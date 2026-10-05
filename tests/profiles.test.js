@@ -111,6 +111,10 @@ export async function testImportCopiesIntoLibrary() {
     assert(isInLibrary(imported), `${imported} is in the library`);
     assert(imported.endsWith('-background.jpg'), `type sniffed from content: ${imported}`);
     assert(GLib.file_test(imported, GLib.FileTest.EXISTS), 'copy exists');
+    const leftovers = GLib.Dir.open(GLib.path_get_dirname(imported), 0);
+    for (let name; (name = leftovers.read_name());)
+        assert(!name.endsWith('.partial'), `no temporary file left (${name})`);
+    leftovers.close();
     assertEqual(await importWallpaper(imported), imported, 'library files are not copied again');
 
     const slideshow = GLib.build_filenamev([dir, 'day.xml']);
