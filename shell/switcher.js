@@ -14,7 +14,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {describeLook} from '../lib/looks.js';
+import {describeLook, effectiveWallpaper} from '../lib/looks.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
 
 // Logical pixels; multiplied by the scale factor where used.
@@ -285,7 +285,10 @@ export const LookSwitcher = GObject.registerClass({
             GLib.source_remove(this._preloadId);
         this._preloadId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PRELOAD_DELAY, () => {
             this._preloadId = 0;
-            const wallpaper = this._looks[this._selected]?.wallpaper;
+            const look = this._looks[this._selected];
+            const scheme = look?.colorScheme ??
+                new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
+            const wallpaper = look ? effectiveWallpaper(look, scheme) : null;
             if (wallpaper) {
                 this._preloaded = Meta.BackgroundImageCache.get_default()
                     .load(Gio.File.new_for_path(wallpaper));

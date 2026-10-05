@@ -6,7 +6,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 
 import {linkGtk4Theme, unlinkGtk4Theme} from '../lib/gtk4.js';
-import {ACCENT_COLORS, AUTO_ACCENT, LookStore} from '../lib/looks.js';
+import {AUTO_ACCENT, LookStore, effectiveWallpaper, isAccentColor} from '../lib/looks.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
 import {accentForWallpaper} from '../lib/thumbnails.js';
 
@@ -91,7 +91,7 @@ export class Applier {
         // switch everything at once while the new wallpaper is on screen.
         let finishTransition = null;
         if (plan.background && animate && this.transition)
-            finishTransition = await this.transition.reveal(plan.background.file, plan.background.options);
+            finishTransition = await this.transition.reveal(plan.background.shown, plan.background.options);
         if (this._destroyed)
             return;
 
@@ -111,13 +111,27 @@ export class Applier {
     async _resolve(look, problems) {
         const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const plan = {background: null, iface: {}, shellTheme: null, gtkThemeDir: null};
+        const scheme = look.colorScheme ?? iface.get_string('color-scheme');
 
         if (look.wallpaper) {
             const file = Gio.File.new_for_path(look.wallpaper);
-            if (file.query_exists(null))
-                plan.background = {file, options: look.pictureOptions};
-            else
+            let darkFile = look.wallpaperDark ? Gio.File.new_for_path(look.wallpaperDark) : null;
+            if (darkFile && !darkFile.query_exists(null)) {
+                problems.push(`Dark wallpaper not found: ${look.wallpaperDark}`);
+                darkFile = null;
+            }
+            if (file.query_exists(null)) {
+                const shown = effectiveWallpaper(
+                    {wallpaper: look.wallpaper, wallpaperDark: darkFile?.get_path() ?? null}, scheme);
+                plan.background = {
+                    file,
+                    darkFile,
+                    shown: Gio.File.new_for_path(shown),
+                    options: look.pictureOptions,
+                };
+            } else {
                 problems.push(`Wallpaper not found: ${look.wallpaper}`);
+            }
         }
 
         if (look.colorScheme !== null)
@@ -126,14 +140,15 @@ export class Applier {
         if (look.accentColor !== null && iface.settings_schema.has_key('accent-color')) {
             let accent = look.accentColor;
             if (accent === AUTO_ACCENT) {
-                accent = plan.background
-                    ? await accentForWallpaper(look.wallpaper).catch(e => {
-                        console.warn(`BG Changer: no accent for ${look.wallpaper}: ${e.message}`);
+                const shown = plan.background?.shown.get_path();
+                accent = shown
+                    ? await accentForWallpaper(shown).catch(e => {
+                        console.warn(`BG Changer: no accent for ${shown}: ${e.message}`);
                         return null;
                     })
                     : null;
             }
-            if (accent in ACCENT_COLORS)
+            if (isAccentColor(accent))
                 plan.iface['accent-color'] = accent;
         }
 
@@ -171,10 +186,10 @@ export class Applier {
         // wallpaper; writing them in one go lets it coalesce the reloads.
         if (plan.background) {
             const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
-            const uri = plan.background.file.get_uri();
+            const {file, darkFile} = plan.background;
             background.delay();
-            setIfChanged(background, 'picture-uri', uri);
-            setIfChanged(background, 'picture-uri-dark', uri);
+            setIfChanged(background, 'picture-uri', file.get_uri());
+            setIfChanged(background, 'picture-uri-dark', (darkFile ?? file).get_uri());
             setIfChanged(background, 'picture-options', plan.background.options);
             background.apply();
         }

@@ -143,17 +143,16 @@ export default class BgChangerExtension extends Extension {
             Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
         const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
 
-        let wallpaper = null;
-        if (current.wallpaper) {
-            wallpaper = await importWallpaper(current.wallpaper).catch(e => {
-                console.warn(`BG Changer: could not copy ${current.wallpaper}: ${e.message}`);
-                return null;
-            });
-        }
+        const copy = path => importWallpaper(path).catch(e => {
+            console.warn(`BG Changer: could not copy ${path}: ${e.message}`);
+            return null;
+        });
+        const wallpaper = current.wallpaper ? await copy(current.wallpaper) : null;
+        const wallpaperDark = wallpaper && current.wallpaperDark ? await copy(current.wallpaperDark) : null;
         if (!this._store)
             return; // disabled meanwhile
 
-        const look = this._store.add({...current, wallpaper, name: 'Original'});
+        const look = this._store.add({...current, wallpaper, wallpaperDark, name: 'Original'});
         this._store.activeId = look.id;
         if (wallpaper)
             ensureThumbnail(wallpaper).catch(() => {});

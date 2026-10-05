@@ -20,6 +20,7 @@ const PICTURE_OPTION_LABELS = {
     stretched: 'Stretched',
     wallpaper: 'Tiled',
     spanned: 'Spanned (all monitors)',
+    none: 'None (solid color)',
 };
 
 const capitalize = text => text[0].toUpperCase() + text.slice(1);
@@ -67,6 +68,9 @@ class BgChangerLookEditor extends Adw.Dialog {
         this._draft = look ?? initial ?? {};
         this._themes = themes;
         this._wallpaper = this._draft.wallpaper ?? null;
+        // Kept as is unless another wallpaper is chosen (e.g. GNOME's own
+        // wallpapers have separate light and dark pictures).
+        this._wallpaperDark = this._draft.wallpaperDark ?? null;
         this._accent = this._draft.accentColor ?? null;
         this._nameFromFile = !look && !this._draft.name;
 
@@ -265,8 +269,12 @@ class BgChangerLookEditor extends Adw.Dialog {
     }
 
     _updateWallpaperRow() {
-        this._wallpaperRow.subtitle = this._wallpaper
-            ? prettyName(this._wallpaper) : 'None — the look only changes themes';
+        if (!this._wallpaper)
+            this._wallpaperRow.subtitle = 'None — the look only changes themes';
+        else if (this._wallpaperDark)
+            this._wallpaperRow.subtitle = `${prettyName(this._wallpaper)} · with a dark-style variant`;
+        else
+            this._wallpaperRow.subtitle = prettyName(this._wallpaper);
     }
 
     _updateAccentRow() {
@@ -326,6 +334,7 @@ class BgChangerLookEditor extends Adw.Dialog {
         if (!path)
             return;
         this._wallpaper = path;
+        this._wallpaperDark = null;
         this._preview.setWallpaper(path);
         this._updateWallpaperRow();
         this._updateAccentRow();
@@ -346,11 +355,15 @@ class BgChangerLookEditor extends Adw.Dialog {
                 if (wallpaper !== source)
                     removeThumbnail(source); // only made for the preview
             }
+            let wallpaperDark = wallpaper ? this._wallpaperDark : null;
+            if (wallpaperDark && !isInLibrary(wallpaperDark))
+                wallpaperDark = await importWallpaper(wallpaperDark);
 
             const scheme = this._schemeToggles.active_name;
             const fields = {
                 name: this._nameRow.text.trim() || (wallpaper ? prettyName(wallpaper) : 'Untitled look'),
                 wallpaper,
+                wallpaperDark,
                 pictureOptions: PICTURE_OPTIONS[this._fitRow.selected] ?? 'zoom',
                 colorScheme: scheme === 'keep' ? null : scheme,
                 accentColor: this._accent,
@@ -363,11 +376,14 @@ class BgChangerLookEditor extends Adw.Dialog {
             };
 
             if (this._look) {
-                const previous = this._look.wallpaper;
+                const {wallpaper: previous, wallpaperDark: previousDark} = this._look;
                 this._store.update(this._look.id, fields);
+                const looks = this._store.getAll();
                 if (previous && previous !== wallpaper &&
-                    await deleteWallpaperIfUnused(previous, this._store.getAll()))
+                    await deleteWallpaperIfUnused(previous, looks))
                     removeThumbnail(previous);
+                if (previousDark && previousDark !== wallpaperDark)
+                    await deleteWallpaperIfUnused(previousDark, looks);
             } else {
                 this._store.add(fields);
             }

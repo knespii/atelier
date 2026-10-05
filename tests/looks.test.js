@@ -1,7 +1,9 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-import {LookStore, describeLook, normalizeLook} from '../lib/looks.js';
+import {
+    LookStore, describeLook, effectiveWallpaper, normalizeLook, readCurrentAppearance,
+} from '../lib/looks.js';
 import {importWallpaper, isInLibrary, prettyName, deleteWallpaperIfUnused} from '../lib/paths.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
@@ -25,6 +27,29 @@ export function testNormalizeRejectsGarbage() {
     assertEqual([look.colorScheme, look.accentColor, look.gtkTheme], [null, null, null]);
     assertEqual([look.font, look.gtk4], ['Inter 11', false]);
     assertEqual(normalizeLook({id: 'y', accentColor: 'auto'}).accentColor, 'auto');
+    assertEqual(normalizeLook({id: 'y', accentColor: 'constructor'}).accentColor, null,
+        'inherited object keys are not accent colors');
+    assertEqual(normalizeLook({id: 'y', pictureOptions: 'none'}).pictureOptions, 'none');
+}
+
+export function testDarkWallpaperVariant() {
+    const look = normalizeLook({id: 'd', wallpaper: '/l.jpg', wallpaperDark: '/d.jpg'});
+    assertEqual(effectiveWallpaper(look, 'prefer-dark'), '/d.jpg');
+    assertEqual(effectiveWallpaper(look, 'default'), '/l.jpg');
+    assertEqual(normalizeLook({id: 'd', wallpaper: '/l.jpg', wallpaperDark: '/l.jpg'}).wallpaperDark, null,
+        'same file twice is no variant');
+    assertEqual(normalizeLook({id: 'd', wallpaperDark: '/d.jpg'}).wallpaperDark, null,
+        'no variant without a wallpaper');
+
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    background.set_string('picture-uri', 'file:///w/light.jpg');
+    background.set_string('picture-uri-dark', 'file:///w/dark.jpg');
+    const current = readCurrentAppearance(null);
+    assertEqual([current.wallpaper, current.wallpaperDark], ['/w/light.jpg', '/w/dark.jpg']);
+    background.set_string('picture-uri-dark', 'file:///w/light.jpg');
+    assertEqual(readCurrentAppearance(null).wallpaperDark, null);
+    background.reset('picture-uri');
+    background.reset('picture-uri-dark');
 }
 
 export function testStoreRoundTrip() {
