@@ -92,15 +92,19 @@ export class Applier {
         let finishTransition = null;
         if (plan.background && animate && this.transition)
             finishTransition = await this.transition.reveal(plan.background.shown, plan.background.options);
-        if (this._destroyed)
-            return;
 
-        this._write(plan);
-        this._store.activeId = look.id;
-        onWritten?.();
-
-        const notes = await this._syncGtk4(look, plan, problems);
-        await finishTransition?.();
+        let notes = [];
+        try {
+            if (this._destroyed)
+                return;
+            this._write(plan);
+            this._store.activeId = look.id;
+            onWritten?.();
+            notes = await this._syncGtk4(look, plan, problems);
+        } finally {
+            // Whatever failed, the overlay must not stay over the desktop.
+            await finishTransition?.();
+        }
 
         if (problems.length > 0)
             Main.notify(`BG Changer: “${look.name}” was applied partially`, problems.join('\n'));
@@ -170,9 +174,11 @@ export class Applier {
 
         if (look.shellTheme !== null) {
             const userThemes = Main.extensionManager.lookup(USER_THEME_UUID);
-            if (userThemes?.state !== ExtensionState.ACTIVE)
-                problems.push('Shell theme skipped: the User Themes extension is not enabled');
-            else if (await locateTheme('shell', look.shellTheme) === null)
+            if (userThemes?.state !== ExtensionState.ACTIVE) {
+                // Without User Themes the default shell theme is in effect anyway.
+                if (look.shellTheme !== '')
+                    problems.push('Shell theme skipped: the User Themes extension is not enabled');
+            } else if (await locateTheme('shell', look.shellTheme) === null)
                 problems.push(`Shell theme “${look.shellTheme}” is not installed`);
             else
                 plan.shellTheme = look.shellTheme;
@@ -212,18 +218,24 @@ export class Applier {
         if (look.gtkTheme === null || !plan.iface['gtk-theme'])
             return [];
 
-        if (look.gtk4 && plan.gtkThemeDir) {
-            const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-            const dark = iface.get_string('color-scheme') === 'prefer-dark';
-            const result = await linkGtk4Theme(this._settings, plan.gtkThemeDir, dark);
-            if (!result.ok) {
-                problems.push(`GTK 4 apps were not themed: ${result.reason}`);
-                return [];
+        try {
+            if (look.gtk4 && plan.gtkThemeDir) {
+                const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+                const dark = iface.get_string('color-scheme') === 'prefer-dark';
+                const result = await linkGtk4Theme(this._settings, plan.gtkThemeDir, dark);
+                if (!result.ok) {
+                    problems.push(`GTK 4 apps were not themed: ${result.reason}`);
+                    return [];
+                }
+                return result.changed ? ['Restart open apps to see the GTK 4 theme.'] : [];
             }
-            return result.changed ? ['Restart open apps to see the GTK 4 theme.'] : [];
-        }
 
-        const removed = await unlinkGtk4Theme(this._settings);
-        return removed ? ['Restart open apps to bring back their default GTK 4 look.'] : [];
+            const removed = await unlinkGtk4Theme(this._settings);
+            return removed ? ['Restart open apps to bring back their default GTK 4 look.'] : [];
+        } catch (e) {
+            // e.g. ~/.config/gtk-4.0 not writable
+            problems.push(`GTK 4 apps were not themed: ${e.message}`);
+            return [];
+        }
     }
 }
