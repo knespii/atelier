@@ -182,6 +182,8 @@ export const LookSwitcher = GObject.registerClass({
      * @param {string} activeId
      */
     setLooks(looks, activeId) {
+        if (this._destroyed)
+            return;
         const selectedId = this._looks[this._selected]?.id ?? activeId;
         this._looks = looks;
         this._activeId = activeId;
@@ -209,6 +211,8 @@ export const LookSwitcher = GObject.registerClass({
 
     /** @param {string} activeId */
     setActive(activeId) {
+        if (this._destroyed)
+            return;
         this._activeId = activeId;
         this._cards.forEach(card => (card.active = card.look.id === activeId));
         this._updateFooter();
@@ -237,7 +241,8 @@ export const LookSwitcher = GObject.registerClass({
     }
 
     close() {
-        if (this._closing)
+        // Also called when an apply finishes, possibly after disable() destroyed us.
+        if (this._closing || this._destroyed)
             return;
         this._closing = true;
         this._popModal();
@@ -262,6 +267,7 @@ export const LookSwitcher = GObject.registerClass({
     }
 
     _onDestroy() {
+        this._destroyed = true;
         this._popModal();
         Main.layoutManager.disconnectObject(this);
         if (this._preloadId)
