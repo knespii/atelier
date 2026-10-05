@@ -14,6 +14,7 @@ BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache"
+mkdir -m 700 "$ROOT/runtime"
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
 
 LOOKS="[\
@@ -37,8 +38,10 @@ looks='$LOOKS'
 EOF
 
 status=0
-env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET \
-    WAYLAND_DISPLAY=bgc-test-0 \
+# A private runtime dir keeps the helper services this session starts away
+# from the sockets of the real session (keyring, gvfs, document portal...).
+env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
+    WAYLAND_DISPLAY=bgc-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
     GSETTINGS_BACKEND=keyfile BGC_TEST_OUTPUT="$ROOT" \
     dbus-run-session -- timeout --kill-after=5 120 \
