@@ -13,8 +13,14 @@
 
   <enum id="org.gnome.shell.extensions.atelier.BarStyle">
     <value nick="gnome" value="0"/>
-    <value nick="clear" value="1"/>
-    <value nick="grouped" value="2"/>
+    <value nick="grouped" value="1"/>
+    <value nick="spread" value="2"/>
+    <value nick="island" value="3"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.BarSides">
+    <value nick="wallpaper" value="0"/>
+    <value nick="capsules" value="1"/>
   </enum>
 
   <enum id="org.gnome.shell.extensions.atelier.Surface">
@@ -217,9 +223,17 @@
   <schema id="org.gnome.shell.extensions.atelier.bar"
           path="/org/gnome/shell/extensions/atelier/bar/">
     <key name="style" enum="org.gnome.shell.extensions.atelier.BarStyle">
-      <default>'clear'</default>
+      <aliases>
+        <alias value="clear" target="spread"/>
+      </aliases>
+      <default>'spread'</default>
       <summary>Look of the top bar</summary>
-      <description>“gnome” keeps GNOME's bar, “clear” has no background (the workspaces, the island and the status icons on the wallpaper), “grouped” puts the left and the right side into capsules like the island.</description>
+      <description>“grouped” puts the workspaces, the island and the status icons together in the middle, “spread” the workspaces at the left edge and the status icons at the right one, “island” all of them into one island. None of them has a background of its own. “gnome” keeps GNOME's black bar.</description>
+    </key>
+    <key name="sides" enum="org.gnome.shell.extensions.atelier.BarSides">
+      <default>'wallpaper'</default>
+      <summary>Where the workspaces and the status icons lie</summary>
+      <description>“wallpaper” right on the wallpaper, “capsules” in capsules like the island. (In the “island” style, they are in the island.)</description>
     </key>
     <key name="surface" enum="org.gnome.shell.extensions.atelier.Surface">
       <default>'classic'</default>

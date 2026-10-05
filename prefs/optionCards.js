@@ -11,14 +11,15 @@ export const OptionCards = GObject.registerClass({
      * @param {object} params
      * @param {{id: string, label: string, preview: Gtk.Widget}[]} params.options
      * @param {string} params.selected
+     * @param {number} [params.columns] - at least this many cards in a row
      */
-    _init({options, selected}) {
+    _init({options, selected, columns = 3}) {
         super._init({
             selection_mode: Gtk.SelectionMode.NONE,
             homogeneous: true,
             column_spacing: 12,
             row_spacing: 12,
-            min_children_per_line: Math.min(3, options.length),
+            min_children_per_line: Math.min(columns, options.length),
             max_children_per_line: options.length,
         });
         this._buttons = new Map();
@@ -50,6 +51,15 @@ export const OptionCards = GObject.registerClass({
         const button = this._buttons.get(id);
         if (button && !button.active)
             button.active = true;
+    }
+
+    /** @returns {string|null} the id of the option chosen */
+    get selectedId() {
+        for (const [id, button] of this._buttons) {
+            if (button.active)
+                return id;
+        }
+        return null;
     }
 });
 

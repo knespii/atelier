@@ -18,11 +18,26 @@ const BLUR_BRIGHTNESS = 0.75;
 
 // Pixels outside the rounded rectangle are dropped; its edge gets one pixel
 // of antialiasing. Everything is in pixels of the actor. The top and the
-// bottom corners may differ (a notch has square top corners).
+// bottom corners may differ (a notch has square top corners), and a notch
+// may have ears: beside its top corners, squares less a quarter circle,
+// where it curves into the top edge. (They reach a pixel into the notch and
+// above it, so no seam shows.)
 const MASK_DECLARATIONS = `
 uniform vec2 size;
 uniform vec4 rect;
 uniform vec2 radii;
+uniform float ear;
+
+float atelier_box(vec2 p, vec2 center, vec2 halfSize) {
+    vec2 q = abs(p - center) - halfSize;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+float atelier_ear(vec2 p, float side, float inner) {
+    vec2 center = vec2(side + (inner - side) * 0.5, rect.y + ear * 0.5 - 0.5);
+    float square = atelier_box(p, center, vec2(ear * 0.5 + 0.5));
+    return max(square, ear - length(p - vec2(side, rect.y + ear)));
+}
 `;
 
 const MASK_CODE = `
@@ -32,6 +47,11 @@ vec2 center = rect.xy + halfSize;
 float radius = p.y < center.y ? radii.x : radii.y;
 vec2 q = abs(p - center) - halfSize + vec2(radius);
 float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+if (ear > 0.0) {
+    float left = atelier_ear(p, rect.x - ear, rect.x + 1.0);
+    float right = atelier_ear(p, rect.x + rect.z + ear, rect.x + rect.z - 1.0);
+    d = min(d, min(left, right));
+}
 cogl_color_out *= clamp(0.5 - d, 0.0, 1.0);
 `;
 
@@ -42,6 +62,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this._size = this.get_uniform_location('size');
         this._rect = this.get_uniform_location('rect');
         this._radii = this.get_uniform_location('radii');
+        this._ear = this.get_uniform_location('ear');
     }
 
     vfunc_build_pipeline() {
@@ -54,11 +75,13 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      * @param {number[]} size - [width, height] of the actor
      * @param {number[]} rect - [x, y, width, height] relative to the actor
      * @param {number[]} radii - [top, bottom] corner radius
+     * @param {number} ear - radius of the ears, 0 for none
      */
-    setShape(size, rect, radii) {
+    setShape(size, rect, radii, ear) {
         this.set_uniform_float(this._size, 2, size);
         this.set_uniform_float(this._rect, 4, rect);
         this.set_uniform_float(this._radii, 2, radii);
+        this.set_uniform_float(this._ear, 1, [ear]);
         this.queue_repaint();
     }
 });
@@ -150,11 +173,12 @@ class AtelierGlassSurface extends St.Widget {
      * @param {number} height
      * @param {number} radius - of the top corners
      * @param {number} [bottomRadius] - of the bottom ones, if different
+     * @param {number} [ear] - radius of a notch's ears beside the top corners
      */
-    setShape(x, y, width, height, radius, bottomRadius = radius) {
-        this._shape = [x, y, width, height, radius, bottomRadius];
+    setShape(x, y, width, height, radius, bottomRadius = radius, ear = 0) {
+        this._shape = [x, y, width, height, radius, bottomRadius, ear];
         const limit = Math.min(width / 2, height / 2);
         this._mask.setShape([this.width, this.height], [x - this.x, y - this.y, width, height],
-            [Math.min(radius, limit), Math.min(bottomRadius, limit)]);
+            [Math.min(radius, limit), Math.min(bottomRadius, limit)], ear);
     }
 });

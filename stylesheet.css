@@ -298,12 +298,14 @@
 
 .atelier-glance {
   width: 340px;
-  padding: 16px 18px 18px;
+  padding: 14px 20px 18px;
   spacing: 14px;
 }
 
+/* The big clock next to the days around today */
+
 .atelier-glance-header {
-  spacing: 12px;
+  spacing: 18px;
 }
 
 .atelier-glance-time {
@@ -316,37 +318,13 @@
   font-feature-settings: "tnum";
 }
 
-.atelier-glance-date {
+.atelier-glance-suffix {
   background-color: transparent;
   padding: 0;
-  margin: 0;
+  margin: 0 0 7px 5px;
   color: rgba(255, 255, 255, 0.62);
-  font-size: 10.5pt;
-  font-weight: bold;
-}
-
-.atelier-glance-power {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  margin: 0;
-  border: none;
-  border-radius: 17px;
-  box-shadow: none;
-  background-color: rgba(255, 255, 255, 0.09);
-  color: #ffffff;
-}
-
-.atelier-glance-power:hover {
-  background-color: rgba(255, 255, 255, 0.17);
-}
-
-.atelier-glance-power:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
-}
-
-.atelier-glance-power StIcon {
-  icon-size: 16px;
+  font-size: 11pt;
+  font-weight: 800;
 }
 
 .atelier-glance-week {
@@ -354,39 +332,38 @@
 }
 
 .atelier-glance-day {
-  spacing: 4px;
+  spacing: 3px;
 }
 
 .atelier-glance-day-name {
   background-color: transparent;
   padding: 0;
   margin: 0;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 8.5pt;
-  font-weight: bold;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 8pt;
+  font-weight: 800;
 }
 
 .atelier-glance-day-number {
   min-width: 28px;
-  padding: 4px 0;
+  padding: 0;
   margin: 0;
   border: none;
-  border-radius: 999px;
   background-color: transparent;
-  color: #ffffff;
-  font-size: 10.5pt;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11pt;
   font-weight: bold;
   font-feature-settings: "tnum";
   text-align: center;
 }
 
 .atelier-glance-day:today .atelier-glance-day-name {
-  color: #ffffff;
+  color: -st-accent-color;
 }
 
 .atelier-glance-day:today .atelier-glance-day-number {
-  background-color: -st-accent-color;
-  color: -st-accent-fg-color;
+  color: #ffffff;
+  font-weight: 800;
 }
 
 .atelier-glance-day-dot {
@@ -395,7 +372,7 @@
   margin: 0;
   border: none;
   border-radius: 2px;
-  background-color: rgba(255, 255, 255, 0.55);
+  background-color: rgba(255, 255, 255, 0.4);
 }
 
 .atelier-glance-events {
@@ -1066,17 +1043,17 @@
   color: -st-accent-fg-color;
 }
 
-/* Grouped bar: the sides in capsules like the island */
+/* The sides in capsules like the island, or in the one island */
 
-#panel.atelier-bar-grouped .panel-button {
+#panel.atelier-bar-capsules .panel-button {
   text-shadow: none;
 }
 
-#panel.atelier-bar-grouped .panel-button .system-status-icon {
+#panel.atelier-bar-capsules .panel-button .system-status-icon {
   icon-shadow: none;
 }
 
-#panel.atelier-bar-grouped .panel-button#panelActivities .workspace-dot {
+#panel.atelier-bar-capsules .panel-button#panelActivities .workspace-dot {
   box-shadow: none;
 }
 
@@ -1103,7 +1080,11 @@
   background-color: transparent;
 }
 
-/* Notch: the island hangs from the top edge */
+/* Notch: the island hangs from the top edge, which curves into its sides */
+
+.atelier-notch-ear {
+  color: #000000;
+}
 
 .atelier-island.atelier-island-notch {
   border-radius: 0 0 14px 14px;

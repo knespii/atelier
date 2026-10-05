@@ -247,6 +247,8 @@ async function testIsland(ext, atelier) {
     const rows = Math.min(left, 3) + (left > 3 ? 1 : 0);
     check(glance._eventList.get_n_children() === rows, `today's events listed (${rows} rows)`);
     check(glance._weatherRow.visible && glance._weatherText.text.includes('14'), 'weather shown');
+    check(/\d/.test(glance._time.text) && !glance._time.clutter_text.get_layout().is_ellipsized() &&
+        glance._week.get_n_children() === 5, `the big clock in full next to five days (${glance._time.text})`);
     await screenshotIsland('11-island-glance');
     await restPointer();
     check(await waitFor(() => island.page === null, 2000), 'leaving the island closes the glance');
@@ -680,32 +682,68 @@ async function testOverviewBar() {
 async function testBarStyles(ext) {
     const bar = ext.stateObj._settings.get_child('bar');
     const island = ext.stateObj.modules.get('island').island;
-    const surfaces = () => Main.layoutManager.uiGroup.get_children()
-        .filter(a => hasClass(a, 'atelier-capsule') || hasClass(a, 'atelier-glass'));
+    const {_leftBox: left, _rightBox: right} = Main.panel;
+    const shown = name => Main.layoutManager.uiGroup.get_children().filter(a => hasClass(a, name) && a.visible);
+    const surfaces = () => [...shown('atelier-capsule'), ...shown('atelier-glass')];
+    const leftEnd = () => left.get_transformed_position()[0] + left.width;
+    const rightStart = () => right.get_transformed_position()[0];
+    const besideIsland = () => leftEnd() <= island.x && island.x - leftEnd() < 24 &&
+        rightStart() >= island.x + island.width && rightStart() - island.x - island.width < 24;
+    const bounds = () => `${Math.round(leftEnd())} | ${island.x}–${island.x + island.width} | ${Math.round(rightStart())}`;
+    const top = name => screenshotArea(name, 0, 0, global.stage.width, 44);
     await restPointer();
 
-    // Grouped: the sides in black capsules.
+    check(left.translation_x === 0 && right.translation_x === 0 && rightStart() > global.stage.width - 400,
+        'spread: the workspaces and the status icons at the edges');
+
+    // Grouped: everything together in the middle, moving aside as the
+    // island grows.
     bar.set_string('style', 'grouped');
     await Scripting.sleep(400);
-    const capsules = surfaces();
+    check(besideIsland(), `grouped: the sides right next to the island (${bounds()})`);
+    await top('25-bar-grouped');
+    await pointerTo(...centerOf(island));
+    await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
+    await Scripting.sleep(600);
+    check(island.width > 300 && besideIsland(), `and they move aside as it grows (${bounds()})`);
+    await screenshotArea('25b-glance-grouped', 0, 0, global.stage.width, 200);
+    await restPointer();
+    await waitFor(() => island.page === null, 2000);
+    await Scripting.sleep(400);
+
+    // The sides in capsules like the island.
+    bar.set_string('sides', 'capsules');
+    await Scripting.sleep(400);
     const activities = Main.panel.statusArea.activities;
-    const [ax] = activities.get_transformed_position();
-    const left = capsules.find(c => c.x < global.stage.width / 2);
-    const middle = ax + activities.width / 2;
-    check(Main.panel.has_style_class_name('atelier-bar-grouped') && capsules.length === 2 &&
-        left && left.x < middle && left.x + left.width > middle && left.width >= activities.width - 16,
-    `grouped: the sides sit in capsules (${left?.x}+${left?.width} around ${ax}+${activities.width})`);
-    await screenshotArea('25-bar-grouped', 0, 0, global.stage.width, 44);
+    const middle = activities.get_transformed_position()[0] + activities.width / 2;
+    const capsule = surfaces().find(c => c.x < island.x);
+    check(Main.panel.has_style_class_name('atelier-bar-capsules') && surfaces().length === 2 &&
+        capsule && capsule.x < middle && capsule.x + capsule.width > middle,
+    `in capsules: one around each side (${capsule?.x}+${capsule?.width} around ${middle})`);
+    await top('25c-bar-grouped-capsules');
 
     // Glass: the island and the capsules are the blurred wallpaper.
     bar.set_string('surface', 'glass');
     await Scripting.sleep(600);
-    const glass = surfaces().filter(a => hasClass(a, 'atelier-glass'));
+    const glass = shown('atelier-glass');
     check(glass.length === 3 && island.has_style_class_name('atelier-island-glass'),
         `glass: the island and the capsules (${glass.length} surfaces)`);
-    await screenshotArea('26-bar-glass', 0, 0, global.stage.width, 44);
-    const islandGlass = glass.find(g => g.get_parent() === island.get_parent() &&
-        island.get_parent().get_children().indexOf(g) === island.get_parent().get_children().indexOf(island) - 1);
+    await top('26-bar-glass');
+
+    // Dragging a window onto a workspace in the overview looks for the
+    // target among all actors: it must find the workspace, never the glass
+    // (as big as most of the screen) or the overview's backdrop.
+    Main.overview.show();
+    await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    const pick = (x, y) => global.stage.get_actor_at_pos(Clutter.PickMode.ALL, x, y);
+    const ours = actor => glass.some(g => g.contains(actor)) ||
+        Main.layoutManager.overviewGroup.get_first_child().contains(actor);
+    const picked = [pick(global.stage.width / 2, global.stage.height / 2), pick(8, global.stage.height / 2)];
+    check(!picked.some(ours), `a drop in the overview reaches GNOME's actors (${picked.map(a => a?.constructor.name)})`);
+    Main.overview.hide();
+    await waitFor(() => !Main.overview.visible, 4000);
+    const islandGlass = glass.find(g => g.get_parent().get_children().indexOf(g) ===
+        island.get_parent().get_children().indexOf(island) - 1);
     await pointerTo(...centerOf(island));
     await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
     await Scripting.sleep(600);
@@ -717,18 +755,49 @@ async function testBarStyles(ext) {
     await waitFor(() => island.page === null, 2000);
     await Scripting.sleep(400);
 
-    // Notch: the island hangs from the top edge.
+    // Notch: the island hangs from the top edge, which curves into it.
+    bar.set_string('surface', 'classic');
     bar.set_string('island-shape', 'notch');
     await Scripting.sleep(600);
     const [, panelY] = Main.panel.get_transformed_position();
     check(Math.abs(island.y - panelY) < 1 && Math.abs(island.height - Main.panel.height) < 1,
         `notch: the island hangs from the top edge (${island.y}, ${island.height})`);
-    await screenshotArea('28-bar-notch', 0, 0, global.stage.width, 44);
+    const ears = shown('atelier-notch-ear').sort((a, b) => a.x - b.x);
+    check(ears.length === 2 && Math.abs(ears[0].x + ears[0].width - island.x) < 1 &&
+        Math.abs(ears[1].x - island.x - island.width) < 1 && ears[0].y === island.y,
+    `with ears where it meets the edge (${ears.map(e => `${e.x}+${e.width}`)})`);
+    check(besideIsland(), `the sides keep clear of the ears (${bounds()})`);
+    await top('28-bar-notch');
+    bar.set_string('surface', 'glass');
+    await Scripting.sleep(600);
+    const notchGlass = shown('atelier-glass').find(g => g.get_parent().get_children().indexOf(g) ===
+        island.get_parent().get_children().indexOf(island) - 1);
+    check(shown('atelier-notch-ear').length === 0 && notchGlass?._shape[6] > 0, 'glass draws its own ears');
+    await top('28b-bar-notch-glass');
 
-    ['style', 'surface', 'island-shape'].forEach(key => bar.reset(key));
+    // One island: all of it in one shape, here a notch with its ears.
+    bar.set_string('style', 'island');
+    await Scripting.sleep(600);
+    const one = shown('atelier-glass').find(g => g !== notchGlass);
+    const [lx] = left.get_transformed_position();
+    check(one && one._shape[0] < lx && one._shape[0] + one._shape[2] > rightStart() + right.width - 1 &&
+        one._shape[6] > 0 && notchGlass._shape[6] === 0,
+    `one island: around everything, with the ears at its ends (${one?._shape?.slice(0, 3)})`);
+    await top('28c-bar-one-island-notch');
+    bar.set_string('island-shape', 'floating');
+    bar.set_string('surface', 'classic');
+    await Scripting.sleep(600);
+    const pill = shown('atelier-capsule');
+    check(pill.length === 1 && pill[0].x < lx && pill[0].x + pill[0].width >= rightStart() + right.width &&
+        Math.abs(pill[0].height - island.height) < 1, 'or floating, as tall as the island');
+    await top('28d-bar-one-island');
+
+    ['style', 'sides', 'surface', 'island-shape'].forEach(key => bar.reset(key));
     await Scripting.sleep(500);
-    check(surfaces().length === 0 && !island.has_style_class_name('atelier-island-glass') &&
-        Main.panel.has_style_class_name('atelier-bar-clean'), 'back to the clear bar');
+    check(surfaces().length === 0 && shown('atelier-notch-ear').length === 0 &&
+        !island.has_style_class_name('atelier-island-glass') && left.translation_x === 0 &&
+        right.translation_x === 0 && Main.panel.has_style_class_name('atelier-bar-clean'),
+    'back to the spread bar on the wallpaper');
 }
 
 async function testClaude(ext) {
@@ -1069,6 +1138,11 @@ async function testNewProfile(ext, atelier) {
 }
 
 async function testDisableCleansUp(atelier) {
+    // (Grouped, with a black notch: the sides moved and the ears are up.)
+    const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
+    bar.set_string('style', 'grouped');
+    bar.set_string('island-shape', 'notch');
+    await Scripting.sleep(300);
     atelier.toggleSwitcher();
     await Scripting.sleep(300);
     // Disable mid-transition: everything must be torn down.
@@ -1090,8 +1164,12 @@ async function testDisableCleansUp(atelier) {
     check(['toggleCalendar', 'closeCalendar'].every(name => Main.panel[name] === panelProto[name]),
         'calendar functions restored');
     const qsMenu = Main.panel.statusArea.quickSettings.menu;
-    check(!Main.layoutManager.uiGroup.get_children().some(a => hasClass(a, 'atelier-glass') || hasClass(a, 'atelier-capsule')),
-        'no glass or capsules left');
+    check(!Main.layoutManager.uiGroup.get_children().some(a => hasClass(a, 'atelier-glass') ||
+        hasClass(a, 'atelier-capsule') || hasClass(a, 'atelier-notch-ear')), 'no glass, capsules or ears left');
+    check(Main.panel._leftBox.translation_x === 0 && Main.panel._rightBox.translation_x === 0,
+        'the sides back where GNOME puts them');
+    check(Main.layoutManager.overviewGroup.get_first_child()?.name !== 'atelier-overview-backdrop',
+        'the overview\'s own background back');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
@@ -1105,6 +1183,8 @@ async function testDisableCleansUp(atelier) {
     check(Main.panel.statusArea[UUID] !== undefined, 'indicator back');
     check(await waitFor(() => Main.extensionManager.lookup(UUID).stateObj.modules?.get('island')?.island, 3000),
         'island back');
+    bar.reset('style');
+    bar.reset('island-shape');
 }
 
 export async function run() {

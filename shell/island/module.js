@@ -15,7 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 import {effectiveWallpaper} from '../../lib/profiles.js';
-import {capsuleHeight} from '../core/barMetrics.js';
+import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
+import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
 import {switcherWidth} from '../switcherContent.js';
 import {CalendarBridge} from './calendar.js';
@@ -68,6 +69,7 @@ export class IslandModule {
         this._waits = new Map();
         this._laterId = 0;
         this._glanceBlocked = false;
+        this._ear = 0;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -84,9 +86,7 @@ export class IslandModule {
 
     /** @returns {GlancePage} a glance, e.g. for the weather in the bar */
     createGlance() {
-        const glance = new GlancePage({events: this._calendar.events, weather: this._calendar.weather});
-        glance.connect('power-request', () => this.togglePowerMenu());
-        return glance;
+        return new GlancePage({events: this._calendar.events, weather: this._calendar.weather});
     }
 
     /** @returns {boolean} whether the island is on screen to show pages */
@@ -132,11 +132,22 @@ export class IslandModule {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this.togglePowerMenu());
 
-        // What it is made of and its shape follow the top bar's look.
+        // What it is made of and its shape follow the top bar's look; its
+        // glass and the ears of a notch follow it every frame it changes.
         this._barSettings = this._settings.get_child('bar');
         this._barSettings.connectObject(
             'changed::surface', () => this._syncLook(),
             'changed::island-shape', () => this._syncLook(),
+            'changed::style', () => this._syncLook(),
+            this);
+        this._island.connectObject(
+            'notify::x', () => this._syncShape(),
+            'notify::y', () => this._syncShape(),
+            'notify::width', () => this._syncShape(),
+            'notify::height', () => this._syncShape(),
+            'notify::visible', () => this._syncShape(),
+            'notify::opacity', () => this._syncShape(),
+            'style-changed', () => this._syncShape(),
             this);
         this._syncLook();
 
@@ -149,6 +160,8 @@ export class IslandModule {
         this._barSettings = null;
         this._glass?.destroy();
         this._glass = null;
+        this._ears?.destroy();
+        this._ears = null;
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         // Whoever waits for an announcement goes on without it.
@@ -369,6 +382,9 @@ export class IslandModule {
         const island = this._island;
         const notch = this._barSettings.get_string('island-shape') === 'notch';
         const glass = this._barSettings.get_string('surface') === 'glass';
+        // A notch curves into the top edge – unless it is part of one island
+        // with the whole bar, whose shape has the ears then.
+        this._ear = notch && this._barSettings.get_string('style') !== 'island' ? EAR_RADIUS : 0;
         if (notch)
             island.add_style_class_name('atelier-island-notch');
         else
@@ -378,35 +394,40 @@ export class IslandModule {
             this._glass = new GlassSurface({reach: GLASS_REACH});
             Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
             island.add_style_class_name('atelier-island-glass');
-            island.connectObject(
-                'notify::x', () => this._syncGlass(),
-                'notify::y', () => this._syncGlass(),
-                'notify::width', () => this._syncGlass(),
-                'notify::height', () => this._syncGlass(),
-                'notify::visible', () => this._syncGlass(),
-                'notify::opacity', () => this._syncGlass(),
-                'style-changed', () => this._syncGlass(),
-                this._glass);
         } else if (!glass && this._glass) {
-            island.disconnectObject(this._glass);
             island.remove_style_class_name('atelier-island-glass');
             this._glass.destroy();
             this._glass = null;
         }
-        this._syncGlass();
+        // Black ears; glass draws its own.
+        const ears = this._ear > 0 && !glass;
+        if (ears && !this._ears) {
+            this._ears = new NotchEars(island);
+        } else if (!ears && this._ears) {
+            this._ears.destroy();
+            this._ears = null;
+        }
+        this._syncShape();
         this._queueLayout(true);
     }
 
-    // The glass under the island takes its shape, every frame it changes.
-    _syncGlass() {
+    // The glass under the island and the ears take its shape.
+    _syncShape() {
         const island = this._island;
-        const glass = this._glass;
-        if (!glass)
+        if (!this._glass && !this._ears)
             return;
-        glass.visible = island.visible && island.opacity > 0;
-        const node = island.get_theme_node();
-        glass.setShape(island.x, island.y, island.width, island.height,
-            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT));
+        const shown = island.visible && island.opacity > 0;
+        const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        if (this._glass) {
+            this._glass.visible = shown;
+            const node = island.get_theme_node();
+            this._glass.setShape(island.x, island.y, island.width, island.height,
+                node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear);
+        }
+        if (this._ears) {
+            this._ears.show(shown, island.opacity);
+            this._ears.setShape(island.x, island.y, island.width, ear);
+        }
     }
 
     _setTimeout(name, delay, callback) {

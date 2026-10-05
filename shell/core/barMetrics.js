@@ -14,3 +14,9 @@ const MAX_HEIGHT = 28;
 export function capsuleHeight(barHeight, scale) {
     return Math.round(Math.max(MIN_HEIGHT * scale, Math.min(MAX_HEIGHT * scale, barHeight - 2 * MARGIN * scale)));
 }
+
+/** Radius of the bottom corners of a notch at rest, logical pixels. */
+export const NOTCH_RADIUS = 14;
+
+/** Radius of a notch's ears, where it curves into the top edge. */
+export const EAR_RADIUS = 9;

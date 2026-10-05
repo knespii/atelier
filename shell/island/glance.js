@@ -1,13 +1,12 @@
 // The glance: what the island shows while the pointer rests on it. A big
-// clock, this week, what's left of today's events and the weather, all read
-// from GNOME's own calendar and weather sources.
+// clock next to the days around today, then what's left of today's events
+// and the weather, all read from GNOME's own calendar and weather sources.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GnomeDesktop from 'gi://GnomeDesktop';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
-import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {formatTime} from 'resource:///org/gnome/shell/misc/dateUtils.js';
@@ -15,6 +14,8 @@ import {formatTime} from 'resource:///org/gnome/shell/misc/dateUtils.js';
 import {IslandPage} from './page.js';
 
 const MAX_EVENTS = 3;
+// Days shown before and after today.
+const DAYS_AROUND = 2;
 
 const dayStart = date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const addDays = (date, days) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
@@ -22,9 +23,8 @@ const format = (date, fmt) =>
     GLib.DateTime.new_local(date.getFullYear(), date.getMonth() + 1, date.getDate(), 0, 0, 0).format(fmt);
 const shortTime = date => formatTime(date, {timeOnly: true}).trim();
 
-export const GlancePage = GObject.registerClass({
-    Signals: {'power-request': {}},
-}, class AtelierGlance extends IslandPage {
+export const GlancePage = GObject.registerClass(
+class AtelierGlance extends IslandPage {
     /**
      * @param {object} sources
      * @param {object|null} sources.events - GNOME's calendar event source
@@ -38,29 +38,21 @@ export const GlancePage = GObject.registerClass({
 
         const header = new St.BoxLayout({style_class: 'atelier-glance-header'});
         this.add_child(header);
-        const clockBox = new St.BoxLayout({
-            style_class: 'atelier-glance-clock',
-            orientation: Clutter.Orientation.VERTICAL,
-            x_expand: true,
-        });
-        header.add_child(clockBox);
+        // The digits big; AM or PM, if the clock has them, small after them.
+        const clock = new St.BoxLayout({style_class: 'atelier-glance-clock', y_align: Clutter.ActorAlign.CENTER});
+        header.add_child(clock);
         this._time = new St.Label({style_class: 'atelier-glance-time'});
-        clockBox.add_child(this._time);
-        this._date = new St.Label({style_class: 'atelier-glance-date'});
-        clockBox.add_child(this._date);
-
-        this._power = new St.Button({
-            style_class: 'atelier-glance-power',
-            accessible_name: 'Power',
-            can_focus: true,
-            y_align: Clutter.ActorAlign.START,
-            child: new St.Icon({icon_name: 'system-shutdown-symbolic'}),
+        this._suffix = new St.Label({style_class: 'atelier-glance-suffix', y_align: Clutter.ActorAlign.END});
+        for (const label of [this._time, this._suffix]) {
+            label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            clock.add_child(label);
+        }
+        this._week = new St.BoxLayout({
+            style_class: 'atelier-glance-week',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
         });
-        this._power.connect('clicked', () => this.emit('power-request'));
-        header.add_child(this._power);
-
-        this._week = new St.BoxLayout({style_class: 'atelier-glance-week', x_expand: true});
-        this.add_child(this._week);
+        header.add_child(this._week);
 
         this._eventList = new St.BoxLayout({
             style_class: 'atelier-glance-events',
@@ -102,7 +94,11 @@ export const GlancePage = GObject.registerClass({
     }
 
     _syncClock() {
-        this._time.text = this._clock.clock.trim();
+        const text = this._clock.clock.trim();
+        const [, digits, suffix] = /^([\d:.\u2236\s]*\d)\s*(\D*)$/u.exec(text) ?? [null, text, ''];
+        this._time.text = digits;
+        this._suffix.text = suffix;
+        this._suffix.visible = suffix !== '';
         const today = dayStart(new Date());
         if (this._day?.getTime() !== today.getTime()) {
             this._day = today;
@@ -112,28 +108,27 @@ export const GlancePage = GObject.registerClass({
 
     _syncDay() {
         const today = this._day;
-        this._date.text = format(today, '%A, %B %-d');
         this._syncWeek(today);
         this._syncEvents(today);
         this.resized();
     }
 
+    // Today in the middle, named in full (MON); the others by their initial.
     _syncWeek(today) {
         this._week.destroy_all_children();
-        const weekStart = Shell.util_get_week_start();
-        const first = addDays(today, -((7 + today.getDay() - weekStart) % 7));
-        for (let i = 0; i < 7; i++) {
-            const day = addDays(first, i);
+        for (let offset = -DAYS_AROUND; offset <= DAYS_AROUND; offset++) {
+            const day = addDays(today, offset);
             const cell = new St.BoxLayout({
                 style_class: 'atelier-glance-day',
                 orientation: Clutter.Orientation.VERTICAL,
                 x_expand: true,
             });
-            if (day.getTime() === today.getTime())
+            if (offset === 0)
                 cell.add_style_pseudo_class('today');
+            const name = format(day, '%a');
             cell.add_child(new St.Label({
                 style_class: 'atelier-glance-day-name',
-                text: format(day, '%a'),
+                text: offset === 0 ? name.toUpperCase() : name.charAt(0).toUpperCase(),
                 x_align: Clutter.ActorAlign.CENTER,
             }));
             cell.add_child(new St.Label({
@@ -229,7 +224,4 @@ export const GlancePage = GObject.registerClass({
         this._weatherText.text = sky ? `${info.get_temp_summary()}  ·  ${sky}` : info.get_temp_summary();
     }
 
-    focus() {
-        this._power.grab_key_focus();
-    }
 });

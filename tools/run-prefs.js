@@ -200,14 +200,19 @@ async function runSelftest(window) {
     // Top bar and control centre.
     const bar = await section(window, 'top-bar');
     const barSettings = store.settings.get_child('bar');
-    bar._style.selected = 2;
-    bar._surface.selected = 1;
-    bar._shape.selected = 1;
+    bar._style.setSelected('grouped');
+    bar._surface.setSelected('glass');
+    bar._shape.setSelected('notch');
+    bar._sides.active_name = 'capsules';
     check(barSettings.get_string('style') === 'grouped' && barSettings.get_string('surface') === 'glass' &&
-        barSettings.get_string('island-shape') === 'notch', 'bar style, glass and notch are saved');
-    ['style', 'surface', 'island-shape'].forEach(key => barSettings.reset(key));
+        barSettings.get_string('island-shape') === 'notch' && barSettings.get_string('sides') === 'capsules',
+    'bar style, glass, notch and capsules are saved');
+    barSettings.set_string('style', 'island');
+    check(!bar._sidesRow.sensitive, 'sides only matter when grouped or spread');
+    ['style', 'surface', 'island-shape', 'sides'].forEach(key => barSettings.reset(key));
     await sleep(100);
-    check(bar._style.selected === 1, 'and the rows follow the settings');
+    check(bar._style.selectedId === 'spread' && bar._shape.selectedId === 'floating' &&
+        bar._sides.active_name === 'wallpaper' && bar._sidesRow.sensitive, 'and the cards follow the settings');
     check(bar._claude.active && !bar._weather.active, 'the Claude module is on, the weather off');
     bar._weather.active = true;
     bar._claude.active = false;

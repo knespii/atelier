@@ -1,15 +1,22 @@
-// The top bar: its look – GNOME's, clear (the workspaces, the island and
-// the status icons on the wallpaper) or grouped (the sides in capsules like
-// the island, black or glass) – and Atelier's modules on its right, which
-// show their details in the island while the pointer rests on them.
+// The top bar: its look, and Atelier's modules on its right, which show
+// their details in the island while the pointer rests on them.
+//
+// Besides GNOME's black bar, the bar has no background of its own and one
+// of three shapes: the workspaces, the island and the status icons grouped
+// in the middle, spread to the edges of the screen, or all in one island.
+// The sides lie on the wallpaper or in capsules like the island; the
+// island, the capsules and the one island are black or glass.
 
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {capsuleHeight} from '../core/barMetrics.js';
+import {EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
+import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
 import {ContentPage} from '../island/page.js';
 import {ClaudeIndicator, WeatherIndicator} from './indicators.js';
@@ -20,54 +27,72 @@ const MODULES = ['weather', 'claude'];
 const PREVIEW_DELAY = 300;
 const PREVIEW_HIDE_DELAY = 250;
 
-const CLEAN = 'atelier-bar-clean';
-const GROUPED = 'atelier-bar-grouped';
-// Room between a capsule and the screen's edge, logical pixels.
-const EDGE = 4;
+const CLEAN = 'atelier-bar-clean'; // no background of its own
+const CAPSULES = 'atelier-bar-capsules'; // the sides on capsules or in the one island
 
-// A capsule behind one side of the bar.
-class Capsule {
-    constructor(box, glass) {
-        this._box = box;
-        if (glass) {
-            this.actor = new GlassSurface({reach: 0.1});
-        } else {
-            this.actor = new St.Widget({style_class: 'atelier-capsule', reactive: false});
-        }
+// Logical pixels.
+const EDGE = 4; // between a capsule and the screen's edge
+const GAP = 6; // between the island and a grouped side
+const ISLAND_PADDING = 6; // of the one island, beyond the icons at its ends
+
+// Something under the bar: a capsule behind one side, or the one island
+// behind all of it. Black (with black ears for a notch), or glass.
+class Surface {
+    constructor(glass) {
         this._glass = glass;
+        this.actor = glass
+            ? new GlassSurface({reach: 0.1})
+            : new St.Widget({style_class: 'atelier-capsule', reactive: false});
+        // (Never the target of a drag and drop.)
+        Shell.util_set_hidden_from_pick(this.actor, true);
         Main.layoutManager.uiGroup.insert_child_below(this.actor, Main.layoutManager.panelBox);
+        this._ears = null;
+        this._radii = '';
     }
 
     get glass() {
         return this._glass;
     }
 
-    /** Wrap the side's items, as tall as the island at rest. */
-    update() {
-        const box = this._box;
-        const panel = Main.panel;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const shown = box.get_children().some(child => child.visible && child.width > 0);
-        this.actor.visible = shown && Main.layoutManager.panelBox.visible && panel.visible;
-        if (!this.actor.visible)
-            return;
-        const [boxX] = box.get_transformed_position();
-        const [, panelY] = panel.get_transformed_position();
-        const height = capsuleHeight(panel.height, scale);
-        const edge = EDGE * scale;
-        const monitor = Main.layoutManager.primaryMonitor;
-        const x = Math.max(boxX, monitor.x + edge);
-        const right = Math.min(boxX + box.width, monitor.x + monitor.width - edge);
-        const y = Math.round(panelY + (panel.height - height) / 2);
+    hide() {
+        this.actor.visible = false;
+        this._ears?.show(false);
+    }
+
+    /**
+     * @param {number[]} rect - [x, y, width, height] in stage coordinates
+     * @param {number} radius - of the top corners
+     * @param {number} bottomRadius
+     * @param {number} ear - radius of a notch's ears, 0 for none
+     */
+    show([x, y, width, height], radius, bottomRadius, ear) {
+        this.actor.visible = true;
         if (this._glass) {
-            this.actor.setShape(x, y, right - x, height, height / 2);
+            this.actor.setShape(x, y, width, height, radius, bottomRadius, ear);
+            return;
+        }
+        this.actor.set_position(x, y);
+        this.actor.set_size(width, height);
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [top, bottom] = [radius / scale, bottomRadius / scale];
+        const radii = `border-radius: ${top}px ${top}px ${bottom}px ${bottom}px;`;
+        if (radii !== this._radii) {
+            this._radii = radii;
+            this.actor.style = radii;
+        }
+        if (ear > 0) {
+            this._ears ??= new NotchEars(Main.layoutManager.panelBox);
+            this._ears.show(true);
+            this._ears.setShape(x, y, width, ear);
         } else {
-            this.actor.set_position(x, y);
-            this.actor.set_size(right - x, height);
+            this._ears?.destroy();
+            this._ears = null;
         }
     }
 
     destroy() {
+        this._ears?.destroy();
+        this._ears = null;
         this.actor.destroy();
         this.actor = null;
     }
@@ -82,8 +107,10 @@ export class BarModule {
     constructor({settings, modules}) {
         this._settings = settings;
         this._modules = modules;
+        this._look = null;
         this._backdrop = null;
-        this._capsules = [];
+        this._surfaces = [];
+        this._island = null;
         this._laterId = 0;
         this._indicators = new Map();
         this._preview = null;
@@ -99,27 +126,33 @@ export class BarModule {
         this._barSettings = this._settings.get_child('bar');
         this._barSettings.connectObject(
             'changed::style', () => this._sync(),
+            'changed::sides', () => this._sync(),
             'changed::surface', () => this._sync(),
+            'changed::island-shape', () => this._sync(),
             this);
-        for (const box of [Main.panel._leftBox, Main.panel._rightBox])
-            box.connectObject('notify::allocation', () => this._queueUpdate(), this);
+        for (const box of [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox])
+            box.connectObject('notify::allocation', () => this._queuePlace(), this);
         Main.layoutManager.panelBox.connectObject(
-            'notify::allocation', () => this._queueUpdate(),
-            'notify::visible', () => this._queueUpdate(),
+            'notify::allocation', () => this._queuePlace(),
+            'notify::visible', () => this._queuePlace(),
             this);
+        this._followIsland();
         this._sync();
 
         this._barSettings.connectObject('changed::modules', () => this._syncModules(), this);
-        // The modules show what other features know.
+        // The modules show what other features know; the sides follow the
+        // island.
         this._modules.connectObject(
-            'started', (_, id) => ['claude', 'island'].includes(id) && this._syncModules(),
-            'stopped', (_, id) => ['claude', 'island'].includes(id) && this._syncModules(true),
+            'started', (_, id) => this._onModule(id, true),
+            'stopped', (_, id) => this._onModule(id, false),
             this);
         this._syncModules();
     }
 
     disable() {
         this._modules.disconnectObject(this);
+        this._island?.disconnectObject(this);
+        this._island = null;
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         this._closePreview();
@@ -127,25 +160,39 @@ export class BarModule {
         this._indicators.clear();
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
-        Main.panel._leftBox.disconnectObject(this);
-        Main.panel._rightBox.disconnectObject(this);
+        for (const box of [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox]) {
+            box.disconnectObject(this);
+            box.translation_x = 0;
+        }
         Main.layoutManager.panelBox.disconnectObject(this);
         if (this._laterId)
             global.compositor.get_laters().remove(this._laterId);
         this._laterId = 0;
         Main.panel.remove_style_class_name(CLEAN);
-        Main.panel.remove_style_class_name(GROUPED);
+        Main.panel.remove_style_class_name(CAPSULES);
         this._backdrop?.destroy();
         this._backdrop = null;
-        this._capsules.forEach(capsule => capsule.destroy());
-        this._capsules = [];
+        this._surfaces.forEach(surface => surface.destroy());
+        this._surfaces = [];
+        this._look = null;
+    }
+
+    _onModule(id, started) {
+        if (id === 'island')
+            this._followIsland();
+        if (id === 'claude' || id === 'island')
+            this._syncModules(!started);
     }
 
     _sync() {
-        const style = this._barSettings.get_string('style');
+        const bar = this._barSettings;
+        const style = bar.get_string('style');
         const clear = style !== 'gnome';
-        const grouped = style === 'grouped';
-        const glass = this._barSettings.get_string('surface') === 'glass';
+        const notch = bar.get_string('island-shape') === 'notch';
+        const glass = bar.get_string('surface') === 'glass';
+        const capsules = clear && bar.get_string('sides') === 'capsules';
+        // The island's ears, beside it on the bar (the one island has its own).
+        this._look = {style, notch, ear: notch && style !== 'island' ? EAR_RADIUS : 0};
 
         // Without a background of its own, the bar shows the overview's
         // background too: the blurred wallpaper rather than GNOME's grey.
@@ -157,18 +204,136 @@ export class BarModule {
             this._backdrop?.destroy();
             this._backdrop = null;
         }
-
-        if (grouped)
-            Main.panel.add_style_class_name(GROUPED);
+        if (style === 'island' || capsules)
+            Main.panel.add_style_class_name(CAPSULES);
         else
-            Main.panel.remove_style_class_name(GROUPED);
-        if (!grouped || this._capsules.some(capsule => capsule.glass !== glass)) {
-            this._capsules.forEach(capsule => capsule.destroy());
-            this._capsules = [];
+            Main.panel.remove_style_class_name(CAPSULES);
+
+        // One island, or a capsule for each side.
+        const count = style === 'island' ? 1 : capsules ? 2 : 0;
+        if (this._surfaces.length !== count || this._surfaces.some(surface => surface.glass !== glass)) {
+            this._surfaces.forEach(surface => surface.destroy());
+            this._surfaces = Array.from({length: count}, () => new Surface(glass));
         }
-        if (grouped && this._capsules.length === 0)
-            this._capsules = [Main.panel._leftBox, Main.panel._rightBox].map(box => new Capsule(box, glass));
-        this._queueUpdate();
+        this._place();
+    }
+
+    // The sides of a grouped bar and the one island follow the island as it
+    // grows and shrinks, every frame.
+    _followIsland() {
+        this._island?.disconnectObject(this);
+        this._island = this._modules.get('island')?.island ?? null;
+        this._island?.connectObject(
+            'notify::x', () => this._place(),
+            'notify::width', () => this._place(),
+            'notify::visible', () => this._place(),
+            'destroy', () => (this._island = null),
+            this);
+        this._queuePlace();
+    }
+
+    /** @returns {number[]} what grouped sides surround, [start, end] in the bar */
+    _middle() {
+        const island = this._island;
+        if (island?.visible && island.width > 0) {
+            const [panelX] = Main.panel.get_transformed_position();
+            return [island.x - panelX, island.x - panelX + island.width];
+        }
+        const center = Main.panel._centerBox;
+        return [center.x, center.x + center.width];
+    }
+
+    // Grouped and in one island, the sides move next to the island; spread,
+    // they stay at the edges where GNOME puts them.
+    _place() {
+        if (!this._look)
+            return;
+        const panel = Main.panel;
+        // Placed once the bar is laid out anew, e.g. after a style change.
+        // (Hidden, it waits until it shows again.)
+        if (!panel.has_allocation()) {
+            if (panel.mapped)
+                this._queuePlace();
+            return;
+        }
+        const {style, ear} = this._look;
+        const left = panel._leftBox;
+        const right = panel._rightBox;
+        const together = (style === 'grouped' || style === 'island') &&
+            panel.get_text_direction() !== Clutter.TextDirection.RTL;
+        if (together) {
+            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+            const [start, end] = this._middle();
+            const gap = style === 'island' ? 0 : (GAP + ear) * scale;
+            const edge = EDGE * scale;
+            const leftX = Math.max(edge, start - gap - left.width);
+            const rightX = Math.min(panel.width - edge - right.width, end + gap);
+            left.translation_x = Math.round(leftX - left.x);
+            right.translation_x = Math.round(rightX - right.x);
+        } else {
+            left.translation_x = 0;
+            right.translation_x = 0;
+        }
+        this._updateSurfaces();
+    }
+
+    _updateSurfaces() {
+        if (this._surfaces.length === 0)
+            return;
+        const panel = Main.panel;
+        if (!Main.layoutManager.panelBox.visible || !panel.visible) {
+            this._surfaces.forEach(surface => surface.hide());
+            return;
+        }
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [panelX, panelY] = panel.get_transformed_position();
+        const monitor = Main.layoutManager.primaryMonitor;
+        const [minX, maxX] = [monitor.x + EDGE * scale, monitor.x + monitor.width - EDGE * scale];
+        const height = capsuleHeight(panel.height, scale);
+        const y = Math.round(panelY + (panel.height - height) / 2);
+        // [start, end] of a side's icons on the stage, if it shows any
+        const extent = box => {
+            if (!box.get_children().some(child => child.visible && child.width > 0))
+                return null;
+            const [x] = box.get_transformed_position();
+            return [x, x + box.width];
+        };
+
+        if (this._look.style === 'island') {
+            const [start, end] = this._middle();
+            const parts = [extent(panel._leftBox), [panelX + start, panelX + end], extent(panel._rightBox)]
+                .filter(Boolean);
+            const padding = ISLAND_PADDING * scale;
+            const x1 = Math.max(minX, Math.min(...parts.map(([a]) => a)) - padding);
+            const x2 = Math.min(maxX, Math.max(...parts.map(([, b]) => b)) + padding);
+            // As the island: hanging from the top edge, or floating in the bar.
+            if (this._look.notch)
+                this._surfaces[0].show([x1, panelY, x2 - x1, panel.height], 0, NOTCH_RADIUS * scale, EAR_RADIUS * scale);
+            else
+                this._surfaces[0].show([x1, y, x2 - x1, height], height / 2, height / 2, 0);
+            return;
+        }
+
+        [panel._leftBox, panel._rightBox].forEach((box, i) => {
+            const range = extent(box);
+            if (!range) {
+                this._surfaces[i].hide();
+                return;
+            }
+            const x1 = Math.max(minX, range[0]);
+            const x2 = Math.min(maxX, range[1]);
+            this._surfaces[i].show([x1, y, x2 - x1, height], height / 2, height / 2, 0);
+        });
+    }
+
+    _queuePlace() {
+        if (this._laterId)
+            return;
+        this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._laterId = 0;
+            this._place();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     /**
@@ -226,8 +391,10 @@ export class BarModule {
                     page.destroy();
                     return;
                 }
-                this._preview = {page, indicator, island};
-                island.connectObject('notify::hover', () => this._maybeClosePreview(), this);
+                const preview = {page, indicator, island};
+                this._preview = preview;
+                // (Its own connection: the bar follows the island too.)
+                island.connectObject('notify::hover', () => this._maybeClosePreview(), preview);
             });
         } else {
             this._clear('show-preview');
@@ -257,7 +424,7 @@ export class BarModule {
         this._preview = null;
         if (!preview)
             return;
-        preview.island.disconnectObject(this);
+        preview.island.disconnectObject(preview);
         if (close && preview.island.page === preview.page)
             preview.island.close(preview.page);
     }
@@ -276,15 +443,5 @@ export class BarModule {
         if (id)
             GLib.source_remove(id);
         this._timeouts.delete(name);
-    }
-
-    _queueUpdate() {
-        if (this._laterId || this._capsules.length === 0)
-            return;
-        this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
-            this._laterId = 0;
-            this._capsules.forEach(capsule => capsule.update());
-            return GLib.SOURCE_REMOVE;
-        });
     }
 }
