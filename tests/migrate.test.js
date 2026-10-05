@@ -73,6 +73,14 @@ export async function testTakesOverProfilesFilesAndSettings() {
     assertEqual(settings.get_uint('transition-duration'), 1200);
     assertEqual(settings.get_boolean('first-run-done'), true);
 
+    // Later writes through the same object (and its children) still reach
+    // the backend, where other settings objects see them.
+    assertEqual(settings.delay_apply, false, 'not left in delay-apply mode');
+    settings.get_child('island').set_boolean('show-date', true);
+    const other = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.atelier.island'});
+    assertEqual(other.get_boolean('show-date'), true, 'children write through');
+    other.reset('show-date');
+
     // A second start changes nothing.
     settings.set_string('profiles', '[]');
     assertEqual(await migrateFromBgChanger(settings, legacy, {background}), {migrated: false});
