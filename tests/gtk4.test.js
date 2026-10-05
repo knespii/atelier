@@ -70,7 +70,23 @@ export async function testRefusesToTouchUserFiles() {
     assert(!hasGtk4Support(gtk3Only));
 
     // A file the user put back after we linked must survive unlinking.
-    settings.set_string('gtk4-link', JSON.stringify({theme, files: ['gtk.css']}));
+    settings.set_string('gtk4-link', JSON.stringify({theme, links: {'gtk.css': fn(theme, 'gtk-4.0', 'gtk.css')}}));
     await unlinkGtk4Theme(settings, config);
     assert(GLib.file_test(fn(config, 'gtk.css'), GLib.FileTest.EXISTS), 'regular file kept');
+}
+
+export async function testLeavesForeignLinksAlone() {
+    const {config, theme, lightOnly, settings} = setup();
+    await linkGtk4Theme(settings, theme, false, config);
+
+    // A theme installer replaces our link with its own (ln -sf).
+    const link = Gio.File.new_for_path(fn(config, 'gtk.css'));
+    link.delete(null);
+    link.make_symbolic_link(fn(lightOnly, 'gtk-4.0', 'gtk.css'), null);
+
+    const result = await linkGtk4Theme(settings, theme, true, config);
+    assertEqual(result.ok, false, 'a link pointing elsewhere is not ours');
+    await unlinkGtk4Theme(settings, config);
+    assertEqual(target(fn(config, 'gtk.css')), fn(lightOnly, 'gtk-4.0', 'gtk.css'), 'foreign link kept');
+    assert(!GLib.file_test(fn(config, 'assets'), GLib.FileTest.EXISTS), 'our assets link removed');
 }
