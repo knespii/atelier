@@ -33,6 +33,11 @@ for f in gtk-3.0/gtk.css gtk-4.0/gtk.css gtk-4.0/gtk-dark.css gtk-4.0/assets/che
     echo "/* $f */" > "$ROOT/data/themes/Modern/$f"
 done
 
+# BG Changer's library with the wallpaper currently on the desktop.
+LEGACY_WALLPAPER="$ROOT/data/bg-changer/wallpapers/1234abcd-amber.jxl"
+mkdir -p "$(dirname "$LEGACY_WALLPAPER")"
+cp "$BG/amber-d.jxl" "$LEGACY_WALLPAPER"
+
 PROFILES="[\
 {\"id\":\"amber\",\"name\":\"Amber\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"orange\",\"iconTheme\":\"Adwaita\"},\
 {\"id\":\"rainbow\",\"name\":\"LCD Rainbow\",\"wallpaper\":\"$BG/lcd-rainbow-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"auto\",\"gtkTheme\":\"Adwaita-dark\",\"font\":\"Cantarell 11\"},\
@@ -45,14 +50,16 @@ cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 enabled-extensions=['$UUID', 'user-theme@gnome-shell-extensions.gcampax.github.com']
 
 [org/gnome/desktop/background]
-picture-uri='file://$BG/adwaita-d.jpg'
-picture-uri-dark='file://$BG/adwaita-d.jpg'
+picture-uri='file://$LEGACY_WALLPAPER'
+picture-uri-dark='file://$LEGACY_WALLPAPER'
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
 
-[org/gnome/shell/extensions/atelier]
-profiles='$PROFILES'
+# Seeded as BG Changer data, so Atelier has to take it over on start.
+[org/gnome/shell/extensions/bg-changer]
+looks='$PROFILES'
+active-look='amber'
 EOF
 
 status=0

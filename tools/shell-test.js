@@ -214,6 +214,15 @@ export async function run() {
             return;
         const atelier = ext.stateObj;
 
+        check(atelier._settings.get_boolean('migrated-from-bg-changer'), 'BG Changer data taken over');
+        check(['amber', 'rainbow', 'glass', 'hostile', 'modern'].every(id => atelier._store.get(id)),
+            'all BG Changer profiles migrated');
+        const desktop = new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-uri');
+        check(desktop.startsWith(`file://${GLib.get_user_data_dir()}/atelier/wallpapers/`),
+            `desktop wallpaper moved into the Atelier library (${desktop})`);
+        check(!GLib.file_test(`${GLib.get_user_data_dir()}/bg-changer`, GLib.FileTest.EXISTS),
+            'old library removed');
+
         check(await waitFor(() => atelier._store.getAll().some(l => l.name === 'Original')),
             'first run saved the "Original" profile');
         const original = atelier._store.getAll().find(l => l.name === 'Original');

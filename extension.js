@@ -8,6 +8,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {LEGACY_SCHEMA, LEGACY_UUID, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore, readCurrentAppearance} from './lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper} from './lib/paths.js';
 import {USER_THEME_UUID, getUserThemeSettings} from './lib/themes.js';
@@ -27,6 +28,28 @@ export default class AtelierExtension extends Extension {
         this._applier.transition = new WallpaperTransition(this._settings);
         this._switcher = null;
         this._indicator = null;
+        this._started = false;
+
+        // BG Changer's data has to be taken over before anything reads the
+        // profiles, otherwise the first run would save a second "Original".
+        const legacySchema = Gio.SettingsSchemaSource.new_from_directory(
+            this.dir.get_child('schemas').get_path(), Gio.SettingsSchemaSource.get_default(), false)
+            .lookup(LEGACY_SCHEMA, false);
+        const legacy = legacySchema ? new Gio.Settings({settings_schema: legacySchema}) : null;
+        migrateFromBgChanger(this._settings, legacy)
+            .then(result => {
+                if (result.migrated)
+                    console.log(`Atelier: took over ${result.profiles} profiles from BG Changer`);
+            })
+            .catch(e => console.error('Atelier: taking over BG Changer data failed', e))
+            .finally(() => {
+                if (this._settings)
+                    this._start();
+            });
+    }
+
+    _start() {
+        this._started = true;
 
         // Keep a GTK 4 theme link on the light or dark variant matching the style.
         this._interfaceSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
@@ -41,13 +64,19 @@ export default class AtelierExtension extends Extension {
             this);
         this._syncIndicator();
 
-        const flags = Meta.KeyBindingFlags.IGNORE_AUTOREPEAT;
-        const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW;
-        // POPUP lets the shortcut close the switcher it opened.
-        Main.wm.addKeybinding('atelier-open-switcher', this._settings, flags,
-            modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher());
-        Main.wm.addKeybinding('atelier-next-profile', this._settings, flags, modes, () => this._step(1));
-        Main.wm.addKeybinding('atelier-previous-profile', this._settings, flags, modes, () => this._step(-1));
+        // Both extensions would grab the same keys while BG Changer still runs.
+        if (Main.extensionManager.lookup(LEGACY_UUID)?.state === ExtensionState.ACTIVE) {
+            Main.notify('Atelier has taken over BG Changer',
+                'Your profiles are in Atelier now. Disable BG Changer in Extensions, then log out and back in for the shortcuts to work.');
+        } else {
+            const flags = Meta.KeyBindingFlags.IGNORE_AUTOREPEAT;
+            const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW;
+            // POPUP lets the shortcut close the switcher it opened.
+            Main.wm.addKeybinding('atelier-open-switcher', this._settings, flags,
+                modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher());
+            Main.wm.addKeybinding('atelier-next-profile', this._settings, flags, modes, () => this._step(1));
+            Main.wm.addKeybinding('atelier-previous-profile', this._settings, flags, modes, () => this._step(-1));
+        }
 
         if (!this._settings.get_boolean('first-run-done') && !this._originalPending) {
             this._originalPending = true;
@@ -58,8 +87,13 @@ export default class AtelierExtension extends Extension {
     }
 
     disable() {
-        for (const name of KEYBINDINGS)
-            Main.wm.removeKeybinding(name);
+        if (this._started) {
+            for (const name of KEYBINDINGS)
+                Main.wm.removeKeybinding(name);
+            this._interfaceSettings.disconnectObject(this);
+            this._interfaceSettings = null;
+        }
+        this._started = false;
 
         this._switcher?.destroy();
         this._switcher = null;
@@ -67,8 +101,6 @@ export default class AtelierExtension extends Extension {
         this._indicator = null;
         this._applier.destroy();
         this._applier = null;
-        this._interfaceSettings.disconnectObject(this);
-        this._interfaceSettings = null;
         this._settings.disconnectObject(this);
         this._settings = null;
         this._store = null;
