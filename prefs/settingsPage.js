@@ -1,4 +1,5 @@
-// "Settings" page: switcher options, transition, theme check and reset.
+// "System" section: switcher options, shortcuts, transition, theme check,
+// reset and where Atelier keeps its data.
 
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
@@ -22,11 +23,7 @@ const home = path => path.replace(GLib.get_home_dir(), '~');
 export const SettingsPage = GObject.registerClass(
 class AtelierSettingsPage extends Adw.PreferencesPage {
     _init(settings) {
-        super._init({
-            title: 'Settings',
-            icon_name: 'preferences-system-symbolic',
-            name: 'settings',
-        });
+        super._init({title: 'System', name: 'system'});
         this._settings = settings;
         this._settingsIds = [];
 
@@ -41,6 +38,7 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
         this._checkThemes().catch(e => console.error('Atelier: theme check failed', e));
 
         this.add(this._buildResetGroup());
+        this.add(this._buildAboutGroup());
     }
 
     disconnectSettings() {
@@ -58,6 +56,7 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
 
         this._shortcutRows = [
             ['atelier-open-switcher', 'Open the switcher'],
+            ['atelier-open-wallpapers', 'Open the Wallpapers tab'],
             ['atelier-next-profile', 'Apply the next profile'],
             ['atelier-previous-profile', 'Apply the previous profile'],
         ].map(([key, title]) => new ShortcutRow({settings: this._settings, key, title}));
@@ -156,6 +155,18 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
         });
         row.connect('activated', () => this._reset().catch(e => toast(this, e.message)));
         group.add(row);
+        return group;
+    }
+
+    _buildAboutGroup() {
+        const group = new Adw.PreferencesGroup({title: 'About'});
+        const rows = [
+            ['Wallpaper copies', home(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'wallpapers']))],
+            ['Settings', '/org/gnome/shell/extensions/atelier/ (dconf)'],
+            ['Generated styles', home(GLib.build_filenamev([GLib.get_user_cache_dir(), 'atelier']))],
+        ];
+        for (const [title, subtitle] of rows)
+            group.add(new Adw.ActionRow({title, subtitle, subtitle_selectable: true, use_markup: false}));
         return group;
     }
 

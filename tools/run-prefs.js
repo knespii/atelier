@@ -45,6 +45,21 @@ function seedSampleProfiles() {
     const settings = extensionSettings();
     settings.set_string('profiles', JSON.stringify(profiles));
     settings.set_string('active-profile', 'amber');
+    return settings;
+}
+
+async function seedPalette(settings) {
+    // Normally written by the shell; the preferences only show it.
+    const {paletteForWallpaper} = await import('../lib/wallpaperPalette.js');
+    const palette = await paletteForWallpaper('/usr/share/backgrounds/gnome/amber-d.jxl', {});
+    settings.get_child('palette').set_string('current', JSON.stringify(palette));
+}
+
+/** Show a section of the sidebar and return its page. */
+async function section(window, id) {
+    window.atelierView.showSection(id);
+    await sleep(400);
+    return window.atelierView._pages.get(id);
 }
 
 const sleep = ms => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
@@ -78,15 +93,14 @@ function check(condition, message) {
 }
 
 async function runSelftest(window) {
-    window.visible_page_name = 'profiles';
-    const page = window.visible_page;
+    const page = await section(window, 'profiles');
     const store = page._store;
     const before = store.getAll().length;
 
     await page._saveCurrent();
     await sleep(500);
     const editor = window.visible_dialog;
-    check(editor?._look === null, 'Save Current Setup opens an editor for a new profile');
+    check(editor?._profile === null, 'Save Current Setup opens an editor for a new profile');
     await editor._save();
     await sleep(300);
     const profiles = store.getAll();
@@ -119,18 +133,37 @@ async function runSelftest(window) {
     store.move(copy.id, -1);
     check(store.getAll().at(-2).id === copy.id, 'move up');
     check(page._rows.length === store.getAll().length, 'list shows every profile');
+
+    // Sidebar search narrows the sections.
+    const view = window.atelierView;
+    view._search.text = 'terminal';
+    await sleep(300);
+    check(view._list.get_selected_row()?.section.id === 'appearance', 'search finds the Appearance section');
+    view._search.text = '';
+    await sleep(200);
+
+    // Appearance: switching the palette source updates the settings.
+    const appearance = await section(window, 'appearance');
+    appearance._sourceToggles.active_name = 'preset';
+    check(appearance._palette.get_string('source') === 'preset' && appearance._presetRow.visible,
+        'palette source switches to fixed palettes');
+    appearance._presetButtons.get('sea').active = true;
+    check(appearance._palette.get_string('preset') === 'sea', 'a fixed palette can be picked');
+    appearance._sourceToggles.active_name = 'wallpaper';
+    appearance._variants.setSelected('muted');
+    check(appearance._palette.get_string('variant') === 'muted', 'variant cards set the variant');
+    appearance._palette.reset('variant');
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    render(window, 'profiles');
+    for (const id of ['profiles', 'wallpapers', 'appearance', 'system']) {
+        await section(window, id);
+        await sleep(id === 'appearance' ? 1200 : 600);
+        render(window, id);
+    }
 
-    window.visible_page_name = 'settings';
-    await sleep(1000);
-    render(window, 'settings');
-
-    window.visible_page_name = 'profiles';
-    const page = window.visible_page;
+    const page = await section(window, 'profiles');
     const [, second] = page._store.getAll();
     await page._edit(second);
     await sleep(2000);
@@ -161,7 +194,7 @@ async function automate(window, app) {
 }
 
 if (args.includes('--sample'))
-    seedSampleProfiles();
+    await seedPalette(seedSampleProfiles());
 
 Adw.init();
 const app = new Adw.Application({

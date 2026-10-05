@@ -19,6 +19,19 @@ const swatchCss = Object.entries(ACCENT_COLORS)
 const CSS = `
 .atelier-thumb { border-radius: 8px; background-color: alpha(currentColor, 0.08); }
 .atelier-preview { border-radius: 14px; background-color: alpha(currentColor, 0.08); }
+.atelier-sidebar-heading {
+  font-size: 8.5pt; font-weight: 800; letter-spacing: 1px;
+  opacity: 0.55; margin: 14px 12px 4px;
+}
+.atelier-option-card {
+  padding: 12px; border-radius: 14px;
+}
+.atelier-option-card:checked {
+  outline: 2px solid @accent_color; outline-offset: -2px;
+  background: alpha(@accent_bg_color, 0.12);
+}
+.atelier-color-button { min-width: 0; min-height: 0; padding: 4px; border-radius: 999px; }
+.atelier-color-button:checked { outline: 2px solid @accent_color; outline-offset: 1px; }
 .atelier-swatch {
   min-width: 32px; min-height: 32px; padding: 0;
   border-radius: 999px; color: white;
