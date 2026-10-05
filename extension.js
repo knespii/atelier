@@ -101,7 +101,10 @@ export default class BgChangerExtension extends Extension {
         const looks = this._store.getAll();
         if (looks.length === 0)
             return;
-        const current = looks.findIndex(look => look.id === this._store.activeId);
+        // While a look is still being applied, step from it rather than from
+        // the active one, so quick presses don't apply the same look twice.
+        const from = this._applier.targetId ?? this._store.activeId;
+        const current = looks.findIndex(look => look.id === from);
         const index = current < 0
             ? (delta > 0 ? 0 : looks.length - 1)
             : (current + delta + looks.length) % looks.length;

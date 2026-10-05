@@ -31,6 +31,7 @@ export class Applier {
         this._store = new LookStore(settings);
         this._next = null;
         this._running = null;
+        this._targetId = null;
         this._destroyed = false;
 
         /** Optional wallpaper transition, see reveal.js */
@@ -49,6 +50,11 @@ export class Applier {
         return this._running !== null;
     }
 
+    /** @returns {string|null} the newest look requested while busy */
+    get targetId() {
+        return this._targetId;
+    }
+
     /**
      * Apply a look. While one is being applied, only the newest request is
      * kept and runs afterwards, so mashing the shortcut can't pile up work.
@@ -62,8 +68,10 @@ export class Applier {
      */
     apply(look, {animate = true, onWritten = null} = {}) {
         this._next = {look, animate, onWritten};
+        this._targetId = look.id;
         this._running ??= this._drain().finally(() => {
             this._running = null;
+            this._targetId = null;
         });
         return this._running;
     }
