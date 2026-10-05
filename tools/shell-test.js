@@ -2,6 +2,7 @@
 // run() once startup is complete and exits when it returns.
 
 import Clutter from 'gi://Clutter';
+import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -59,6 +60,28 @@ function screenshotIsland(name, height = 420) {
 }
 
 const uriOf = path => Gio.File.new_for_path(path).get_uri();
+
+/**
+ * @returns {number[]} the average [r, g, b] of a rectangle of a screenshot
+ */
+function averageColor(name, x, y, width, height) {
+    const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
+    const pixels = pixbuf.get_pixels();
+    const stride = pixbuf.get_rowstride();
+    const channels = pixbuf.get_n_channels();
+    const sum = [0, 0, 0];
+    for (let row = y; row < y + height; row++) {
+        for (let col = x; col < x + width; col++) {
+            const i = row * stride + col * channels;
+            sum[0] += pixels[i];
+            sum[1] += pixels[i + 1];
+            sum[2] += pixels[i + 2];
+        }
+    }
+    return sum.map(v => Math.round(v / (width * height)));
+}
+
+const colorDistance = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
 
 // Real input through virtual devices, so hover, grabs and focus behave as
 // they do for a user.
@@ -580,6 +603,24 @@ async function testControlCentre(ext) {
     indicator.destroy();
 }
 
+async function testOverviewBar() {
+    await restPointer();
+    Main.overview.show();
+    await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    await Scripting.sleep(300);
+    Main.overview.hide();
+    await Scripting.sleep(110);
+    await screenshotArea('24-leaving-overview', 0, 0, 900, 80);
+    // A stretch of the bar left of the island against the wallpaper below it.
+    const bar = averageColor('24-leaving-overview', 120, 6, 300, 20);
+    const below = averageColor('24-leaving-overview', 120, 50, 300, 20);
+    check(colorDistance(bar, below) < 60, `the bar stays clear while leaving the overview (${bar} vs ${below})`);
+    await waitFor(() => !Main.overview.visible, 3000);
+    await Scripting.sleep(200);
+    const backdrop = Main.layoutManager.uiGroup.get_children().find(a => a.name === 'atelier-panel-backdrop');
+    check(backdrop?.opacity === 0, 'and the wallpaper strip behind it is gone on the desktop');
+}
+
 async function testSwitcherAndReveal(atelier) {
     await screenshot('01-desktop');
 
@@ -952,6 +993,7 @@ export async function run() {
         await testIsland(ext, atelier);
         await testNotifications(ext, atelier);
         await testControlCentre(ext);
+        await testOverviewBar();
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

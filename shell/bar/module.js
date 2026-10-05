@@ -3,6 +3,8 @@
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {PanelBackdrop} from './backdrop.js';
+
 const CLEAN = 'atelier-bar-clean';
 
 export class BarModule {
@@ -12,6 +14,7 @@ export class BarModule {
      */
     constructor({settings}) {
         this._settings = settings;
+        this._backdrop = null;
     }
 
     enable() {
@@ -24,12 +27,19 @@ export class BarModule {
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
         Main.panel.remove_style_class_name(CLEAN);
+        this._backdrop?.destroy();
+        this._backdrop = null;
     }
 
     _sync() {
-        if (this._barSettings.get_boolean('transparent'))
+        const clean = this._barSettings.get_boolean('transparent');
+        if (clean) {
             Main.panel.add_style_class_name(CLEAN);
-        else
+            this._backdrop ??= new PanelBackdrop();
+        } else {
             Main.panel.remove_style_class_name(CLEAN);
+            this._backdrop?.destroy();
+            this._backdrop = null;
+        }
     }
 }
