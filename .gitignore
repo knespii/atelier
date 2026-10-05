@@ -7,3 +7,6 @@ dist/
 
 # Local test output
 tests/output/
+
+# Claude Code scheduler state
+.claude/*.lock
