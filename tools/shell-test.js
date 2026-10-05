@@ -243,22 +243,28 @@ async function testIsland(ext, atelier) {
     delete module._calendar.events;
     delete module._calendar.weather;
 
-    // A click opens GNOME's calendar and notifications under the island.
+    // A click opens the control centre; Super+V its notifications and
+    // GNOME's calendar menu stays closed.
     await clickAt(islandX, islandY);
-    check(await waitFor(() => dateMenu.menu.isOpen, 2000), 'clicking the island opens the calendar');
-    await Scripting.sleep(500);
-    const [menuX] = centerOf(dateMenu.menu.actor);
-    const [, menuY] = dateMenu.menu.actor.get_transformed_position();
-    check(Math.abs(menuX - islandX) < 40 && menuY >= Main.panel.height - 1,
-        `under the island (${Math.round(menuX)}, ${Math.round(menuY)})`);
-    await screenshotIsland('12-island-calendar', 700);
+    check(await waitFor(() => hasClass(island.page, 'atelier-cc') && island.page.tab === 'controls', 2000),
+        'clicking the island opens the control centre');
+    check(!dateMenu.menu.isOpen, 'GNOME\'s calendar menu stays closed');
     Main.panel.closeCalendar();
-    check(await waitFor(() => !dateMenu.menu.isOpen, 2000), 'closeCalendar() closes it');
+    check(await waitFor(() => island.page === null, 2000), 'closeCalendar() closes it');
     await restPointer();
     Main.panel.toggleCalendar();
-    check(await waitFor(() => dateMenu.menu.isOpen, 2000), 'toggleCalendar() (Super+V) opens it');
+    check(await waitFor(() => island.page?.tab === 'notifications', 2000), 'Super+V opens its notifications');
+    check(dateMenu._messageList.get_parent()?.get_parent() === island.page, 'GNOME\'s notification list is there');
+    await Scripting.sleep(500);
+    await screenshotIsland('12-control-centre-notifications', 520);
+    island.page.setTab('calendar');
+    await Scripting.sleep(500);
+    check(dateMenu._calendar.mapped, 'and the calendar on its own tab');
+    await screenshotIsland('12b-control-centre-calendar', 640);
     Main.panel.toggleCalendar();
-    await waitFor(() => !dateMenu.menu.isOpen, 2000);
+    check(await waitFor(() => island.page?.tab === 'notifications', 1000), 'Super+V again goes to the notifications');
+    Main.panel.toggleCalendar();
+    check(await waitFor(() => island.page === null, 1000), 'and once more closes it');
 
     // Power menu, with stand-in actions.
     module.togglePowerMenu();
@@ -538,13 +544,17 @@ async function testControlCentre(ext) {
     await restPointer();
     await screenshotArea('20-top-bar', 0, 0, global.stage.width, 44);
 
-    // The status icons (and Super+S) open it in the island.
+    // The status icons only show; the island (and Super+S) open it.
     await clickAt(...centerOf(quickSettings));
+    await Scripting.sleep(500);
+    check(island.page === null && !quickSettings.menu.isOpen, 'clicking the status icons does nothing');
+    await clickAt(...centerOf(island));
     check(await waitFor(() => hasClass(island.page, 'atelier-cc') && island.busy, 1000),
-        'the status icons open the control centre in the island');
+        'the island opens the control centre');
     check(!quickSettings.menu.isOpen, 'GNOME\'s menu stays closed');
     const page = island.page;
-    check(page._host.grid.contains(toggle), 'an extension\'s tile is there too');
+    const grid = modules.get('control-centre')._quickSettingsHost.grid;
+    check(grid.contains(toggle) && page.contains(grid), 'an extension\'s tile is there too');
     await restPointer();
     await Scripting.sleep(500);
     await screenshotIsland('21-control-centre', 700);
@@ -554,7 +564,7 @@ async function testControlCentre(ext) {
     const [, tileY] = toggle.get_transformed_position();
     const [, menuY] = toggle.menu.actor.get_transformed_position();
     check(toggle.menu.isOpen && menuY >= tileY + toggle.height - 1, 'a tile\'s menu opens under it');
-    check(island.height > page._host.grid.get_preferred_height(-1)[1] - 1, 'and the island makes room');
+    check(island.height > grid.get_preferred_height(-1)[1] - 1, 'and the island makes room');
     await screenshotIsland('22-control-centre-menu', 800);
     toggle.menu.close(true);
     await Scripting.sleep(500);
@@ -583,8 +593,10 @@ async function testControlCentre(ext) {
     const settings = ext.stateObj._settings.get_child('control-centre');
     settings.set_boolean('enabled', false);
     await Scripting.sleep(300);
+    const dateMenu = Main.panel.statusArea.dateMenu;
     check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box &&
-        Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menu and the icons are back');
+        dateMenu._messageList.get_parent()?.name === 'calendarArea' &&
+        Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menus and the icons are back');
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => quickSettings.menu.isOpen, 1000) && island.page === null,
         'and GNOME\'s menu opens again');
@@ -940,8 +952,8 @@ async function testDisableCleansUp(atelier) {
     check(['toggleCalendar', 'closeCalendar'].every(name => Main.panel[name] === panelProto[name]),
         'calendar functions restored');
     const qsMenu = Main.panel.statusArea.quickSettings.menu;
-    check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean'),
-        'quick settings and the bar restored');
+    check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
+        dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
     const trayProto = Object.getPrototypeOf(Main.messageTray);
     check(['_showNotification', '_hideNotification', '_updateShowingNotification']
         .every(name => Main.messageTray[name] === trayProto[name]), 'message tray restored');

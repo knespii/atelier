@@ -12,10 +12,9 @@ of the desktop (desktop widgets, notes, a dock) is on its way.
   (and a microphone while an app records, a dot for unseen notifications,
   the Do Not Disturb icon). Rest the pointer on it for a glance – a big clock,
   this week, what's left of today's events and the weather, from GNOME's own
-  calendar and weather. Clicking it (or <kbd>Super</kbd>+<kbd>V</kbd>) opens
-  GNOME's calendar and notifications under it. The glance's power button
-  opens a power menu (Lock, Suspend, Log Out, Restart, Power Off); after a
-  profile switch the island briefly shows its name.
+  calendar and weather. Clicking it opens the control centre. The glance's
+  power button opens a power menu (Lock, Suspend, Log Out, Restart, Power
+  Off); after a profile switch the island briefly shows its name.
 - **Notifications** appear in the island instead of under the top bar. GNOME
   still decides what shows (Do Not Disturb, its per-app settings, the queue)
   and they stay in the notification list. Per app you choose the buttons:
@@ -23,12 +22,14 @@ of the desktop (desktop widgets, notes, a dock) is on its way.
   Mute keeps the app's banners away for an hour, 8 hours or until you unmute
   it in the settings). WhatsApp (as a Chrome app) starts with Reply and Mute,
   Claude with none.
-- **Control centre**: the status icons on the right of the top bar (or
-  <kbd>Super</kbd>+<kbd>S</kbd>) open GNOME's quick settings in the island –
-  sound, brightness, Wi‑Fi, Bluetooth, power mode, night light, dark style,
-  keyboard light, airplane mode and the tiles of extensions such as Caffeine,
-  with their menus. Icons that extensions put into the top bar move to its
-  second tab, *Extensions*, as tiles; clicking one does what it did in the bar.
+- **Control centre**: click the island (or <kbd>Super</kbd>+<kbd>S</kbd>) for
+  GNOME's quick settings in the island – sound, brightness, Wi‑Fi, Bluetooth,
+  power mode, night light, dark style, keyboard light, airplane mode and the
+  tiles of extensions such as Caffeine, with their menus. Further tabs hold
+  GNOME's notification list with Do Not Disturb (<kbd>Super</kbd>+<kbd>V</kbd>),
+  the calendar, and the icons extensions put into the top bar, as tiles that
+  do what the icons did. GNOME's own menus don't open anymore; the status
+  icons in the bar only show the state.
 - **Top bar** without a background: the workspaces on the left, the island in
   the middle and the status icons on the right. (If Blur my Shell blurs the
   bar, turn that off for a clean bar.)

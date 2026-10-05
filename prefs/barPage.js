@@ -21,11 +21,12 @@ class AtelierBarPage extends Adw.PreferencesPage {
         const centre = new Adw.PreferencesGroup({
             title: 'Control Centre',
             description: 'GNOME\'s quick settings – Wi-Fi, Bluetooth, sound, brightness, power mode and the ' +
-                'tiles of extensions such as Caffeine – open in the island.',
+                'tiles of extensions such as Caffeine – with the notifications and the calendar on further ' +
+                'tabs, in the island. The status icons in the bar only show the state.',
         });
         this.add(centre);
-        this._controlCentre = this._switch(centre, controlCentre, 'enabled', 'Open the quick settings in the island',
-            'From the status icons in the top bar or Super+S');
+        this._controlCentre = this._switch(centre, controlCentre, 'enabled', 'Open the control centre in the island',
+            'Click the island, or Super+S; Super+V for the notifications');
         this._extensions = this._switch(centre, controlCentre, 'extensions', 'Extension icons in the control centre',
             'On its Extensions tab instead of the top bar');
         controlCentre.bind('enabled', this._extensions, 'sensitive', Gio.SettingsBindFlags.GET);

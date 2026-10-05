@@ -1,7 +1,7 @@
 // The island takes the place of GNOME's clock button. The button is hidden,
-// but its calendar and notification list stay in use: they open under the
-// island (until Atelier's control centre replaces them), and the glance reads
-// the clock's calendar events and weather.
+// but its calendar and notification list stay in use: on the control
+// centre's tabs, or without it in GNOME's menu under the island. The glance
+// reads the clock's calendar events and weather.
 
 import St from 'gi://St';
 
@@ -11,9 +11,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 export class CalendarBridge {
     /**
      * @param {Clutter.Actor} anchor - the menu opens under it
+     * @param {Function} controlCentre - () => the control centre, if it opens in the island
      */
-    constructor(anchor) {
+    constructor(anchor, controlCentre) {
         this._anchor = anchor;
+        this._controlCentre = controlCentre;
         this._dateMenu = null;
         this._injections = new InjectionManager();
     }
@@ -69,6 +71,11 @@ export class CalendarBridge {
     }
 
     toggle() {
+        const controlCentre = this._controlCentre();
+        if (controlCentre) {
+            controlCentre.toggle('notifications');
+            return;
+        }
         const menu = this._dateMenu?.menu;
         if (!menu || !this._anchor.mapped)
             return;
@@ -78,6 +85,7 @@ export class CalendarBridge {
     }
 
     close() {
+        this._controlCentre()?.close();
         this._dateMenu?.menu.close();
     }
 }

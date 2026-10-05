@@ -1,5 +1,5 @@
-// The control centre in the island: GNOME's quick settings on the Controls
-// tab, extension icons on the Extensions tab.
+// The control centre in the island: tabs for GNOME's quick settings, the
+// notification list, the calendar and extension icons.
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -7,49 +7,59 @@ import St from 'gi://St';
 
 import {IslandPage} from '../island/page.js';
 
-export const TABS = [['controls', 'Controls'], ['extensions', 'Extensions']];
+/**
+ * @typedef {object} Tab
+ * @property {string} id
+ * @property {string} label
+ * @property {string} icon - icon name
+ * @property {Clutter.Actor} actor - the content; it outlives the page
+ * @property {Function} [available] - () => boolean, whether the tab shows
+ * @property {Function} [onShow] - called when the tab comes up
+ */
 
 export const ControlCentrePage = GObject.registerClass(
 class AtelierControlCentrePage extends IslandPage {
     /**
-     * @param {object} params
-     * @param {QuickSettingsHost} params.host - GNOME's tiles
-     * @param {ExtensionTray|null} params.tray - extension icons, if moved here
+     * @param {Tab[]} tabs
+     * @param {string} tab - the tab to start with
      */
-    _init({host, tray}) {
+    _init(tabs, tab) {
         super._init({style_class: 'atelier-cc', orientation: Clutter.Orientation.VERTICAL});
-        this._host = host;
-        this._tiles = host.actor;
-        this._tray = tray;
+        this._tabs = tabs;
 
-        this._tabs = new St.BoxLayout({style_class: 'atelier-tabs', x_align: Clutter.ActorAlign.CENTER});
-        this._tabButtons = new Map();
-        for (const [id, label] of TABS) {
-            const button = new St.Button({style_class: 'atelier-tab', label, can_focus: true});
+        this._bar = new St.BoxLayout({style_class: 'atelier-cc-tabs', x_align: Clutter.ActorAlign.CENTER});
+        this.add_child(this._bar);
+        this._buttons = new Map();
+        for (const {id, label, icon} of tabs) {
+            const box = new St.BoxLayout({style_class: 'atelier-cc-tab-box'});
+            box.add_child(new St.Icon({icon_name: icon, style_class: 'atelier-cc-tab-icon'}));
+            const text = new St.Label({style_class: 'atelier-cc-tab-label', text: label, y_align: Clutter.ActorAlign.CENTER});
+            box.add_child(text);
+            const button = new St.Button({style_class: 'atelier-cc-tab', accessible_name: label, can_focus: true, child: box});
+            button.label_actor = text;
+            button._text = text;
             button.connect('clicked', () => this.setTab(id));
-            this._tabs.add_child(button);
-            this._tabButtons.set(id, button);
+            this._bar.add_child(button);
+            this._buttons.set(id, button);
         }
-        this.add_child(this._tabs);
 
-        // Both stay alive when the page goes; they move back to the module.
-        for (const actor of [host.actor, tray].filter(Boolean)) {
+        // The contents stay alive when the page goes; they belong to the module.
+        for (const {actor} of tabs) {
             actor.get_parent()?.remove_child(actor);
             this.add_child(actor);
         }
-        tray?.connectObject('changed', () => this._syncTabs(), this);
         this.connect('destroy', () => {
-            // (Either may be gone already when Atelier is turned off.)
+            // (Some may be gone already when the control centre is turned off.)
             const children = this.get_children();
-            for (const actor of [this._tiles, tray].filter(Boolean)) {
+            for (const {actor} of tabs) {
                 if (children.includes(actor))
                     this.remove_child(actor);
             }
         });
 
         global.focus_manager.add_group(this);
-        this._tab = 'controls';
-        this._syncTabs();
+        this._tab = null;
+        this.setTab(this._shows(tab) ? tab : tabs[0].id);
     }
 
     /** @returns {string} the tab shown */
@@ -57,37 +67,39 @@ class AtelierControlCentrePage extends IslandPage {
         return this._tab;
     }
 
-    /** @param {string} id - one of TABS */
+    /** @param {string} id - a tab's id */
     setTab(id) {
-        if (!this._hasTab(id) || id === this._tab)
+        if (!this._shows(id))
             return;
+        const changed = id !== this._tab;
         this._tab = id;
-        this._host.closeMenus();
-        this._syncTabs();
-        this.focus();
+        this.sync();
+        if (changed)
+            this._tabs.find(tab => tab.id === id).onShow?.();
     }
 
-    _hasTab(id) {
-        return id === 'controls' || (id === 'extensions' && this._tray?.tiles.length > 0);
-    }
-
-    _syncTabs() {
-        if (!this._hasTab(this._tab))
-            this._tab = 'controls';
-        const extensions = this._hasTab('extensions');
-        // One tab is no choice: no tabs then.
-        this._tabs.visible = extensions;
-        for (const [id, button] of this._tabButtons) {
-            if (id === this._tab)
+    /** Update the tabs, e.g. when one has become (un)available. */
+    sync() {
+        if (!this._shows(this._tab))
+            this._tab = this._tabs[0].id;
+        for (const tab of this._tabs) {
+            const button = this._buttons.get(tab.id);
+            const current = tab.id === this._tab;
+            button.visible = this._shows(tab.id);
+            button._text.visible = current;
+            if (current)
                 button.add_style_pseudo_class('checked');
             else
                 button.remove_style_pseudo_class('checked');
+            if (this.get_children().includes(tab.actor))
+                tab.actor.visible = current;
         }
-        if (this._hasTiles())
-            this._tiles.visible = this._tab === 'controls';
-        if (this._tray)
-            this._tray.visible = this._tab === 'extensions';
         this.resized();
+    }
+
+    _shows(id) {
+        const tab = this._tabs.find(t => t.id === id);
+        return Boolean(tab && (tab.available?.() ?? true));
     }
 
     // Keys work from here (Tab and arrows move into the controls) without a
@@ -96,28 +108,30 @@ class AtelierControlCentrePage extends IslandPage {
         this.grab_key_focus();
     }
 
-    // As wide as the tiles on both tabs, so switching tabs doesn't resize it.
+    // As wide as the widest tab, so switching tabs doesn't resize it.
     vfunc_get_preferred_width(forHeight) {
-        const [min, nat] = super.vfunc_get_preferred_width(forHeight);
-        if (!this._hasTiles())
-            return [min, nat];
+        let [min, nat] = super.vfunc_get_preferred_width(forHeight);
         const padding = this.get_theme_node().get_horizontal_padding();
-        const [, tiles] = this._tiles.get_preferred_width(-1);
-        return [Math.max(min, tiles + padding), Math.max(nat, tiles + padding)];
-    }
-
-    // The tiles go back to GNOME when the control centre is turned off,
-    // possibly while this page is still fading out.
-    _hasTiles() {
-        return this._host.actor === this._tiles;
+        const children = this.get_children();
+        for (const {actor} of this._tabs) {
+            if (!children.includes(actor))
+                continue;
+            const [, width] = actor.get_preferred_width(-1);
+            min = Math.max(min, width + padding);
+            nat = Math.max(nat, width + padding);
+        }
+        return [min, nat];
     }
 
     handleKeyPress(event) {
-        // Ctrl+Tab switches tabs; arrows and Tab move between controls.
+        // Ctrl+Tab goes through the tabs; arrows and Tab move between controls.
         const symbol = event.get_key_symbol();
         const ctrl = (event.get_state() & Clutter.ModifierType.CONTROL_MASK) !== 0;
         if (ctrl && (symbol === Clutter.KEY_Tab || symbol === Clutter.KEY_ISO_Left_Tab)) {
-            this.setTab(this._tab === 'controls' ? 'extensions' : 'controls');
+            const shown = this._tabs.filter(tab => this._shows(tab.id));
+            const step = symbol === Clutter.KEY_ISO_Left_Tab ? -1 : 1;
+            const index = shown.findIndex(tab => tab.id === this._tab);
+            this.setTab(shown[(index + step + shown.length) % shown.length].id);
             return true;
         }
         return global.focus_manager.navigate_from_event(event);

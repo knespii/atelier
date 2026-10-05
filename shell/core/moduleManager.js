@@ -1,13 +1,16 @@
 // Starts and stops Atelier's features ("modules") independently, so a
-// failing feature is reported and the others keep working.
+// failing feature is reported and the others keep working. Emits 'started'
+// and 'stopped' with the id of a module, for modules that build on others.
 
+import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-export class ModuleManager {
+export class ModuleManager extends EventEmitter {
     /**
      * @param {object} context - shared objects handed to every module
      */
     constructor(context) {
+        super();
         this._context = context;
         this._entries = [];
         this._enabled = false;
@@ -68,6 +71,7 @@ export class ModuleManager {
             instance = entry.create(this._context, this);
             instance.enable();
             entry.instance = instance;
+            this.emit('started', entry.id);
         } catch (e) {
             console.error(`Atelier: the ${entry.id} module could not start`, e);
             Main.notifyError('Atelier', `The ${entry.id} feature could not start: ${e.message}`);
@@ -87,5 +91,7 @@ export class ModuleManager {
         } catch (e) {
             console.error(`Atelier: the ${entry.id} module did not stop cleanly`, e);
         }
+        if (instance)
+            this.emit('stopped', entry.id);
     }
 }

@@ -16,8 +16,8 @@ class AtelierIslandPage extends Adw.PreferencesPage {
         const group = new Adw.PreferencesGroup({
             title: 'Island',
             description: 'A black capsule in the middle of the top bar, in place of GNOME\'s clock. ' +
-                'It shows the switcher and the power menu, and opens the calendar and notifications ' +
-                'when clicked.',
+                'It shows the switcher, the power menu and notifications, and opens the control ' +
+                'centre when clicked.',
         });
         this.add(group);
 

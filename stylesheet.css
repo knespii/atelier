@@ -883,3 +883,178 @@
   font-size: 8.5pt;
   font-weight: bold;
 }
+
+/* Tabs of the control centre: icons, the current one with its name */
+
+.atelier-cc-tabs {
+  spacing: 6px;
+  padding: 0 0 2px;
+  margin: 0;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.atelier-cc-tab {
+  padding: 5px 10px;
+  margin: 0;
+  border: none;
+  border-radius: 999px;
+  box-shadow: none;
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.atelier-cc-tab:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.atelier-cc-tab:checked {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.atelier-cc-tab:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-cc-tab-box {
+  spacing: 6px;
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+  border: none;
+}
+
+.atelier-cc-tab-icon {
+  icon-size: 16px;
+}
+
+.atelier-cc-tab-label {
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+/* GNOME's notification list and calendar in the control centre */
+
+.atelier-cc-notifications,
+.atelier-cc-calendar {
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+  border: none;
+}
+
+.atelier-cc-notifications {
+  height: 380px;
+}
+
+.atelier-cc-calendar {
+  max-height: 470px;
+}
+
+.atelier-cc .message-list {
+  width: 0;
+  margin: 0;
+  padding: 0;
+  border-width: 0;
+}
+
+.atelier-cc .message-view:ltr,
+.atelier-cc .message-view:rtl {
+  margin: 0;
+}
+
+.atelier-cc .message-list-controls {
+  padding: 10px 2px 0;
+  color: #ffffff;
+}
+
+.atelier-cc .message-list .message-list-placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.atelier-cc .message {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.atelier-cc .message:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc .message:second-in-stack {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.atelier-cc .message:lower-in-stack {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.atelier-cc .message .message-header,
+.atelier-cc .message .message-header .message-header-content .event-time {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-cc .message-notification-group .message-collapse-button {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.atelier-cc .datemenu-calendar-column:ltr,
+.atelier-cc .datemenu-calendar-column:rtl {
+  margin: 0;
+}
+
+.atelier-cc .calendar,
+.atelier-cc .datemenu-today-button,
+.atelier-cc .events-button,
+.atelier-cc .world-clocks-button,
+.atelier-cc .weather-button {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+
+.atelier-cc .datemenu-today-button:hover,
+.atelier-cc .events-button:hover,
+.atelier-cc .world-clocks-button:hover,
+.atelier-cc .weather-button:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc .calendar .calendar-month-header .calendar-month-label {
+  color: #ffffff !important;
+}
+
+.atelier-cc .calendar .calendar-day,
+.atelier-cc .calendar .calendar-day-heading,
+.atelier-cc .calendar .pager-button {
+  color: #ffffff;
+  background-color: transparent;
+}
+
+.atelier-cc .calendar .calendar-day:hover,
+.atelier-cc .calendar .pager-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-cc .calendar .calendar-day:selected {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.atelier-cc .calendar .calendar-day.calendar-weekend {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-cc .calendar .calendar-day.calendar-other-month {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.atelier-cc .calendar .calendar-day.calendar-today {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}

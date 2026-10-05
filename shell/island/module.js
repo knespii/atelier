@@ -60,9 +60,11 @@ export class IslandModule {
     /**
      * @param {object} context
      * @param {Gio.Settings} context.settings
+     * @param {ModuleManager} context.modules
      */
-    constructor({settings}) {
+    constructor({settings, modules}) {
         this._settings = settings;
+        this._modules = modules;
         this._timeouts = new Map();
         this._waits = new Map();
         this._laterId = 0;
@@ -100,7 +102,7 @@ export class IslandModule {
 
         this._slot = new IslandSlot();
         Main.panel.addToStatusArea(SLOT_ROLE, this._slot, 0, 'center');
-        this._calendar = new CalendarBridge(this._slot);
+        this._calendar = new CalendarBridge(this._slot, () => this._controlCentre());
         this._calendar.enable();
 
         this._island.connectObject(
@@ -273,11 +275,22 @@ export class IslandModule {
         this._clearTimeout('show-glance');
         if (button !== Clutter.BUTTON_PRIMARY)
             return;
+        const controlCentre = this._controlCentre();
+        if (controlCentre) {
+            controlCentre.toggle('controls');
+            return;
+        }
+        // Without the control centre, GNOME's calendar and notifications
+        // open under the island.
         if (this._island.page)
             this._island.close();
-        // Until the control centre arrives, GNOME's calendar and
-        // notifications open under the island.
         this._calendar.toggle();
+    }
+
+    /** @returns {ControlCentreModule|null} the control centre, if it opens in the island */
+    _controlCentre() {
+        const module = this._modules?.get('control-centre');
+        return module?.available ? module : null;
     }
 
     _onPageClosed() {

@@ -144,7 +144,7 @@
     <key name="enabled" type="b">
       <default>true</default>
       <summary>Show the island in the middle of the top bar</summary>
-      <description>The island takes the place of GNOME's clock: it shows the time, grows into a glance on hover and hosts the switcher, the power menu and profile toasts. Clicking it opens GNOME's calendar and notifications.</description>
+      <description>The island takes the place of GNOME's clock: it shows the time, grows into a glance on hover and hosts the switcher, the power menu, notifications, profile toasts and the control centre, which opens when it is clicked.</description>
     </key>
     <key name="show-date" type="b">
       <default>false</default>
@@ -188,8 +188,8 @@
           path="/org/gnome/shell/extensions/atelier/control-centre/">
     <key name="enabled" type="b">
       <default>true</default>
-      <summary>Open the quick settings in the island</summary>
-      <description>The status icons in the top bar and Super+S open GNOME's quick settings – Wi-Fi, Bluetooth, sliders, power mode, tiles of extensions – as the island's control centre instead of GNOME's menu.</description>
+      <summary>Open the control centre in the island</summary>
+      <description>Clicking the island (or Super+S) opens a control centre with GNOME's quick settings – Wi-Fi, Bluetooth, sliders, power mode, tiles of extensions – and, on further tabs, GNOME's notification list (Super+V) and calendar, instead of GNOME's menus. The status icons in the top bar only show the state.</description>
     </key>
     <key name="extensions" type="b">
       <default>true</default>
