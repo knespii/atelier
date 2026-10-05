@@ -41,6 +41,14 @@ async function screenshot(name) {
 
 const uriOf = path => Gio.File.new_for_path(path).get_uri();
 
+function findActor(root, predicate) {
+    for (const child of root.get_children()) {
+        if (predicate(child) || findActor(child, predicate))
+            return true;
+    }
+    return false;
+}
+
 function overlayCount() {
     return Main.layoutManager._backgroundGroup.get_n_children() -
         Main.layoutManager._bgManagers.length;
@@ -95,6 +103,12 @@ async function testShortcutsAndRequests(bgc) {
     await Scripting.sleep(300);
     await screenshot('06-glass-light');
 
+    // Two quick presses while the first look is still being applied move two steps.
+    bgc._step(1); // glass -> hostile
+    bgc._step(1); // hostile -> modern
+    await waitFor(() => !bgc._applier.busy, 8000);
+    check(bgc._store.activeId === 'modern', 'quick next presses each move one step');
+
     bgc._settings.set_string('apply-request', JSON.stringify({id: 'amber', nonce: GLib.uuid_string_random()}));
     check(await waitFor(() => bgc._store.activeId === 'amber', 5000), 'apply-request from preferences works');
     await waitFor(() => !bgc._applier.busy, 6000);
@@ -140,6 +154,33 @@ async function testHostileShellTheme(bgc) {
     check(userTheme.get_string('name') === '', 'default shell theme restored');
 }
 
+function linkTarget(path) {
+    try {
+        return Gio.File.new_for_path(path).query_info('standard::symlink-target',
+            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null).get_symlink_target();
+    } catch {
+        return null;
+    }
+}
+
+async function testGtk4Links(bgc) {
+    const gtkCss = GLib.build_filenamev([GLib.get_user_config_dir(), 'gtk-4.0', 'gtk.css']);
+    const theme = GLib.build_filenamev([GLib.get_user_data_dir(), 'themes', 'Modern', 'gtk-4.0']);
+
+    await bgc._applier.apply(bgc._store.get('modern'), {animate: false});
+    await waitFor(() => !bgc._applier.busy, 6000);
+    check(linkTarget(gtkCss) === `${theme}/gtk-dark.css`, 'dark look links the dark GTK 4 stylesheet');
+
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    iface.set_string('color-scheme', 'default');
+    check(await waitFor(() => linkTarget(gtkCss) === `${theme}/gtk.css`, 3000),
+        'switching to light relinks the light stylesheet');
+
+    await bgc._applier.apply(bgc._store.get('glass'), {animate: false});
+    await waitFor(() => !bgc._applier.busy, 6000);
+    check(linkTarget(gtkCss) === null, 'a look without GTK 4 theming removes the link');
+}
+
 async function testDisableCleansUp(bgc) {
     bgc.toggleSwitcher();
     await Scripting.sleep(300);
@@ -151,7 +192,7 @@ async function testDisableCleansUp(bgc) {
     const ext = Main.extensionManager.lookup(UUID);
     check(ext.state === ExtensionState.INACTIVE, `disabled (state ${ext.state})`);
     check(overlayCount() === 0, 'no overlay left after disable');
-    check(Main.uiGroup.get_children().every(a => !a.has_style_class_name?.('bgc-panel')),
+    check(!findActor(Main.uiGroup, a => a.has_style_class_name?.('bgc-panel')),
         'no switcher left after disable');
     check(Main.panel.statusArea[UUID] === undefined, 'indicator removed');
 
@@ -184,6 +225,7 @@ export async function run() {
         await testShortcutsAndRequests(bgc);
         await testFromOverview(bgc);
         await testHostileShellTheme(bgc);
+        await testGtk4Links(bgc);
         await testDisableCleansUp(bgc);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);

@@ -27,11 +27,18 @@ StButton { background-color: yellow; border: 5px solid red; border-radius: 0; }
 #panel { background-color: orange; }
 CSS
 
+# A GTK theme with a GTK 4 version, for the ~/.config/gtk-4.0 links.
+for f in gtk-3.0/gtk.css gtk-4.0/gtk.css gtk-4.0/gtk-dark.css gtk-4.0/assets/check.svg; do
+    mkdir -p "$(dirname "$ROOT/data/themes/Modern/$f")"
+    echo "/* $f */" > "$ROOT/data/themes/Modern/$f"
+done
+
 LOOKS="[\
 {\"id\":\"amber\",\"name\":\"Amber\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"orange\",\"iconTheme\":\"Adwaita\"},\
 {\"id\":\"rainbow\",\"name\":\"LCD Rainbow\",\"wallpaper\":\"$BG/lcd-rainbow-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"auto\",\"gtkTheme\":\"Adwaita-dark\",\"font\":\"Cantarell 11\"},\
 {\"id\":\"glass\",\"name\":\"Glass Chip\",\"wallpaper\":\"$BG/glass-chip-l.jxl\",\"colorScheme\":\"prefer-light\",\"accentColor\":\"teal\",\"gtkTheme\":\"Adwaita\",\"shellTheme\":\"\"},\
-{\"id\":\"hostile\",\"name\":\"Hostile Theme\",\"wallpaper\":\"$BG/fold-d.jxl\",\"colorScheme\":\"prefer-dark\",\"shellTheme\":\"Hostile\"}]"
+{\"id\":\"hostile\",\"name\":\"Hostile Theme\",\"wallpaper\":\"$BG/fold-d.jxl\",\"colorScheme\":\"prefer-dark\",\"shellTheme\":\"Hostile\"},\
+{\"id\":\"modern\",\"name\":\"Modern\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"gtkTheme\":\"Modern\",\"gtk4\":true}]"
 
 cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]
