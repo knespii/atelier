@@ -45,8 +45,9 @@ be enabled as well.
   GTK 3 apps do. A theme can still restyle them through
   `~/.config/gtk-4.0/gtk.css` if it ships a `gtk-4.0` folder. Turn on
   *Also theme GTK 4 / libadwaita apps* in a look to have the extension link
-  that stylesheet (the dark one for dark looks); open apps need a restart.
-  The extension never replaces a `gtk.css` it didn't create.
+  that stylesheet; the link follows the light/dark style, and open apps need
+  a restart to pick it up. The extension never replaces a `gtk.css` (or a
+  link) it didn't create.
 - **Archives in `~/.themes`** (e.g. `Theme.tar.xz`) make the User Themes
   settings fail to list themes. Extract them and remove the archive.
 - If something goes wrong anyway: Settings → **Reset Appearance to GNOME
@@ -65,7 +66,9 @@ Light/dark style and the accent color work for every app, themed or not.
 
 Wallpapers are copied when a look is saved, because the original file may be
 moved or overwritten (the wallpaper portal always writes to
-`~/.config/background`). Deleting a look deletes its copy.
+`~/.config/background`). A look can also keep a separate picture for the dark
+style, as GNOME's own wallpapers do. Deleting a look deletes its copies,
+unless the desktop is still showing them.
 
 ## Development
 
