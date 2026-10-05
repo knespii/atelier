@@ -365,12 +365,9 @@ class BgChangerLookEditor extends Adw.Dialog {
             if (this._look) {
                 const previous = this._look.wallpaper;
                 this._store.update(this._look.id, fields);
-                if (previous && previous !== wallpaper) {
-                    const looks = this._store.getAll();
-                    await deleteWallpaperIfUnused(previous, looks);
-                    if (!looks.some(l => l.wallpaper === previous))
-                        removeThumbnail(previous);
-                }
+                if (previous && previous !== wallpaper &&
+                    await deleteWallpaperIfUnused(previous, this._store.getAll()))
+                    removeThumbnail(previous);
             } else {
                 this._store.add(fields);
             }

@@ -229,12 +229,8 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
             return;
 
         this._store.remove(look.id);
-        if (look.wallpaper) {
-            const remaining = this._store.getAll();
-            await deleteWallpaperIfUnused(look.wallpaper, remaining);
-            if (!remaining.some(l => l.wallpaper === look.wallpaper))
-                await removeThumbnail(look.wallpaper);
-        }
+        if (look.wallpaper && await deleteWallpaperIfUnused(look.wallpaper, this._store.getAll()))
+            await removeThumbnail(look.wallpaper);
         toast(this, `Deleted “${look.name}”`);
     }
 });

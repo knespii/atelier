@@ -99,9 +99,19 @@ export async function testImportCopiesIntoLibrary() {
     }
     assert(error, 'non-images are rejected');
 
-    await deleteWallpaperIfUnused(imported, [{wallpaper: imported}]);
+    assertEqual(await deleteWallpaperIfUnused(imported, [{wallpaper: imported}]), false);
     assert(GLib.file_test(imported, GLib.FileTest.EXISTS), 'still used: kept');
-    await deleteWallpaperIfUnused(imported, []);
+    assertEqual(await deleteWallpaperIfUnused(imported, [{wallpaper: '/x', wallpaperDark: imported}]), false);
+    assert(GLib.file_test(imported, GLib.FileTest.EXISTS), 'used as a dark variant: kept');
+
+    // The desktop still showing the file (e.g. the look on screen was deleted)
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    background.set_string('picture-uri-dark', GLib.filename_to_uri(imported, null));
+    assertEqual(await deleteWallpaperIfUnused(imported, []), false);
+    assert(GLib.file_test(imported, GLib.FileTest.EXISTS), 'desktop background: kept');
+    background.reset('picture-uri-dark');
+
+    assertEqual(await deleteWallpaperIfUnused(imported, []), true);
     assert(!GLib.file_test(imported, GLib.FileTest.EXISTS), 'unused: deleted');
     await deleteWallpaperIfUnused(source, []);
     assert(GLib.file_test(source, GLib.FileTest.EXISTS), 'files outside the library are never deleted');
