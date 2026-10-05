@@ -37,7 +37,9 @@ check:
 
 # Unit tests for the modules shared by the shell and the preferences.
 test: schemas
-	GSETTINGS_SCHEMA_DIR=schemas GSETTINGS_BACKEND=memory gjs -m tests/run.js
+	GSETTINGS_SCHEMA_DIR=schemas GSETTINGS_BACKEND=memory \
+	XDG_DATA_HOME="$(CURDIR)/tests/output/data" XDG_CACHE_HOME="$(CURDIR)/tests/output/cache" \
+	gjs -m tests/run.js
 
 # Open the preferences window outside of GNOME Shell (settings are kept in memory).
 prefs: schemas
