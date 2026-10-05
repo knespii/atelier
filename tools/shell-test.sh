@@ -17,10 +17,21 @@ mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$
 mkdir -m 700 "$ROOT/runtime"
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
 
+# A deliberately hostile, outdated shell theme: the switcher must stay usable.
+mkdir -p "$ROOT/data/themes/Hostile/gnome-shell"
+cat > "$ROOT/data/themes/Hostile/gnome-shell/gnome-shell.css" <<'CSS'
+stage { color: #ff00ff; font-size: 22pt; font-family: serif; }
+StLabel { color: #00ff00; }
+StBoxLayout { spacing: 40px; padding: 30px; background-color: rgba(255, 0, 0, 0.5); }
+StButton { background-color: yellow; border: 5px solid red; border-radius: 0; }
+#panel { background-color: orange; }
+CSS
+
 LOOKS="[\
 {\"id\":\"amber\",\"name\":\"Amber\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"orange\",\"iconTheme\":\"Adwaita\"},\
 {\"id\":\"rainbow\",\"name\":\"LCD Rainbow\",\"wallpaper\":\"$BG/lcd-rainbow-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"auto\",\"gtkTheme\":\"Adwaita-dark\",\"font\":\"Cantarell 11\"},\
-{\"id\":\"glass\",\"name\":\"Glass Chip\",\"wallpaper\":\"$BG/glass-chip-l.jxl\",\"colorScheme\":\"prefer-light\",\"accentColor\":\"teal\",\"gtkTheme\":\"Adwaita\",\"shellTheme\":\"\"}]"
+{\"id\":\"glass\",\"name\":\"Glass Chip\",\"wallpaper\":\"$BG/glass-chip-l.jxl\",\"colorScheme\":\"prefer-light\",\"accentColor\":\"teal\",\"gtkTheme\":\"Adwaita\",\"shellTheme\":\"\"},\
+{\"id\":\"hostile\",\"name\":\"Hostile Theme\",\"wallpaper\":\"$BG/fold-d.jxl\",\"colorScheme\":\"prefer-dark\",\"shellTheme\":\"Hostile\"}]"
 
 cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]

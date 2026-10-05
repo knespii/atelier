@@ -4,6 +4,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -114,6 +115,31 @@ async function testFromOverview(bgc) {
     await Scripting.sleep(400);
 }
 
+async function testHostileShellTheme(bgc) {
+    const userThemes = Main.extensionManager.lookup('user-theme@gnome-shell-extensions.gcampax.github.com');
+    if (!check(userThemes?.state === ExtensionState.ACTIVE, 'User Themes active in the test session'))
+        return;
+
+    await bgc._applier.apply(bgc._store.get('hostile'));
+    await waitFor(() => !bgc._applier.busy, 6000);
+    const userTheme = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.user-theme'});
+    check(userTheme.get_string('name') === 'Hostile', 'shell theme applied through User Themes');
+    await Scripting.sleep(500);
+
+    bgc.toggleSwitcher();
+    await Scripting.sleep(600);
+    await screenshot('08-switcher-hostile-theme');
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const [, height] = bgc._switcher._panel.get_preferred_height(-1);
+    check(height < 320 * scale, `switcher keeps its size under a hostile theme (${height}px)`);
+    bgc._switcher.close();
+    await Scripting.sleep(300);
+
+    await bgc._applier.apply(bgc._store.get('glass'));
+    await waitFor(() => !bgc._applier.busy, 6000);
+    check(userTheme.get_string('name') === '', 'default shell theme restored');
+}
+
 async function testDisableCleansUp(bgc) {
     bgc.toggleSwitcher();
     await Scripting.sleep(300);
@@ -157,6 +183,7 @@ export async function run() {
         await testSwitcherAndReveal(bgc);
         await testShortcutsAndRequests(bgc);
         await testFromOverview(bgc);
+        await testHostileShellTheme(bgc);
         await testDisableCleansUp(bgc);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);

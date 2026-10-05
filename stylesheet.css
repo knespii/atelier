@@ -1,18 +1,42 @@
 /* BG Changer switcher.
- * Every color is set explicitly so the panel looks the same, and stays
- * usable, whatever shell theme is loaded. */
+ * Every property a shell theme might set through type selectors (StBoxLayout,
+ * StLabel, StButton, stage...) is set explicitly, so the panel looks the same,
+ * and stays usable, whatever shell theme is loaded. Only the font family is
+ * inherited, so the panel follows the interface font. */
 
 .bgc-panel {
   background-color: rgba(8, 8, 10, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 26px;
   padding: 8px 16px 12px;
+  margin: 0;
+  spacing: 0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   color: #f4f4f5;
+  font-size: 11pt;
+  font-weight: normal;
+  text-shadow: none;
+}
+
+.bgc-viewport,
+.bgc-strip,
+.bgc-footer,
+.bgc-chips {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+.bgc-viewport {
+  padding: 0;
 }
 
 .bgc-strip {
   spacing: 14px;
+  padding: 0;
 }
 
 .bgc-card {
@@ -20,10 +44,14 @@
   border: 2px solid rgba(255, 255, 255, 0.06);
   background-color: #26262b;
   background-size: cover;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
 }
 
 .bgc-card:hover {
   border-color: rgba(255, 255, 255, 0.4);
+  background-color: #26262b;
 }
 
 .bgc-card:selected {
@@ -39,6 +67,7 @@
 .bgc-badge {
   background-color: -st-accent-color;
   color: -st-accent-fg-color;
+  border: none;
   border-radius: 999px;
   padding: 4px;
   margin: 7px;
@@ -51,7 +80,10 @@
 
 .bgc-empty {
   padding: 22px 12px 10px;
+  margin: 0;
+  background-color: transparent;
   color: rgba(255, 255, 255, 0.75);
+  font-size: 11pt;
   text-align: center;
 }
 
@@ -63,21 +95,31 @@
 .bgc-dot {
   width: 8px;
   height: 8px;
+  margin: 0;
+  border: none;
   border-radius: 4px;
   background-color: -st-accent-color;
 }
 
 .bgc-name {
-  font-weight: bold;
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
   color: #ffffff;
+  font-size: 11pt;
+  font-weight: bold;
 }
 
 .bgc-chips {
   spacing: 6px;
+  padding: 0;
 }
 
 .bgc-chip {
+  margin: 0;
+  border: none;
   font-size: 9pt;
+  font-weight: normal;
   color: rgba(255, 255, 255, 0.72);
   background-color: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
@@ -85,7 +127,11 @@
 }
 
 .bgc-counter {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
   font-size: 9.5pt;
+  font-weight: normal;
   font-feature-settings: "tnum";
   color: rgba(255, 255, 255, 0.55);
 }
