@@ -13,7 +13,7 @@ const STYLES = [
     ['grouped', 'Grouped', 'The workspaces, the island and the status icons together in the middle'],
     ['spread', 'Spread', 'The workspaces at the left edge, the status icons at the right one'],
     ['island', 'One island', 'All of it in one island'],
-    ['gnome', 'GNOME', 'GNOME\'s black bar'],
+    ['gnome', 'GNOME', 'GNOME\'s bar across the top, black or glass'],
 ];
 const SHAPES = [
     ['floating', 'Floating', 'A capsule below the top edge'],
@@ -215,11 +215,21 @@ class AtelierBarPage extends Adw.PreferencesPage {
         this._shape = this._cards(shape, 'island-shape', 'Island', SHAPES, id => barPicture(look({shape: id})));
         this._surface = this._cards(shape, 'surface', 'Ground', SURFACES, id => surfacePicture(id));
         this._sides = this._toggles(shape, 'sides', 'Sides', SIDES);
-        const syncSides = () => {
-            this._sidesRow.sensitive = ['grouped', 'spread'].includes(this._bar.get_string('style'));
+        this._compact = new Adw.SwitchRow({
+            title: 'Only the essentials',
+            subtitle: 'Grouped or as one island: the workspaces, the time and the battery. ' +
+                'The control centre has the rest.',
+        });
+        this._bar.bind('compact', this._compact, 'active', Gio.SettingsBindFlags.DEFAULT);
+        this._bound.push(this._compact, 'active');
+        shape.add(this._compact);
+        const syncRows = () => {
+            const style = this._bar.get_string('style');
+            this._sidesRow.sensitive = ['grouped', 'spread'].includes(style);
+            this._compact.sensitive = ['grouped', 'island'].includes(style);
         };
-        syncSides();
-        this._ids.push(this._bar.connect('changed::style', syncSides));
+        syncRows();
+        this._ids.push(this._bar.connect('changed::style', syncRows));
         // The pictures show the other choices as they are.
         for (const key of ['style', 'island-shape', 'surface', 'sides'])
             this._ids.push(this._bar.connect(`changed::${key}`, () => this._pictures.forEach(p => p.queue_draw())));

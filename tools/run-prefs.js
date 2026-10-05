@@ -208,7 +208,12 @@ async function runSelftest(window) {
         barSettings.get_string('island-shape') === 'notch' && barSettings.get_string('sides') === 'capsules',
     'bar style, glass, notch and capsules are saved');
     barSettings.set_string('style', 'island');
-    check(!bar._sidesRow.sensitive, 'sides only matter when grouped or spread');
+    check(!bar._sidesRow.sensitive && bar._compact.sensitive, 'sides only matter when grouped or spread');
+    bar._compact.active = false;
+    check(!barSettings.get_boolean('compact'), 'the compact bar can be turned off');
+    barSettings.reset('compact');
+    barSettings.set_string('style', 'spread');
+    check(!bar._compact.sensitive, 'it only matters grouped or as one island');
     ['style', 'surface', 'island-shape', 'sides'].forEach(key => barSettings.reset(key));
     await sleep(100);
     check(bar._style.selectedId === 'spread' && bar._shape.selectedId === 'floating' &&

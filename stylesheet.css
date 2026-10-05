@@ -919,7 +919,9 @@
 /* GNOME's notification list and calendar in the control centre */
 
 .atelier-cc-notifications,
-.atelier-cc-calendar {
+.atelier-cc-calendar,
+.atelier-cc-calendar-month,
+.atelier-cc-calendar-side {
   padding: 0;
   margin: 0;
   background-color: transparent;
@@ -927,11 +929,31 @@
 }
 
 .atelier-cc-notifications {
+  width: 380px;
   height: 380px;
 }
 
+/* The month on the left, under today; events, clocks and weather beside it */
 .atelier-cc-calendar {
+  spacing: 12px;
   max-height: 640px;
+}
+
+.atelier-cc-calendar-month {
+  spacing: 6px;
+}
+
+.atelier-cc-calendar-side {
+  width: 280px;
+  spacing: 6px;
+}
+
+.atelier-cc .datemenu-today-button,
+.atelier-cc .calendar,
+.atelier-cc .events-button,
+.atelier-cc .world-clocks-button,
+.atelier-cc .weather-button {
+  margin: 0;
 }
 
 /* Everything under the calendar shows, without a fade at the bottom. */
@@ -987,11 +1009,6 @@
 .atelier-cc .message-notification-group .message-collapse-button {
   color: #ffffff;
   background-color: rgba(255, 255, 255, 0.15);
-}
-
-.atelier-cc .datemenu-calendar-column:ltr,
-.atelier-cc .datemenu-calendar-column:rtl {
-  margin: 0;
 }
 
 .atelier-cc .calendar,

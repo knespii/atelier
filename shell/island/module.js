@@ -139,6 +139,7 @@ export class IslandModule {
             'changed::surface', () => this._syncLook(),
             'changed::island-shape', () => this._syncLook(),
             'changed::style', () => this._syncLook(),
+            'changed::compact', () => this._syncLook(),
             this);
         this._island.connectObject(
             'notify::x', () => this._syncShape(),
@@ -382,9 +383,12 @@ export class IslandModule {
         const island = this._island;
         const notch = this._barSettings.get_string('island-shape') === 'notch';
         const glass = this._barSettings.get_string('surface') === 'glass';
+        const style = this._barSettings.get_string('style');
         // A notch curves into the top edge – unless it is part of one island
         // with the whole bar, whose shape has the ears then.
-        this._ear = notch && this._barSettings.get_string('style') !== 'island' ? EAR_RADIUS : 0;
+        this._ear = notch && style !== 'island' ? EAR_RADIUS : 0;
+        // A compact bar has just the time in the middle.
+        this._idle.setCompact(this._barSettings.get_boolean('compact') && ['grouped', 'island'].includes(style));
         if (notch)
             island.add_style_class_name('atelier-island-notch');
         else

@@ -26,11 +26,15 @@ const FADE_IN_DELAY = 70;
 
 /**
  * @param {Clutter.Actor} page
- * @returns {number[]|null} [width, height] the page asks for, or null when it
- *   can't say (a size that isn't a number)
+ * @param {number} [fill] - the width a page that fills the island (one with
+ *   fillsWidth set) takes at least
+ * @returns {number[]|null} [width, height] the page is laid out at, or null
+ *   when it can't say (a size that isn't a number)
  */
-function measure(page) {
-    const [, width] = page.get_preferred_width(-1);
+function measure(page, fill = 0) {
+    let [, width] = page.get_preferred_width(-1);
+    if (page.fillsWidth)
+        width = Math.max(width, fill);
     const [, height] = Number.isFinite(width) ? page.get_preferred_height(width) : [0, NaN];
     return Number.isFinite(width) && Number.isFinite(height) ? [width, height] : null;
 }
@@ -46,9 +50,15 @@ function culprit(actor) {
 
 // Children keep their natural size whatever size the island has, centered
 // at the top: while the island grows, it uncovers the page instead of
-// squeezing it, and the page never reflows during the animation.
+// squeezing it, and the page never reflows during the animation. (A page
+// that fills the island is as wide as the island's pages are at least.)
 const IslandLayout = GObject.registerClass(
 class AtelierIslandLayout extends Clutter.LayoutManager {
+    _init() {
+        super._init();
+        this.minPageWidth = 0;
+    }
+
     vfunc_get_preferred_width(container, _forHeight) {
         let [min, nat] = [0, 0];
         for (const child of container.get_children()) {
@@ -74,7 +84,7 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
         const available = box.get_width();
         for (const child of container.get_children()) {
             // (A page without a size is on its way out; see Island.open.)
-            const [width, height] = measure(child) ?? [0, 0];
+            const [width, height] = measure(child, this.minPageWidth) ?? [0, 0];
             const x = box.x1 + Math.round((available - width) / 2);
             child.allocate(new Clutter.ActorBox({x1: x, y1: box.y1, x2: x + width, y2: box.y1 + height}));
         }
@@ -131,6 +141,30 @@ export const Island = GObject.registerClass({
         const [, width] = this._idle.get_preferred_width(-1);
         const [, height] = this._idle.get_preferred_height(width);
         return [Math.ceil(width), Math.ceil(height)];
+    }
+
+    /** @returns {number[]|null} [x, width] of the island at rest, once placed */
+    restBounds() {
+        if (!this._anchor)
+            return null;
+        const [width] = this.idleSize();
+        return [Math.round(this._anchor.centerX - width / 2), width];
+    }
+
+    /**
+     * Make pages at least this wide, e.g. as wide as the one island the
+     * whole bar is; pages that fill the island are laid out at it.
+     *
+     * @param {number} width - 0 for none
+     */
+    setMinPageWidth(width) {
+        width = Math.ceil(width);
+        if (width === this.layout_manager.minPageWidth)
+            return;
+        this.layout_manager.minPageWidth = width;
+        this.layout_manager.layout_changed();
+        if (this._shown !== this._idle)
+            this._resize(this._shown, true);
     }
 
     /**
@@ -274,13 +308,17 @@ export const Island = GObject.registerClass({
 
     /**
      * @param {St.Widget} target
-     * @returns {number[]|null} its size, or null (logged) when it has none
+     * @returns {number[]|null} the island's size around it, or null (logged)
+     *   when it has none
      */
     _measure(target) {
-        const size = measure(target);
-        if (!size)
+        const min = this.layout_manager.minPageWidth;
+        const size = measure(target, min);
+        if (!size) {
             console.warn(`Atelier: an island page has no size, because of ${culprit(target)}`);
-        return size;
+            return null;
+        }
+        return target === this._idle ? size : [Math.max(size[0], min), size[1]];
     }
 
     _resize(target, animate) {

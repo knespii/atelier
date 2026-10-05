@@ -275,6 +275,10 @@ async function testIsland(ext, atelier) {
     await Scripting.sleep(500);
     check(dateMenu._calendar.mapped, 'and the calendar on its own tab');
     check(dateMenu._displaysSection.get_effect('fade') === null, 'with nothing faded out under it');
+    const [calendarX, calendarY] = dateMenu._calendar.get_transformed_position();
+    const [eventsX] = dateMenu._displaysSection.get_transformed_position();
+    check(eventsX >= calendarX + dateMenu._calendar.width && calendarY < 200 &&
+        dateMenu._calendar.layout_manager.column_homogeneous, 'the events beside the month, its days spread evenly');
     await screenshotIsland('12b-control-centre-calendar', 640);
     Main.panel.toggleCalendar();
     check(await waitFor(() => island.page?.tab === 'notifications', 1000), 'Super+V again goes to the notifications');
@@ -549,7 +553,7 @@ function addTestButton() {
     const button = new PanelMenu.Button(0.5, 'Test Extension', false);
     button.add_child(new St.Icon({icon_name: 'applications-science-symbolic', style_class: 'system-status-icon'}));
     button.menu.addMenuItem(new PopupMenu.PopupMenuItem('Do something'));
-    Main.panel.addToStatusArea('atelier-test-extension', button, 1, 'right');
+    Main.panel.addToStatusArea('test-extension@example.org', button, 1, 'right');
     return button;
 }
 
@@ -665,8 +669,11 @@ async function testOverviewBar() {
     Main.overview.show();
     await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
     await Scripting.sleep(300);
+    const blurred = Main.layoutManager.overviewGroup.get_first_child()?.get_child_at_index(1);
+    check(blurred?.opacity === 255, 'the wallpaper is blurred in the overview');
     Main.overview.hide();
     await Scripting.sleep(110);
+    check(blurred.opacity > 0 && blurred.opacity < 255, `and sharpens as it closes (${blurred.opacity})`);
     await screenshotArea('24-leaving-overview', 0, 0, 900, 80);
     // A stretch of the bar left of the island against the wallpaper below it.
     const bar = averageColor('24-leaving-overview', 120, 6, 300, 20);
@@ -706,6 +713,11 @@ async function testBarStyles(ext) {
     await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
     await Scripting.sleep(600);
     check(island.width > 300 && besideIsland(), `and they move aside as it grows (${bounds()})`);
+    // Compact (grouped, by default): the workspaces, the time and the battery.
+    const statusArea = Main.panel.statusArea;
+    check(!statusArea.quickSettings.container.visible && !(statusArea['atelier-claude']?.container.visible ?? false) &&
+        statusArea.activities.container.visible && statusArea['atelier-battery'] !== undefined &&
+        !ext.stateObj.modules.get('island')._idle._date.visible, 'compact: just the workspaces, the time and the battery');
     await screenshotArea('25b-glance-grouped', 0, 0, global.stage.width, 200);
     await restPointer();
     await waitFor(() => island.page === null, 2000);
@@ -790,7 +802,35 @@ async function testBarStyles(ext) {
     const pill = shown('atelier-capsule');
     check(pill.length === 1 && pill[0].x < lx && pill[0].x + pill[0].width >= rightStart() + right.width &&
         Math.abs(pill[0].height - island.height) < 1, 'or floating, as tall as the island');
+    const middle1 = pill[0].x + pill[0].width / 2;
+    check(Math.abs(middle1 - (island.x + island.width / 2)) <= 1, `even on both sides of the time (${middle1})`);
     await top('28d-bar-one-island');
+
+    // Opened, the island takes the one island's whole width (at least).
+    const restWidth = pill[0].width;
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
+    await Scripting.sleep(700);
+    check(island.width >= restWidth - 1 && Math.abs(island.page.width - island.width) < 2,
+        `opened, it is as wide as the one island (${island.width} ≥ ${restWidth}, page ${island.page.width})`);
+    await screenshotArea('28e-one-island-open', 0, 0, global.stage.width, 520);
+    Main.panel.closeQuickSettings();
+    await waitFor(() => island.page === null, 1000);
+    await Scripting.sleep(400);
+
+    // GNOME's bar, of glass, giving way to the overview as GNOME's does.
+    bar.set_string('style', 'gnome');
+    bar.set_string('surface', 'glass');
+    await Scripting.sleep(600);
+    const glassBar = shown('atelier-glass').find(g => g._shape?.[2] >= Main.panel.width - 1);
+    check(glassBar && Main.panel.has_style_class_name('atelier-bar-clean') && left.translation_x === 0 &&
+        statusArea.quickSettings.container.visible, 'GNOME\'s bar of glass, with all its icons');
+    await top('28f-bar-gnome-glass');
+    Main.overview.show();
+    await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    check(glassBar?.opacity === 0, 'the glass gives way in the overview');
+    Main.overview.hide();
+    await waitFor(() => !Main.overview.visible, 4000);
 
     ['style', 'sides', 'surface', 'island-shape'].forEach(key => bar.reset(key));
     await Scripting.sleep(500);

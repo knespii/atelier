@@ -230,6 +230,11 @@
       <summary>Look of the top bar</summary>
       <description>“grouped” puts the workspaces, the island and the status icons together in the middle, “spread” the workspaces at the left edge and the status icons at the right one, “island” all of them into one island. None of them has a background of its own. “gnome” keeps GNOME's black bar.</description>
     </key>
+    <key name="compact" type="b">
+      <default>true</default>
+      <summary>Only the essentials in the middle</summary>
+      <description>Grouped and as one island, the bar shows only the workspaces, the time and the battery (and the screen recording and sharing indicators while they are on). The control centre has everything else.</description>
+    </key>
     <key name="sides" enum="org.gnome.shell.extensions.atelier.BarSides">
       <default>'wallpaper'</default>
       <summary>Where the workspaces and the status icons lie</summary>

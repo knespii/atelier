@@ -74,9 +74,19 @@ export const IdleView = GObject.registerClass({
         return this._time.text;
     }
 
+    /**
+     * @param {boolean} compact - just the time, as in a compact bar
+     */
+    setCompact(compact) {
+        if (compact === Boolean(this._compact))
+            return;
+        this._compact = compact;
+        this._sync();
+    }
+
     _sync() {
         this._time.text = this._clock.clock.trim();
-        const showDate = this._settings.get_boolean('show-date');
+        const showDate = !this._compact && this._settings.get_boolean('show-date');
         this._date.visible = showDate;
         if (showDate)
             this._date.text = GLib.DateTime.new_now_local().format('%a %b %-d');

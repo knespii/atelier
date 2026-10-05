@@ -13,11 +13,9 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {PopupDummyMenu} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-// What stays in the bar.
-const KEEP = new Set([
-    'activities', 'dateMenu', 'quickSettings', 'keyboard', 'screenRecording', 'screenSharing',
-    'atelier-island', 'atelier@local', 'atelier-claude', 'atelier-weather',
-]);
+// What stays in the bar: GNOME's own and everything of Atelier's.
+const KEEP = new Set(['activities', 'dateMenu', 'quickSettings', 'keyboard', 'screenRecording', 'screenSharing']);
+const keeps = role => KEEP.has(role) || role.startsWith('atelier');
 
 /**
  * @param {string} role - key of the button in Main.panel.statusArea
@@ -145,7 +143,7 @@ export const ExtensionTray = GObject.registerClass({
     _scan() {
         let changed = false;
         for (const [role, indicator] of Object.entries(Main.panel.statusArea)) {
-            if (KEEP.has(role) || !indicator?.container || this._moved.some(entry => entry.role === role))
+            if (keeps(role) || !indicator?.container || this._moved.some(entry => entry.role === role))
                 continue;
             const container = indicator.container;
             const box = this._boxes().find(b => b === container.get_parent());

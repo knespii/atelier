@@ -61,6 +61,9 @@ class AtelierControlCentrePage extends IslandPage {
         });
 
         global.focus_manager.add_group(this);
+        // Each tab as wide as it needs, the island changing shape between
+        // them; as wide as the island, when it is wider (one island).
+        this.fillsWidth = true;
         this._tab = null;
         this.setTab(this._shows(tab) ? tab : tabs[0].id);
     }
@@ -109,25 +112,6 @@ class AtelierControlCentrePage extends IslandPage {
     // focus ring on the first one when it was opened with the mouse.
     focus() {
         this.grab_key_focus();
-    }
-
-    // As wide as the widest tab, so switching tabs doesn't resize it. (A
-    // hidden tab without a sensible width – an extension's odd icon – is
-    // left out; the island looks after the one shown.)
-    vfunc_get_preferred_width(forHeight) {
-        let [min, nat] = super.vfunc_get_preferred_width(forHeight);
-        const padding = this.get_theme_node().get_horizontal_padding();
-        const children = this.get_children();
-        for (const {actor} of this._tabs) {
-            if (!children.includes(actor))
-                continue;
-            const [, width] = actor.get_preferred_width(-1);
-            if (!Number.isFinite(width))
-                continue;
-            min = Math.max(min, width + padding);
-            nat = Math.max(nat, width + padding);
-        }
-        return [min, nat];
     }
 
     handleKeyPress(event) {
