@@ -8,6 +8,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 import {AtelierView} from './prefs/app.js';
 import {AppearancePage} from './prefs/appearancePage.js';
 import {IslandPage} from './prefs/islandPage.js';
+import {NotificationsPage} from './prefs/notificationsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
 import {WallpapersPage} from './prefs/wallpapersPage.js';
@@ -26,6 +27,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 keywords: ['clock', 'time', 'date', 'glance', 'calendar', 'weather', 'power', 'microphone',
                     'toast', 'top bar', 'panel'],
                 create: () => new IslandPage(settings),
+            },
+            {
+                id: 'notifications', title: 'Notifications', icon: 'preferences-system-notifications-symbolic',
+                group: 'THE SHELL',
+                keywords: ['banner', 'mute', 'do not disturb', 'dnd', 'buttons', 'reply', 'apps', 'whatsapp'],
+                create: () => new NotificationsPage(settings),
             },
             {
                 id: 'profiles', title: 'Profiles', icon: 'view-grid-symbolic', group: 'THE DESK',

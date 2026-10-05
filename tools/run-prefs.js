@@ -48,6 +48,14 @@ function seedSampleProfiles() {
     return settings;
 }
 
+function seedNotifications(settings) {
+    // Apps GNOME has seen sending notifications, and one muted for an hour.
+    new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'}).set_strv('application-children',
+        ['org-gnome-nautilus', 'org-gnome-texteditor', 'com-anthropic-claude', 'chrome-hnpfjngllnobngcgfapefoaidbinmjnm-default']);
+    const until = Math.floor(GLib.get_real_time() / 1000000) + 3600;
+    settings.get_child('notifications').set_string('muted', JSON.stringify({'org-gnome-texteditor': until}));
+}
+
 async function seedPalette(settings) {
     // Normally written by the shell; the preferences only show it.
     const {paletteForWallpaper} = await import('../lib/wallpaperPalette.js');
@@ -167,11 +175,29 @@ async function runSelftest(window) {
     check(!islandSettings.get_boolean('enabled') && !dateRow.sensitive, 'turning the island off greys out its options');
     island._enabled.active = true;
     islandSettings.reset('show-date');
+
+    // Notifications: buttons per app and muted apps.
+    const notifications = await section(window, 'notifications');
+    const rules = notifications._settings;
+    const filesRow = notifications._appRows.find(row => row.appId === 'org-gnome-nautilus');
+    check(filesRow?.selected === 0, 'apps start with their own buttons');
+    filesRow.selected = 1;
+    check(JSON.parse(rules.get_string('app-buttons'))['org-gnome-nautilus'] === 'none',
+        'choosing None for an app is saved');
+    const whatsappRow = notifications._appRows.find(row => row.appId === 'chrome-hnpfjngllnobngcgfapefoaidbinmjnm-default');
+    check(whatsappRow?.selected === 2, 'WhatsApp has Reply and Mute');
+    check(notifications._mutedRows.some(row => row.appId === 'org-gnome-texteditor'), 'muted apps are listed');
+    const unmute = findDescendant(notifications._mutedRows[0], w => w instanceof Gtk.Button && w.label === 'Unmute');
+    unmute.emit('clicked');
+    await sleep(200);
+    check(!rules.get_string('muted').includes('texteditor') && notifications._mutedRows[0].appId === undefined,
+        'Unmute lifts the mute');
+    rules.reset('app-buttons');
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         render(window, id);
@@ -207,8 +233,11 @@ async function automate(window, app) {
     }
 }
 
-if (args.includes('--sample'))
-    await seedPalette(seedSampleProfiles());
+if (args.includes('--sample')) {
+    const settings = seedSampleProfiles();
+    seedNotifications(settings);
+    await seedPalette(settings);
+}
 
 Adw.init();
 const app = new Adw.Application({
