@@ -36,7 +36,7 @@ const CODE = `
 vec2 p = cogl_tex_coord_in[0].xy - vec2(0.5);
 p.x *= aspect;
 float radius = progress * (length(vec2(0.5 * aspect, 0.5)) + feather);
-cogl_color_out.a *= 1.0 - smoothstep(radius - feather, radius, length(p));
+cogl_color_out *= 1.0 - smoothstep(radius - feather, radius, length(p));
 `;
 
 const CircleRevealEffect = GObject.registerClass({
@@ -61,8 +61,8 @@ const CircleRevealEffect = GObject.registerClass({
     }
 
     vfunc_build_pipeline() {
-        // Not a replacement: the snippet runs after the texture lookup and
-        // only masks the alpha (the pipeline blends with straight alpha).
+        // Not a replacement: the snippet runs after the texture lookup. The
+        // color is premultiplied, so all four channels get the mask.
         this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, DECLARATIONS, CODE, false);
     }
 
