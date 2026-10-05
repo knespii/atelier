@@ -2,7 +2,7 @@ UUID := bg-changer@local
 INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 JS_FILES = $(shell git ls-files --cached --others --exclude-standard '*.js')
 
-.PHONY: all schemas install uninstall pack check test prefs shell-test clean
+.PHONY: all schemas install uninstall pack check test prefs prefs-screenshots shell-test clean
 
 all: schemas
 
@@ -43,7 +43,12 @@ test: schemas
 
 # Open the preferences window outside of GNOME Shell (settings are kept in memory).
 prefs: schemas
-	GSETTINGS_BACKEND=memory gjs -m tools/run-prefs.js
+	GSETTINGS_BACKEND=memory GI_TYPELIB_PATH=/usr/lib/gnome-shell/girepository-1.0 \
+	LD_LIBRARY_PATH=/usr/lib/gnome-shell gjs -m tools/run-prefs.js --sample
+
+# Render the preference pages to PNGs in tests/output/prefs (headless).
+prefs-screenshots: schemas
+	tools/prefs-screenshots.sh
 
 # Load the extension in a throwaway headless GNOME Shell with isolated settings.
 shell-test: schemas
