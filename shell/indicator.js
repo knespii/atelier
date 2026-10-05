@@ -1,4 +1,4 @@
-// Top bar button that opens the look switcher.
+// Top bar button that opens the profile switcher.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -9,13 +9,13 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 export const Indicator = GObject.registerClass({
     Signals: {'activate': {}},
-}, class BgChangerIndicator extends PanelMenu.Button {
+}, class AtelierIndicator extends PanelMenu.Button {
     _init(extensionPath) {
         // No menu: the button only opens the switcher.
-        super._init(0.5, 'BG Changer', true);
+        super._init(0.5, 'Atelier', true);
 
         this.add_child(new St.Icon({
-            gicon: Gio.icon_new_for_string(`${extensionPath}/icons/bg-changer-symbolic.svg`),
+            gicon: Gio.icon_new_for_string(`${extensionPath}/icons/atelier-symbolic.svg`),
             style_class: 'system-status-icon',
         }));
     }

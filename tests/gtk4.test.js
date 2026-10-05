@@ -17,7 +17,7 @@ function setup() {
     const gtk3Only = fn(root, 'themes', 'Old');
     writeFile(fn(gtk3Only, 'gtk-3.0', 'gtk.css'), '');
 
-    const settings = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.bg-changer'});
+    const settings = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.atelier'});
     settings.reset('gtk4-link');
     return {config: fn(root, 'config', 'gtk-4.0'), theme, lightOnly, gtk3Only, settings};
 }

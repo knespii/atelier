@@ -1,4 +1,4 @@
-// "Looks" page: the list of saved looks and the ways to create new ones.
+// "Profiles" page: the list of saved profiles and the ways to create new ones.
 
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
@@ -6,57 +6,57 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
-import {LookStore, describeLook, readCurrentAppearance} from '../lib/looks.js';
+import {ProfileStore, describeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, prettyName} from '../lib/paths.js';
 import {getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
-import {LookEditor} from './lookEditor.js';
+import {ProfileEditor} from './profileEditor.js';
 import {chooseImages, createThumbnail, requestApply, toast} from './widgets.js';
 
 Gio._promisify(Adw.AlertDialog.prototype, 'choose', 'choose_finish');
 
 function shortcutLabel(settings) {
-    const [accel] = settings.get_strv('bgc-open-switcher');
+    const [accel] = settings.get_strv('atelier-open-switcher');
     if (!accel)
         return null;
     const [ok, key, mods] = Gtk.accelerator_parse(accel);
     return ok ? Gtk.accelerator_get_label(key, mods) : accel;
 }
 
-export const LooksPage = GObject.registerClass(
-class BgChangerLooksPage extends Adw.PreferencesPage {
+export const ProfilesPage = GObject.registerClass(
+class AtelierProfilesPage extends Adw.PreferencesPage {
     _init(settings) {
         super._init({
-            title: 'Looks',
+            title: 'Profiles',
             icon_name: 'preferences-desktop-wallpaper-symbolic',
-            name: 'looks',
+            name: 'profiles',
         });
         this._settings = settings;
-        this._store = new LookStore(settings);
+        this._store = new ProfileStore(settings);
         this._rows = [];
 
-        this._group = new Adw.PreferencesGroup({title: 'Saved Looks'});
+        this._group = new Adw.PreferencesGroup({title: 'Saved Profiles'});
         this.add(this._group);
 
         const actions = new Adw.PreferencesGroup();
         this.add(actions);
         for (const [title, icon, handler] of [
-            ['New Look…', 'list-add-symbolic', () => this._newLook()],
+            ['New Profile…', 'list-add-symbolic', () => this._newProfile()],
             ['Add Wallpapers…', 'image-x-generic-symbolic', () => this._addWallpapers()],
             ['Save Current Setup…', 'document-save-symbolic', () => this._saveCurrent()],
         ]) {
             const row = new Adw.ButtonRow({title, start_icon_name: icon});
             row.connect('activated', () => handler().catch(e => {
-                console.error('BG Changer:', e);
+                console.error('Atelier:', e);
                 toast(this, e.message);
             }));
             actions.add(row);
         }
 
         this._settingsIds = [
-            settings.connect('changed::looks', () => this._rebuild()),
-            settings.connect('changed::active-look', () => this._rebuild()),
-            settings.connect('changed::bgc-open-switcher', () => this._updateDescription()),
+            settings.connect('changed::profiles', () => this._rebuild()),
+            settings.connect('changed::active-profile', () => this._rebuild()),
+            settings.connect('changed::atelier-open-switcher', () => this._updateDescription()),
         ];
         this._updateDescription();
         this._rebuild();
@@ -78,11 +78,11 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
         this._rows.forEach(row => this._group.remove(row));
         this._rows = [];
 
-        const looks = this._store.getAll();
+        const profiles = this._store.getAll();
         const activeId = this._store.activeId;
-        if (looks.length === 0) {
+        if (profiles.length === 0) {
             const row = new Adw.ActionRow({
-                title: 'No looks yet',
+                title: 'No profiles yet',
                 subtitle: 'Add some wallpapers or save your current setup below.',
             });
             this._group.add(row);
@@ -90,28 +90,28 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
             return;
         }
 
-        looks.forEach((look, index) => {
-            const row = this._createRow(look, index, looks.length, look.id === activeId);
+        profiles.forEach((profile, index) => {
+            const row = this._createRow(profile, index, profiles.length, profile.id === activeId);
             this._group.add(row);
             this._rows.push(row);
         });
     }
 
-    _createRow(look, index, count, active) {
-        const parts = describeLook(look).map(({label, value}) => `${label}: ${value}`);
+    _createRow(profile, index, count, active) {
+        const parts = describeProfile(profile).map(({label, value}) => `${label}: ${value}`);
         const row = new Adw.ActionRow({
-            title: GLib.markup_escape_text(look.name, -1),
+            title: GLib.markup_escape_text(profile.name, -1),
             subtitle: GLib.markup_escape_text(parts.join(' · ') || 'Wallpaper only', -1),
             subtitle_lines: 2,
             activatable: true,
         });
-        row.add_prefix(createThumbnail(look.wallpaper, 96).widget);
-        row.connect('activated', () => this._edit(look).catch(e => toast(this, e.message)));
+        row.add_prefix(createThumbnail(profile.wallpaper, 96).widget);
+        row.connect('activated', () => this._edit(profile).catch(e => toast(this, e.message)));
 
         if (active) {
             row.add_suffix(new Gtk.Image({
                 icon_name: 'object-select-symbolic',
-                tooltip_text: 'Active look',
+                tooltip_text: 'Active profile',
                 css_classes: ['accent'],
             }));
         }
@@ -123,8 +123,8 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
             css_classes: ['flat'],
         });
         apply.connect('clicked', () => {
-            requestApply(this._settings, look.id);
-            toast(this, `Applying “${look.name}”`);
+            requestApply(this._settings, profile.id);
+            toast(this, `Applying “${profile.name}”`);
         });
         row.add_suffix(apply);
 
@@ -143,11 +143,11 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
             });
             menu.append(button);
         };
-        addItem('Edit…', () => this._edit(look));
-        addItem('Duplicate', () => this._duplicate(look));
-        addItem('Move Up', () => this._store.move(look.id, -1), {sensitive: index > 0});
-        addItem('Move Down', () => this._store.move(look.id, 1), {sensitive: index < count - 1});
-        addItem('Delete…', () => this._delete(look), {destructive: true});
+        addItem('Edit…', () => this._edit(profile));
+        addItem('Duplicate', () => this._duplicate(profile));
+        addItem('Move Up', () => this._store.move(profile.id, -1), {sensitive: index > 0});
+        addItem('Move Down', () => this._store.move(profile.id, 1), {sensitive: index < count - 1});
+        addItem('Delete…', () => this._delete(profile), {destructive: true});
 
         row.add_suffix(new Gtk.MenuButton({
             icon_name: 'view-more-symbolic',
@@ -159,11 +159,11 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
         return row;
     }
 
-    async _openEditor(look, initial = null) {
+    async _openEditor(profile, initial = null) {
         const themes = await scanThemes();
-        const editor = new LookEditor({
+        const editor = new ProfileEditor({
             store: this._store,
-            look,
+            profile,
             initial,
             themes,
             userThemesEnabled: isUserThemeEnabled(),
@@ -171,12 +171,12 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
         editor.present(this);
     }
 
-    _newLook() {
+    _newProfile() {
         return this._openEditor(null);
     }
 
-    _edit(look) {
-        return this._openEditor(look);
+    _edit(profile) {
+        return this._openEditor(profile);
     }
 
     async _saveCurrent() {
@@ -208,17 +208,17 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
         fields.forEach(({wallpaper}) => ensureThumbnail(wallpaper).catch(() => {}));
         toast(this, fields.length === 1
             ? `Added “${fields[0].name}”`
-            : `Added ${fields.length} looks`);
+            : `Added ${fields.length} profiles`);
     }
 
-    _duplicate(look) {
-        this._store.add({...look, id: '', name: `${look.name} (copy)`});
+    _duplicate(profile) {
+        this._store.add({...profile, id: '', name: `${profile.name} (copy)`});
     }
 
-    async _delete(look) {
+    async _delete(profile) {
         const dialog = new Adw.AlertDialog({
-            heading: `Delete “${look.name}”?`,
-            body: 'The look and its copy of the wallpaper will be removed.',
+            heading: `Delete “${profile.name}”?`,
+            body: 'The profile and its copy of the wallpaper will be removed.',
             close_response: 'cancel',
             default_response: 'cancel',
         });
@@ -228,12 +228,12 @@ class BgChangerLooksPage extends Adw.PreferencesPage {
         if (await dialog.choose(this, null) !== 'delete')
             return;
 
-        this._store.remove(look.id);
+        this._store.remove(profile.id);
         const remaining = this._store.getAll();
-        if (look.wallpaper && await deleteWallpaperIfUnused(look.wallpaper, remaining))
-            await removeThumbnail(look.wallpaper);
-        if (look.wallpaperDark)
-            await deleteWallpaperIfUnused(look.wallpaperDark, remaining);
-        toast(this, `Deleted “${look.name}”`);
+        if (profile.wallpaper && await deleteWallpaperIfUnused(profile.wallpaper, remaining))
+            await removeThumbnail(profile.wallpaper);
+        if (profile.wallpaperDark)
+            await deleteWallpaperIfUnused(profile.wallpaperDark, remaining);
+        toast(this, `Deleted “${profile.name}”`);
     }
 });

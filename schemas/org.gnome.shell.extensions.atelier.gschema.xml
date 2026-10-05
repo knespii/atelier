@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="org.gnome.shell.extensions.atelier.Transition">
+    <value nick="circle" value="0"/>
+    <value nick="fade" value="1"/>
+  </enum>
+
+  <schema id="org.gnome.shell.extensions.atelier"
+          path="/org/gnome/shell/extensions/atelier/">
+    <key name="profiles" type="s">
+      <default>'[]'</default>
+      <summary>Saved profiles</summary>
+      <description>JSON array of profiles. Each profile stores a wallpaper and optional appearance settings; null fields are left unchanged when the profile is applied.</description>
+    </key>
+    <key name="active-profile" type="s">
+      <default>''</default>
+      <summary>ID of the profile that was applied last</summary>
+    </key>
+    <key name="first-run-done" type="b">
+      <default>false</default>
+      <summary>Whether the “Original” profile has been created</summary>
+    </key>
+    <key name="migrated-from-bg-changer" type="b">
+      <default>false</default>
+      <summary>Whether data of the BG Changer extension has been taken over</summary>
+    </key>
+    <key name="transition" enum="org.gnome.shell.extensions.atelier.Transition">
+      <default>'circle'</default>
+      <summary>Wallpaper transition</summary>
+      <description>“circle” reveals the new wallpaper with a growing circle, “fade” keeps GNOME's own crossfade.</description>
+    </key>
+    <key name="transition-duration" type="u">
+      <range min="200" max="3000"/>
+      <default>900</default>
+      <summary>Duration of the circle transition in milliseconds</summary>
+    </key>
+    <key name="show-indicator" type="b">
+      <default>true</default>
+      <summary>Show the button in the top bar</summary>
+    </key>
+    <key name="atelier-open-switcher" type="as">
+      <default><![CDATA[['<Super>w']]]></default>
+      <summary>Open the profile switcher</summary>
+    </key>
+    <key name="atelier-next-profile" type="as">
+      <default>[]</default>
+      <summary>Apply the next profile</summary>
+    </key>
+    <key name="atelier-previous-profile" type="as">
+      <default>[]</default>
+      <summary>Apply the previous profile</summary>
+    </key>
+    <key name="gtk4-link" type="s">
+      <default>''</default>
+      <summary>GTK4 theme links created by the extension</summary>
+      <description>JSON object listing the files in ~/.config/gtk-4.0 that are symlinks owned by this extension.</description>
+    </key>
+    <key name="apply-request" type="s">
+      <default>''</default>
+      <summary>Request from the preferences to apply a profile</summary>
+      <description>JSON object with the profile ID and a nonce. Written by the preferences window, handled by the shell.</description>
+    </key>
+  </schema>
+</schemalist>

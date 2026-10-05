@@ -1,4 +1,4 @@
-// BG Changer: save looks (wallpaper + themes) and switch between them.
+// Atelier: save profiles (wallpaper + themes) and switch between them.
 
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
@@ -8,21 +8,21 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {LookStore, readCurrentAppearance} from './lib/looks.js';
+import {ProfileStore, readCurrentAppearance} from './lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper} from './lib/paths.js';
 import {USER_THEME_UUID, getUserThemeSettings} from './lib/themes.js';
 import {ensureThumbnail} from './lib/thumbnails.js';
 import {Applier} from './shell/applier.js';
 import {Indicator} from './shell/indicator.js';
 import {WallpaperTransition} from './shell/reveal.js';
-import {LookSwitcher} from './shell/switcher.js';
+import {ProfileSwitcher} from './shell/switcher.js';
 
-const KEYBINDINGS = ['bgc-open-switcher', 'bgc-next-look', 'bgc-previous-look'];
+const KEYBINDINGS = ['atelier-open-switcher', 'atelier-next-profile', 'atelier-previous-profile'];
 
-export default class BgChangerExtension extends Extension {
+export default class AtelierExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._store = new LookStore(this._settings);
+        this._store = new ProfileStore(this._settings);
         this._applier = new Applier(this._settings);
         this._applier.transition = new WallpaperTransition(this._settings);
         this._switcher = null;
@@ -36,23 +36,23 @@ export default class BgChangerExtension extends Extension {
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),
             'changed::apply-request', () => this._onApplyRequest(),
-            'changed::looks', () => this._switcher?.setLooks(this._store.getAll(), this._store.activeId),
-            'changed::active-look', () => this._switcher?.setActive(this._store.activeId),
+            'changed::profiles', () => this._switcher?.setProfiles(this._store.getAll(), this._store.activeId),
+            'changed::active-profile', () => this._switcher?.setActive(this._store.activeId),
             this);
         this._syncIndicator();
 
         const flags = Meta.KeyBindingFlags.IGNORE_AUTOREPEAT;
         const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW;
         // POPUP lets the shortcut close the switcher it opened.
-        Main.wm.addKeybinding('bgc-open-switcher', this._settings, flags,
+        Main.wm.addKeybinding('atelier-open-switcher', this._settings, flags,
             modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher());
-        Main.wm.addKeybinding('bgc-next-look', this._settings, flags, modes, () => this._step(1));
-        Main.wm.addKeybinding('bgc-previous-look', this._settings, flags, modes, () => this._step(-1));
+        Main.wm.addKeybinding('atelier-next-profile', this._settings, flags, modes, () => this._step(1));
+        Main.wm.addKeybinding('atelier-previous-profile', this._settings, flags, modes, () => this._step(-1));
 
         if (!this._settings.get_boolean('first-run-done') && !this._originalPending) {
             this._originalPending = true;
-            this._createOriginalLook()
-                .catch(e => console.error('BG Changer: could not save the original look', e))
+            this._createOriginalProfile()
+                .catch(e => console.error('Atelier: could not save the original profile', e))
                 .finally(() => (this._originalPending = false));
         }
     }
@@ -85,8 +85,8 @@ export default class BgChangerExtension extends Extension {
         if (Main.overview.visible)
             Main.overview.hide();
 
-        const switcher = new LookSwitcher();
-        switcher.setLooks(this._store.getAll(), this._store.activeId);
+        const switcher = new ProfileSwitcher();
+        switcher.setProfiles(this._store.getAll(), this._store.activeId);
         switcher.connect('activate', (_, id) => this._applyFromSwitcher(switcher, id));
         switcher.connect('destroy', () => {
             if (this._switcher === switcher)
@@ -97,28 +97,28 @@ export default class BgChangerExtension extends Extension {
     }
 
     _applyFromSwitcher(switcher, id) {
-        const look = this._store.get(id);
-        if (!look)
+        const profile = this._store.get(id);
+        if (!profile)
             return;
         switcher.setActive(id);
         // Keep the panel up while the new wallpaper is revealed, like a
-        // dynamic island, and close it once the look is in place.
-        this._applier.apply(look, {onWritten: () => switcher.close()})
+        // dynamic island, and close it once the profile is in place.
+        this._applier.apply(profile, {onWritten: () => switcher.close()})
             .finally(() => switcher.close());
     }
 
     _step(delta) {
-        const looks = this._store.getAll();
-        if (looks.length === 0)
+        const profiles = this._store.getAll();
+        if (profiles.length === 0)
             return;
-        // While a look is still being applied, step from it rather than from
-        // the active one, so quick presses don't apply the same look twice.
+        // While a profile is still being applied, step from it rather than from
+        // the active one, so quick presses don't apply the same profile twice.
         const from = this._applier.targetId ?? this._store.activeId;
-        const current = looks.findIndex(look => look.id === from);
+        const current = profiles.findIndex(profile => profile.id === from);
         const index = current < 0
-            ? (delta > 0 ? 0 : looks.length - 1)
-            : (current + delta + looks.length) % looks.length;
-        this._applier.apply(looks[index]);
+            ? (delta > 0 ? 0 : profiles.length - 1)
+            : (current + delta + profiles.length) % profiles.length;
+        this._applier.apply(profiles[index]);
     }
 
     _onApplyRequest() {
@@ -128,9 +128,9 @@ export default class BgChangerExtension extends Extension {
         } catch {
             return;
         }
-        const look = request?.id ? this._store.get(request.id) : null;
-        if (look)
-            this._applier.apply(look);
+        const profile = request?.id ? this._store.get(request.id) : null;
+        if (profile)
+            this._applier.apply(profile);
     }
 
     _syncIndicator() {
@@ -149,13 +149,13 @@ export default class BgChangerExtension extends Extension {
      * Save the setup the user had before installing the extension, so there
      * is always a way back.
      */
-    async _createOriginalLook() {
+    async _createOriginalProfile() {
         const userThemesActive =
             Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
         const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
 
         const copy = path => importWallpaper(path).catch(e => {
-            console.warn(`BG Changer: could not copy ${path}: ${e.message}`);
+            console.warn(`Atelier: could not copy ${path}: ${e.message}`);
             return null;
         });
         const wallpaper = current.wallpaper ? await copy(current.wallpaper) : null;
@@ -168,8 +168,8 @@ export default class BgChangerExtension extends Extension {
             return;
         }
 
-        const look = this._store.add({...current, wallpaper, wallpaperDark, name: 'Original'});
-        this._store.activeId = look.id;
+        const profile = this._store.add({...current, wallpaper, wallpaperDark, name: 'Original'});
+        this._store.activeId = profile.id;
         // Only now: an interrupted first run is retried on the next enable.
         this._settings.set_boolean('first-run-done', true);
         if (wallpaper)

@@ -6,27 +6,27 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
-import {ACCENT_COLORS} from '../lib/looks.js';
+import {ACCENT_COLORS} from '../lib/profiles.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
 
 Gio._promisify(Gtk.FileDialog.prototype, 'open', 'open_finish');
 Gio._promisify(Gtk.FileDialog.prototype, 'open_multiple', 'open_multiple_finish');
 
 const swatchCss = Object.entries(ACCENT_COLORS)
-    .map(([name, color]) => `.bgc-swatch.${name} { background: ${color}; }`)
+    .map(([name, color]) => `.atelier-swatch.${name} { background: ${color}; }`)
     .join('\n');
 
 const CSS = `
-.bgc-thumb { border-radius: 8px; background-color: alpha(currentColor, 0.08); }
-.bgc-preview { border-radius: 14px; background-color: alpha(currentColor, 0.08); }
-.bgc-swatch {
+.atelier-thumb { border-radius: 8px; background-color: alpha(currentColor, 0.08); }
+.atelier-preview { border-radius: 14px; background-color: alpha(currentColor, 0.08); }
+.atelier-swatch {
   min-width: 32px; min-height: 32px; padding: 0;
   border-radius: 999px; color: white;
   box-shadow: inset 0 0 0 1px alpha(black, 0.12);
 }
-.bgc-swatch.neutral { background: alpha(currentColor, 0.1); color: inherit; }
-.bgc-swatch:checked { outline: 2px solid @accent_color; outline-offset: 2px; }
-.bgc-swatch image { -gtk-icon-size: 14px; }
+.atelier-swatch.neutral { background: alpha(currentColor, 0.1); color: inherit; }
+.atelier-swatch:checked { outline: 2px solid @accent_color; outline-offset: 2px; }
+.atelier-swatch image { -gtk-icon-size: 14px; }
 ${swatchCss}
 `;
 
@@ -55,7 +55,7 @@ export function installCss(window) {
  * @param {string} [cssClass]
  * @returns {{widget: Gtk.Widget, setWallpaper: Function}}
  */
-export function createThumbnail(wallpaper, width, cssClass = 'bgc-thumb') {
+export function createThumbnail(wallpaper, width, cssClass = 'atelier-thumb') {
     const picture = new Gtk.Picture({
         content_fit: Gtk.ContentFit.COVER,
         can_shrink: true,
@@ -89,14 +89,14 @@ export function createThumbnail(wallpaper, width, cssClass = 'bgc-thumb') {
                 if (current === path)
                     picture.set_filename(thumb);
             })
-            .catch(e => console.warn(`BG Changer: no thumbnail for ${path}: ${e.message}`));
+            .catch(e => console.warn(`Atelier: no thumbnail for ${path}: ${e.message}`));
     };
     setWallpaper(wallpaper);
     return {widget, setWallpaper};
 }
 
 /**
- * Ask the shell to apply a look (with its transition).
+ * Ask the shell to apply a profile (with its transition).
  *
  * @param {Gio.Settings} settings
  * @param {string} id
@@ -111,7 +111,7 @@ export function requestApply(settings, id) {
  */
 export function toast(widget, title) {
     const window = widget.get_root();
-    // Titles carry look names and error messages: no markup.
+    // Titles carry profile names and error messages: no markup.
     window?.add_toast?.(new Adw.Toast({title, timeout: 3, use_markup: false}));
 }
 

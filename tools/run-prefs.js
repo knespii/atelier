@@ -3,7 +3,7 @@
 //   make prefs                    interactive window, settings kept in memory
 //   make prefs-screenshots        render the pages to tests/output/prefs
 //
-// Options: --sample (add sample looks), --screenshots DIR (render the pages),
+// Options: --sample (add sample profiles), --screenshots DIR (render the pages),
 // --selftest (drive the main flows and report PASS/FAIL). Both quit afterwards.
 // Needs GI_TYPELIB_PATH/LD_LIBRARY_PATH pointing at /usr/lib/gnome-shell,
 // which the Makefile sets, because the Extensions app code imports Shew.
@@ -35,16 +35,16 @@ function extensionSettings() {
     return new Gio.Settings({settings_schema: source.lookup(metadata['settings-schema'], true)});
 }
 
-function seedSampleLooks() {
+function seedSampleProfiles() {
     const bg = '/usr/share/backgrounds/gnome';
-    const looks = [
+    const profiles = [
         {id: 'amber', name: 'Amber', wallpaper: `${bg}/amber-d.jxl`, colorScheme: 'prefer-dark', accentColor: 'orange', iconTheme: 'Adwaita'},
         {id: 'glass', name: 'Glass Chip', wallpaper: `${bg}/glass-chip-l.jxl`, colorScheme: 'default', accentColor: 'auto', gtkTheme: 'Adwaita', shellTheme: '', font: 'Cantarell 11'},
         {id: 'desert', name: 'Desert', wallpaper: `${bg}/fold-d.jxl`, gtkTheme: 'Desert-Green-1.3', shellTheme: 'Desert-Green-1.3', cursorTheme: 'Bibata-Modern-Classic'},
     ];
     const settings = extensionSettings();
-    settings.set_string('looks', JSON.stringify(looks));
-    settings.set_string('active-look', 'amber');
+    settings.set_string('profiles', JSON.stringify(profiles));
+    settings.set_string('active-profile', 'amber');
 }
 
 const sleep = ms => new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
@@ -78,7 +78,7 @@ function check(condition, message) {
 }
 
 async function runSelftest(window) {
-    window.visible_page_name = 'looks';
+    window.visible_page_name = 'profiles';
     const page = window.visible_page;
     const store = page._store;
     const before = store.getAll().length;
@@ -86,16 +86,16 @@ async function runSelftest(window) {
     await page._saveCurrent();
     await sleep(500);
     const editor = window.visible_dialog;
-    check(editor?._look === null, 'Save Current Setup opens an editor for a new look');
+    check(editor?._look === null, 'Save Current Setup opens an editor for a new profile');
     await editor._save();
     await sleep(300);
-    const looks = store.getAll();
-    check(looks.length === before + 1, 'saving the editor adds the look');
-    const added = looks.at(-1);
+    const profiles = store.getAll();
+    check(profiles.length === before + 1, 'saving the editor adds the profile');
+    const added = profiles.at(-1);
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     check(added.gtkTheme === iface.get_string('gtk-theme') && added.font === iface.get_string('font-name'),
         `current themes captured (${added.gtkTheme}, ${added.font})`);
-    check(added.wallpaper === null || added.wallpaper.includes('/bg-changer/wallpapers/') ||
+    check(added.wallpaper === null || added.wallpaper.includes('/atelier/wallpapers/') ||
         added.wallpaper.endsWith('.xml'), `wallpaper imported or referenced (${added.wallpaper})`);
     check(window.visible_dialog === null, 'editor closed after saving');
 
@@ -118,18 +118,18 @@ async function runSelftest(window) {
 
     store.move(copy.id, -1);
     check(store.getAll().at(-2).id === copy.id, 'move up');
-    check(page._rows.length === store.getAll().length, 'list shows every look');
+    check(page._rows.length === store.getAll().length, 'list shows every profile');
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    render(window, 'looks');
+    render(window, 'profiles');
 
     window.visible_page_name = 'settings';
     await sleep(1000);
     render(window, 'settings');
 
-    window.visible_page_name = 'looks';
+    window.visible_page_name = 'profiles';
     const page = window.visible_page;
     const [, second] = page._store.getAll();
     await page._edit(second);
@@ -161,11 +161,11 @@ async function automate(window, app) {
 }
 
 if (args.includes('--sample'))
-    seedSampleLooks();
+    seedSampleProfiles();
 
 Adw.init();
 const app = new Adw.Application({
-    application_id: 'org.gnome.Shell.Extensions.BgChangerDev',
+    application_id: 'org.gnome.Shell.Extensions.AtelierDev',
     flags: Gio.ApplicationFlags.NON_UNIQUE,
 });
 app.connect('activate', () => {

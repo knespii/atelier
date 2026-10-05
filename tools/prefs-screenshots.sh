@@ -6,7 +6,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD/tests/output/prefs"
-SOCKET=bgc-prefs-0
+SOCKET=atelier-prefs-0
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/config" "$ROOT/data" "$ROOT/cache"

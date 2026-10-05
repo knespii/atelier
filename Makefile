@@ -1,4 +1,4 @@
-UUID := bg-changer@local
+UUID := atelier@local
 INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 JS_FILES = $(shell git ls-files --cached --others --exclude-standard '*.js')
 

@@ -21,7 +21,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {isSlideshow} from '../lib/paths.js';
 
-const EFFECT_NAME = 'bgc-reveal';
+const EFFECT_NAME = 'atelier-reveal';
 const PRELOAD_TIMEOUT = 5000; // ms
 const SWAP_TIMEOUT = 4000; // ms to wait for GNOME's background to catch up
 const OVERLAY_FADE_TIME = 200; // ms

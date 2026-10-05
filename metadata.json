@@ -1,10 +1,10 @@
 {
-  "uuid": "bg-changer@local",
-  "name": "BG Changer",
-  "description": "Save looks (wallpaper, GTK and shell theme, icons, cursor, font, accent color) and switch between them from a quick picker.",
+  "uuid": "atelier@local",
+  "name": "Atelier",
+  "description": "A desktop atelier for GNOME: profiles with wallpaper, palette and themes, switched from a quick picker.",
   "shell-version": [
     "48"
   ],
-  "settings-schema": "org.gnome.shell.extensions.bg-changer",
-  "version-name": "0.1.0"
+  "settings-schema": "org.gnome.shell.extensions.atelier",
+  "version-name": "0.2.0"
 }

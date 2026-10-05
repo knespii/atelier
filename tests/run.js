@@ -4,11 +4,11 @@
 import System from 'system';
 
 import * as gtk4 from './gtk4.test.js';
-import * as looks from './looks.test.js';
+import * as profiles from './profiles.test.js';
 import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
 
-const suites = {looks, themes, thumbnails, gtk4};
+const suites = {profiles, themes, thumbnails, gtk4};
 
 let total = 0;
 let failures = 0;

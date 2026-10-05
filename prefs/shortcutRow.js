@@ -69,7 +69,7 @@ function recordShortcut(parent, title) {
 }
 
 export const ShortcutRow = GObject.registerClass(
-class BgChangerShortcutRow extends Adw.ActionRow {
+class AtelierShortcutRow extends Adw.ActionRow {
     /**
      * @param {object} params
      * @param {Gio.Settings} params.settings

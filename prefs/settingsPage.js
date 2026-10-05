@@ -20,7 +20,7 @@ const RESET_KEYS = ['gtk-theme', 'icon-theme', 'cursor-theme', 'font-name', 'col
 const home = path => path.replace(GLib.get_home_dir(), '~');
 
 export const SettingsPage = GObject.registerClass(
-class BgChangerSettingsPage extends Adw.PreferencesPage {
+class AtelierSettingsPage extends Adw.PreferencesPage {
     _init(settings) {
         super._init({
             title: 'Settings',
@@ -38,7 +38,7 @@ class BgChangerSettingsPage extends Adw.PreferencesPage {
             description: 'Problems with installed themes that can break the desktop.',
         });
         this.add(this._healthGroup);
-        this._checkThemes().catch(e => console.error('BG Changer: theme check failed', e));
+        this._checkThemes().catch(e => console.error('Atelier: theme check failed', e));
 
         this.add(this._buildResetGroup());
     }
@@ -57,9 +57,9 @@ class BgChangerSettingsPage extends Adw.PreferencesPage {
         group.add(indicator);
 
         this._shortcutRows = [
-            ['bgc-open-switcher', 'Open the switcher'],
-            ['bgc-next-look', 'Apply the next look'],
-            ['bgc-previous-look', 'Apply the previous look'],
+            ['atelier-open-switcher', 'Open the switcher'],
+            ['atelier-next-profile', 'Apply the next profile'],
+            ['atelier-previous-profile', 'Apply the previous profile'],
         ].map(([key, title]) => new ShortcutRow({settings: this._settings, key, title}));
         this._shortcutRows.forEach(row => group.add(row));
         return group;
@@ -110,7 +110,7 @@ class BgChangerSettingsPage extends Adw.PreferencesPage {
         if (!isUserThemeEnabled()) {
             issues.push({
                 title: 'User Themes is not enabled',
-                subtitle: 'Looks can’t change the shell theme until the User Themes extension is on.',
+                subtitle: 'Profiles can’t change the shell theme until the User Themes extension is on.',
             });
         }
         for (const theme of themes.shell.filter(t => t.compat === 'outdated')) {
@@ -163,7 +163,7 @@ class BgChangerSettingsPage extends Adw.PreferencesPage {
         const dialog = new Adw.AlertDialog({
             heading: 'Reset appearance?',
             body: 'GTK theme, shell theme, icons, cursor, font, light/dark style and accent color ' +
-                'go back to the GNOME defaults. Your looks are kept.',
+                'go back to the GNOME defaults. Your profiles are kept.',
             close_response: 'cancel',
             default_response: 'cancel',
         });
@@ -178,7 +178,7 @@ class BgChangerSettingsPage extends Adw.PreferencesPage {
             iface.reset(key);
         getUserThemeSettings()?.reset('name');
         const unlinked = await unlinkGtk4Theme(this._settings);
-        this._settings.set_string('active-look', '');
+        this._settings.set_string('active-profile', '');
         toast(this, unlinked
             ? 'Appearance reset. Restart open apps to drop the GTK 4 theme.'
             : 'Appearance reset to the GNOME defaults');

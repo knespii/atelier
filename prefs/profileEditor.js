@@ -1,4 +1,4 @@
-// Dialog for creating or editing a look.
+// Dialog for creating or editing a profile.
 
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
@@ -6,7 +6,7 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 import Pango from 'gi://Pango';
 
-import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS} from '../lib/looks.js';
+import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, isInLibrary, prettyName} from '../lib/paths.js';
 import {accentForWallpaper, ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {chooseImages, createThumbnail, toast} from './widgets.js';
@@ -47,32 +47,32 @@ function optionalComboRow({title, values, labels, current}) {
     };
 }
 
-export const LookEditor = GObject.registerClass(
-class BgChangerLookEditor extends Adw.Dialog {
+export const ProfileEditor = GObject.registerClass(
+class AtelierProfileEditor extends Adw.Dialog {
     /**
      * @param {object} params
-     * @param {LookStore} params.store
-     * @param {object|null} params.look - null for a new look
-     * @param {object} [params.initial] - prefilled fields for a new look
+     * @param {ProfileStore} params.store
+     * @param {object|null} params.profile - null for a new profile
+     * @param {object} [params.initial] - prefilled fields for a new profile
      * @param {object} params.themes - result of scanThemes()
      * @param {boolean} params.userThemesEnabled
      */
-    _init({store, look, initial = null, themes, userThemesEnabled}) {
+    _init({store, profile, initial = null, themes, userThemesEnabled}) {
         super._init({
-            title: look ? 'Edit Look' : 'New Look',
+            title: profile ? 'Edit Profile' : 'New Profile',
             content_width: 600,
             content_height: 820,
         });
         this._store = store;
-        this._look = look;
-        this._draft = look ?? initial ?? {};
+        this._look = profile;
+        this._draft = profile ?? initial ?? {};
         this._themes = themes;
         this._wallpaper = this._draft.wallpaper ?? null;
         // Kept as is unless another wallpaper is chosen (e.g. GNOME's own
         // wallpapers have separate light and dark pictures).
         this._wallpaperDark = this._draft.wallpaperDark ?? null;
         this._accent = this._draft.accentColor ?? null;
-        this._nameFromFile = !look && !this._draft.name;
+        this._nameFromFile = !profile && !this._draft.name;
 
         const toolbar = new Adw.ToolbarView();
         const header = new Adw.HeaderBar({
@@ -93,7 +93,7 @@ class BgChangerLookEditor extends Adw.Dialog {
 
         // Rows of a group come before other widgets, so the preview gets its own group.
         const previewGroup = new Adw.PreferencesGroup();
-        this._preview = createThumbnail(this._wallpaper, 400, 'bgc-preview');
+        this._preview = createThumbnail(this._wallpaper, 400, 'atelier-preview');
         this._preview.widget.halign = Gtk.Align.CENTER;
         previewGroup.add(this._preview.widget);
         page.add(previewGroup);
@@ -166,7 +166,7 @@ class BgChangerLookEditor extends Adw.Dialog {
         for (const [value, cssClass, icon, tooltip] of options) {
             const image = new Gtk.Image({icon_name: icon ?? 'object-select-symbolic'});
             const button = new Gtk.ToggleButton({
-                css_classes: ['bgc-swatch', cssClass],
+                css_classes: ['atelier-swatch', cssClass],
                 tooltip_text: tooltip,
                 child: image,
                 active: this._accent === value,
@@ -195,7 +195,7 @@ class BgChangerLookEditor extends Adw.Dialog {
         const themes = this._themes;
         const group = new Adw.PreferencesGroup({
             title: 'Themes',
-            description: 'Anything left at “Don’t change” stays as it is when you switch to this look.',
+            description: 'Anything left at “Don’t change” stays as it is when you switch to this profile.',
         });
 
         this._gtk = optionalComboRow({
@@ -275,7 +275,7 @@ class BgChangerLookEditor extends Adw.Dialog {
 
     _updateWallpaperRow() {
         if (!this._wallpaper)
-            this._wallpaperRow.subtitle = 'None — the look only changes themes';
+            this._wallpaperRow.subtitle = 'None — the profile only changes themes';
         else if (this._wallpaperDark)
             this._wallpaperRow.subtitle = `${prettyName(this._wallpaper)} · with a dark-style variant`;
         else
@@ -311,7 +311,7 @@ class BgChangerLookEditor extends Adw.Dialog {
         } else {
             this._gtk4Row.active = false;
             this._gtk4Row.subtitle = theme
-                ? 'This theme has no GTK 4 version, so libadwaita apps (most GNOME apps) keep their look'
+                ? 'This theme has no GTK 4 version, so libadwaita apps (most GNOME apps) keep their profile'
                 : 'Pick a GTK theme first';
         }
     }
@@ -366,7 +366,7 @@ class BgChangerLookEditor extends Adw.Dialog {
 
             const scheme = this._schemeToggles.active_name;
             const fields = {
-                name: this._nameRow.text.trim() || (wallpaper ? prettyName(wallpaper) : 'Untitled look'),
+                name: this._nameRow.text.trim() || (wallpaper ? prettyName(wallpaper) : 'Untitled profile'),
                 wallpaper,
                 wallpaperDark,
                 pictureOptions: PICTURE_OPTIONS[this._fitRow.selected] ?? 'zoom',
@@ -383,12 +383,12 @@ class BgChangerLookEditor extends Adw.Dialog {
             if (this._look) {
                 const {wallpaper: previous, wallpaperDark: previousDark} = this._look;
                 this._store.update(this._look.id, fields);
-                const looks = this._store.getAll();
+                const profiles = this._store.getAll();
                 if (previous && previous !== wallpaper &&
-                    await deleteWallpaperIfUnused(previous, looks))
+                    await deleteWallpaperIfUnused(previous, profiles))
                     removeThumbnail(previous);
                 if (previousDark && previousDark !== wallpaperDark)
-                    await deleteWallpaperIfUnused(previousDark, looks);
+                    await deleteWallpaperIfUnused(previousDark, profiles);
             } else {
                 this._store.add(fields);
             }
@@ -403,7 +403,7 @@ class BgChangerLookEditor extends Adw.Dialog {
                 use_markup: false,
             }));
         } catch (e) {
-            console.error('BG Changer: saving a look failed', e);
+            console.error('Atelier: saving a profile failed', e);
             toast(this, `Could not save: ${e.message}`);
             this._saveButton.sensitive = true;
         }
