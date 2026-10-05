@@ -144,7 +144,9 @@ export const SwitcherContent = GObject.registerClass({
         this._closing = false;
         this._preloadId = 0;
         this._preloaded = null;
-        this._width = 0;
+        // Known once a host sets the width; measuring before that would
+        // need the styles of a widget that isn't on the stage yet.
+        this._viewportWidth = 0;
 
         const tabs = new St.BoxLayout({style_class: 'atelier-tabs', x_align: Clutter.ActorAlign.CENTER});
         this._tabs = {};
@@ -221,12 +223,11 @@ export const SwitcherContent = GObject.registerClass({
      * @param {number} width
      */
     setWidth(width) {
-        this._width = width;
         this.width = width;
         const scale = this._scale;
         const node = this.get_theme_node();
-        const inner = width - node.get_horizontal_padding();
-        this._viewport.set_size(inner, (CARD_HEIGHT + STRIP_PADDING * 2) * scale);
+        this._viewportWidth = width - node.get_horizontal_padding();
+        this._viewport.set_size(this._viewportWidth, (CARD_HEIGHT + STRIP_PADDING * 2) * scale);
         this._strip.y = STRIP_PADDING * scale;
         this._select(this._selected, false);
     }
@@ -368,7 +369,7 @@ export const SwitcherContent = GObject.registerClass({
 
         const scale = this._scale;
         const step = (CARD_WIDTH + CARD_SPACING) * scale;
-        const target = Math.round(this._viewport.width / 2 -
+        const target = Math.round(this._viewportWidth / 2 -
             (this._selected * step + CARD_WIDTH * scale / 2));
         const duration = animate ? SCROLL_TIME : 0;
 
