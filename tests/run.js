@@ -5,8 +5,9 @@ import System from 'system';
 
 import * as looks from './looks.test.js';
 import * as themes from './themes.test.js';
+import * as thumbnails from './thumbnails.test.js';
 
-const suites = {looks, themes};
+const suites = {looks, themes, thumbnails};
 
 let total = 0;
 let failures = 0;
