@@ -52,8 +52,10 @@ function recordShortcut(parent, title) {
             }
             if (MODIFIER_KEYS.includes(key))
                 return Gdk.EVENT_STOP;
-            // Plain letters would make the key unusable for typing.
-            if ((mods === 0 && !isFunctionKey(key)) || !Gtk.accelerator_valid(key, mods))
+            // Without Ctrl, Alt or Super a shortcut would swallow typing
+            // (Shift+A is just a capital A); only F-keys may stand alone.
+            const typing = (mods & ~Gdk.ModifierType.SHIFT_MASK) === 0;
+            if ((typing && !isFunctionKey(key)) || !Gtk.accelerator_valid(key, mods))
                 return Gdk.EVENT_STOP;
 
             result = Gtk.accelerator_name_with_keycode(null, key, keycode, mods);
