@@ -74,3 +74,11 @@ export async function testAccentForWallpaper() {
     const wallpaper = savePng(solid(1200, 800, 0xd56199ff), 'pink.png');
     assertEqual(await accentForWallpaper(wallpaper), 'pink');
 }
+
+export function testAccentOnDarkBackground() {
+    // Colorful details on a black background still produce a color.
+    const pixbuf = solid(100, 100, 0x050505ff);
+    solid(30, 30, 0xed5b00ff).copy_area(0, 0, 30, 30, pixbuf, 10, 10);
+    assertEqual(accentFromPixbuf(pixbuf), 'orange');
+    assertEqual(accentFromPixbuf(solid(64, 40, 0x000000ff)), 'slate', 'pure black');
+}
