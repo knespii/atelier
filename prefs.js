@@ -7,6 +7,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 import {AtelierView} from './prefs/app.js';
 import {AppearancePage} from './prefs/appearancePage.js';
+import {BarPage} from './prefs/barPage.js';
 import {IslandPage} from './prefs/islandPage.js';
 import {NotificationsPage} from './prefs/notificationsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
@@ -33,6 +34,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 group: 'THE SHELL',
                 keywords: ['banner', 'mute', 'do not disturb', 'dnd', 'buttons', 'reply', 'apps', 'whatsapp'],
                 create: () => new NotificationsPage(settings),
+            },
+            {
+                id: 'top-bar', title: 'Top Bar', icon: 'focus-top-bar-symbolic', group: 'THE SHELL',
+                keywords: ['bar', 'panel', 'transparent', 'background', 'quick settings', 'control centre',
+                    'control center', 'wi-fi', 'bluetooth', 'extensions', 'icons', 'tray'],
+                create: () => new BarPage(settings),
             },
             {
                 id: 'profiles', title: 'Profiles', icon: 'view-grid-symbolic', group: 'THE DESK',

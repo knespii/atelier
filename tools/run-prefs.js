@@ -193,11 +193,21 @@ async function runSelftest(window) {
     check(!rules.get_string('muted').includes('texteditor') && notifications._mutedRows[0].appId === undefined,
         'Unmute lifts the mute');
     rules.reset('app-buttons');
+
+    // Top bar and control centre.
+    const bar = await section(window, 'top-bar');
+    bar._transparent.active = false;
+    check(!store.settings.get_child('bar').get_boolean('transparent'), 'the bar\'s background can come back');
+    bar._controlCentre.active = false;
+    check(!store.settings.get_child('control-centre').get_boolean('enabled') && !bar._extensions.sensitive,
+        'without the control centre, its options are greyed out');
+    bar._transparent.active = true;
+    bar._controlCentre.active = true;
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'notifications', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'top-bar', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         render(window, id);
