@@ -20,7 +20,8 @@ import {Applier} from './applier.js';
 import {ProfileSync} from './core/profileSync.js';
 import {Indicator} from './indicator.js';
 import {WallpaperTransition} from './reveal.js';
-import {Switcher} from './switcher.js';
+import {SwitcherPopup} from './switcher.js';
+import {SwitcherContent} from './switcherContent.js';
 
 const KEYBINDINGS = [
     'atelier-open-switcher', 'atelier-open-wallpapers', 'atelier-next-profile', 'atelier-previous-profile',
@@ -33,10 +34,11 @@ export class ProfilesModule {
      * @param {Gio.Settings} context.settings
      * @param {ProfileStore} context.store
      */
-    constructor({extension, settings, store}) {
+    constructor({extension, settings, store, modules}) {
         this._extension = extension;
         this._settings = settings;
         this._store = store;
+        this._modules = modules;
         this._switcher = null;
         this._indicator = null;
         this._originalPending = false;
@@ -124,7 +126,7 @@ export class ProfilesModule {
         if (Main.overview.visible)
             Main.overview.hide();
 
-        const switcher = new Switcher(mode);
+        const switcher = new SwitcherContent(mode);
         switcher.setProfiles(this._store.getAll(), this._store.activeId);
         switcher.connect('activate', (_, tab, id) => {
             if (tab === 'profiles')
@@ -143,7 +145,11 @@ export class ProfilesModule {
         this._switcher = switcher;
         if (mode === 'wallpapers')
             this._loadWallpapers(switcher);
-        switcher.open();
+
+        // The island shows the switcher in itself; without it, a popup does.
+        const island = this._modules?.get('island');
+        if (!island?.showSwitcher(switcher))
+            new SwitcherPopup(switcher).open();
     }
 
     async _loadWallpapers(switcher) {

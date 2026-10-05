@@ -20,6 +20,7 @@ export default class AtelierExtension extends Extension {
             store: new ProfileStore(this._settings),
         };
         this.modules = new ModuleManager(context);
+        context.modules = this.modules;
         this.modules.register('palette', ctx => new PaletteModule(ctx));
         this.modules.register('profiles', ctx => new ProfilesModule(ctx));
 

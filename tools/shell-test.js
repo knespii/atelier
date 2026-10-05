@@ -182,7 +182,7 @@ async function testHostileShellTheme(atelier) {
     await Scripting.sleep(600);
     await screenshot('08-switcher-hostile-theme');
     const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-    const [, height] = atelier._switcher._panel.get_preferred_height(-1);
+    const [, height] = atelier._switcher.get_parent().get_preferred_height(-1);
     check(height < 320 * scale, `switcher keeps its size under a hostile theme (${height}px)`);
     atelier._switcher.close();
     await Scripting.sleep(300);

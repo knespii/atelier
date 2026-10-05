@@ -18,6 +18,7 @@
   text-shadow: none;
 }
 
+.atelier-switcher,
 .atelier-viewport,
 .atelier-strip,
 .atelier-footer,
@@ -30,8 +31,10 @@
   margin: 0;
 }
 
+.atelier-switcher,
 .atelier-viewport {
   padding: 0;
+  spacing: 0;
 }
 
 .atelier-strip {
