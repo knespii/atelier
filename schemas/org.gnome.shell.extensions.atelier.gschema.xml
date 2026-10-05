@@ -22,6 +22,8 @@
     <child name="palette" schema="org.gnome.shell.extensions.atelier.palette"/>
     <child name="island" schema="org.gnome.shell.extensions.atelier.island"/>
     <child name="notifications" schema="org.gnome.shell.extensions.atelier.notifications"/>
+    <child name="control-centre" schema="org.gnome.shell.extensions.atelier.control-centre"/>
+    <child name="bar" schema="org.gnome.shell.extensions.atelier.bar"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -179,6 +181,28 @@
       <default>'{}'</default>
       <summary>Muted apps</summary>
       <description>JSON object mapping app keys to the end of the mute in Unix seconds, or 0 until it is lifted. Notifications of muted apps go to the list without a banner.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.control-centre"
+          path="/org/gnome/shell/extensions/atelier/control-centre/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Open the quick settings in the island</summary>
+      <description>The status icons in the top bar and Super+S open GNOME's quick settings – Wi-Fi, Bluetooth, sliders, power mode, tiles of extensions – as the island's control centre instead of GNOME's menu.</description>
+    </key>
+    <key name="extensions" type="b">
+      <default>true</default>
+      <summary>Move extension icons into the control centre</summary>
+      <description>Icons that extensions put into the top bar move to the control centre's Extensions tab. The bar keeps the workspaces, the island, the status icons and the screen sharing and recording indicators.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.bar"
+          path="/org/gnome/shell/extensions/atelier/bar/">
+    <key name="transparent" type="b">
+      <default>true</default>
+      <summary>Top bar without a background</summary>
     </key>
   </schema>
 </schemalist>

@@ -8,6 +8,8 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
+import {BarModule} from './shell/bar/module.js';
+import {ControlCentreModule} from './shell/controlCentre/module.js';
 import {IslandModule} from './shell/island/module.js';
 import {NotificationsModule} from './shell/notifications/module.js';
 import {PaletteModule} from './shell/paletteModule.js';
@@ -29,6 +31,9 @@ export default class AtelierExtension extends Extension {
             {settings: this._settings.get_child('island'), key: 'enabled'});
         this.modules.register('notifications', ctx => new NotificationsModule(ctx),
             {settings: this._settings.get_child('notifications'), key: 'enabled'});
+        this.modules.register('control-centre', ctx => new ControlCentreModule(ctx),
+            {settings: this._settings.get_child('control-centre'), key: 'enabled'});
+        this.modules.register('bar', ctx => new BarModule(ctx));
 
         // BG Changer's data has to be taken over before anything reads the
         // profiles, otherwise the first run would save a second "Original".

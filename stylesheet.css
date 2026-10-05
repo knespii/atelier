@@ -686,3 +686,200 @@
   background-color: transparent;
   color: rgba(255, 255, 255, 0.65);
 }
+
+/* Top bar without a background */
+
+#panel.atelier-bar-clean {
+  background-color: transparent;
+}
+
+#panel.atelier-bar-clean .panel-button {
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+#panel.atelier-bar-clean .panel-button .system-status-icon {
+  icon-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+#panel.atelier-bar-clean .panel-button#panelActivities .workspace-dot {
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* Control centre: GNOME's quick settings in the island. They are dark in
+   both styles, like the island. */
+
+.atelier-cc {
+  padding: 10px 16px 16px;
+  spacing: 12px;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: #f4f4f5;
+}
+
+.atelier-cc-tiles,
+.atelier-ext-tray,
+.atelier-ext-slot,
+.atelier-ext-button {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-cc .quick-settings-grid {
+  spacing-rows: 10px;
+  spacing-columns: 10px;
+}
+
+.atelier-cc .quick-toggle,
+.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button,
+.atelier-cc .quick-settings-system-item .icon-button {
+  background-color: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.atelier-cc .quick-toggle:hover,
+.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:hover,
+.atelier-cc .quick-settings-system-item .icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.atelier-cc .quick-toggle:active,
+.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:active,
+.atelier-cc .quick-settings-system-item .icon-button:active {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.atelier-cc .quick-toggle:focus,
+.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
+.atelier-cc .quick-settings-system-item .icon-button:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-cc .quick-toggle:checked,
+.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
+.atelier-cc .quick-toggle-has-menu .quick-toggle-separator {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.atelier-cc .quick-toggle-menu {
+  margin: 10px 0 0;
+  border-radius: 22px;
+  background-color: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+}
+
+.atelier-cc .quick-toggle-menu .header .title,
+.atelier-cc .quick-toggle-menu .header .subtitle,
+.atelier-cc .background-app-item .title,
+.atelier-cc .background-app-item .subtitle {
+  color: #ffffff;
+}
+
+.atelier-cc .quick-toggle-menu .header .icon {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.atelier-cc .quick-toggle-menu .header .icon.active {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
+.atelier-cc .popup-menu-item {
+  color: #ffffff;
+}
+
+.atelier-cc .popup-menu-item:hover,
+.atelier-cc .popup-menu-item:focus,
+.atelier-cc .popup-menu-item:selected {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-cc .popup-menu-item:active {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.atelier-cc .popup-separator-menu-item .popup-separator-menu-item-separator {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-cc .slider {
+  color: #ffffff;
+  -barlevel-background-color: rgba(255, 255, 255, 0.14);
+  -barlevel-active-background-color: -st-accent-color;
+}
+
+.atelier-cc .quick-slider .icon-button {
+  background-color: transparent;
+  color: #ffffff;
+}
+
+.atelier-cc .quick-slider .icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc .quick-slider .slider-bin:focus {
+  background-color: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+/* Extensions tab */
+
+.atelier-ext-tray {
+  spacing-rows: 12px;
+  spacing-columns: 12px;
+}
+
+.atelier-ext-tile {
+  width: 112px;
+  height: 80px;
+  border-radius: 18px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.atelier-ext-tile:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.atelier-ext-slot {
+  padding: 4px 4px 24px;
+}
+
+.atelier-ext-tile .panel-button {
+  border: none;
+  border-radius: 14px;
+  background-color: transparent;
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.atelier-ext-tile .panel-button:active,
+.atelier-ext-tile .panel-button:checked {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.atelier-ext-tile .system-status-icon {
+  icon-size: 20px;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-ext-label {
+  background-color: transparent;
+  padding: 0 6px 8px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 8.5pt;
+  font-weight: bold;
+}

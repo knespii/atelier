@@ -11,6 +11,9 @@ import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'atelier@local';
@@ -263,11 +266,12 @@ async function testIsland(ext, atelier) {
     const others = () => atelier._store.getAll()
         .filter(p => ['amber', 'glass'].includes(p.id) && p.id !== atelier._store.activeId);
     const target = others()[0];
+    // (Checked right away: _switchTo opens the toast before it first waits.)
     const switching = atelier._switchTo(target);
-    await Scripting.sleep(40);
     check(hasClass(island.page, 'atelier-toast') && island.page.title === target.name,
         `switching profiles shows a toast at once (${island.page?.title})`);
-    check(atelier._store.activeId !== target.id && !atelier._applier.busy, 'before the work starts');
+    check(atelier._store.activeId !== target.id && !atelier._applier.busy,
+        `before the work starts (active ${atelier._store.activeId}, busy ${atelier._applier.busy})`);
     await Scripting.sleep(400);
     await screenshotIsland('14-island-toast', 120);
     await switching;
@@ -466,6 +470,114 @@ async function testNotifications(ext, atelier) {
         if (tray.contains(source))
             source.destroy();
     }
+}
+
+// A quick settings tile with a menu, added the way Caffeine adds its own.
+function addTestTile() {
+    const indicator = new QuickSettings.SystemIndicator();
+    const toggle = new QuickSettings.QuickMenuToggle({
+        title: 'Test Tile',
+        iconName: 'weather-clear-night-symbolic',
+        toggleMode: true,
+    });
+    toggle.menu.setHeader('weather-clear-night-symbolic', 'Test Tile', 'Its own menu');
+    toggle.menu.addMenuItem(new PopupMenu.PopupMenuItem('First option'));
+    toggle.menu.addMenuItem(new PopupMenu.PopupMenuItem('Second option'));
+    indicator.quickSettingsItems.push(toggle);
+    Main.panel.statusArea.quickSettings.addExternalIndicator(indicator);
+    return {indicator, toggle};
+}
+
+// An extension's icon in the top bar, with a menu.
+function addTestButton() {
+    const button = new PanelMenu.Button(0.5, 'Test Extension', false);
+    button.add_child(new St.Icon({icon_name: 'applications-science-symbolic', style_class: 'system-status-icon'}));
+    button.menu.addMenuItem(new PopupMenu.PopupMenuItem('Do something'));
+    Main.panel.addToStatusArea('atelier-test-extension', button, 1, 'right');
+    return button;
+}
+
+async function testControlCentre(ext) {
+    const modules = ext.stateObj.modules;
+    if (!check(modules.get('control-centre') !== null, 'control centre module running'))
+        return;
+    const quickSettings = Main.panel.statusArea.quickSettings;
+    const island = modules.get('island').island;
+    check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles'),
+        'GNOME\'s tiles moved into the control centre');
+    check(Main.panel.has_style_class_name('atelier-bar-clean'), 'the top bar has no background');
+
+    const {indicator, toggle} = addTestTile();
+    const button = addTestButton();
+    await Scripting.sleep(300);
+    check(hasClass(button.container.get_parent()?.get_parent(), 'atelier-ext-tile') &&
+        !Main.panel._rightBox.contains(button), 'an extension\'s icon moves out of the bar');
+    await restPointer();
+    await screenshotArea('20-top-bar', 0, 0, global.stage.width, 44);
+
+    // The status icons (and Super+S) open it in the island.
+    await clickAt(...centerOf(quickSettings));
+    check(await waitFor(() => hasClass(island.page, 'atelier-cc') && island.busy, 1000),
+        'the status icons open the control centre in the island');
+    check(!quickSettings.menu.isOpen, 'GNOME\'s menu stays closed');
+    const page = island.page;
+    check(page._host.grid.contains(toggle), 'an extension\'s tile is there too');
+    await restPointer();
+    await Scripting.sleep(500);
+    await screenshotIsland('21-control-centre', 700);
+
+    toggle.menu.open(true);
+    await Scripting.sleep(700);
+    const [, tileY] = toggle.get_transformed_position();
+    const [, menuY] = toggle.menu.actor.get_transformed_position();
+    check(toggle.menu.isOpen && menuY >= tileY + toggle.height - 1, 'a tile\'s menu opens under it');
+    check(island.height > page._host.grid.get_preferred_height(-1)[1] - 1, 'and the island makes room');
+    await screenshotIsland('22-control-centre-menu', 800);
+    toggle.menu.close(true);
+    await Scripting.sleep(500);
+
+    // The second tab: extension icons as tiles.
+    page.setTab('extensions');
+    await Scripting.sleep(500);
+    const tile = modules.get('control-centre').tray.tiles.find(t => t.indicator === button);
+    check(page.tab === 'extensions' && tile?.mapped, 'the Extensions tab shows their icons');
+    check(tile?.name === 'Test Extension', `named after the extension (${tile?.name})`);
+    await screenshotIsland('23-control-centre-extensions', 300);
+    await clickAt(...centerOf(button));
+    check(await waitFor(() => button.menu.isOpen, 1000), 'clicking one opens the extension\'s menu');
+    button.menu.close();
+    await Scripting.sleep(300);
+    check(island.page === page, 'the control centre stays open behind it');
+
+    Main.panel.closeQuickSettings();
+    check(await waitFor(() => island.page === null && !island.busy, 1000), 'closeQuickSettings() closes it');
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000), 'Super+S opens it');
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => island.page === null, 1000), 'and closes it');
+
+    // Turned off: GNOME's menu and the icons in the bar come back.
+    const settings = ext.stateObj._settings.get_child('control-centre');
+    settings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box &&
+        Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menu and the icons are back');
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => quickSettings.menu.isOpen, 1000) && island.page === null,
+        'and GNOME\'s menu opens again');
+    Main.panel.closeQuickSettings();
+    await waitFor(() => !quickSettings.menu.isOpen, 1000);
+    settings.set_boolean('enabled', true);
+    await Scripting.sleep(400);
+    check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles') &&
+        !Main.panel._rightBox.contains(button), 'and on again');
+
+    button.destroy();
+    await Scripting.sleep(100);
+    check(!modules.get('control-centre').tray.tiles.some(t => t.indicator === button),
+        'a removed extension\'s tile goes away');
+    indicator.quickSettingsItems.forEach(item => item.destroy());
+    indicator.destroy();
 }
 
 async function testSwitcherAndReveal(atelier) {
@@ -786,6 +898,9 @@ async function testDisableCleansUp(atelier) {
     const panelProto = Object.getPrototypeOf(Main.panel);
     check(['toggleCalendar', 'closeCalendar'].every(name => Main.panel[name] === panelProto[name]),
         'calendar functions restored');
+    const qsMenu = Main.panel.statusArea.quickSettings.menu;
+    check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean'),
+        'quick settings and the bar restored');
     const trayProto = Object.getPrototypeOf(Main.messageTray);
     check(['_showNotification', '_hideNotification', '_updateShowingNotification']
         .every(name => Main.messageTray[name] === trayProto[name]), 'message tray restored');
@@ -836,6 +951,7 @@ export async function run() {
 
         await testIsland(ext, atelier);
         await testNotifications(ext, atelier);
+        await testControlCentre(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

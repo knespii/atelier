@@ -5,8 +5,8 @@ A GNOME Shell 48 extension that turns the desktop into an atelier: **profiles**
 font, palette) you switch between with a quick picker, and a **palette taken
 from the wallpaper** that colors Atelier and, if you want, GTK apps and
 GNOME Terminal, and an **island** in the middle of the top bar that also
-shows notifications. It started as *BG Changer*; more of the desktop (a
-control centre, desktop widgets, notes, a dock) is on its way.
+shows notifications and the control centre. It started as *BG Changer*; more
+of the desktop (desktop widgets, notes, a dock) is on its way.
 
 - **Island**: a black capsule in place of GNOME's clock. It shows the time
   (and a microphone while an app records, a dot for unseen notifications,
@@ -23,6 +23,15 @@ control centre, desktop widgets, notes, a dock) is on its way.
   Mute keeps the app's banners away for an hour, 8 hours or until you unmute
   it in the settings). WhatsApp (as a Chrome app) starts with Reply and Mute,
   Claude with none.
+- **Control centre**: the status icons on the right of the top bar (or
+  <kbd>Super</kbd>+<kbd>S</kbd>) open GNOME's quick settings in the island –
+  sound, brightness, Wi‑Fi, Bluetooth, power mode, night light, dark style,
+  keyboard light, airplane mode and the tiles of extensions such as Caffeine,
+  with their menus. Icons that extensions put into the top bar move to its
+  second tab, *Extensions*, as tiles; clicking one does what it did in the bar.
+- **Top bar** without a background: the workspaces on the left, the island in
+  the middle and the status icons on the right. (If Blur my Shell blurs the
+  bar, turn that off for a clean bar.)
 - **Switcher**: press <kbd>Super</kbd>+<kbd>W</kbd> (or click the button in the
   top bar). The island grows into it (without the island, a dark panel drops
   from the top of the screen), with two tabs:
@@ -131,7 +140,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, notifications, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; screenshots land in `tests/output/shell` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, notifications, the control centre, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; screenshots land in `tests/output/shell` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make pack` | Builds `dist/atelier@local.shell-extension.zip` |
@@ -145,8 +154,9 @@ Layout:
 - `shell/` – runs inside GNOME Shell: `core/` (module manager, generated
   styles, GTK and terminal colors), the profiles module (switcher,
   transition, applying and saving profiles), the palette module,
-  `island/` (the island and its pages) and `notifications/` (banners in
-  the island)
+  `island/` (the island and its pages), `notifications/` (banners in
+  the island), `controlCentre/` (quick settings and extension icons in the
+  island) and `bar/` (the top bar's look)
 - `prefs.js`, `prefs/` – the settings app (GTK 4 / libadwaita)
 - `lib/` – shared by both: profiles, palette, migration, theme discovery,
   thumbnails, GTK stylesheets, terminal profile
