@@ -15,6 +15,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {describeLook, effectiveWallpaper} from '../lib/looks.js';
+import {isSlideshow} from '../lib/paths.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
 
 // Logical pixels; multiplied by the scale factor where used.
@@ -289,7 +290,8 @@ export const LookSwitcher = GObject.registerClass({
             const scheme = look?.colorScheme ??
                 new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
             const wallpaper = look ? effectiveWallpaper(look, scheme) : null;
-            if (wallpaper) {
+            // Slideshows are XML, not images; GNOME loads them itself.
+            if (wallpaper && !isSlideshow(wallpaper)) {
                 this._preloaded = Meta.BackgroundImageCache.get_default()
                     .load(Gio.File.new_for_path(wallpaper));
             }

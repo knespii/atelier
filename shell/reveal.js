@@ -19,6 +19,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {isSlideshow} from '../lib/paths.js';
+
 const EFFECT_NAME = 'bgc-reveal';
 const PRELOAD_TIMEOUT = 5000; // ms
 const SWAP_TIMEOUT = 4000; // ms to wait for GNOME's background to catch up
@@ -111,7 +113,8 @@ export class WallpaperTransition {
     async reveal(file, pictureOptions) {
         this.abort();
 
-        if (this._settings.get_string('transition') !== 'circle' ||
+        // Slideshows are XML that only GNOME's own background code understands.
+        if (this._settings.get_string('transition') !== 'circle' || isSlideshow(file.get_path() ?? '') ||
             !this._canAnimate() || this._isCurrent(file, pictureOptions))
             return null;
 
