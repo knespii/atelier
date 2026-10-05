@@ -65,8 +65,17 @@
     </key>
     <key name="gtk4-link" type="s">
       <default>''</default>
-      <summary>GTK4 theme links created by the extension</summary>
-      <description>JSON object listing the files in ~/.config/gtk-4.0 that are symlinks owned by this extension.</description>
+      <summary>GTK 4 links made by BG Changer</summary>
+      <description>JSON object listing the symlinks in ~/.config/gtk-4.0 that BG Changer created. Atelier replaces them with a generated stylesheet and then clears this key.</description>
+    </key>
+    <key name="gtk4-theme" type="s">
+      <default>''</default>
+      <summary>Theme imported for GTK 4 apps</summary>
+      <description>Directory of the GTK theme whose GTK 4 stylesheet is imported into ~/.config/gtk-4.0/gtk.css, or empty. Set when a profile with GTK 4 theming is applied.</description>
+    </key>
+    <key name="gtk-css-problem" type="s">
+      <default>''</default>
+      <summary>Why the GTK stylesheets could not be written, if they couldn't</summary>
     </key>
     <key name="apply-request" type="s">
       <default>''</default>

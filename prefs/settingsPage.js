@@ -6,7 +6,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
-import {unlinkGtk4Theme} from '../lib/gtk4.js';
+import {gtk3ConfigDir, gtk4ConfigDir, legacyLinks, writeStylesheet} from '../lib/gtkCss.js';
 import {findThemeArchives, getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
 import {ShortcutRow} from './shortcutRow.js';
 import {toast} from './widgets.js';
@@ -163,7 +163,8 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
         const dialog = new Adw.AlertDialog({
             heading: 'Reset appearance?',
             body: 'GTK theme, shell theme, icons, cursor, font, light/dark style and accent color ' +
-                'go back to the GNOME defaults. Your profiles are kept.',
+                'go back to the GNOME defaults, and GTK apps stop using Atelier\'s colors. ' +
+                'Your profiles are kept.',
             close_response: 'cancel',
             default_response: 'cancel',
         });
@@ -177,10 +178,17 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
         for (const key of RESET_KEYS.filter(k => iface.settings_schema.has_key(k)))
             iface.reset(key);
         getUserThemeSettings()?.reset('name');
-        const unlinked = await unlinkGtk4Theme(this._settings);
+        // GTK apps lose Atelier's theme and colors; only Atelier's own files go.
+        this._settings.set_string('gtk4-theme', '');
+        this._settings.get_child('palette').set_boolean('gtk-apps', false);
+        const legacy = legacyLinks(this._settings);
+        const results = await Promise.all([
+            writeStylesheet(`${gtk4ConfigDir()}/gtk.css`, null, {legacyTarget: legacy['gtk.css'] ?? null}),
+            writeStylesheet(`${gtk3ConfigDir()}/gtk.css`, null),
+        ]);
         this._settings.set_string('active-profile', '');
-        toast(this, unlinked
-            ? 'Appearance reset. Restart open apps to drop the GTK 4 theme.'
+        toast(this, results.some(r => r.changed)
+            ? 'Appearance reset. Restart open apps to drop Atelier\'s GTK styles.'
             : 'Appearance reset to the GNOME defaults');
     }
 });

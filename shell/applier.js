@@ -1,11 +1,12 @@
-// Applies a profile: wallpaper, interface settings, shell theme and GTK 4 links.
+// Applies a profile: wallpaper, interface settings, shell theme and the GTK 4
+// theme for libadwaita apps.
 
 import Gio from 'gi://Gio';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 
-import {linkGtk4Theme, linkedGtk4Theme, unlinkGtk4Theme} from '../lib/gtk4.js';
+import {hasGtk4Support} from '../lib/gtkCss.js';
 import {AUTO_ACCENT, ProfileStore, effectiveWallpaper, isAccentColor} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
@@ -33,7 +34,6 @@ export class Applier {
         this._running = null;
         this._targetId = null;
         this._destroyed = false;
-        this._gtk4Chain = Promise.resolve();
 
         /** Optional wallpaper transition, see reveal.js */
         this.transition = null;
@@ -109,7 +109,7 @@ export class Applier {
             this._write(plan);
             this._store.activeId = profile.id;
             onWritten?.();
-            notes = await this._syncGtk4(profile, plan, problems);
+            notes = this._syncGtk4(profile, plan, problems);
         } finally {
             // Whatever failed, the overlay must not stay over the desktop.
             await finishTransition?.();
@@ -221,54 +221,29 @@ export class Applier {
         }
     }
 
-    /** Run GTK 4 link changes one after another; they touch the same files. */
-    _serializeGtk4(task) {
-        const run = this._gtk4Chain.then(task);
-        this._gtk4Chain = run.catch(() => {});
-        return run;
-    }
-
     /**
-     * Follow a change of the light/dark style: GTK 4 only reads gtk.css, so
-     * the link has to point at the matching variant of the theme.
+     * Choose the GTK 4 theme imported for libadwaita apps; the palette module
+     * writes the stylesheet.
      *
-     * @returns {Promise<void>}
+     * @returns {string[]} notes for the user
      */
-    syncGtk4Variant() {
-        return this._serializeGtk4(async () => {
-            const theme = linkedGtk4Theme(this._settings);
-            if (!theme || this._destroyed)
-                return;
-            const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-            await linkGtk4Theme(this._settings, theme, iface.get_string('color-scheme') === 'prefer-dark');
-        }).catch(e => console.warn(`Atelier: could not update the GTK 4 link: ${e.message}`));
-    }
-
-    async _syncGtk4(profile, plan, problems) {
-        // A profile that leaves the GTK theme alone leaves its GTK 4 links alone too.
+    _syncGtk4(profile, plan, problems) {
+        // A profile that leaves the GTK theme alone leaves GTK 4 apps alone too.
         if (profile.gtkTheme === null || !plan.iface['gtk-theme'])
             return [];
 
-        try {
-            return await this._serializeGtk4(async () => {
-                if (profile.gtk4 && plan.gtkThemeDir) {
-                    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-                    const dark = iface.get_string('color-scheme') === 'prefer-dark';
-                    const result = await linkGtk4Theme(this._settings, plan.gtkThemeDir, dark);
-                    if (!result.ok) {
-                        problems.push(`GTK 4 apps were not themed: ${result.reason}`);
-                        return [];
-                    }
-                    return result.changed ? ['Restart open apps to see the GTK 4 theme.'] : [];
-                }
-
-                const removed = await unlinkGtk4Theme(this._settings);
-                return removed ? ['Restart open apps to bring back their default GTK 4 profile.'] : [];
-            });
-        } catch (e) {
-            // e.g. ~/.config/gtk-4.0 not writable
-            problems.push(`GTK 4 apps were not themed: ${e.message}`);
-            return [];
+        let theme = '';
+        if (profile.gtk4) {
+            if (hasGtk4Support(plan.gtkThemeDir))
+                theme = plan.gtkThemeDir;
+            else
+                problems.push(`GTK 4 apps were not themed: “${profile.gtkTheme}” has no GTK 4 version`);
         }
+        if (this._settings.get_string('gtk4-theme') === theme)
+            return [];
+        this._settings.set_string('gtk4-theme', theme);
+        return [theme
+            ? 'Restart open apps to see the GTK 4 theme.'
+            : 'Restart open apps to bring back their default GTK 4 look.'];
     }
 }

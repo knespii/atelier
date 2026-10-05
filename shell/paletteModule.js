@@ -1,6 +1,6 @@
 // The palette feature: recomputes the palette whenever the wallpaper, the
 // light/dark style or the palette settings change, and hands it to the
-// shell styles (and, in later steps, to GTK apps and the terminal).
+// shell styles and the GTK stylesheets.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -8,6 +8,7 @@ import GLib from 'gi://GLib';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {GtkStyles} from './core/gtkStyles.js';
 import {ThemeManager} from './core/theme.js';
 
 const OPTION_KEYS = ['source', 'swatch', 'preset', 'variant'];
@@ -36,6 +37,8 @@ export class PaletteModule extends Signals.EventEmitter {
         this._background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
         this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         this._theme = new ThemeManager();
+        this._gtk = new GtkStyles(this._settings);
+        this._gtk.enable();
 
         this._background.connectObject(
             'changed::picture-uri', () => this._queue(),
@@ -51,6 +54,7 @@ export class PaletteModule extends Signals.EventEmitter {
         try {
             this._palette = JSON.parse(this._paletteSettings.get_string('current'));
             this._theme.update(this._palette).catch(e => console.warn(`Atelier: ${e.message}`));
+            this._gtk.setPalette(this._palette);
         } catch {
             this._palette = null;
         }
@@ -68,6 +72,8 @@ export class PaletteModule extends Signals.EventEmitter {
         this._paletteSettings.disconnectObject(this);
         this._theme.destroy();
         this._theme = null;
+        this._gtk.disable();
+        this._gtk = null;
         this._background = null;
         this._interface = null;
         this._paletteSettings = null;
@@ -103,6 +109,7 @@ export class PaletteModule extends Signals.EventEmitter {
         const json = JSON.stringify(palette);
         if (this._paletteSettings.get_string('current') !== json)
             this._paletteSettings.set_string('current', json);
+        this._gtk.setPalette(palette);
         await this._theme.update(palette);
         if (serial === this._serial)
             this.emit('changed', palette);
