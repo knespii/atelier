@@ -263,6 +263,38 @@ async function testTerminal(ext) {
     check(!list.get_strv('list').includes(uuid), 'Atelier profile removed');
 }
 
+async function testLiveProfile(ext, atelier) {
+    // glass: managed GTK theme and light style, icons left alone
+    await atelier._applier.apply(atelier._store.get('glass'), {animate: false});
+    await waitFor(() => !atelier._applier.busy, 6000);
+    await Scripting.sleep(1500); // let the sync see the applied settings first
+    const before = atelier._store.get('glass');
+
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const outside = '/usr/share/backgrounds/gnome/fold-l.jxl';
+    iface.set_string('gtk-theme', 'HighContrast');
+    iface.set_string('icon-theme', 'HighContrast');
+    background.set_string('picture-uri', Gio.File.new_for_path(outside).get_uri());
+    background.set_string('picture-uri-dark', Gio.File.new_for_path(outside).get_uri());
+    ext.stateObj._settings.get_child('palette').set_string('variant', 'muted');
+
+    check(await waitFor(() => atelier._store.get('glass').gtkTheme === 'HighContrast', 5000),
+        'GTK theme changed elsewhere is saved into the active profile');
+    const after = atelier._store.get('glass');
+    check(after.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`) &&
+        after.wallpaper.endsWith('.jxl'), `new wallpaper copied into the profile (${after.wallpaper})`);
+    check(after.iconTheme === before.iconTheme, 'fields left at "don\'t change" stay that way');
+    check(after.palette?.variant === 'muted', 'palette options saved too');
+
+    // Switching profiles doesn't leak settings into the next one.
+    await atelier._applier.apply(atelier._store.get('amber'), {animate: false});
+    await waitFor(() => !atelier._applier.busy, 6000);
+    await Scripting.sleep(1500);
+    check(atelier._store.get('amber').gtkTheme === null, 'other profiles untouched');
+    ext.stateObj._settings.get_child('palette').reset('variant');
+}
+
 async function testDisableCleansUp(atelier) {
     atelier.toggleSwitcher();
     await Scripting.sleep(300);
@@ -327,6 +359,7 @@ export async function run() {
         await testHostileShellTheme(atelier);
         await testGtkStyles(ext, atelier);
         await testTerminal(ext);
+        await testLiveProfile(ext, atelier);
         await testDisableCleansUp(atelier);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);

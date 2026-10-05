@@ -2,7 +2,8 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    ProfileStore, describeProfile, effectiveWallpaper, normalizeProfile, readCurrentAppearance,
+    ProfileStore, describeProfile, effectiveWallpaper, normalizePaletteOptions, normalizeProfile,
+    profileChanges, readCurrentAppearance,
 } from '../lib/profiles.js';
 import {importWallpaper, isInLibrary, prettyName, deleteWallpaperIfUnused} from '../lib/paths.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
@@ -140,4 +141,40 @@ export async function testImportCopiesIntoLibrary() {
     assert(!GLib.file_test(imported, GLib.FileTest.EXISTS), 'unused: deleted');
     await deleteWallpaperIfUnused(source, []);
     assert(GLib.file_test(source, GLib.FileTest.EXISTS), 'files outside the library are never deleted');
+}
+
+export function testPaletteOptions() {
+    assertEqual(normalizePaletteOptions(null), null);
+    assertEqual(normalizePaletteOptions({source: 'bogus', swatch: 12, preset: '', variant: 'loud'}),
+        {source: 'wallpaper', swatch: 7, preset: 'ochre', variant: 'vibrant'});
+    const profile = normalizeProfile({id: 'p', palette: {source: 'preset', preset: 'sea', variant: 'muted'}});
+    assertEqual(profile.palette, {source: 'preset', swatch: 0, preset: 'sea', variant: 'muted'});
+    assert(describeProfile(profile).some(p => p.label === 'Palette' && p.value === 'Sea, muted'));
+}
+
+export function testProfileChanges() {
+    const options = {source: 'wallpaper', swatch: 0, preset: 'ochre', variant: 'vibrant'};
+    const profile = normalizeProfile({
+        id: 'p', wallpaper: '/lib/a.jpg', colorScheme: 'prefer-dark', gtkTheme: 'Adwaita-dark',
+        iconTheme: null, accentColor: 'auto', palette: options,
+    });
+    const current = {
+        wallpaper: '/lib/a.jpg', wallpaperDark: null, pictureOptions: 'zoom', colorScheme: 'prefer-dark',
+        accentColor: 'teal', gtkTheme: 'Adwaita-dark', shellTheme: null, iconTheme: 'Conflux',
+        cursorTheme: 'Adwaita', font: 'Cantarell 11',
+    };
+    assertEqual(profileChanges(profile, current, options), {},
+        'nothing managed changed: unmanaged icons and the automatic accent are ignored');
+
+    assertEqual(profileChanges(profile, {...current, wallpaper: '/x/b.jpg', colorScheme: 'default'}, options),
+        {wallpaper: '/x/b.jpg', wallpaperDark: null, colorScheme: 'default'});
+    assertEqual(profileChanges(profile, {...current, wallpaperDark: '/x/night.jpg'}, options),
+        {wallpaper: '/lib/a.jpg', wallpaperDark: '/x/night.jpg'}, 'a new dark variant counts');
+    assertEqual(profileChanges(profile, current, {...options, variant: 'muted'}),
+        {palette: {...options, variant: 'muted'}});
+
+    const explicit = normalizeProfile({id: 'q', accentColor: 'blue'});
+    assertEqual(profileChanges(explicit, current, null), {accentColor: 'teal'}, 'explicit accents follow');
+    assertEqual(profileChanges(normalizeProfile({id: 'r'}), current, null), {},
+        'a profile without wallpaper doesn\'t pick one up');
 }

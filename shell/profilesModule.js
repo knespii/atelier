@@ -13,6 +13,7 @@ import {readCurrentAppearance} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
 import {ensureThumbnail} from '../lib/thumbnails.js';
 import {Applier} from './applier.js';
+import {ProfileSync} from './core/profileSync.js';
 import {Indicator} from './indicator.js';
 import {WallpaperTransition} from './reveal.js';
 import {ProfileSwitcher} from './switcher.js';
@@ -43,6 +44,12 @@ export class ProfilesModule {
     enable() {
         this._applier = new Applier(this._settings);
         this._applier.transition = new WallpaperTransition(this._settings);
+        this._sync = new ProfileSync({
+            settings: this._settings,
+            store: this._store,
+            isBusy: () => this._applier?.busy ?? false,
+        });
+        this._sync.enable();
 
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),
@@ -82,6 +89,8 @@ export class ProfilesModule {
         this._switcher = null;
         this._indicator?.destroy();
         this._indicator = null;
+        this._sync.disable();
+        this._sync = null;
         this._applier.destroy();
         this._applier = null;
         this._settings.disconnectObject(this);

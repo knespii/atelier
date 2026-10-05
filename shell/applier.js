@@ -123,7 +123,7 @@ export class Applier {
 
     async _resolve(profile, problems) {
         const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-        const plan = {background: null, iface: {}, shellTheme: null, gtkThemeDir: null};
+        const plan = {background: null, iface: {}, shellTheme: null, gtkThemeDir: null, palette: profile.palette};
         const scheme = profile.colorScheme ?? iface.get_string('color-scheme');
 
         if (profile.wallpaper) {
@@ -157,7 +157,7 @@ export class Applier {
                 const shown = plan.background?.shown.get_path();
                 accent = shown
                     ? (await paletteForWallpaper(shown,
-                        readPaletteOptions(this._settings.get_child('palette')))).accent
+                        profile.palette ?? readPaletteOptions(this._settings.get_child('palette')))).accent
                     : null;
             }
             if (isAccentColor(accent))
@@ -196,6 +196,19 @@ export class Applier {
     }
 
     _write(plan) {
+        // Palette options first, so the palette computed for the new
+        // wallpaper already uses them.
+        if (plan.palette) {
+            const palette = this._settings.get_child('palette');
+            palette.delay();
+            setIfChanged(palette, 'source', plan.palette.source);
+            if (palette.get_int('swatch') !== plan.palette.swatch)
+                palette.set_int('swatch', plan.palette.swatch);
+            setIfChanged(palette, 'preset', plan.palette.preset);
+            setIfChanged(palette, 'variant', plan.palette.variant);
+            palette.apply();
+        }
+
         // Background keys and color-scheme each make the shell reload the
         // wallpaper; writing them in one go lets it coalesce the reloads.
         if (plan.background) {
