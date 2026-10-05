@@ -17,6 +17,9 @@ import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js
 
 export const MODES = ['profiles', 'wallpapers'];
 
+/** Id of the card at the end of the Profiles tab that saves a new profile. */
+export const NEW_PROFILE = 'atelier-new-profile';
+
 // Logical pixels; multiplied by the scale factor where used.
 const CARD_WIDTH = 192;
 const CARD_HEIGHT = 120;
@@ -93,7 +96,18 @@ class AtelierCard extends St.Button {
 
         this.connect('destroy', () => (this._destroyed = true));
 
-        if (item.wallpaper && hasThumbnail(item.wallpaper))
+        if (item.id === NEW_PROFILE) {
+            this.add_style_class_name('atelier-card-new');
+            this._placeholder.hide();
+            content.add_child(new St.Icon({
+                style_class: 'atelier-card-new-icon',
+                icon_name: 'list-add-symbolic',
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+                x_expand: true,
+                y_expand: true,
+            }));
+        } else if (item.wallpaper && hasThumbnail(item.wallpaper))
             this._showThumbnail(thumbnailPath(item.wallpaper));
         else if (item.wallpaper)
             this._loadThumbnail(item.wallpaper);
@@ -122,6 +136,7 @@ class AtelierCard extends St.Button {
 export const SwitcherContent = GObject.registerClass({
     Signals: {
         'activate': {param_types: [GObject.TYPE_STRING, GObject.TYPE_STRING]},
+        'create': {},
         'mode-changed': {param_types: [GObject.TYPE_STRING]},
         'close-request': {},
     },
@@ -245,7 +260,10 @@ export const SwitcherContent = GObject.registerClass({
             return;
         this._data.profiles = {
             activeId,
-            items: profiles.map(p => ({id: p.id, name: p.name, wallpaper: p.wallpaper, profile: p})),
+            items: [
+                ...profiles.map(p => ({id: p.id, name: p.name, wallpaper: p.wallpaper, profile: p})),
+                {id: NEW_PROFILE, name: 'New profile', wallpaper: null},
+            ],
         };
         if (this._mode === 'profiles')
             this._rebuild();
@@ -318,16 +336,13 @@ export const SwitcherContent = GObject.registerClass({
             index = this._items.findIndex(item => item.id === data.activeId);
         this._selected = Math.max(0, index);
 
+        // The Profiles tab always has its "new profile" card.
         const empty = this._items.length === 0;
         this._viewport.visible = !empty;
         this._empty.visible = empty;
-        if (this._mode === 'profiles') {
-            this._empty.text = 'No profiles yet. Add them in the Atelier settings\n(Extensions → Atelier → ⚙).';
-        } else {
-            this._empty.text = data.loaded
-                ? `No pictures in ${home(data.folder)}.\nPut some there, or choose another folder in Atelier's settings.`
-                : 'Looking for pictures…';
-        }
+        this._empty.text = data.loaded
+            ? `No pictures in ${home(data.folder)}.\nPut some there, or choose another folder in Atelier's settings.`
+            : 'Looking for pictures…';
         this._select(this._selected, false);
     }
 
@@ -412,7 +427,16 @@ export const SwitcherContent = GObject.registerClass({
 
         this._name.text = item.name;
         this._dot.opacity = item.id === this._data[this._mode].activeId ? 255 : 0;
-        this._counter.text = `${this._selected + 1} / ${this._items.length}`;
+        if (item.id === NEW_PROFILE) {
+            this._counter.text = '';
+            this._chips.add_child(new St.Label({
+                style_class: 'atelier-chip',
+                text: 'Saves the wallpaper, style and themes you have now',
+            }));
+            return;
+        }
+        const count = this._items.filter(i => i.id !== NEW_PROFILE).length;
+        this._counter.text = `${this._selected + 1} / ${count}`;
         const parts = item.profile ? describeProfile(item.profile).slice(0, 4) : [];
         for (const {label, value} of parts) {
             this._chips.add_child(new St.Label({
@@ -426,7 +450,10 @@ export const SwitcherContent = GObject.registerClass({
         if (this._closing || !this._items[index])
             return;
         this._select(index);
-        this.emit('activate', this._mode, this._items[index].id);
+        if (this._items[index].id === NEW_PROFILE)
+            this.emit('create');
+        else
+            this.emit('activate', this._mode, this._items[index].id);
     }
 
     /**

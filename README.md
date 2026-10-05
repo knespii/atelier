@@ -23,13 +23,16 @@ widgets, notes, a dock) is on its way.
     <kbd>Enter</kbd>: the new wallpaper is revealed by a growing circle, then
     the themes and colors switch.
   - *Wallpapers* – the pictures in `~/Pictures/Wallpapers` (or another folder).
-    Picking one changes only the wallpaper; the active profile keeps it.
+    Picking one changes the wallpaper for now; no profile changes.
 
   <kbd>Tab</kbd> switches between the tabs.
-- **Live profiles**: while a profile is active, what you change is saved into
-  it – another wallpaper, light/dark, themes, palette options – whether you
-  change it in Atelier or in GNOME Settings. Settings a profile leaves at
-  "don't change" stay that way.
+- **Profiles stay as you saved them.** A wallpaper picked for a while, or
+  anything changed in GNOME Settings, leaves them alone; switching to a
+  profile brings its look back. To keep what you have now, pick the **+**
+  card at the end of the Profiles tab: it saves the wallpaper, style, themes
+  and palette as a new profile (rename it in the settings).
+- When you switch profiles, the island shows the profile's name right away
+  and the new wallpaper is revealed below it.
 - **Settings** live in the preferences: open *Extension Manager* (or
   *Extensions*) and click the gear next to Atelier.
 
@@ -121,7 +124,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks switching, the transition, the palette, GTK styles, terminal colors, live profiles and the Wallpapers tab; screenshots land in `tests/output/shell` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; screenshots land in `tests/output/shell` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make pack` | Builds `dist/atelier@local.shell-extension.zip` |
@@ -133,8 +136,9 @@ Layout:
 
 - `extension.js` – takes over BG Changer's data and starts the modules
 - `shell/` – runs inside GNOME Shell: `core/` (module manager, generated
-  styles, GTK and terminal colors, live profiles), the profiles module
-  (switcher, transition, applying profiles) and the palette module
+  styles, GTK and terminal colors), the profiles module (switcher,
+  transition, applying and saving profiles), the palette module and
+  `island/` (the island and its pages)
 - `prefs.js`, `prefs/` – the settings app (GTK 4 / libadwaita)
 - `lib/` – shared by both: profiles, palette, migration, theme discovery,
   thumbnails, GTK stylesheets, terminal profile

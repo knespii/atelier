@@ -3,7 +3,7 @@ import GLib from 'gi://GLib';
 
 import {
     ProfileStore, describeProfile, effectiveWallpaper, normalizePaletteOptions, normalizeProfile,
-    profileChanges, readCurrentAppearance,
+    readCurrentAppearance,
 } from '../lib/profiles.js';
 import {
     deleteWallpaperIfUnused, importWallpaper, isInLibrary, listWallpapers, prettyName, wallpaperFolder,
@@ -156,33 +156,6 @@ export function testPaletteOptions() {
     const profile = normalizeProfile({id: 'p', palette: {source: 'preset', preset: 'sea', variant: 'muted'}});
     assertEqual(profile.palette, {source: 'preset', swatch: 0, preset: 'sea', variant: 'muted'});
     assert(describeProfile(profile).some(p => p.label === 'Palette' && p.value === 'Sea, muted'));
-}
-
-export function testProfileChanges() {
-    const options = {source: 'wallpaper', swatch: 0, preset: 'ochre', variant: 'vibrant'};
-    const profile = normalizeProfile({
-        id: 'p', wallpaper: '/lib/a.jpg', colorScheme: 'prefer-dark', gtkTheme: 'Adwaita-dark',
-        iconTheme: null, accentColor: 'auto', palette: options,
-    });
-    const current = {
-        wallpaper: '/lib/a.jpg', wallpaperDark: null, pictureOptions: 'zoom', colorScheme: 'prefer-dark',
-        accentColor: 'teal', gtkTheme: 'Adwaita-dark', shellTheme: null, iconTheme: 'Conflux',
-        cursorTheme: 'Adwaita', font: 'Cantarell 11',
-    };
-    assertEqual(profileChanges(profile, current, options), {},
-        'nothing managed changed: unmanaged icons and the automatic accent are ignored');
-
-    assertEqual(profileChanges(profile, {...current, wallpaper: '/x/b.jpg', colorScheme: 'default'}, options),
-        {wallpaper: '/x/b.jpg', wallpaperDark: null, colorScheme: 'default'});
-    assertEqual(profileChanges(profile, {...current, wallpaperDark: '/x/night.jpg'}, options),
-        {wallpaper: '/lib/a.jpg', wallpaperDark: '/x/night.jpg'}, 'a new dark variant counts');
-    assertEqual(profileChanges(profile, current, {...options, variant: 'muted'}),
-        {palette: {...options, variant: 'muted'}});
-
-    const explicit = normalizeProfile({id: 'q', accentColor: 'blue'});
-    assertEqual(profileChanges(explicit, current, null), {accentColor: 'teal'}, 'explicit accents follow');
-    assertEqual(profileChanges(normalizeProfile({id: 'r'}), current, null), {},
-        'a profile without wallpaper doesn\'t pick one up');
 }
 
 export async function testListWallpapers() {

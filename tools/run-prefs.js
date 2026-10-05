@@ -109,6 +109,8 @@ async function runSelftest(window) {
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     check(added.gtkTheme === iface.get_string('gtk-theme') && added.font === iface.get_string('font-name'),
         `current themes captured (${added.gtkTheme}, ${added.font})`);
+    check(added.palette?.variant === store.settings.get_child('palette').get_string('variant'),
+        'and the palette options');
     check(added.wallpaper === null || added.wallpaper.includes('/atelier/wallpapers/') ||
         added.wallpaper.endsWith('.xml'), `wallpaper imported or referenced (${added.wallpaper})`);
     check(window.visible_dialog === null, 'editor closed after saving');

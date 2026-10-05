@@ -62,6 +62,20 @@
   border-color: -st-accent-color;
 }
 
+.atelier-card-new {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-card-new:hover {
+  background-color: rgba(255, 255, 255, 0.09);
+}
+
+.atelier-card-new-icon {
+  icon-size: 28px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .atelier-placeholder {
   color: rgba(255, 255, 255, 0.35);
   font-size: 28pt;

@@ -10,6 +10,7 @@ import {ProfileStore, describeProfile, readCurrentAppearance} from '../lib/profi
 import {deleteWallpaperIfUnused, importWallpaper, prettyName} from '../lib/paths.js';
 import {getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
+import {readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {ProfileEditor} from './profileEditor.js';
 import {chooseImages, createThumbnail, requestApply, toast} from './widgets.js';
 
@@ -184,7 +185,8 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
         // ~/.config/background (set by the wallpaper portal) has no useful name.
         const name = current.wallpaper && !current.wallpaper.endsWith('/.config/background')
             ? prettyName(current.wallpaper) : 'My Setup';
-        await this._openEditor(null, {...current, name});
+        const palette = readPaletteOptions(this._settings.get_child('palette'));
+        await this._openEditor(null, {...current, name, palette});
     }
 
     async _addWallpapers() {

@@ -1,6 +1,8 @@
 // The profiles feature: applying profiles, the switcher (profiles and the
 // wallpaper folder), its top bar button, shortcuts, requests from the
-// preferences, live profiles and the first-run "Original".
+// preferences, saving the current setup and the first-run "Original".
+// Profiles stay as they were saved: a wallpaper picked for now, or anything
+// changed in GNOME Settings, leaves them alone.
 
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
@@ -15,9 +17,9 @@ import {
 } from '../lib/paths.js';
 import {normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
-import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
+import {ensureThumbnail} from '../lib/thumbnails.js';
+import {readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {Applier} from './applier.js';
-import {ProfileSync} from './core/profileSync.js';
 import {Indicator} from './indicator.js';
 import {WallpaperTransition} from './reveal.js';
 import {SwitcherPopup} from './switcher.js';
@@ -42,6 +44,7 @@ export class ProfilesModule {
         this._switcher = null;
         this._indicator = null;
         this._originalPending = false;
+        this._saving = false;
         // The profile being switched to, until it is applied.
         this._target = null;
     }
@@ -54,12 +57,6 @@ export class ProfilesModule {
     enable() {
         this._applier = new Applier(this._settings);
         this._applier.transition = new WallpaperTransition(this._settings);
-        this._sync = new ProfileSync({
-            settings: this._settings,
-            store: this._store,
-            isBusy: () => this._applier?.busy ?? false,
-        });
-        this._sync.enable();
 
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),
@@ -102,8 +99,6 @@ export class ProfilesModule {
         this._indicator?.destroy();
         this._indicator = null;
         this._target = null;
-        this._sync.disable();
-        this._sync = null;
         this._applier.destroy();
         this._applier = null;
         this._settings.disconnectObject(this);
@@ -137,6 +132,7 @@ export class ProfilesModule {
             else
                 this._applyWallpaper(switcher, id);
         });
+        switcher.connect('create', () => this._saveFromSwitcher(switcher));
         switcher.connect('mode-changed', (_, tab) => {
             if (tab === 'wallpapers' && !switcher.wallpapersLoaded)
                 this._loadWallpapers(switcher);
@@ -201,44 +197,46 @@ export class ProfilesModule {
     }
 
     /**
-     * Show a picture of the wallpaper folder and keep it in the active profile.
+     * Show a picture of the wallpaper folder for now. Profiles keep their own
+     * wallpapers; switching to one brings its wallpaper back.
      *
-     * @param {Switcher} switcher
+     * @param {SwitcherContent} switcher
      * @param {string} path
      */
     async _applyWallpaper(switcher, path) {
         switcher.setActive(path);
-        let copy;
-        try {
-            // The profile keeps its own copy, like any wallpaper it stores.
-            copy = await importWallpaper(path);
-        } catch (e) {
-            Main.notifyError('Atelier', `Could not use ${prettyName(path)}: ${e.message}`);
-            switcher.close();
-            return;
-        }
-        if (!this._applier)
-            return;
-
-        const active = this._store.get(this._store.activeId);
-        const options = active?.pictureOptions ??
+        const options = this._store.get(this._store.activeId)?.pictureOptions ??
             new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-options');
         const wallpaperOnly = normalizeProfile({
-            id: 'atelier-wallpaper', name: prettyName(path), wallpaper: copy, pictureOptions: options,
+            id: 'atelier-wallpaper', name: prettyName(path), wallpaper: path, pictureOptions: options,
         });
-        if (active)
-            this._store.update(active.id, {wallpaper: copy, wallpaperDark: null});
-
         await this._applier.apply(wallpaperOnly, {onWritten: () => switcher.close(), keepActive: true})
             .finally(() => switcher.close());
+    }
 
-        // Once the desktop shows the new picture, drop copies nobody uses.
-        const profiles = this._store?.getAll() ?? [];
-        for (const old of [active?.wallpaper, active?.wallpaperDark]) {
-            if (old && old !== copy && await deleteWallpaperIfUnused(old, profiles))
-                removeThumbnail(old);
+    /**
+     * Save what the desktop shows now as a new profile and make it active.
+     *
+     * @param {SwitcherContent} switcher
+     */
+    async _saveFromSwitcher(switcher) {
+        if (this._saving)
+            return;
+        this._saving = true;
+        try {
+            const profile = await this._saveCurrentSetup();
+            if (!profile)
+                return;
+            this._store.activeId = profile.id;
+            const island = this._modules?.get('island');
+            if (!(island && await island.announceProfile(profile, {subtitle: 'New profile'})))
+                switcher.close();
+        } catch (e) {
+            Main.notifyError('Atelier', `Could not save the profile: ${e.message}`);
+            switcher.close();
+        } finally {
+            this._saving = false;
         }
-        ensureThumbnail(copy).catch(() => {});
     }
 
     _step(delta) {
@@ -284,6 +282,22 @@ export class ProfilesModule {
      * is always a way back.
      */
     async _createOriginalProfile() {
+        const profile = await this._saveCurrentSetup('Original');
+        if (!profile)
+            return;
+        this._store.activeId = profile.id;
+        // Only now: an interrupted first run is retried on the next enable.
+        this._settings.set_boolean('first-run-done', true);
+    }
+
+    /**
+     * Save what the desktop shows now as a profile. Its wallpapers are copied
+     * into the library, so it keeps working when the pictures move.
+     *
+     * @param {string} [name] - by default one made from the wallpaper
+     * @returns {Promise<object|null>} the profile; null if Atelier was turned off meanwhile
+     */
+    async _saveCurrentSetup(name = null) {
         const userThemesActive =
             Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
         const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
@@ -296,17 +310,39 @@ export class ProfilesModule {
         const wallpaperDark = wallpaper && current.wallpaperDark ? await copy(current.wallpaperDark) : null;
 
         if (!this._applier) {
-            // Disabled meanwhile: drop the copies, the next enable starts over.
+            // Turned off meanwhile: drop new copies (files profiles use stay).
+            const profiles = this._store.getAll();
             for (const path of [wallpaper, wallpaperDark].filter(Boolean))
-                await deleteWallpaperIfUnused(path, []).catch(() => {});
-            return;
+                await deleteWallpaperIfUnused(path, profiles).catch(() => {});
+            return null;
         }
 
-        const profile = this._store.add({...current, wallpaper, wallpaperDark, name: 'Original'});
-        this._store.activeId = profile.id;
-        // Only now: an interrupted first run is retried on the next enable.
-        this._settings.set_boolean('first-run-done', true);
+        const profile = this._store.add({
+            ...current,
+            wallpaper,
+            wallpaperDark,
+            palette: readPaletteOptions(this._settings.get_child('palette')),
+            name: name ?? this._nameFor(current.wallpaper),
+        });
         if (wallpaper)
             ensureThumbnail(wallpaper).catch(() => {});
+        return profile;
+    }
+
+    /**
+     * @param {string|null} wallpaper
+     * @returns {string} a profile name not used yet, after the wallpaper if it has a useful name
+     */
+    _nameFor(wallpaper) {
+        let base = wallpaper ? prettyName(wallpaper) : 'Profile';
+        // Camera file names ("DJI 20261001…") and the wallpaper portal's
+        // ~/.config/background say nothing.
+        if (/\d{5,}/.test(base) || wallpaper?.endsWith('/.config/background'))
+            base = 'Profile';
+        const names = new Set(this._store.getAll().map(profile => profile.name));
+        let name = base;
+        for (let i = 2; names.has(name); i++)
+            name = `${base} ${i}`;
+        return name;
     }
 }

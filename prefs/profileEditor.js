@@ -382,6 +382,10 @@ class AtelierProfileEditor extends Adw.Dialog {
                 font: this._fontRow.enable_expansion ? this._fontButton.font_desc.to_string() : null,
             };
 
+            // A profile saved from the current setup keeps its palette too.
+            if (!this._profile && this._draft.palette)
+                fields.palette = this._draft.palette;
+
             if (this._profile) {
                 const {wallpaper: previous, wallpaperDark: previousDark} = this._profile;
                 this._store.update(this._profile.id, fields);

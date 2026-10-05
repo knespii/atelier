@@ -544,40 +544,32 @@ async function testTerminal(ext) {
     check(!list.get_strv('list').includes(uuid), 'Atelier profile removed');
 }
 
-async function testLiveProfile(ext, atelier) {
-    // glass: managed GTK theme and light style, icons left alone
+async function testProfilesStayAsSaved(ext, atelier) {
     await atelier._applier.apply(atelier._store.get('glass'), {animate: false});
     await waitFor(() => !atelier._applier.busy, 6000);
-    await Scripting.sleep(1500); // let the sync see the applied settings first
-    const before = atelier._store.get('glass');
+    const before = JSON.stringify(atelier._store.get('glass'));
+    const count = atelier._store.getAll().length;
 
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
-    const outside = '/usr/share/backgrounds/gnome/fold-l.jxl';
+    const outside = uriOf('/usr/share/backgrounds/gnome/fold-l.jxl');
     iface.set_string('gtk-theme', 'HighContrast');
-    iface.set_string('icon-theme', 'HighContrast');
-    background.set_string('picture-uri', Gio.File.new_for_path(outside).get_uri());
-    background.set_string('picture-uri-dark', Gio.File.new_for_path(outside).get_uri());
+    background.set_string('picture-uri', outside);
+    background.set_string('picture-uri-dark', outside);
     ext.stateObj._settings.get_child('palette').set_string('variant', 'muted');
+    await Scripting.sleep(2000);
 
-    check(await waitFor(() => atelier._store.get('glass').gtkTheme === 'HighContrast', 5000),
-        'GTK theme changed elsewhere is saved into the active profile');
-    const after = atelier._store.get('glass');
-    check(after.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`) &&
-        after.wallpaper.endsWith('.jxl'), `new wallpaper copied into the profile (${after.wallpaper})`);
-    check(after.iconTheme === before.iconTheme, 'fields left at "don\'t change" stay that way');
-    check(after.palette?.variant === 'muted', 'palette options saved too');
-
-    // Switching profiles doesn't leak settings into the next one.
-    await atelier._applier.apply(atelier._store.get('amber'), {animate: false});
-    await waitFor(() => !atelier._applier.busy, 6000);
-    await Scripting.sleep(1500);
-    check(atelier._store.get('amber').gtkTheme === null, 'other profiles untouched');
+    check(JSON.stringify(atelier._store.get('glass')) === before,
+        'changes made elsewhere leave the active profile as saved');
+    check(atelier._store.getAll().length === count && atelier._store.activeId === 'glass',
+        'no profile is created and the active one stays');
     ext.stateObj._settings.get_child('palette').reset('variant');
 }
 
 async function testWallpapersTab(atelier) {
     const activeBefore = atelier._store.activeId;
+    const profileBefore = JSON.stringify(atelier._store.get(activeBefore));
+    const countBefore = atelier._store.getAll().length;
     atelier.toggleSwitcher('wallpapers');
     check(await waitFor(() => atelier._switcher?.wallpapersLoaded, 3000), 'Wallpapers tab lists the folder');
     const switcher = atelier._switcher;
@@ -587,21 +579,49 @@ async function testWallpapersTab(atelier) {
     await screenshot('09-wallpapers-tab');
 
     switcher.setMode('profiles');
-    check(switcher.mode === 'profiles' && switcher._cards.length === atelier._store.getAll().length,
-        'Tab back to profiles');
+    check(switcher.mode === 'profiles' && switcher._cards.length === atelier._store.getAll().length + 1,
+        'Tab back to profiles (and the "new profile" card)');
     switcher.setMode('wallpapers');
     const pills = switcher._items.findIndex(item => item.id.endsWith('pills.jxl'));
+    const picture = switcher._items[pills].id;
     switcher._activate(pills);
     check(await waitFor(() => atelier._switcher === null, 5000), 'switcher closes after picking a wallpaper');
     await waitFor(() => !atelier._applier.busy, 6000);
 
     const uri = new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-uri');
-    const active = atelier._store.get(activeBefore);
-    check(uri.includes('/atelier/wallpapers/') && uri.endsWith('-pills.jxl'),
-        `desktop shows a library copy of the picture (${uri})`);
+    check(uri === uriOf(picture), `the desktop shows the picture for now (${uri})`);
     check(atelier._store.activeId === activeBefore, 'the active profile stays active');
-    check(active.wallpaper && uri === Gio.File.new_for_path(active.wallpaper).get_uri(),
-        'and keeps the new wallpaper');
+    check(JSON.stringify(atelier._store.get(activeBefore)) === profileBefore, 'and keeps its own wallpaper');
+    check(atelier._store.getAll().length === countBefore, 'no profile is created');
+}
+
+async function testNewProfile(ext, atelier) {
+    // What the desktop shows now (the picture from the Wallpapers tab).
+    const count = atelier._store.getAll().length;
+    atelier.toggleSwitcher();
+    await Scripting.sleep(400);
+    const switcher = atelier._switcher;
+    const last = switcher._cards.length - 1;
+    check(switcher._items[last]?.id === 'atelier-new-profile', 'the Profiles tab ends with a "new profile" card');
+    switcher._select(last);
+    await Scripting.sleep(400);
+    await screenshotIsland('17-switcher-new-profile', 300);
+
+    switcher._activate(last);
+    check(await waitFor(() => atelier._store.getAll().length === count + 1, 3000), 'it saves a new profile');
+    const added = atelier._store.getAll().at(-1);
+    check(added.name === 'Pills' && atelier._store.activeId === added.id,
+        `named after the wallpaper and active (${added.name})`);
+    check(added.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`),
+        `with its own copy of the wallpaper (${added.wallpaper})`);
+    const palette = ext.stateObj._settings.get_child('palette');
+    check(added.palette?.variant === palette.get_string('variant') && added.gtkTheme === 'HighContrast',
+        'and the palette and themes in use');
+    const island = ext.stateObj.modules.get('island').island;
+    check(await waitFor(() => hasClass(island.page, 'atelier-toast') && island.page.title === added.name, 2000),
+        'the island announces it');
+    check(await waitFor(() => atelier._switcher === null, 2000), 'in place of the switcher');
+    await waitFor(() => island.page === null, 4000);
 }
 
 async function testDisableCleansUp(atelier) {
@@ -678,8 +698,9 @@ export async function run() {
         await testHostileShellTheme(atelier);
         await testGtkStyles(ext, atelier);
         await testTerminal(ext);
-        await testLiveProfile(ext, atelier);
+        await testProfilesStayAsSaved(ext, atelier);
         await testWallpapersTab(atelier);
+        await testNewProfile(ext, atelier);
         await testDisableCleansUp(atelier);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
