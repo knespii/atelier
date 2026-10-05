@@ -1,0 +1,10 @@
+{
+  "uuid": "bg-changer@local",
+  "name": "BG Changer",
+  "description": "Save looks (wallpaper, GTK and shell theme, icons, cursor, font, accent color) and switch between them from a quick picker.",
+  "shell-version": [
+    "48"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.bg-changer",
+  "version-name": "0.1.0"
+}
