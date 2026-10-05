@@ -56,6 +56,10 @@ picture-uri-dark='file://$LEGACY_WALLPAPER'
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
 
+[org/gnome/terminal/legacy/profiles:]
+list=['b1dcc9dd-5262-4d8d-a863-c897e6d979b9']
+default='b1dcc9dd-5262-4d8d-a863-c897e6d979b9'
+
 # Seeded as BG Changer data, so Atelier has to take it over on start.
 [org/gnome/shell/extensions/bg-changer]
 looks='$PROFILES'
@@ -69,7 +73,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
     GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" \
-    dbus-run-session -- timeout --kill-after=5 120 \
+    dbus-run-session -- timeout --kill-after=5 180 \
     gnome-shell --headless --virtual-monitor 1920x1080 --no-x11 \
         --wayland-display=atelier-test-0 --force-animations \
         --automation-script="$REPO/tools/shell-test.js" \

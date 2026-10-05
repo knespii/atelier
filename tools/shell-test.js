@@ -235,6 +235,34 @@ async function testGtkStyles(ext, atelier) {
         'turning colors off removes the generated files');
 }
 
+async function testTerminal(ext) {
+    const ORIGINAL = 'b1dcc9dd-5262-4d8d-a863-c897e6d979b9';
+    const list = new Gio.Settings({schema_id: 'org.gnome.Terminal.ProfilesList'});
+    const palette = ext.stateObj._settings.get_child('palette');
+    const paletteModule = ext.stateObj.modules.get('palette');
+    const profile = uuid => new Gio.Settings({
+        settings_schema: Gio.SettingsSchemaSource.get_default().lookup('org.gnome.Terminal.Legacy.Profile', true),
+        path: `/org/gnome/terminal/legacy/profiles:/:${uuid}/`,
+    });
+
+    palette.set_boolean('terminal', true);
+    check(await waitFor(() => palette.get_string('terminal-profile') !== '', 3000), 'terminal profile created');
+    const uuid = palette.get_string('terminal-profile');
+    check(list.get_string('default') === uuid, 'Atelier profile is the default terminal profile');
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = () => (iface.get_string('color-scheme') === 'prefer-dark' ? 'dark' : 'light');
+    check(await waitFor(() => profile(uuid).get_string('background-color') ===
+        paletteModule.palette[scheme()].surface, 3000), 'terminal background from the palette');
+
+    iface.set_string('color-scheme', scheme() === 'dark' ? 'default' : 'prefer-dark');
+    check(await waitFor(() => profile(uuid).get_string('background-color') ===
+        paletteModule.palette[scheme()].surface, 3000), 'terminal follows light/dark');
+
+    palette.set_boolean('terminal', false);
+    check(await waitFor(() => list.get_string('default') === ORIGINAL, 3000), 'previous terminal profile restored');
+    check(!list.get_strv('list').includes(uuid), 'Atelier profile removed');
+}
+
 async function testDisableCleansUp(atelier) {
     atelier.toggleSwitcher();
     await Scripting.sleep(300);
@@ -262,8 +290,9 @@ export async function run() {
         // The session starts in the overview; begin on the desktop.
         Main.overview.hide();
         await waitFor(() => !Main.overview.visible, 4000);
-        // Extensions load after startup; on a busy machine that can take a moment.
-        await waitFor(() => Main.extensionManager.lookup(UUID)?.state === ExtensionState.ACTIVE, 8000);
+        // Extensions load a few seconds after startup (longer on a busy
+        // machine), and Atelier starts its modules once BG Changer's data is in.
+        await waitFor(() => Main.extensionManager.lookup(UUID)?.stateObj?.modules?.get('profiles'), 30000);
         const ext = Main.extensionManager.lookup(UUID);
         if (!ext)
             results.push(`INFO  loaded extensions: ${Main.extensionManager.getUuids().join(', ')}`);
@@ -297,6 +326,7 @@ export async function run() {
         await testFromOverview(atelier);
         await testHostileShellTheme(atelier);
         await testGtkStyles(ext, atelier);
+        await testTerminal(ext);
         await testDisableCleansUp(atelier);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
