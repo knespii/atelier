@@ -2,14 +2,17 @@
 // shape. At rest it shows the time; it grows into whatever page it shows
 // (a glance, a toast, the switcher, the power menu…) and back.
 //
-// A page is any widget that emits 'close-request' when it wants to go away,
-// and 'resized', if it has that signal, when its content changed size. It
-// may also implement handleKeyPress(event) and handleScroll(event), which
+// A page is any widget that emits 'close-request' when it wants to go away.
+// The island follows its size when its content changes (a menu unfolding
+// in it, say); a page may also emit 'resized' to have the change animated.
+// It may implement handleKeyPress(event) and handleScroll(event), which
 // return whether they handled the event, and focus(), called when it opens
 // with the keyboard.
 
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -169,7 +172,11 @@ export const Island = GObject.registerClass({
         if (old !== page) {
             old?.disconnectObject(this);
             this._page = page;
-            page.connectObject('close-request', () => this.close(page), this);
+            page.connectObject(
+                'close-request', () => this.close(page),
+                'notify::height', () => this._queueFollow(),
+                'notify::width', () => this._queueFollow(),
+                this);
             if (GObject.signal_lookup('resized', page.constructor.$gtype)) {
                 page.connectObject('resized', () => {
                     if (this._shown === page)
@@ -259,6 +266,27 @@ export const Island = GObject.registerClass({
         });
     }
 
+    // The page is allocated at its natural size whatever the island's size,
+    // so a change of its allocation is a change of its content.
+    _queueFollow() {
+        if (this._followId || this._destroyed)
+            return;
+        this._followId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._followId = 0;
+            const page = this._shown;
+            if (page === this._idle || this._destroyed)
+                return GLib.SOURCE_REMOVE;
+            const [, width] = page.get_preferred_width(-1);
+            const [, height] = page.get_preferred_height(width);
+            if (Math.abs(Math.ceil(width) - this.width) >= 1 || Math.abs(Math.ceil(height) - this.height) >= 1) {
+                // Still growing into the page: aim the animation anew;
+                // otherwise follow the content right away.
+                this._resize(page, Boolean(this.get_transition('height') || this.get_transition('width')));
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _isOutside(event) {
         return !this.contains(global.stage.get_event_actor(event));
     }
@@ -307,6 +335,9 @@ export const Island = GObject.registerClass({
 
     _onDestroy() {
         this._destroyed = true;
+        if (this._followId)
+            global.compositor.get_laters().remove(this._followId);
+        this._followId = 0;
         this._releaseGrab();
         this._page?.disconnectObject(this);
         this._page = null;
