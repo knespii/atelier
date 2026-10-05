@@ -257,17 +257,23 @@ async function testIsland(ext, atelier) {
     check(await waitFor(() => island.page === null && !island.busy, 1000), 'so does a click outside');
     check(calls.length === 1, `nothing else ran (${calls})`);
 
-    // A toast when the profile changes (not right after start).
-    await waitFor(() => GLib.get_monotonic_time() - module._startedAt > 3500000, 5000);
-    const target = atelier._store.getAll().find(p => ['amber', 'glass'].includes(p.id) && p.id !== atelier._store.activeId);
-    await atelier._applier.apply(target, {animate: false});
-    check(await waitFor(() => hasClass(island.page, 'atelier-toast'), 2000), 'switching profiles shows a toast');
-    check(island.page?.title === target.name, `with the profile's name (${island.page?.title})`);
-    await Scripting.sleep(500);
+    // Switching profiles: the island announces it at once, and the work
+    // starts once the announcement is open.
+    const others = () => atelier._store.getAll()
+        .filter(p => ['amber', 'glass'].includes(p.id) && p.id !== atelier._store.activeId);
+    const target = others()[0];
+    const switching = atelier._switchTo(target);
+    await Scripting.sleep(40);
+    check(hasClass(island.page, 'atelier-toast') && island.page.title === target.name,
+        `switching profiles shows a toast at once (${island.page?.title})`);
+    check(atelier._store.activeId !== target.id && !atelier._applier.busy, 'before the work starts');
+    await Scripting.sleep(400);
     await screenshotIsland('14-island-toast', 120);
+    await switching;
+    check(atelier._store.activeId === target.id, 'then the profile is applied');
     check(await waitFor(() => island.page === null, 4000), 'the toast goes away by itself');
 
-    // The switcher opens inside the island.
+    // The switcher opens inside the island…
     atelier.toggleSwitcher();
     await Scripting.sleep(500);
     check(hasClass(atelier._switcher?.get_parent(), 'atelier-island-switcher') && island.busy,
@@ -275,6 +281,19 @@ async function testIsland(ext, atelier) {
     await screenshotIsland('15-island-switcher', 300);
     atelier._switcher.close();
     check(await waitFor(() => atelier._switcher === null && island.page === null, 2000), 'and closes back into it');
+
+    // …and turns into the toast when a profile is picked.
+    atelier.toggleSwitcher();
+    await Scripting.sleep(500);
+    const pick = others()[0];
+    atelier._switcher._activate(atelier._store.getAll().findIndex(p => p.id === pick.id));
+    await Scripting.sleep(40);
+    check(hasClass(island.page, 'atelier-toast') && island.page.title === pick.name && !island.busy,
+        'picking a profile turns the switcher into the toast');
+    check(await waitFor(() => atelier._switcher === null, 1000), 'the switcher is gone');
+    check(await waitFor(() => atelier._store.activeId === pick.id && !atelier._applier.busy, 6000),
+        'and the profile is applied');
+    await waitFor(() => island.page === null, 4000);
 
     // Microphone and Do Not Disturb next to the time.
     const mic = module._mic;
@@ -325,13 +344,12 @@ async function testSwitcherAndReveal(atelier) {
 
     atelier._switcher._activate(index);
     const duration = atelier._settings.get_uint('transition-duration');
-    await Scripting.sleep(Math.round(duration * 0.5));
-    check(overlayCount() > 0, 'reveal overlay is on screen during the transition');
+    check(await waitFor(() => atelier._switcher === null, 1000), 'the switcher gives way to the toast');
+    check(await waitFor(() => overlayCount() > 0, 3000), 'reveal overlay is on screen during the transition');
+    await Scripting.sleep(Math.round(duration * 0.4));
     await screenshot('04-reveal-half');
 
-    check(await waitFor(() => atelier._switcher === null, duration + 3000),
-        'switcher closes after the reveal');
-    check(await waitFor(() => !atelier._applier.busy, 6000), 'apply finished');
+    check(await waitFor(() => !atelier._applier.busy, duration + 6000), 'apply finished');
     await Scripting.sleep(300);
     check(overlayCount() === 0, `overlay removed (extra actors: ${overlayCount()})`);
     await screenshot('05-applied');
@@ -398,8 +416,8 @@ async function testShortcutsAndRequests(atelier) {
     // Two quick presses while the first profile is still being applied move two steps.
     atelier._step(1); // glass -> hostile
     atelier._step(1); // hostile -> modern
-    await waitFor(() => !atelier._applier.busy, 8000);
-    check(atelier._store.activeId === 'modern', 'quick next presses each move one step');
+    check(await waitFor(() => atelier._store.activeId === 'modern' && !atelier._applier.busy, 8000),
+        `quick next presses each move one step (${atelier._store.activeId})`);
 
     atelier._settings.set_string('apply-request', JSON.stringify({id: 'amber', nonce: GLib.uuid_string_random()}));
     check(await waitFor(() => atelier._store.activeId === 'amber', 5000), 'apply-request from preferences works');
@@ -591,7 +609,7 @@ async function testDisableCleansUp(atelier) {
     await Scripting.sleep(300);
     // Disable mid-transition: everything must be torn down.
     atelier._switcher._activate(0);
-    await Scripting.sleep(200);
+    await waitFor(() => overlayCount() > 0, 3000);
     Main.extensionManager.disableExtension(UUID);
     await Scripting.sleep(500);
     const ext = Main.extensionManager.lookup(UUID);

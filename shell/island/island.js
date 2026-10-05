@@ -14,7 +14,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const MORPH_TIME = 280;
+/** How long the island takes to change shape, in milliseconds. */
+export const MORPH_TIME = 280;
 const FADE_OUT_TIME = 90;
 const FADE_IN_TIME = 170;
 const FADE_IN_DELAY = 70;

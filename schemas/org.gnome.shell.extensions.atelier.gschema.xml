@@ -154,7 +154,7 @@
     </key>
     <key name="profile-toast" type="b">
       <default>true</default>
-      <summary>Show the profile's name in the island when it changes</summary>
+      <summary>Show the profile's name in the island when switching to it</summary>
     </key>
     <key name="atelier-power-menu" type="as">
       <default>[]</default>

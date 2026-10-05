@@ -20,7 +20,7 @@ import {CalendarBridge} from './calendar.js';
 import {GlancePage} from './glance.js';
 import {IdleView} from './idle.js';
 import {MicWatcher, UnseenWatcher} from './indicators.js';
-import {Island} from './island.js';
+import {Island, MORPH_TIME} from './island.js';
 import {SwitcherPage} from './page.js';
 import {POWER_ACTIONS, PowerPage} from './power.js';
 import {ToastPage} from './toast.js';
@@ -29,8 +29,6 @@ export const SLOT_ROLE = 'atelier-island';
 
 const GLANCE_DELAY = 300;
 const GLANCE_HIDE_DELAY = 250;
-// The active profile is only restored right after start; that's no news.
-const QUIET_START = 3000;
 // Height of the capsule at rest, logical pixels: the top bar's height minus
 // a margin, within these bounds.
 const IDLE_MARGIN = 3;
@@ -62,14 +60,12 @@ export class IslandModule {
     /**
      * @param {object} context
      * @param {Gio.Settings} context.settings
-     * @param {ProfileStore} context.store
      */
-    constructor({settings, store}) {
+    constructor({settings}) {
         this._settings = settings;
-        this._store = store;
         this._timeouts = new Map();
+        this._waits = new Map();
         this._laterId = 0;
-        this._pendingToast = null;
         this._glanceBlocked = false;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
@@ -105,13 +101,10 @@ export class IslandModule {
             'changed', () => this._queueLayout(true),
             'notify::scale-factor', () => this._queueLayout(true),
             this);
-        this._settings.connectObject('changed::active-profile', () => this._onProfileChanged(), this);
-
         Main.wm.addKeybinding('atelier-power-menu', this._islandSettings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this.togglePowerMenu());
 
-        this._startedAt = GLib.get_monotonic_time();
         this._queueLayout();
     }
 
@@ -119,11 +112,16 @@ export class IslandModule {
         Main.wm.removeKeybinding('atelier-power-menu');
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
+        // Whoever waits for an announcement goes on without it.
+        this._waits.forEach((resolve, id) => {
+            GLib.source_remove(id);
+            resolve(false);
+        });
+        this._waits.clear();
         if (this._laterId)
             global.compositor.get_laters().remove(this._laterId);
         this._laterId = 0;
 
-        this._settings.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         Main.layoutManager.panelBox.disconnectObject(this);
         this._calendar?.disable();
@@ -138,7 +136,6 @@ export class IslandModule {
         this._mic = null;
         this._unseen?.destroy();
         this._unseen = null;
-        this._pendingToast = null;
     }
 
     /**
@@ -163,6 +160,34 @@ export class IslandModule {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Show a profile's name in the island, e.g. when switching to it. An open
+     * switcher turns into the announcement.
+     *
+     * @param {object} profile
+     * @param {object} [options]
+     * @param {string} [options.subtitle]
+     * @returns {Promise<boolean>} resolves once the announcement is open, or
+     *   with false right away when there is none (turned off, other modal page)
+     */
+    announceProfile(profile, {subtitle = 'Profile'} = {}) {
+        const island = this._island;
+        if (!island?.visible || !this._slot.mapped || !this._islandSettings.get_boolean('profile-toast'))
+            return Promise.resolve(false);
+        if (island.busy && !(island.page instanceof SwitcherPage))
+            return Promise.resolve(false);
+
+        this._clearTimeout('show-glance');
+        const scheme = profile.colorScheme ??
+            new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
+        island.open(new ToastPage({
+            title: profile.name,
+            subtitle,
+            wallpaper: effectiveWallpaper(profile, scheme),
+        }));
+        return this._wait(MORPH_TIME);
     }
 
     /** Open the power menu, or close it when it's open. */
@@ -242,45 +267,9 @@ export class IslandModule {
     }
 
     _onPageClosed() {
-        const island = this._island;
-        if (island.page)
-            return; // another page took its place
-        if (this._pendingToast) {
-            const profile = this._store.get(this._pendingToast);
-            this._pendingToast = null;
-            if (profile) {
-                this._showToast(profile);
-                return;
-            }
-        }
-        if (island.hover)
+        // Back at rest under the pointer: the glance may follow.
+        if (!this._island.page && this._island.hover)
             this._onHover();
-    }
-
-    _onProfileChanged() {
-        if (!this._islandSettings.get_boolean('profile-toast'))
-            return;
-        if (GLib.get_monotonic_time() - this._startedAt < QUIET_START * 1000)
-            return;
-        const profile = this._store.get(this._store.activeId);
-        if (!profile)
-            return;
-        // The switcher (or another modal page) finishes first.
-        if (this._island.busy)
-            this._pendingToast = profile.id;
-        else
-            this._showToast(profile);
-    }
-
-    _showToast(profile) {
-        this._clearTimeout('show-glance');
-        const scheme = profile.colorScheme ??
-            new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
-        this._island.open(new ToastPage({
-            title: profile.name,
-            subtitle: 'Profile',
-            wallpaper: effectiveWallpaper(profile, scheme),
-        }));
     }
 
     /**
@@ -328,6 +317,17 @@ export class IslandModule {
             callback();
             return GLib.SOURCE_REMOVE;
         }));
+    }
+
+    _wait(delay) {
+        return new Promise(resolve => {
+            const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                this._waits.delete(id);
+                resolve(true);
+                return GLib.SOURCE_REMOVE;
+            });
+            this._waits.set(id, resolve);
+        });
     }
 
     _clearTimeout(name) {

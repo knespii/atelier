@@ -42,6 +42,8 @@ export class ProfilesModule {
         this._switcher = null;
         this._indicator = null;
         this._originalPending = false;
+        // The profile being switched to, until it is applied.
+        this._target = null;
     }
 
     /** @returns {Applier} applies profiles; other modules may use it */
@@ -99,6 +101,7 @@ export class ProfilesModule {
         this._switcher = null;
         this._indicator?.destroy();
         this._indicator = null;
+        this._target = null;
         this._sync.disable();
         this._sync = null;
         this._applier.destroy();
@@ -166,10 +169,35 @@ export class ProfilesModule {
         if (!profile)
             return;
         switcher.setActive(id);
-        // Keep the panel up while the new wallpaper is revealed, like a
-        // dynamic island, and close it once the profile is in place.
-        this._applier.apply(profile, {onWritten: () => switcher.close()})
-            .finally(() => switcher.close());
+        this._switchTo(profile, switcher).catch(e => console.error('Atelier: switching failed', e));
+    }
+
+    /**
+     * Switch to a profile. The island announces it first (the switcher, if
+     * open, turns into the announcement) and the heavy part – wallpaper,
+     * themes, colors – starts once that has opened, so it opens right away
+     * and smoothly. Without the island, the switcher stays up while the new
+     * wallpaper is revealed and closes once the profile is in place.
+     *
+     * @param {object} profile
+     * @param {SwitcherContent} [switcher]
+     */
+    async _switchTo(profile, switcher = null) {
+        this._target = profile.id;
+        const island = this._modules?.get('island');
+        const announced = island ? await island.announceProfile(profile) : false;
+        // A newer switch took over meanwhile, or Atelier was turned off.
+        if (this._target !== profile.id || !this._applier)
+            return;
+
+        const close = () => switcher?.close();
+        try {
+            await this._applier.apply(profile, announced ? {} : {onWritten: close});
+        } finally {
+            close();
+            if (this._target === profile.id)
+                this._target = null;
+        }
     }
 
     /**
@@ -217,14 +245,14 @@ export class ProfilesModule {
         const profiles = this._store.getAll();
         if (profiles.length === 0)
             return;
-        // While a profile is still being applied, step from it rather than from
-        // the active one, so quick presses don't apply the same profile twice.
-        const from = this._applier.targetId ?? this._store.activeId;
+        // While a profile is still on its way, step from it rather than from
+        // the active one, so quick presses move one profile each.
+        const from = this._target ?? this._applier.targetId ?? this._store.activeId;
         const current = profiles.findIndex(profile => profile.id === from);
         const index = current < 0
             ? (delta > 0 ? 0 : profiles.length - 1)
             : (current + delta + profiles.length) % profiles.length;
-        this._applier.apply(profiles[index]);
+        this._switchTo(profiles[index]).catch(e => console.error('Atelier: switching failed', e));
     }
 
     _onApplyRequest() {
@@ -236,7 +264,7 @@ export class ProfilesModule {
         }
         const profile = request?.id ? this._store.get(request.id) : null;
         if (profile)
-            this._applier.apply(profile);
+            this._switchTo(profile).catch(e => console.error('Atelier: switching failed', e));
     }
 
     _syncIndicator() {
