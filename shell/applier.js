@@ -56,10 +56,12 @@ export class Applier {
      * @param {object} look
      * @param {object} [options]
      * @param {boolean} [options.animate] - play the wallpaper transition
-     * @returns {Promise<void>}
+     * @param {Function} [options.onWritten] - called once the settings are
+     *   written (after the transition, before GNOME finished updating)
+     * @returns {Promise<void>} resolves when no request is left
      */
-    apply(look, {animate = true} = {}) {
-        this._next = {look, animate};
+    apply(look, {animate = true, onWritten = null} = {}) {
+        this._next = {look, animate, onWritten};
         this._running ??= this._drain().finally(() => {
             this._running = null;
         });
@@ -68,10 +70,10 @@ export class Applier {
 
     async _drain() {
         while (this._next && !this._destroyed) {
-            const {look, animate} = this._next;
+            const {look, animate, onWritten} = this._next;
             this._next = null;
             try {
-                await this._applyOne(look, animate);
+                await this._applyOne(look, animate, onWritten);
             } catch (e) {
                 console.error(`BG Changer: applying “${look.name}” failed`, e);
                 Main.notifyError('BG Changer', `Could not apply “${look.name}”: ${e.message}`);
@@ -79,7 +81,7 @@ export class Applier {
         }
     }
 
-    async _applyOne(look, animate) {
+    async _applyOne(look, animate, onWritten) {
         const problems = [];
         const plan = await this._resolve(look, problems);
         if (this._destroyed)
@@ -95,6 +97,7 @@ export class Applier {
 
         this._write(plan);
         this._store.activeId = look.id;
+        onWritten?.();
 
         const notes = await this._syncGtk4(look, plan, problems);
         await finishTransition?.();
