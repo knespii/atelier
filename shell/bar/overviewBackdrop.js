@@ -17,7 +17,9 @@ const BLUR_BRIGHTNESS = 0.6;
 export class OverviewBackdrop {
     constructor() {
         this.actor = new Clutter.Actor({name: 'atelier-overview-backdrop', reactive: false});
-        // Under everything the overview shows.
+        // Under everything the overview shows, and never where a dragged
+        // window is dropped.
+        Shell.util_set_hidden_from_pick(this.actor, true);
         Main.layoutManager.overviewGroup.insert_child_at_index(this.actor, 0);
         this._managers = [];
 

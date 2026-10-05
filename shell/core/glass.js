@@ -77,6 +77,10 @@ class AtelierGlassSurface extends St.Widget {
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
+        // As big as the top of the monitor and above the overview: dragging
+        // a window onto a workspace looks for the target among all actors,
+        // reactive or not, and must not find this one.
+        Shell.util_set_hidden_from_pick(this, true);
         this._monitorIndex = monitorIndex;
         this._reach = reach;
         this._shape = null;
