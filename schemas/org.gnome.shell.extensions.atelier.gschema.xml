@@ -20,6 +20,7 @@
   <schema id="org.gnome.shell.extensions.atelier"
           path="/org/gnome/shell/extensions/atelier/">
     <child name="palette" schema="org.gnome.shell.extensions.atelier.palette"/>
+    <child name="island" schema="org.gnome.shell.extensions.atelier.island"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -132,6 +133,32 @@
     <key name="current" type="s">
       <default>''</default>
       <summary>The palette in use (JSON), written by the shell</summary>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.island"
+          path="/org/gnome/shell/extensions/atelier/island/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Show the island in the middle of the top bar</summary>
+      <description>The island takes the place of GNOME's clock: it shows the time, grows into a glance on hover and hosts the switcher, the power menu and profile toasts. Clicking it opens GNOME's calendar and notifications.</description>
+    </key>
+    <key name="show-date" type="b">
+      <default>false</default>
+      <summary>Show the date next to the time</summary>
+    </key>
+    <key name="glance-on-hover" type="b">
+      <default>true</default>
+      <summary>Show the glance while the pointer rests on the island</summary>
+      <description>A big clock, this week, what's left of today's events and the weather.</description>
+    </key>
+    <key name="profile-toast" type="b">
+      <default>true</default>
+      <summary>Show the profile's name in the island when it changes</summary>
+    </key>
+    <key name="atelier-power-menu" type="as">
+      <default>[]</default>
+      <summary>Open the power menu in the island</summary>
     </key>
   </schema>
 </schemalist>

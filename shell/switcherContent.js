@@ -28,7 +28,11 @@ const SCROLL_TIME = 260;
 const UNSELECTED_SCALE = 0.92;
 const UNSELECTED_OPACITY = 190;
 
-function cssUrl(path) {
+/**
+ * @param {string} path
+ * @returns {string} the path as a URL usable inside url("…") in St CSS
+ */
+export function cssUrl(path) {
     return GLib.filename_to_uri(path, null).replace(/"/g, '%22');
 }
 

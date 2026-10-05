@@ -4,12 +4,21 @@ A GNOME Shell 48 extension that turns the desktop into an atelier: **profiles**
 (wallpaper, light/dark style, accent, GTK and shell theme, icons, cursor,
 font, palette) you switch between with a quick picker, and a **palette taken
 from the wallpaper** that colors Atelier and, if you want, GTK apps and
-GNOME Terminal. It started as *BG Changer*; more of the desktop (an island in
-the top bar, notifications, a control centre, desktop widgets, notes, a dock)
-is on its way.
+GNOME Terminal, and an **island** in the middle of the top bar. It started as
+*BG Changer*; more of the desktop (notifications, a control centre, desktop
+widgets, notes, a dock) is on its way.
 
+- **Island**: a black capsule in place of GNOME's clock. It shows the time
+  (and a microphone while an app records, a dot for unseen notifications,
+  the Do Not Disturb icon). Rest the pointer on it for a glance – a big clock,
+  this week, what's left of today's events and the weather, from GNOME's own
+  calendar and weather. Clicking it (or <kbd>Super</kbd>+<kbd>V</kbd>) opens
+  GNOME's calendar and notifications under it. The glance's power button
+  opens a power menu (Lock, Suspend, Log Out, Restart, Power Off); after a
+  profile switch the island briefly shows its name.
 - **Switcher**: press <kbd>Super</kbd>+<kbd>W</kbd> (or click the button in the
-  top bar). A dark panel drops from the top of the screen with two tabs:
+  top bar). The island grows into it (without the island, a dark panel drops
+  from the top of the screen), with two tabs:
   - *Profiles* – pick one with the arrow keys, scrolling or the mouse and press
     <kbd>Enter</kbd>: the new wallpaper is revealed by a growing circle, then
     the themes and colors switch.

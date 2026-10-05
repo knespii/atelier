@@ -24,6 +24,12 @@ export function paletteStylesheet(p) {
 .atelier-switcher .atelier-dot { background-color: ${d.primary}; }
 .atelier-switcher .atelier-chip { background-color: ${d.surfaceContainerHigh}; color: ${d.onSurfaceVariant}; }
 .atelier-switcher .atelier-tab:checked { background-color: ${d.primaryContainer}; color: ${d.onPrimaryContainer}; }
+.atelier-island .atelier-island-unread { background-color: ${d.primary}; }
+.atelier-island .atelier-glance-power:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
+.atelier-island .atelier-glance-day:today .atelier-glance-day-number { background-color: ${d.primary}; color: ${d.onPrimary}; }
+.atelier-island .atelier-glance-event-bar { background-color: ${d.primary}; }
+.atelier-island .atelier-power-tile:focus { border-color: ${d.primary}; }
+.atelier-island .atelier-toast-check { color: ${d.primary}; }
 `;
 }
 

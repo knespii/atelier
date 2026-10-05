@@ -1,8 +1,9 @@
-/* Atelier switcher.
+/* Atelier's switcher and island.
  * Every property a shell theme might set through type selectors (StBoxLayout,
- * StLabel, StButton, stage...) is set explicitly, so the panel looks the same,
- * and stays usable, whatever shell theme is loaded. Only the font family is
- * inherited, so the panel follows the interface font. */
+ * StLabel, StButton, stage...) is set explicitly, so they look the same, and
+ * stay usable, whatever shell theme is loaded. Only the font family is
+ * inherited, so they follow the interface font. Colors that follow the
+ * palette are overridden by the generated stylesheet (shell/core/theme.js). */
 
 .atelier-panel {
   background-color: rgba(8, 8, 10, 0.97);
@@ -168,4 +169,382 @@
 .atelier-tab:checked {
   background-color: rgba(255, 255, 255, 0.14);
   color: #ffffff;
+}
+
+/* The island: a black capsule in the middle of the top bar. */
+
+#panel .atelier-island-slot,
+#panel .atelier-island-slot:hover,
+#panel .atelier-island-slot:active,
+#panel .atelier-island-slot:focus {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+.atelier-island {
+  background-color: #000000;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  spacing: 0;
+  box-shadow: none;
+  color: #f4f4f5;
+  font-size: 11pt;
+  font-weight: normal;
+  text-shadow: none;
+}
+
+.atelier-island:expanded {
+  border-radius: 26px;
+}
+
+.atelier-island-idle,
+.atelier-island-switcher,
+.atelier-glance,
+.atelier-glance-header,
+.atelier-glance-clock,
+.atelier-glance-week,
+.atelier-glance-day,
+.atelier-glance-events,
+.atelier-glance-event,
+.atelier-glance-weather,
+.atelier-power,
+.atelier-power-tiles,
+.atelier-power-tile-box,
+.atelier-toast,
+.atelier-toast-text {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+  spacing: 0;
+}
+
+/* At rest */
+
+.atelier-island-idle {
+  padding: 0 14px;
+  spacing: 7px;
+}
+
+.atelier-island-time,
+.atelier-island-date {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 10.5pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-island-time {
+  color: #ffffff;
+}
+
+.atelier-island-date {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.atelier-island-mic {
+  icon-size: 14px;
+  color: #ffa348;
+}
+
+.atelier-island-dnd {
+  icon-size: 14px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.atelier-island-unread {
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border: none;
+  border-radius: 3px;
+  background-color: -st-accent-color;
+}
+
+/* The switcher inside the island */
+
+.atelier-island-switcher {
+  padding: 8px 16px 12px;
+}
+
+/* Glance */
+
+.atelier-glance {
+  width: 340px;
+  padding: 16px 18px 18px;
+  spacing: 14px;
+}
+
+.atelier-glance-header {
+  spacing: 12px;
+}
+
+.atelier-glance-time {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: #ffffff;
+  font-size: 30pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-glance-date {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 10.5pt;
+  font-weight: bold;
+}
+
+.atelier-glance-power {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 17px;
+  box-shadow: none;
+  background-color: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.atelier-glance-power:hover {
+  background-color: rgba(255, 255, 255, 0.17);
+}
+
+.atelier-glance-power:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-glance-power StIcon {
+  icon-size: 16px;
+}
+
+.atelier-glance-week {
+  spacing: 2px;
+}
+
+.atelier-glance-day {
+  spacing: 4px;
+}
+
+.atelier-glance-day-name {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 8.5pt;
+  font-weight: bold;
+}
+
+.atelier-glance-day-number {
+  min-width: 28px;
+  padding: 4px 0;
+  margin: 0;
+  border: none;
+  border-radius: 999px;
+  background-color: transparent;
+  color: #ffffff;
+  font-size: 10.5pt;
+  font-weight: bold;
+  font-feature-settings: "tnum";
+  text-align: center;
+}
+
+.atelier-glance-day:today .atelier-glance-day-name {
+  color: #ffffff;
+}
+
+.atelier-glance-day:today .atelier-glance-day-number {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
+.atelier-glance-day-dot {
+  width: 4px;
+  height: 4px;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.atelier-glance-events {
+  spacing: 7px;
+}
+
+.atelier-glance-event {
+  spacing: 10px;
+}
+
+.atelier-glance-event-bar {
+  width: 3px;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background-color: -st-accent-color;
+}
+
+.atelier-glance-event-summary {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: #ffffff;
+  font-size: 10.5pt;
+  font-weight: normal;
+}
+
+.atelier-glance-event-time,
+.atelier-glance-more,
+.atelier-glance-placeholder,
+.atelier-glance-weather-place {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9.5pt;
+  font-weight: normal;
+  font-feature-settings: "tnum";
+}
+
+.atelier-glance-weather {
+  spacing: 8px;
+}
+
+.atelier-glance-weather-icon {
+  icon-size: 16px;
+  color: #ffffff;
+}
+
+.atelier-glance-weather-text {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 10pt;
+  font-weight: normal;
+}
+
+/* Power menu */
+
+.atelier-power {
+  padding: 14px 16px 16px;
+  spacing: 10px;
+}
+
+.atelier-power-title {
+  background-color: transparent;
+  padding: 0 0 0 2px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+.atelier-power-tiles {
+  spacing: 8px;
+}
+
+.atelier-power-tile-box {
+  spacing: 7px;
+}
+
+.atelier-power-tile {
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  margin: 0;
+  border: 2px solid transparent;
+  border-radius: 18px;
+  box-shadow: none;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.atelier-power-tile:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.atelier-power-tile:active {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.atelier-power-tile:focus {
+  border-color: -st-accent-color;
+}
+
+.atelier-power-tile:insensitive {
+  background-color: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.atelier-power-icon {
+  icon-size: 20px;
+}
+
+.atelier-power-label {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font-size: 9pt;
+  font-weight: bold;
+}
+
+/* Toast */
+
+.atelier-toast {
+  min-width: 240px;
+  padding: 7px 16px 7px 7px;
+  spacing: 12px;
+}
+
+.atelier-toast-thumb {
+  width: 54px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background-color: #26262b;
+  background-size: cover;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-toast-thumb StIcon {
+  icon-size: 16px;
+}
+
+.atelier-toast-subtitle {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 8.5pt;
+  font-weight: bold;
+}
+
+.atelier-toast-title {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+  color: #ffffff;
+  font-size: 11pt;
+  font-weight: bold;
+}
+
+.atelier-toast-check {
+  icon-size: 16px;
+  color: -st-accent-color;
 }
