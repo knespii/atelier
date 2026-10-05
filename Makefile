@@ -26,7 +26,7 @@ uninstall:
 pack: schemas
 	@mkdir -p dist
 	gnome-extensions pack --force --out-dir=dist \
-		--extra-source=lib --extra-source=shell --extra-source=prefs .
+		--extra-source=lib --extra-source=shell --extra-source=prefs --extra-source=icons .
 
 # Syntax check every module (GJS modules are ES modules) and validate the schema.
 check:
