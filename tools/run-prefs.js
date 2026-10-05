@@ -244,6 +244,11 @@ async function runSelftest(window) {
     await sleep(50);
     check(desktop._photo.subtitle === '/tmp/pictures' && desktop._clearPhoto.visible, 'the photo shows where it is from');
     ['style', 'github-user', 'photo'].forEach(key => desktopSettings.reset(key));
+    const notesSettings = store.settings.get_child('notes');
+    desktop._notes.active = false;
+    check(!notesSettings.get_boolean('enabled') && !desktop._edgesOnDesktop.sensitive,
+        'notes can be turned off, and their options grey out');
+    notesSettings.reset('enabled');
 }
 
 async function takeScreenshots(window) {

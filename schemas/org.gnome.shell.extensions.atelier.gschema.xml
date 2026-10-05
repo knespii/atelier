@@ -52,6 +52,7 @@
     <child name="control-centre" schema="org.gnome.shell.extensions.atelier.control-centre"/>
     <child name="bar" schema="org.gnome.shell.extensions.atelier.bar"/>
     <child name="desktop" schema="org.gnome.shell.extensions.atelier.desktop"/>
+    <child name="notes" schema="org.gnome.shell.extensions.atelier.notes"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -293,6 +294,24 @@
       <default>''</default>
       <summary>Picture of the photo widget</summary>
       <description>A picture, or a folder whose pictures take turns every hour.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.notes"
+          path="/org/gnome/shell/extensions/atelier/notes/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Notes</summary>
+      <description>Written in the island (the control centre's Notes tab), shown on the desktop and pinned to the screen's edges.</description>
+    </key>
+    <key name="edges-on-desktop-only" type="b">
+      <default>false</default>
+      <summary>Notes on the edges only on the desktop</summary>
+      <description>Pinned notes lie under the windows instead of over them.</description>
+    </key>
+    <key name="atelier-open-notes" type="as">
+      <default>[]</default>
+      <summary>Open the notes</summary>
     </key>
   </schema>
 </schemalist>

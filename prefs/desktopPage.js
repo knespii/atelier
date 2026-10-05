@@ -11,6 +11,7 @@ import Gtk from 'gi://Gtk';
 
 import {validUser} from '../lib/github.js';
 import {OptionCards} from './optionCards.js';
+import {ShortcutRow} from './shortcutRow.js';
 
 Gio._promisify(Gtk.FileDialog.prototype, 'open', 'open_finish');
 Gio._promisify(Gtk.FileDialog.prototype, 'select_folder', 'select_folder_finish');
@@ -148,6 +149,31 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         }));
         github.add(this._github);
 
+        const notes = new Adw.PreferencesGroup({
+            title: 'Notes',
+            description: 'Written in the island, on the control centre\'s Notes tab, or with "New Note" in the ' +
+                'desktop\'s menu. A note can sit on the desktop as a widget, or be pinned to an edge of the screen.',
+        });
+        this.add(notes);
+        this._notesSettings = settings.get_child('notes');
+        this._notes = new Adw.SwitchRow({title: 'Notes'});
+        this._notesSettings.bind('enabled', this._notes, 'active', Gio.SettingsBindFlags.DEFAULT);
+        this._bound.push(this._notes, 'active');
+        notes.add(this._notes);
+        this._edgesOnDesktop = new Adw.SwitchRow({
+            title: 'Pinned notes only on the desktop',
+            subtitle: 'Under the windows rather than over them',
+        });
+        this._notesSettings.bind('edges-on-desktop-only', this._edgesOnDesktop, 'active', Gio.SettingsBindFlags.DEFAULT);
+        this._bound.push(this._edgesOnDesktop, 'active');
+        notes.add(this._edgesOnDesktop);
+        this._notesShortcut = new ShortcutRow({settings: this._notesSettings, key: 'atelier-open-notes', title: 'Open the notes'});
+        notes.add(this._notesShortcut);
+        for (const row of [this._edgesOnDesktop, this._notesShortcut]) {
+            this._notesSettings.bind('enabled', row, 'sensitive', Gio.SettingsBindFlags.GET);
+            this._bound.push(row, 'sensitive');
+        }
+
         const photo = new Adw.PreferencesGroup({title: 'Photo'});
         this.add(photo);
         this._photo = new Adw.ActionRow({title: 'Picture'});
@@ -213,6 +239,7 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
     disconnectSettings() {
         this._ids.forEach(id => this._desktop.disconnect(id));
         this._ids = [];
+        this._notesShortcut.disconnectSettings();
         for (let i = 0; i < this._bound.length; i += 2)
             Gio.Settings.unbind(this._bound[i], this._bound[i + 1]);
         this._bound = [];

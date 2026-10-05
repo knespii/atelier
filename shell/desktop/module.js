@@ -105,7 +105,9 @@ export class DesktopModule {
             sources: this.sources,
             style: () => this._desktopSettings.get_string('style'),
             claude: () => this._modules.get('claude'),
+            notes: () => this._modules.get('notes'),
             openSettings: () => this._extension.openPreferences(),
+            setOption: (id, key, value) => this._setOption(id, key, value),
         };
 
         // Above the wallpaper, under the windows: inside the wallpapers'
@@ -144,11 +146,7 @@ export class DesktopModule {
     disable() {
         this.stopEditing();
         this._injections.clear();
-        for (const [menu, items] of this._menus) {
-            menu.disconnectObject(this);
-            items.forEach(item => item.destroy());
-        }
-        this._menus.clear();
+        this._resetMenus();
         if (this._laterId)
             global.compositor.get_laters().remove(this._laterId);
         this._laterId = 0;
@@ -220,8 +218,24 @@ export class DesktopModule {
      * @param {Function} action
      */
     addMenuItem(text, action) {
-        this._menuExtras ??= [];
-        this._menuExtras.push([text, action]);
+        this._menuExtras = [...(this._menuExtras ?? []).filter(([t]) => t !== text), [text, action]];
+        this._resetMenus();
+    }
+
+    /** @param {string} text - of an item added with addMenuItem() */
+    removeMenuItem(text) {
+        this._menuExtras = (this._menuExtras ?? []).filter(([t]) => t !== text);
+        this._resetMenus();
+    }
+
+    // Menus extended so far lose Atelier's items; they get them anew when
+    // they open next.
+    _resetMenus() {
+        for (const [menu, items] of this._menus) {
+            menu.disconnectObject(this);
+            items.forEach(item => item.destroy());
+        }
+        this._menus.clear();
     }
 
     _closeMenus() {
@@ -278,6 +292,22 @@ export class DesktopModule {
         if (rebuild)
             this._widgets.forEach(widget => widget.resize(widget.entry.size));
         this.syncGlass();
+    }
+
+    /** Make the widgets anew, e.g. when another kind became known. */
+    reload() {
+        this._widgets.forEach(widget => this._dropWidget(widget));
+        this._widgets.clear();
+        this._load();
+    }
+
+    // A widget's own choice (which note it shows, say), kept with its place.
+    _setOption(id, key, value) {
+        const entry = this._layout.find(e => e.id === id);
+        if (!entry || entry[key] === value)
+            return;
+        entry[key] = value;
+        this._save();
     }
 
     // The widgets as the settings have them.
@@ -366,8 +396,12 @@ export class DesktopModule {
 
     // The layout as shown, for editing it.
     _shownLayout() {
-        return [...this._widgets.values()].map(widget => ({...this._layout.find(e => e.id === widget.entry.id),
-            x: widget.entry.x, y: widget.entry.y, size: widget.entry.size}));
+        // (Entries of kinds not known now stay as they are.)
+        const unknown = this._layout.filter(entry => !this._widgets.has(entry.id));
+        return [...unknown, ...[...this._widgets.values()].map(widget => ({
+            ...this._layout.find(e => e.id === widget.entry.id),
+            x: widget.entry.x, y: widget.entry.y, size: widget.entry.size,
+        }))];
     }
 
     /**

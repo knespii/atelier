@@ -1682,3 +1682,225 @@
   color: -st-accent-fg-color;
   font-weight: bold;
 }
+
+/* Notes: papers in the island, on the desktop and on the screen's edges */
+
+.atelier-notes {
+  width: 420px;
+  height: 400px;
+  spacing: 10px;
+}
+
+.atelier-notes-header,
+.atelier-note-colors,
+.atelier-note-actions,
+.atelier-note-content,
+.atelier-note-check-row,
+.atelier-notes-grid {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+}
+
+.atelier-notes-header {
+  spacing: 8px;
+}
+
+.atelier-notes-heading {
+  font-size: 13pt;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.atelier-notes-button {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+.atelier-notes-button:hover,
+.atelier-notes-button:focus {
+  background-color: rgba(255, 255, 255, 0.17);
+}
+
+.atelier-notes-delete:hover {
+  background-color: #c01c28;
+}
+
+.atelier-notes-button StIcon {
+  icon-size: 16px;
+}
+
+.atelier-notes-grid {
+  spacing-rows: 10px;
+  spacing-columns: 10px;
+}
+
+.atelier-note-new,
+.atelier-note-paper {
+  height: 112px;
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.atelier-note-new {
+  background-color: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+.atelier-note-new:hover,
+.atelier-note-new:focus {
+  background-color: rgba(255, 255, 255, 0.13);
+  color: #ffffff;
+}
+
+.atelier-note-new StIcon {
+  icon-size: 20px;
+  margin-bottom: 4px;
+}
+
+.atelier-note-paper:focus {
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.atelier-notes-empty {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10pt;
+}
+
+.atelier-note-content {
+  spacing: 3px;
+}
+
+.atelier-note-title {
+  font-size: 10.5pt;
+  font-weight: 800;
+}
+
+.atelier-note-line,
+.atelier-note-more {
+  font-size: 9.5pt;
+}
+
+.atelier-note-more {
+  font-weight: bold;
+  opacity: 0.6;
+}
+
+.atelier-note-check-row {
+  spacing: 6px;
+}
+
+.atelier-note-check-row:checked .atelier-note-check-text {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.atelier-note-check {
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 1.5px solid rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  background-color: transparent;
+  color: transparent;
+}
+
+.atelier-note-check:checked {
+  background-color: rgba(0, 0, 0, 0.55);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.atelier-note-check StIcon {
+  icon-size: 10px;
+}
+
+/* Writing a note */
+
+.atelier-note-colors {
+  spacing: 6px;
+}
+
+.atelier-note-color {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 9px;
+  border: 2px solid transparent;
+}
+
+.atelier-note-color:checked {
+  border-color: #ffffff;
+}
+
+.atelier-note-editor {
+  padding: 12px 14px;
+  border-radius: 16px;
+  spacing: 6px;
+}
+
+.atelier-note-title-entry,
+.atelier-note-text-entry {
+  padding: 2px 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background-color: transparent;
+  selection-background-color: rgba(0, 0, 0, 0.25);
+}
+
+.atelier-note-title-entry {
+  font-size: 13pt;
+  font-weight: 800;
+}
+
+.atelier-note-text-entry {
+  font-size: 10.5pt;
+}
+
+.atelier-note-title-entry StLabel.hint-text,
+.atelier-note-text-entry StLabel.hint-text {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.atelier-note-actions {
+  spacing: 6px;
+}
+
+/* A note on the desktop is its own paper */
+
+.atelier-widget-note {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
+}
+
+.atelier-widget-note .atelier-note-title {
+  font-size: 12pt;
+}
+
+.atelier-widget-note .atelier-note-line,
+.atelier-widget-note .atelier-note-check-text {
+  font-size: 10.5pt;
+}
+
+/* Pinned to an edge */
+
+.atelier-note-tab {
+  padding: 12px 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.atelier-note-tab-left {
+  border-radius: 0 16px 16px 0;
+}
+
+.atelier-note-tab-right {
+  border-radius: 16px 0 0 16px;
+}

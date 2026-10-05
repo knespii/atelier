@@ -944,6 +944,74 @@ async function testDesktop(ext) {
     check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
 }
 
+async function testNotes(ext) {
+    const notes = ext.stateObj.modules.get('notes');
+    if (!check(notes !== null, 'notes module running'))
+        return;
+    const island = ext.stateObj.modules.get('island').island;
+    const desktop = ext.stateObj.modules.get('desktop');
+    await restPointer();
+
+    // A new note, written in the island.
+    notes.open(null, {create: true});
+    check(await waitFor(() => island.page?.tab === 'notes' && notes.view.editing, 1000),
+        'a new note opens in the island, on the Notes tab');
+    const id = notes.view.editing;
+    notes.view._title.text = 'Groceries';
+    notes.view._text.text = 'Saturday\n- [ ] milk\n- [x] bread';
+    const note = notes.store.get(id);
+    check(note.title === 'Groceries' && note.text.includes('- [ ] milk'), 'what is written is kept');
+    notes.view._colors.get_children().find(dot => dot._color === 'mint').emit('clicked', 1);
+    check(notes.store.get(id).color === 'mint', 'it can have another paper');
+    await Scripting.sleep(400);
+    await screenshotIsland('50-notes-editor', 480);
+
+    // Back among the papers, its checkboxes tick off.
+    notes.view._leave();
+    await Scripting.sleep(300);
+    const paper = notes.view.get_children()[1].child.get_children().find(child => child.child?._id === id);
+    check(Boolean(paper), 'the note is among the papers');
+    await screenshotIsland('51-notes-grid', 480);
+    const box = paper.child.get_children().find(child => child.has_style_class_name?.('atelier-note-check-row'));
+    box?.get_first_child().emit('clicked', 1);
+    check(notes.store.get(id).text.includes('- [x] milk'), 'a checkbox is ticked off right on the paper');
+    Main.panel.closeQuickSettings();
+    await waitFor(() => island.page === null, 1000);
+
+    // Pinned to the left edge: a strip of it peeks out, all of it on hover.
+    notes.store.update(id, {pin: 'left'});
+    await Scripting.sleep(400);
+    const tab = notes._edges._tabs.get(id);
+    const [tabX] = tab?.get_transformed_position() ?? [NaN];
+    check(tab?.mapped && tabX < 0 && tabX + tab.width > 0 && tabX + tab.width < 40,
+        `pinned to the edge, a strip of it shows (${tabX})`);
+    await pointerTo(5, tab.get_transformed_position()[1] + tab.height / 2);
+    await Scripting.sleep(500);
+    check(Math.abs(tab.get_transformed_position()[0]) < 1, 'and all of it on hover');
+    await screenshotArea('52-note-edge', 0, 0, 600, global.stage.height);
+    await restPointer();
+    await Scripting.sleep(400);
+
+    // On the desktop: a note widget shows it.
+    check(desktop.addWidget('note'), 'a note widget can be added');
+    const widget = [...desktop.widgets.values()].find(w => w.entry.kind === 'note');
+    check(widget?.entry.note === id && JSON.parse(desktop._desktopSettings.get_string('widgets'))
+        .find(e => e.kind === 'note')?.note === id, 'it shows the latest note, and remembers which');
+    await screenshotArea('53-note-desktop', 0, 0, global.stage.width, 760);
+
+    // Archived, it leaves the edge and the papers.
+    notes.store.update(id, {archived: true});
+    await Scripting.sleep(300);
+    check(!notes._edges._tabs.has(id) && !notes.store.all().some(n => n.id === id) &&
+        notes.store.all({archived: true}).some(n => n.id === id), 'archived, it is in the archive only');
+    desktop.removeWidget(widget.entry.id);
+    notes.store.remove(id);
+    notes.store.destroy(); // writes now
+    const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'notes.json']));
+    check(file.query_exists(null) && !new TextDecoder().decode(file.load_contents(null)[1]).includes(id),
+        'the notes are kept in a file');
+}
+
 async function testClaude(ext) {
     const claude = ext.stateObj.modules.get('claude');
     if (!check(claude !== null, 'Claude module running'))
@@ -1316,6 +1384,7 @@ async function testDisableCleansUp(atelier) {
         'the overview\'s own background back');
     check(!findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-desktop'),
         'no widgets left on the desktop');
+    check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')), 'no notes left on the edges');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
@@ -1376,6 +1445,7 @@ export async function run() {
         await testBarStyles(ext);
         await testClaude(ext);
         await testDesktop(ext);
+        await testNotes(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

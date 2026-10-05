@@ -13,6 +13,7 @@ import {ClaudeModule} from './shell/claude/module.js';
 import {ControlCentreModule} from './shell/controlCentre/module.js';
 import {DesktopModule} from './shell/desktop/module.js';
 import {IslandModule} from './shell/island/module.js';
+import {NotesModule} from './shell/notes/module.js';
 import {NotificationsModule} from './shell/notifications/module.js';
 import {PaletteModule} from './shell/paletteModule.js';
 import {ProfilesModule} from './shell/profilesModule.js';
@@ -39,6 +40,8 @@ export default class AtelierExtension extends Extension {
         this.modules.register('bar', ctx => new BarModule(ctx));
         this.modules.register('desktop', ctx => new DesktopModule(ctx),
             {settings: this._settings.get_child('desktop'), key: 'enabled'});
+        this.modules.register('notes', ctx => new NotesModule(ctx),
+            {settings: this._settings.get_child('notes'), key: 'enabled'});
 
         // BG Changer's data has to be taken over before anything reads the
         // profiles, otherwise the first run would save a second "Original".
