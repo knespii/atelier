@@ -5,7 +5,9 @@ import {
     ProfileStore, describeProfile, effectiveWallpaper, normalizePaletteOptions, normalizeProfile,
     profileChanges, readCurrentAppearance,
 } from '../lib/profiles.js';
-import {importWallpaper, isInLibrary, prettyName, deleteWallpaperIfUnused} from '../lib/paths.js';
+import {
+    deleteWallpaperIfUnused, importWallpaper, isInLibrary, listWallpapers, prettyName, wallpaperFolder,
+} from '../lib/paths.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
 function makeStore() {
@@ -177,4 +179,27 @@ export function testProfileChanges() {
     assertEqual(profileChanges(explicit, current, null), {accentColor: 'teal'}, 'explicit accents follow');
     assertEqual(profileChanges(normalizeProfile({id: 'r'}), current, null), {},
         'a profile without wallpaper doesn\'t pick one up');
+}
+
+export async function testListWallpapers() {
+    const dir = freshDir('folder');
+    const png = GLib.build_filenamev([dir, 'b-sunset.png']);
+    const jpg = GLib.build_filenamev([dir, 'a-hill.jpg']);
+    GLib.file_set_contents(png, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    GLib.file_set_contents(jpg, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0]));
+    writeFile(GLib.build_filenamev([dir, 'notes.txt']), 'not a picture');
+    GLib.mkdir_with_parents(GLib.build_filenamev([dir, 'sub.jpg']), 0o755);
+    assertEqual(await listWallpapers(dir), [jpg, png], 'images only, sorted');
+
+    const missing = GLib.build_filenamev([dir, 'Wallpapers']);
+    assertEqual(await listWallpapers(missing), []);
+    assert(!GLib.file_test(missing, GLib.FileTest.EXISTS), 'not created unless asked');
+    await listWallpapers(missing, {create: true});
+    assert(GLib.file_test(missing, GLib.FileTest.IS_DIR), 'created on request');
+
+    const settings = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.atelier'});
+    settings.set_string('wallpaper-folder', dir);
+    assertEqual(wallpaperFolder(settings), dir);
+    settings.reset('wallpaper-folder');
+    assert(wallpaperFolder(settings).endsWith('/Wallpapers'), 'default folder');
 }

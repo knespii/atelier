@@ -1,6 +1,7 @@
-// The profile switcher: a dark panel that drops from the top of the screen with
-// a strip of wallpaper thumbnails. It is only for picking a profile; profiles are
-// managed in the extension's preferences.
+// The switcher: a dark panel that drops from the top of the screen with a
+// strip of thumbnails, either of the profiles or of the pictures in the
+// wallpaper folder. It is only for picking; profiles are managed in the
+// extension's preferences.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -15,8 +16,10 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {describeProfile, effectiveWallpaper} from '../lib/profiles.js';
-import {isSlideshow} from '../lib/paths.js';
+import {isSlideshow, prettyName} from '../lib/paths.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
+
+export const MODES = ['profiles', 'wallpapers'];
 
 // Logical pixels; multiplied by the scale factor where used.
 const CARD_WIDTH = 192;
@@ -38,17 +41,22 @@ function cssUrl(path) {
     return GLib.filename_to_uri(path, null).replace(/"/g, '%22');
 }
 
-const ProfileCard = GObject.registerClass(
-class AtelierProfileCard extends St.Button {
-    _init(profile) {
+const home = path => path.replace(GLib.get_home_dir(), '~');
+
+const Card = GObject.registerClass(
+class AtelierCard extends St.Button {
+    /**
+     * @param {{id: string, name: string, wallpaper: string|null}} item
+     */
+    _init(item) {
         super._init({
             style_class: 'atelier-card',
             track_hover: true,
             can_focus: false,
             pivot_point: new Graphene.Point({x: 0.5, y: 0.5}),
-            accessible_name: profile.name,
+            accessible_name: item.name,
         });
-        this.profile = profile;
+        this.item = item;
 
         const content = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
@@ -70,7 +78,7 @@ class AtelierProfileCard extends St.Button {
 
         this._placeholder = new St.Label({
             style_class: 'atelier-placeholder',
-            text: profile.name.slice(0, 1).toUpperCase(),
+            text: item.name.slice(0, 1).toUpperCase(),
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
             x_expand: true,
@@ -81,10 +89,10 @@ class AtelierProfileCard extends St.Button {
 
         this.connect('destroy', () => (this._destroyed = true));
 
-        if (profile.wallpaper && hasThumbnail(profile.wallpaper))
-            this._showThumbnail(thumbnailPath(profile.wallpaper));
-        else if (profile.wallpaper)
-            this._loadThumbnail(profile.wallpaper);
+        if (item.wallpaper && hasThumbnail(item.wallpaper))
+            this._showThumbnail(thumbnailPath(item.wallpaper));
+        else if (item.wallpaper)
+            this._loadThumbnail(item.wallpaper);
     }
 
     async _loadThumbnail(wallpaper) {
@@ -107,21 +115,29 @@ class AtelierProfileCard extends St.Button {
     }
 });
 
-export const ProfileSwitcher = GObject.registerClass({
+export const Switcher = GObject.registerClass({
     Signals: {
-        'activate': {param_types: [GObject.TYPE_STRING]},
+        'activate': {param_types: [GObject.TYPE_STRING, GObject.TYPE_STRING]},
+        'mode-changed': {param_types: [GObject.TYPE_STRING]},
     },
-}, class AtelierProfileSwitcher extends St.Widget {
-    _init() {
+}, class AtelierSwitcher extends St.Widget {
+    /**
+     * @param {string} mode - one of MODES
+     */
+    _init(mode = 'profiles') {
         super._init({reactive: true, visible: false});
         this.add_constraint(new Clutter.BindConstraint({
             source: global.stage,
             coordinate: Clutter.BindCoordinate.ALL,
         }));
 
-        this._looks = [];
+        this._mode = MODES.includes(mode) ? mode : 'profiles';
+        this._data = {
+            profiles: {items: [], activeId: '', profiles: []},
+            wallpapers: {items: [], activeId: '', folder: '', loaded: false},
+        };
+        this._items = [];
         this._cards = [];
-        this._activeId = '';
         this._selected = 0;
         this._scrollDelta = 0;
         this._grab = null;
@@ -136,17 +152,24 @@ export const ProfileSwitcher = GObject.registerClass({
         });
         this.add_child(this._panel);
 
+        const tabs = new St.BoxLayout({style_class: 'atelier-tabs', x_align: Clutter.ActorAlign.CENTER});
+        this._tabs = {};
+        for (const [key, label] of [['profiles', 'Profiles'], ['wallpapers', 'Wallpapers']]) {
+            const tab = new St.Button({style_class: 'atelier-tab', label, can_focus: false});
+            tab.connect('clicked', () => this.setMode(key));
+            tabs.add_child(tab);
+            this._tabs[key] = tab;
+        }
+        this._panel.add_child(tabs);
+
         this._viewport = new St.Widget({style_class: 'atelier-viewport', clip_to_allocation: true});
         this._panel.add_child(this._viewport);
 
         this._strip = new St.BoxLayout({style_class: 'atelier-strip'});
         this._viewport.add_child(this._strip);
 
-        this._empty = new St.Label({
-            style_class: 'atelier-empty',
-            text: 'No profiles yet. Add them in the Atelier settings\n(Extensions → Atelier → ⚙).',
-            visible: false,
-        });
+        this._empty = new St.Label({style_class: 'atelier-empty', visible: false});
+        this._empty.clutter_text.line_wrap = true;
         this._panel.add_child(this._empty);
 
         const footer = new St.BoxLayout({style_class: 'atelier-footer', x_expand: true});
@@ -172,10 +195,21 @@ export const ProfileSwitcher = GObject.registerClass({
             'system-modal-opened', () => this.close(),
             'monitors-changed', () => this.close(), this);
         this.connect('destroy', () => this._onDestroy());
+        this._syncTabs();
     }
 
     get _scale() {
         return St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    }
+
+    /** @returns {string} the visible tab */
+    get mode() {
+        return this._mode;
+    }
+
+    /** @returns {boolean} whether the wallpaper folder was listed */
+    get wallpapersLoaded() {
+        return this._data.wallpapers.loaded;
     }
 
     /**
@@ -185,37 +219,49 @@ export const ProfileSwitcher = GObject.registerClass({
     setProfiles(profiles, activeId) {
         if (this._destroyed)
             return;
-        const selectedId = this._looks[this._selected]?.id ?? activeId;
-        this._looks = profiles;
-        this._activeId = activeId;
+        this._data.profiles = {
+            profiles,
+            activeId,
+            items: profiles.map(p => ({id: p.id, name: p.name, wallpaper: p.wallpaper, profile: p})),
+        };
+        if (this._mode === 'profiles')
+            this._rebuild();
+    }
 
-        this._strip.destroy_all_children();
-        const scale = this._scale;
-        this._cards = profiles.map((profile, index) => {
-            const card = new ProfileCard(profile);
-            card.set_size(CARD_WIDTH * scale, CARD_HEIGHT * scale);
-            card.active = profile.id === activeId;
-            card.connect('clicked', () => this._activate(index));
-            this._strip.add_child(card);
-            return card;
-        });
+    /**
+     * @param {string[]} paths - pictures of the wallpaper folder
+     * @param {string|null} current - the wallpaper on screen
+     * @param {string} folder
+     */
+    setWallpapers(paths, current, folder) {
+        if (this._destroyed)
+            return;
+        this._data.wallpapers = {
+            folder,
+            loaded: true,
+            activeId: current ?? '',
+            items: paths.map(path => ({id: path, name: prettyName(path), wallpaper: path})),
+        };
+        if (this._mode === 'wallpapers')
+            this._rebuild();
+    }
 
-        const index = profiles.findIndex(profile => profile.id === selectedId);
-        this._selected = Math.max(0, index);
-
-        const empty = profiles.length === 0;
-        this._viewport.visible = !empty;
-        this._empty.visible = empty;
-        this._layoutPanel();
-        this._select(this._selected, false);
+    /** @param {string} mode */
+    setMode(mode) {
+        if (this._destroyed || !MODES.includes(mode) || mode === this._mode)
+            return;
+        this._mode = mode;
+        this._syncTabs();
+        this._rebuild();
+        this.emit('mode-changed', mode);
     }
 
     /** @param {string} activeId */
     setActive(activeId) {
         if (this._destroyed)
             return;
-        this._activeId = activeId;
-        this._cards.forEach(card => (card.active = card.profile.id === activeId));
+        this._data[this._mode].activeId = activeId;
+        this._cards.forEach(card => (card.active = card.item.id === activeId));
         this._updateFooter();
     }
 
@@ -260,6 +306,50 @@ export const ProfileSwitcher = GObject.registerClass({
         return this._closing;
     }
 
+    _syncTabs() {
+        for (const [key, tab] of Object.entries(this._tabs)) {
+            if (key === this._mode)
+                tab.add_style_pseudo_class('checked');
+            else
+                tab.remove_style_pseudo_class('checked');
+        }
+    }
+
+    _rebuild() {
+        const data = this._data[this._mode];
+        const selectedId = this._items[this._selected]?.id;
+        this._items = data.items;
+
+        this._strip.destroy_all_children();
+        const scale = this._scale;
+        this._cards = this._items.map((item, index) => {
+            const card = new Card(item);
+            card.set_size(CARD_WIDTH * scale, CARD_HEIGHT * scale);
+            card.active = item.id === data.activeId;
+            card.connect('clicked', () => this._activate(index));
+            this._strip.add_child(card);
+            return card;
+        });
+
+        let index = this._items.findIndex(item => item.id === selectedId);
+        if (index < 0)
+            index = this._items.findIndex(item => item.id === data.activeId);
+        this._selected = Math.max(0, index);
+
+        const empty = this._items.length === 0;
+        this._viewport.visible = !empty;
+        this._empty.visible = empty;
+        if (this._mode === 'profiles') {
+            this._empty.text = 'No profiles yet. Add them in the Atelier settings\n(Extensions → Atelier → ⚙).';
+        } else {
+            this._empty.text = data.loaded
+                ? `No pictures in ${home(data.folder)}.\nPut some there, or choose another folder in Atelier's settings.`
+                : 'Looking for pictures…';
+        }
+        this._layoutPanel();
+        this._select(this._selected, false);
+    }
+
     _popModal() {
         if (this._grab) {
             Main.popModal(this._grab);
@@ -286,10 +376,13 @@ export const ProfileSwitcher = GObject.registerClass({
             GLib.source_remove(this._preloadId);
         this._preloadId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PRELOAD_DELAY, () => {
             this._preloadId = 0;
-            const profile = this._looks[this._selected];
-            const scheme = profile?.colorScheme ??
-                new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
-            const wallpaper = profile ? effectiveWallpaper(profile, scheme) : null;
+            const item = this._items[this._selected];
+            let wallpaper = item?.wallpaper ?? null;
+            if (item?.profile) {
+                const scheme = item.profile.colorScheme ??
+                    new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
+                wallpaper = effectiveWallpaper(item.profile, scheme);
+            }
             // Slideshows are XML, not images; GNOME loads them itself.
             if (wallpaper && !isSlideshow(wallpaper)) {
                 this._preloaded = Meta.BackgroundImageCache.get_default()
@@ -357,19 +450,20 @@ export const ProfileSwitcher = GObject.registerClass({
     }
 
     _updateFooter() {
-        const profile = this._looks[this._selected];
+        const item = this._items[this._selected];
         this._chips.destroy_all_children();
-        if (!profile) {
+        if (!item) {
             this._name.text = '';
             this._counter.text = '';
             this._dot.opacity = 0;
             return;
         }
 
-        this._name.text = profile.name;
-        this._dot.opacity = profile.id === this._activeId ? 255 : 0;
-        this._counter.text = `${this._selected + 1} / ${this._looks.length}`;
-        for (const {label, value} of describeProfile(profile).slice(0, 4)) {
+        this._name.text = item.name;
+        this._dot.opacity = item.id === this._data[this._mode].activeId ? 255 : 0;
+        this._counter.text = `${this._selected + 1} / ${this._items.length}`;
+        const parts = item.profile ? describeProfile(item.profile).slice(0, 4) : [];
+        for (const {label, value} of parts) {
             this._chips.add_child(new St.Label({
                 style_class: 'atelier-chip',
                 text: `${label}: ${value}`,
@@ -378,10 +472,10 @@ export const ProfileSwitcher = GObject.registerClass({
     }
 
     _activate(index) {
-        if (this._closing || !this._looks[index])
+        if (this._closing || !this._items[index])
             return;
         this._select(index);
-        this.emit('activate', this._looks[index].id);
+        this.emit('activate', this._mode, this._items[index].id);
     }
 
     vfunc_key_press_event(event) {
@@ -399,6 +493,10 @@ export const ProfileSwitcher = GObject.registerClass({
             return Clutter.EVENT_STOP;
         case Clutter.KEY_End:
             this._select(this._cards.length - 1);
+            return Clutter.EVENT_STOP;
+        case Clutter.KEY_Tab:
+        case Clutter.KEY_ISO_Left_Tab:
+            this.setMode(this._mode === 'profiles' ? 'wallpapers' : 'profiles');
             return Clutter.EVENT_STOP;
         case Clutter.KEY_Return:
         case Clutter.KEY_KP_Enter:

@@ -295,6 +295,34 @@ async function testLiveProfile(ext, atelier) {
     ext.stateObj._settings.get_child('palette').reset('variant');
 }
 
+async function testWallpapersTab(atelier) {
+    const activeBefore = atelier._store.activeId;
+    atelier.toggleSwitcher('wallpapers');
+    check(await waitFor(() => atelier._switcher?.wallpapersLoaded, 3000), 'Wallpapers tab lists the folder');
+    const switcher = atelier._switcher;
+    check(switcher.mode === 'wallpapers' && switcher._cards.length === 2,
+        `two pictures shown (${switcher._cards.length})`);
+    await Scripting.sleep(400);
+    await screenshot('09-wallpapers-tab');
+
+    switcher.setMode('profiles');
+    check(switcher.mode === 'profiles' && switcher._cards.length === atelier._store.getAll().length,
+        'Tab back to profiles');
+    switcher.setMode('wallpapers');
+    const pills = switcher._items.findIndex(item => item.id.endsWith('pills.jxl'));
+    switcher._activate(pills);
+    check(await waitFor(() => atelier._switcher === null, 5000), 'switcher closes after picking a wallpaper');
+    await waitFor(() => !atelier._applier.busy, 6000);
+
+    const uri = new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-uri');
+    const active = atelier._store.get(activeBefore);
+    check(uri.includes('/atelier/wallpapers/') && uri.endsWith('-pills.jxl'),
+        `desktop shows a library copy of the picture (${uri})`);
+    check(atelier._store.activeId === activeBefore, 'the active profile stays active');
+    check(active.wallpaper && uri === Gio.File.new_for_path(active.wallpaper).get_uri(),
+        'and keeps the new wallpaper');
+}
+
 async function testDisableCleansUp(atelier) {
     atelier.toggleSwitcher();
     await Scripting.sleep(300);
@@ -360,6 +388,7 @@ export async function run() {
         await testGtkStyles(ext, atelier);
         await testTerminal(ext);
         await testLiveProfile(ext, atelier);
+        await testWallpapersTab(atelier);
         await testDisableCleansUp(atelier);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);

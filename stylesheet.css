@@ -135,3 +135,34 @@
   font-feature-settings: "tnum";
   color: rgba(255, 255, 255, 0.55);
 }
+
+.atelier-tabs {
+  spacing: 4px;
+  padding: 4px 0 6px;
+  margin: 0;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.atelier-tab {
+  padding: 3px 14px;
+  margin: 0;
+  border: none;
+  border-radius: 999px;
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9.5pt;
+  font-weight: bold;
+  box-shadow: none;
+}
+
+.atelier-tab:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.atelier-tab:checked {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}

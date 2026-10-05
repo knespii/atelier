@@ -55,6 +55,15 @@
       <default><![CDATA[['<Super>w']]]></default>
       <summary>Open the profile switcher</summary>
     </key>
+    <key name="atelier-open-wallpapers" type="as">
+      <default>[]</default>
+      <summary>Open the switcher on the Wallpapers tab</summary>
+    </key>
+    <key name="wallpaper-folder" type="s">
+      <default>''</default>
+      <summary>Folder shown on the Wallpapers tab</summary>
+      <description>Empty means ~/Pictures/Wallpapers, which is created when needed.</description>
+    </key>
     <key name="atelier-next-profile" type="as">
       <default>[]</default>
       <summary>Apply the next profile</summary>

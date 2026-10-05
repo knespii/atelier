@@ -1,6 +1,8 @@
-// The profiles feature: applying profiles, the switcher, its top bar button,
-// shortcuts, requests from the preferences and the first-run "Original".
+// The profiles feature: applying profiles, the switcher (profiles and the
+// wallpaper folder), its top bar button, shortcuts, requests from the
+// preferences, live profiles and the first-run "Original".
 
+import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
@@ -8,17 +10,21 @@ import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {LEGACY_UUID} from '../lib/migrate.js';
-import {deleteWallpaperIfUnused, importWallpaper} from '../lib/paths.js';
-import {readCurrentAppearance} from '../lib/profiles.js';
+import {
+    deleteWallpaperIfUnused, importWallpaper, listWallpapers, prettyName, wallpaperFolder,
+} from '../lib/paths.js';
+import {normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
-import {ensureThumbnail} from '../lib/thumbnails.js';
+import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {Applier} from './applier.js';
 import {ProfileSync} from './core/profileSync.js';
 import {Indicator} from './indicator.js';
 import {WallpaperTransition} from './reveal.js';
-import {ProfileSwitcher} from './switcher.js';
+import {Switcher} from './switcher.js';
 
-const KEYBINDINGS = ['atelier-open-switcher', 'atelier-next-profile', 'atelier-previous-profile'];
+const KEYBINDINGS = [
+    'atelier-open-switcher', 'atelier-open-wallpapers', 'atelier-next-profile', 'atelier-previous-profile',
+];
 
 export class ProfilesModule {
     /**
@@ -68,7 +74,9 @@ export class ProfilesModule {
             const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW;
             // POPUP lets the shortcut close the switcher it opened.
             Main.wm.addKeybinding('atelier-open-switcher', this._settings, flags,
-                modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher());
+                modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher('profiles'));
+            Main.wm.addKeybinding('atelier-open-wallpapers', this._settings, flags,
+                modes | Shell.ActionMode.POPUP, () => this.toggleSwitcher('wallpapers'));
             Main.wm.addKeybinding('atelier-next-profile', this._settings, flags, modes, () => this._step(1));
             Main.wm.addKeybinding('atelier-previous-profile', this._settings, flags, modes, () => this._step(-1));
         }
@@ -96,9 +104,18 @@ export class ProfilesModule {
         this._settings.disconnectObject(this);
     }
 
-    toggleSwitcher() {
+    /**
+     * Open the switcher on a tab, switch tabs, or close it when it already
+     * shows that tab.
+     *
+     * @param {string} mode - 'profiles' or 'wallpapers'
+     */
+    toggleSwitcher(mode = 'profiles') {
         if (this._switcher) {
-            this._switcher.close();
+            if (this._switcher.mode === mode)
+                this._switcher.close();
+            else
+                this._switcher.setMode(mode);
             return;
         }
         // Don't stack on top of another popup (e.g. an open menu).
@@ -107,15 +124,35 @@ export class ProfilesModule {
         if (Main.overview.visible)
             Main.overview.hide();
 
-        const switcher = new ProfileSwitcher();
+        const switcher = new Switcher(mode);
         switcher.setProfiles(this._store.getAll(), this._store.activeId);
-        switcher.connect('activate', (_, id) => this._applyFromSwitcher(switcher, id));
+        switcher.connect('activate', (_, tab, id) => {
+            if (tab === 'profiles')
+                this._applyFromSwitcher(switcher, id);
+            else
+                this._applyWallpaper(switcher, id);
+        });
+        switcher.connect('mode-changed', (_, tab) => {
+            if (tab === 'wallpapers' && !switcher.wallpapersLoaded)
+                this._loadWallpapers(switcher);
+        });
         switcher.connect('destroy', () => {
             if (this._switcher === switcher)
                 this._switcher = null;
         });
         this._switcher = switcher;
+        if (mode === 'wallpapers')
+            this._loadWallpapers(switcher);
         switcher.open();
+    }
+
+    async _loadWallpapers(switcher) {
+        const folder = wallpaperFolder(this._settings);
+        // The default folder is created, so there's an obvious place for pictures.
+        const paths = await listWallpapers(folder, {create: !this._settings.get_string('wallpaper-folder')})
+            .catch(() => []);
+        const uri = new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-uri');
+        switcher.setWallpapers(paths, uri ? Gio.File.new_for_uri(uri).get_path() : null, folder);
     }
 
     _applyFromSwitcher(switcher, id) {
@@ -127,6 +164,47 @@ export class ProfilesModule {
         // dynamic island, and close it once the profile is in place.
         this._applier.apply(profile, {onWritten: () => switcher.close()})
             .finally(() => switcher.close());
+    }
+
+    /**
+     * Show a picture of the wallpaper folder and keep it in the active profile.
+     *
+     * @param {Switcher} switcher
+     * @param {string} path
+     */
+    async _applyWallpaper(switcher, path) {
+        switcher.setActive(path);
+        let copy;
+        try {
+            // The profile keeps its own copy, like any wallpaper it stores.
+            copy = await importWallpaper(path);
+        } catch (e) {
+            Main.notifyError('Atelier', `Could not use ${prettyName(path)}: ${e.message}`);
+            switcher.close();
+            return;
+        }
+        if (!this._applier)
+            return;
+
+        const active = this._store.get(this._store.activeId);
+        const options = active?.pictureOptions ??
+            new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-options');
+        const wallpaperOnly = normalizeProfile({
+            id: 'atelier-wallpaper', name: prettyName(path), wallpaper: copy, pictureOptions: options,
+        });
+        if (active)
+            this._store.update(active.id, {wallpaper: copy, wallpaperDark: null});
+
+        await this._applier.apply(wallpaperOnly, {onWritten: () => switcher.close(), keepActive: true})
+            .finally(() => switcher.close());
+
+        // Once the desktop shows the new picture, drop copies nobody uses.
+        const profiles = this._store?.getAll() ?? [];
+        for (const old of [active?.wallpaper, active?.wallpaperDark]) {
+            if (old && old !== copy && await deleteWallpaperIfUnused(old, profiles))
+                removeThumbnail(old);
+        }
+        ensureThumbnail(copy).catch(() => {});
     }
 
     _step(delta) {
@@ -159,7 +237,7 @@ export class ProfilesModule {
         const show = this._settings.get_boolean('show-indicator');
         if (show && !this._indicator) {
             this._indicator = new Indicator(this._extension.path);
-            this._indicator.connect('activate', () => this.toggleSwitcher());
+            this._indicator.connect('activate', () => this.toggleSwitcher('profiles'));
             Main.panel.addToStatusArea(this._extension.uuid, this._indicator);
         } else if (!show && this._indicator) {
             this._indicator.destroy();

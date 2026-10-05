@@ -23,6 +23,7 @@ export function paletteStylesheet(p) {
 .atelier-panel .atelier-badge { background-color: ${d.primary}; color: ${d.onPrimary}; }
 .atelier-panel .atelier-dot { background-color: ${d.primary}; }
 .atelier-panel .atelier-chip { background-color: ${d.surfaceContainerHigh}; color: ${d.onSurfaceVariant}; }
+.atelier-panel .atelier-tab:checked { background-color: ${d.primaryContainer}; color: ${d.onPrimaryContainer}; }
 `;
 }
 

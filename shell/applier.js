@@ -65,10 +65,12 @@ export class Applier {
      * @param {boolean} [options.animate] - play the wallpaper transition
      * @param {Function} [options.onWritten] - called once the settings are
      *   written (after the transition, before GNOME finished updating)
+     * @param {boolean} [options.keepActive] - don't make it the active profile
+     *   (used to show just a wallpaper)
      * @returns {Promise<void>} resolves when no request is left
      */
-    apply(profile, {animate = true, onWritten = null} = {}) {
-        this._next = {profile, animate, onWritten};
+    apply(profile, {animate = true, onWritten = null, keepActive = false} = {}) {
+        this._next = {profile, animate, onWritten, keepActive};
         this._targetId = profile.id;
         this._running ??= this._drain().finally(() => {
             this._running = null;
@@ -79,10 +81,10 @@ export class Applier {
 
     async _drain() {
         while (this._next && !this._destroyed) {
-            const {profile, animate, onWritten} = this._next;
+            const {profile, animate, onWritten, keepActive} = this._next;
             this._next = null;
             try {
-                await this._applyOne(profile, animate, onWritten);
+                await this._applyOne(profile, animate, onWritten, keepActive);
             } catch (e) {
                 console.error(`Atelier: applying “${profile.name}” failed`, e);
                 Main.notifyError('Atelier', `Could not apply “${profile.name}”: ${e.message}`);
@@ -90,7 +92,7 @@ export class Applier {
         }
     }
 
-    async _applyOne(profile, animate, onWritten) {
+    async _applyOne(profile, animate, onWritten, keepActive) {
         const problems = [];
         const plan = await this._resolve(profile, problems);
         if (this._destroyed)
@@ -107,7 +109,8 @@ export class Applier {
             if (this._destroyed)
                 return;
             this._write(plan);
-            this._store.activeId = profile.id;
+            if (!keepActive)
+                this._store.activeId = profile.id;
             onWritten?.();
             notes = this._syncGtk4(profile, plan, problems);
         } finally {

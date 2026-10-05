@@ -38,6 +38,11 @@ LEGACY_WALLPAPER="$ROOT/data/bg-changer/wallpapers/1234abcd-amber.jxl"
 mkdir -p "$(dirname "$LEGACY_WALLPAPER")"
 cp "$BG/amber-d.jxl" "$LEGACY_WALLPAPER"
 
+# Pictures for the Wallpapers tab
+mkdir -p "$ROOT/data/Wallpapers"
+cp "$BG/blobs-d.svg" "$ROOT/data/Wallpapers/blobs.svg"
+cp "$BG/pills-d.jxl" "$ROOT/data/Wallpapers/pills.jxl"
+
 PROFILES="[\
 {\"id\":\"amber\",\"name\":\"Amber\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"orange\",\"iconTheme\":\"Adwaita\"},\
 {\"id\":\"rainbow\",\"name\":\"LCD Rainbow\",\"wallpaper\":\"$BG/lcd-rainbow-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"auto\",\"gtkTheme\":\"Adwaita-dark\",\"font\":\"Cantarell 11\"},\
@@ -59,6 +64,9 @@ color-scheme='prefer-dark'
 [org/gnome/terminal/legacy/profiles:]
 list=['b1dcc9dd-5262-4d8d-a863-c897e6d979b9']
 default='b1dcc9dd-5262-4d8d-a863-c897e6d979b9'
+
+[org/gnome/shell/extensions/atelier]
+wallpaper-folder='$ROOT/data/Wallpapers'
 
 # Seeded as BG Changer data, so Atelier has to take it over on start.
 [org/gnome/shell/extensions/bg-changer]
