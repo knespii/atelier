@@ -24,6 +24,26 @@ const FADE_OUT_TIME = 90;
 const FADE_IN_TIME = 170;
 const FADE_IN_DELAY = 70;
 
+/**
+ * @param {Clutter.Actor} page
+ * @returns {number[]|null} [width, height] the page asks for, or null when it
+ *   can't say (a size that isn't a number)
+ */
+function measure(page) {
+    const [, width] = page.get_preferred_width(-1);
+    const [, height] = Number.isFinite(width) ? page.get_preferred_height(width) : [0, NaN];
+    return Number.isFinite(width) && Number.isFinite(height) ? [width, height] : null;
+}
+
+// The innermost actor without a size, for the log.
+function culprit(actor) {
+    const child = actor.get_children().find(c => !measure(c));
+    if (child)
+        return culprit(child);
+    const style = actor instanceof St.Widget ? actor.get_style_class_name() : null;
+    return `${actor.constructor.name}${style ? ` .${style.replace(/ /g, '.')}` : ''}`;
+}
+
 // Children keep their natural size whatever size the island has, centered
 // at the top: while the island grows, it uncovers the page instead of
 // squeezing it, and the page never reflows during the animation.
@@ -53,8 +73,8 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
     vfunc_allocate(container, box) {
         const available = box.get_width();
         for (const child of container.get_children()) {
-            const [, width] = child.get_preferred_width(-1);
-            const [, height] = child.get_preferred_height(width);
+            // (A page without a size is on its way out; see Island.open.)
+            const [width, height] = measure(child) ?? [0, 0];
             const x = box.x1 + Math.round((available - width) / 2);
             child.allocate(new Clutter.ActorBox({x1: x, y1: box.y1, x2: x + width, y2: box.y1 + height}));
         }
@@ -154,9 +174,21 @@ export const Island = GObject.registerClass({
      * @param {St.Widget} page
      * @param {object} [options]
      * @param {boolean} [options.modal] - take the keyboard; a click outside closes it
-     * @returns {boolean} whether the page is shown
+     * @returns {boolean} whether the page is shown; if not, it is no longer
+     *   in the island and the caller may destroy it
      */
     open(page, {modal = false} = {}) {
+        // A page that can't say how big it is would leave the island around
+        // nothing, holding the keyboard.
+        this.adopt(page);
+        if (!this._measure(page)) {
+            if (page === this._page)
+                this.close(page);
+            else if (page.get_parent() === this)
+                this.remove_child(page);
+            return false;
+        }
+
         if (modal && !this._grab) {
             const grab = Main.pushModal(this, {actionMode: Shell.ActionMode.POPUP});
             if ((grab.get_seat_state() & Clutter.GrabState.KEYBOARD) === 0) {
@@ -240,13 +272,28 @@ export const Island = GObject.registerClass({
         this._resize(target, true);
     }
 
+    /**
+     * @param {St.Widget} target
+     * @returns {number[]|null} its size, or null (logged) when it has none
+     */
+    _measure(target) {
+        const size = measure(target);
+        if (!size)
+            console.warn(`Atelier: an island page has no size, because of ${culprit(target)}`);
+        return size;
+    }
+
     _resize(target, animate) {
         if (!this._anchor)
             return;
-        const [, natWidth] = target.get_preferred_width(-1);
-        const [, natHeight] = target.get_preferred_height(natWidth);
-        const width = Math.ceil(natWidth);
-        const height = Math.ceil(natHeight);
+        const size = this._measure(target);
+        if (!size) {
+            if (target === this._page)
+                this.close(target);
+            return;
+        }
+        const width = Math.ceil(size[0]);
+        const height = Math.ceil(size[1]);
 
         // The capsule's radius would turn into a stadium as it grows; pages
         // get a fixed radius. Shrinking keeps it until the capsule is small.
@@ -276,8 +323,12 @@ export const Island = GObject.registerClass({
             const page = this._shown;
             if (page === this._idle || this._destroyed)
                 return GLib.SOURCE_REMOVE;
-            const [, width] = page.get_preferred_width(-1);
-            const [, height] = page.get_preferred_height(width);
+            const size = this._measure(page);
+            if (!size) {
+                this.close(page);
+                return GLib.SOURCE_REMOVE;
+            }
+            const [width, height] = size;
             if (Math.abs(Math.ceil(width) - this.width) >= 1 || Math.abs(Math.ceil(height) - this.height) >= 1) {
                 // Still growing into the page: aim the animation anew;
                 // otherwise follow the content right away.

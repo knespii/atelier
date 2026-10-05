@@ -954,7 +954,12 @@
 }
 
 .atelier-cc-calendar {
-  max-height: 470px;
+  max-height: 640px;
+}
+
+/* Everything under the calendar shows, without a fade at the bottom. */
+.atelier-cc .datemenu-displays-section {
+  -st-vfade-offset: 0;
 }
 
 .atelier-cc .message-list {
@@ -978,21 +983,23 @@
   color: rgba(255, 255, 255, 0.45);
 }
 
+/* Opaque: grouped notifications lie on top of each other, and only the
+   edges of those below should show. */
 .atelier-cc .message {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: #1d1d20;
   color: #ffffff;
 }
 
 .atelier-cc .message:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: #27272a;
 }
 
 .atelier-cc .message:second-in-stack {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: #161618;
 }
 
 .atelier-cc .message:lower-in-stack {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: #111113;
 }
 
 .atelier-cc .message .message-header,

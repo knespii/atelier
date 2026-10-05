@@ -111,7 +111,9 @@ class AtelierControlCentrePage extends IslandPage {
         this.grab_key_focus();
     }
 
-    // As wide as the widest tab, so switching tabs doesn't resize it.
+    // As wide as the widest tab, so switching tabs doesn't resize it. (A
+    // hidden tab without a sensible width – an extension's odd icon – is
+    // left out; the island looks after the one shown.)
     vfunc_get_preferred_width(forHeight) {
         let [min, nat] = super.vfunc_get_preferred_width(forHeight);
         const padding = this.get_theme_node().get_horizontal_padding();
@@ -120,6 +122,8 @@ class AtelierControlCentrePage extends IslandPage {
             if (!children.includes(actor))
                 continue;
             const [, width] = actor.get_preferred_width(-1);
+            if (!Number.isFinite(width))
+                continue;
             min = Math.max(min, width + padding);
             nat = Math.max(nat, width + padding);
         }

@@ -12,8 +12,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {capsuleHeight} from '../core/barMetrics.js';
 import {GlassSurface} from '../core/glass.js';
 import {ContentPage} from '../island/page.js';
-import {PanelBackdrop} from './backdrop.js';
 import {ClaudeIndicator, WeatherIndicator} from './indicators.js';
+import {OverviewBackdrop} from './overviewBackdrop.js';
 
 // The order of the modules, left to right, before the status icons.
 const MODULES = ['weather', 'claude'];
@@ -147,11 +147,11 @@ export class BarModule {
         const grouped = style === 'grouped';
         const glass = this._barSettings.get_string('surface') === 'glass';
 
-        // Without a background of its own, the bar needs the wallpaper strip
-        // while the overview opens and closes.
+        // Without a background of its own, the bar shows the overview's
+        // background too: the blurred wallpaper rather than GNOME's grey.
         if (clear) {
             Main.panel.add_style_class_name(CLEAN);
-            this._backdrop ??= new PanelBackdrop();
+            this._backdrop ??= new OverviewBackdrop();
         } else {
             Main.panel.remove_style_class_name(CLEAN);
             this._backdrop?.destroy();
@@ -222,9 +222,12 @@ export class BarModule {
                 const page = id === 'claude'
                     ? new ContentPage(this._modules.get('claude').createView())
                     : islandModule.createGlance();
+                if (!island.open(page)) {
+                    page.destroy();
+                    return;
+                }
                 this._preview = {page, indicator, island};
                 island.connectObject('notify::hover', () => this._maybeClosePreview(), this);
-                island.open(page);
             });
         } else {
             this._clear('show-preview');

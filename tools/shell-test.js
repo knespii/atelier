@@ -5,6 +5,8 @@ import Clutter from 'gi://Clutter';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -150,6 +152,16 @@ function fakeSystemActions(calls) {
     };
 }
 
+// A page that asks for an endless width (as something in the control
+// centre once did).
+const EndlessPage = GObject.registerClass({
+    Signals: {'close-request': {}},
+}, class EndlessPage extends St.Widget {
+    vfunc_get_preferred_width(_forHeight) {
+        return [0, Infinity];
+    }
+});
+
 class FakeEvents extends EventEmitter {
     constructor() {
         super();
@@ -260,6 +272,7 @@ async function testIsland(ext, atelier) {
     island.page.setTab('calendar');
     await Scripting.sleep(500);
     check(dateMenu._calendar.mapped, 'and the calendar on its own tab');
+    check(dateMenu._displaysSection.get_effect('fade') === null, 'with nothing faded out under it');
     await screenshotIsland('12b-control-centre-calendar', 640);
     Main.panel.toggleCalendar();
     check(await waitFor(() => island.page?.tab === 'notifications', 1000), 'Super+V again goes to the notifications');
@@ -289,6 +302,13 @@ async function testIsland(ext, atelier) {
     await clickAt(200, global.stage.height - 200);
     check(await waitFor(() => island.page === null && !island.busy, 1000), 'so does a click outside');
     check(calls.length === 1, `nothing else ran (${calls})`);
+
+    // A page that can't say how big it is doesn't get the island stuck
+    // around nothing, holding the keyboard.
+    const endless = new EndlessPage();
+    check(!island.open(endless, {modal: true}) && !island.busy && island.page === null &&
+        endless.get_parent() === null, 'a page without a size is turned away');
+    endless.destroy();
 
     // Switching profiles: the island announces it at once, and the work
     // starts once the announcement is open.
@@ -510,6 +530,11 @@ function addTestTile() {
         toggleMode: true,
     });
     toggle.menu.setHeader('weather-clear-night-symbolic', 'Test Tile', 'Its own menu');
+    // Wrapped like Bluetooth's "Turn on Bluetooth to connect to devices".
+    const note = new PopupMenu.PopupMenuItem(
+        'Turn the test tile on to see everything it could do for you right here', {reactive: false});
+    note.label.clutter_text.set({ellipsize: Pango.EllipsizeMode.NONE, line_wrap: true});
+    toggle.menu.addMenuItem(note);
     toggle.menu.addMenuItem(new PopupMenu.PopupMenuItem('First option'));
     toggle.menu.addMenuItem(new PopupMenu.PopupMenuItem('Second option'));
     indicator.quickSettingsItems.push(toggle);
@@ -565,6 +590,14 @@ async function testControlCentre(ext) {
     const [, menuY] = toggle.menu.actor.get_transformed_position();
     check(toggle.menu.isOpen && menuY >= tileY + toggle.height - 1, 'a tile\'s menu opens under it');
     check(island.height > grid.get_preferred_height(-1)[1] - 1, 'and the island makes room');
+    // Its wrapped text included: the next row (or the end) comes after it.
+    const [, gridY] = grid.get_transformed_position();
+    const below = grid.get_children()
+        .filter(c => c.visible && c.width > 0 && c.get_transformed_position()[1] > tileY + toggle.height)
+        .map(c => c.get_transformed_position()[1]);
+    const next = Math.min(gridY + grid.height, ...below);
+    const menuBottom = menuY + toggle.menu.actor.height;
+    check(menuBottom <= next + 1, `nothing under the menu (${menuBottom} vs ${next})`);
     await screenshotIsland('22-control-centre-menu', 800);
     toggle.menu.close(true);
     await Scripting.sleep(500);
@@ -588,6 +621,16 @@ async function testControlCentre(ext) {
     check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000), 'Super+S opens it');
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => island.page === null, 1000), 'and closes it');
+
+    // GNOME's power button (next to Lock) opens Atelier's power menu.
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
+    const systemItem = quickSettings._system._systemItem;
+    click(systemItem.child.get_last_child());
+    check(await waitFor(() => hasClass(island.page, 'atelier-power') && island.busy, 1000) &&
+        !systemItem.menu.isOpen, 'its power button opens Atelier\'s power menu');
+    await pressKey(Clutter.KEY_Escape);
+    await waitFor(() => island.page === null && !island.busy, 1000);
 
     // Turned off: GNOME's menu and the icons in the bar come back.
     const settings = ext.stateObj._settings.get_child('control-centre');
@@ -629,8 +672,9 @@ async function testOverviewBar() {
     check(colorDistance(bar, below) < 60, `the bar stays clear while leaving the overview (${bar} vs ${below})`);
     await waitFor(() => !Main.overview.visible, 3000);
     await Scripting.sleep(200);
-    const backdrop = Main.layoutManager.uiGroup.get_children().find(a => a.name === 'atelier-panel-backdrop');
-    check(backdrop?.opacity === 0, 'and the wallpaper strip behind it is gone on the desktop');
+    const backdrop = Main.layoutManager.overviewGroup.get_first_child();
+    check(backdrop?.name === 'atelier-overview-backdrop' && backdrop.get_n_children() > 0,
+        'the overview lies on the blurred wallpaper');
 }
 
 async function testBarStyles(ext) {

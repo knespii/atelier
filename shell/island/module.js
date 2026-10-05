@@ -221,11 +221,15 @@ export class IslandModule {
         this._clearTimeout('show-glance');
         const scheme = profile.colorScheme ??
             new Gio.Settings({schema_id: 'org.gnome.desktop.interface'}).get_string('color-scheme');
-        island.open(new ToastPage({
+        const toast = new ToastPage({
             title: profile.name,
             subtitle,
             wallpaper: effectiveWallpaper(profile, scheme),
-        }));
+        });
+        if (!island.open(toast)) {
+            toast.destroy();
+            return Promise.resolve(false);
+        }
         return this._wait(MORPH_TIME);
     }
 
@@ -288,7 +292,9 @@ export class IslandModule {
         const island = this._island;
         if (island.page || !island.hover || this._calendar.isOpen)
             return;
-        island.open(this.createGlance());
+        const glance = this.createGlance();
+        if (!island.open(glance))
+            glance.destroy();
     }
 
     _onClicked(button) {

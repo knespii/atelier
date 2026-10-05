@@ -1,8 +1,8 @@
 // The control centre: the island opens it (and Super+S, Super+V for the
 // notifications); the status icons in the top bar only show the state. It
 // holds GNOME's quick settings, GNOME's notification list and calendar,
-// and the icons extensions put into the bar. Without the island, GNOME's
-// menus work as usual.
+// and the icons extensions put into the bar; its power button opens
+// Atelier's power menu. Without the island, GNOME's menus work as usual.
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -79,6 +79,20 @@ export class ControlCentreModule {
             this.close();
             original.call(Main.panel);
         });
+        // GNOME's power button, next to Lock, opens Atelier's power menu
+        // instead of GNOME's list.
+        const powerMenu = quickSettings._system?._systemItem?.menu;
+        if (powerMenu) {
+            this._injections.overrideMethod(powerMenu, 'open', original => (...args) => {
+                const islandModule = this._islandModule();
+                if (this._page && islandModule) {
+                    this.close();
+                    islandModule.togglePowerMenu();
+                } else {
+                    original.call(powerMenu, ...args);
+                }
+            });
+        }
 
         this._modules.connectObject(
             'started', (_, id) => id === 'island' && this._adopt(),

@@ -144,7 +144,10 @@ export class NotificationsModule {
                 this._finish(tray, true);
         });
         this._page = page;
-        this._island().island.open(page);
+        if (!this._island().island.open(page)) {
+            page.destroy();
+            return undefined;
+        }
         this._present(tray);
         return undefined;
     }

@@ -31,6 +31,31 @@ function label(styleClass, text = '', params = {}) {
     return new St.Label({style_class: styleClass, text, ...params});
 }
 
+// The bar of the block's progress: its child fills a fraction of the width.
+// (Laid out, not sized from the outside while the bar is being allocated.)
+const ProgressLayout = GObject.registerClass(
+class AtelierClaudeProgressLayout extends Clutter.BinLayout {
+    _init() {
+        super._init();
+        this._fraction = 0;
+    }
+
+    /** @param {number} fraction - 0 to 1 */
+    setFraction(fraction) {
+        if (fraction === this._fraction)
+            return;
+        this._fraction = fraction;
+        this.layout_changed();
+    }
+
+    vfunc_allocate(container, box) {
+        const fill = box.copy();
+        fill.x2 = fill.x1 + Math.round(box.get_width() * this._fraction);
+        for (const child of container.get_children())
+            child.allocate(fill);
+    }
+});
+
 export const ClaudeView = GObject.registerClass(
 class AtelierClaudeView extends St.BoxLayout {
     /**
@@ -48,7 +73,12 @@ class AtelierClaudeView extends St.BoxLayout {
 
         this._span = label('atelier-claude-span');
         this.add_child(this._span);
-        this._progress = new St.Widget({style_class: 'atelier-claude-progress', x_expand: true});
+        this._progressLayout = new ProgressLayout();
+        this._progress = new St.Widget({
+            style_class: 'atelier-claude-progress',
+            layout_manager: this._progressLayout,
+            x_expand: true,
+        });
         this._progressFill = new St.Widget({style_class: 'atelier-claude-progress-fill'});
         this._progress.add_child(this._progressFill);
         this.add_child(this._progress);
@@ -92,7 +122,6 @@ class AtelierClaudeView extends St.BoxLayout {
             usage.refresh();
             this._syncProgress();
         });
-        this._progress.connect('notify::width', () => this._syncProgress());
         this._sync();
     }
 
@@ -152,12 +181,10 @@ class AtelierClaudeView extends St.BoxLayout {
 
     _syncProgress() {
         const block = this._block;
-        // Measured once shown; until then it has no size to fill.
-        if (!block || !this._progress.mapped)
+        if (!block)
             return;
-        const fraction = Math.min(1, Math.max(0, (Date.now() - block.start) / (block.end - block.start)));
-        this._progressFill.width = Math.round(this._progress.width * fraction);
-        this._progressFill.height = this._progress.height;
+        const fraction = (Date.now() - block.start) / Math.max(1, block.end - block.start);
+        this._progressLayout.setFraction(Math.min(1, Math.max(0, fraction)));
     }
 
     _syncChart(days) {
