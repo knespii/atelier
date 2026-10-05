@@ -41,8 +41,12 @@ export class CalendarBridge {
         this._sourceActor = dateMenu.menu.sourceActor;
         dateMenu.menu.sourceActor = this._anchor;
         dateMenu.container.hide();
-        // The panel shows its items again whenever the session mode changes.
-        Main.sessionMode.connectObject('updated', () => dateMenu.container.hide(), this);
+        // The panel shows its items again whenever the session mode changes,
+        // and other extensions (Just Perfection) may show the clock too.
+        dateMenu.container.connectObject('notify::visible', () => {
+            if (dateMenu.container.visible)
+                dateMenu.container.hide();
+        }, this);
 
         // Super+V and others go through these; the panel's own versions
         // refuse to open a menu whose button is hidden.
@@ -52,11 +56,11 @@ export class CalendarBridge {
 
     disable() {
         this._injections.clear();
-        Main.sessionMode.disconnectObject(this);
         const dateMenu = this._dateMenu;
         this._dateMenu = null;
         if (!dateMenu)
             return;
+        dateMenu.container.disconnectObject(this);
         dateMenu.menu.close();
         dateMenu.menu.sourceActor = this._sourceActor;
         const layout = Main.sessionMode.panel;

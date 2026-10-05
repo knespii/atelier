@@ -179,6 +179,8 @@ async function testIsland(ext, atelier) {
 
     check(slot !== undefined, 'the island has its place in the top bar');
     check(!dateMenu.container.visible, 'GNOME\'s clock button makes room for it');
+    dateMenu.container.show(); // as Just Perfection does when it starts
+    check(!dateMenu.container.visible, 'and stays hidden when another extension shows it');
     check(await waitFor(() => island.opacity === 255 && island.width > 0, 3000), 'island placed');
     await restPointer();
     await Scripting.sleep(300);
