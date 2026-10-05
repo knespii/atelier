@@ -3,6 +3,7 @@
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {LooksPage} from './prefs/looksPage.js';
+import {SettingsPage} from './prefs/settingsPage.js';
 import {installCss} from './prefs/widgets.js';
 
 export default class BgChangerPreferences extends ExtensionPreferences {
@@ -12,10 +13,13 @@ export default class BgChangerPreferences extends ExtensionPreferences {
         window.set_default_size(760, 860);
 
         const looks = new LooksPage(settings);
+        const preferences = new SettingsPage(settings);
         window.add(looks);
+        window.add(preferences);
 
         window.connect('close-request', () => {
             looks.disconnectSettings();
+            preferences.disconnectSettings();
             return false;
         });
     }
