@@ -76,6 +76,20 @@ export class IslandModule {
         return this._island ?? null;
     }
 
+    /** @returns {boolean} whether the island is on screen to show pages */
+    get available() {
+        return Boolean(this._island?.visible && this._slot?.mapped);
+    }
+
+    /**
+     * @returns {boolean} whether a notification has to wait: a page has the
+     *   keyboard (switcher, power menu) or a toast is up
+     */
+    get occupied() {
+        const island = this._island;
+        return Boolean(island && (island.busy || island.page instanceof ToastPage));
+    }
+
     enable() {
         this._islandSettings = this._settings.get_child('island');
         this._mic = new MicWatcher();

@@ -10,6 +10,7 @@ import St from 'gi://St';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'atelier@local';
@@ -325,6 +326,146 @@ async function testIsland(ext, atelier) {
     settings.set_boolean('enabled', true);
     check(await waitFor(() => ext.stateObj.modules.get('island')?.island?.opacity === 255, 3000), 'and on again');
     ext.stateObj.modules.get('island').systemActions = fakeSystemActions(calls);
+}
+
+function appSource(title, appId, iconName) {
+    const source = new MessageTray.Source({
+        title,
+        iconName,
+        policy: new MessageTray.NotificationApplicationPolicy(appId),
+    });
+    Main.messageTray.add(source);
+    return source;
+}
+
+// The tray keeps banners of a user who is away until they come back; a
+// little pointer movement first makes them time out as usual.
+let nudge = 0;
+async function notify(source, title, body, setup = null) {
+    await pointerTo(global.stage.width / 2 + (nudge++ % 2 ? 40 : -40), global.stage.height - 200);
+    const notification = new MessageTray.Notification({source, title, body});
+    setup?.(notification);
+    source.addNotification(notification);
+    return notification;
+}
+
+const showsNotification = (island, notification = null) =>
+    hasClass(island.page, 'atelier-notification') && (!notification || island.page.notification === notification);
+const click = button => button.emit('clicked', Clutter.BUTTON_PRIMARY);
+
+async function testNotifications(ext, atelier) {
+    if (!check(ext.stateObj.modules.get('notifications') !== null, 'notifications module running'))
+        return;
+    const tray = Main.messageTray;
+    const settings = ext.stateObj._settings.get_child('notifications');
+    const islandModule = () => ext.stateObj.modules.get('island');
+    const island = islandModule().island;
+
+    // WhatsApp (a Chrome app): Reply and Mute.
+    const whatsapp = appSource('WhatsApp', 'chrome-hnpfjngllnobngcgfapefoaidbinmjnm-Default', 'mail-unread-symbolic');
+    const message = await notify(whatsapp, 'Petr Novák',
+        'Ahoj! Jdeme dnes večer na ten koncert? Lístky mám, stačí říct a vezmu je s sebou.');
+    check(await waitFor(() => showsNotification(island, message), 2000), 'a notification shows in the island');
+    check(tray._banner === null && !tray.visible, 'GNOME\'s banner stays hidden');
+    const page = island.page;
+    check(page._title.text === 'Petr Novák' && page._body.text.startsWith('Ahoj!'), 'with its title and text');
+    check(JSON.stringify(page.buttonLabels) === '["Reply","Mute"]', `WhatsApp gets Reply and Mute (${page.buttonLabels})`);
+    check(message.acknowledged, 'and counts as seen');
+    await Scripting.sleep(400);
+    await screenshotIsland('18-notification-whatsapp', 220);
+
+    click(page._buttons.get_child_at_index(1));
+    await Scripting.sleep(400);
+    check(JSON.stringify(page.buttonLabels) === '["1 hour","8 hours","Until unmuted","Cancel"]',
+        'Mute asks for how long');
+    check(island.height > 120, `and the island makes room (${island.height}px)`);
+    await screenshotIsland('19-notification-mute', 220);
+    click(page._buttons.get_child_at_index(0));
+    check(await waitFor(() => island.page === null && tray._notification === null, 2000), 'muting lets it go');
+    check(whatsapp.notifications.includes(message), 'it stays in the list');
+    check(settings.get_string('muted').includes('chrome-hnpfjngllnobngcgfapefoaidbinmjnm-default'), 'the app is muted');
+    const quiet = await notify(whatsapp, 'Petr Novák', 'Haló?');
+    await Scripting.sleep(800);
+    check(island.page === null && tray.queueCount === 0 && whatsapp.notifications.includes(quiet),
+        'a muted app\'s notification goes to the list without a banner');
+    settings.reset('muted');
+
+    // Claude: no buttons, and it goes by itself.
+    const claude = appSource('Claude', 'com.anthropic.claude', 'dialog-information-symbolic');
+    const finished = await notify(claude, 'Claude', 'Your task is done.');
+    check(await waitFor(() => showsNotification(island, finished), 2000), 'the next one shows');
+    check(island.page.buttonLabels.length === 0 && !island.page._buttons.visible, 'Claude\'s has no buttons');
+    check(await waitFor(() => island.page === null, 9000), 'it goes away by itself');
+    check(claude.notifications.includes(finished), 'and stays in the list');
+
+    // Other apps: their own buttons. (A source goes away with its last
+    // notification, so a new one is made when needed.)
+    let filesSource = null;
+    const files = () => {
+        if (!filesSource || !tray.contains(filesSource))
+            filesSource = appSource('Files', 'org.gnome.Nautilus', 'folder-symbolic');
+        return filesSource;
+    };
+    let opened = false;
+    const copied = await notify(files(), 'Copy finished', '3 files copied to Pictures',
+        n => n.addAction('Open Folder', () => (opened = true)));
+    check(await waitFor(() => showsNotification(island, copied), 2000) &&
+        JSON.stringify(island.page.buttonLabels) === '["Open Folder"]', 'other apps get their own buttons');
+    click(island.page._buttons.get_child_at_index(0));
+    check(opened && await waitFor(() => island.page === null, 2000), 'a button runs and closes the notification');
+
+    let activated = false;
+    const clicked = await notify(files(), 'Clicked', 'Opens the app', n => n.connect('activated', () => (activated = true)));
+    await waitFor(() => showsNotification(island, clicked), 2000);
+    click(island.page._content);
+    check(activated && await waitFor(() => island.page === null, 2000), 'clicking a notification opens it');
+    let removed = false;
+    const dismissed = await notify(files(), 'Dismissed', 'Goes away', n => n.connect('destroy', () => (removed = true)));
+    await waitFor(() => showsNotification(island, dismissed), 2000);
+    click(island.page._dismiss);
+    check(await waitFor(() => island.page === null && removed, 2000), 'the × removes it from the list');
+
+    // With the switcher open, a notification waits for it to close.
+    atelier.toggleSwitcher();
+    await Scripting.sleep(400);
+    const waiting = await notify(files(), 'Waiting', 'for the switcher');
+    await Scripting.sleep(500);
+    check(tray.queueCount === 1 && hasClass(atelier._switcher?.get_parent(), 'atelier-island-switcher'),
+        'with the switcher open it waits');
+    atelier._switcher.close();
+    check(await waitFor(() => showsNotification(island, waiting), 2000), 'and shows once it closes');
+    waiting.destroy();
+    await waitFor(() => island.page === null, 2000);
+
+    // Without the island, GNOME's banner.
+    const islandSettings = ext.stateObj._settings.get_child('island');
+    islandSettings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    const plain = await notify(files(), 'Plain', 'A GNOME banner');
+    check(await waitFor(() => tray._banner !== null, 2000), 'without the island, GNOME\'s banner shows');
+    plain.destroy();
+    await waitFor(() => tray._banner === null, 2000);
+    islandSettings.set_boolean('enabled', true);
+    await waitFor(() => islandModule()?.island?.opacity === 255, 3000);
+    islandModule().systemActions = fakeSystemActions([]);
+
+    // Turned off while one shows: the tray carries on with its own banners.
+    const last = await notify(files(), 'Last', 'in the island');
+    await waitFor(() => showsNotification(islandModule().island, last), 2000);
+    settings.set_boolean('enabled', false);
+    await Scripting.sleep(400);
+    check(ext.stateObj.modules.get('notifications') === null && islandModule().island.page === null,
+        'notifications can be turned off, even mid-way');
+    const after = await notify(files(), 'After', 'A GNOME banner again');
+    check(await waitFor(() => tray._banner !== null, 3000), 'then GNOME\'s banners are back');
+    after.destroy();
+    await waitFor(() => tray._banner === null, 2000);
+    settings.set_boolean('enabled', true);
+    await Scripting.sleep(300);
+    for (const source of [whatsapp, claude, filesSource]) {
+        if (tray.contains(source))
+            source.destroy();
+    }
 }
 
 async function testSwitcherAndReveal(atelier) {
@@ -645,6 +786,9 @@ async function testDisableCleansUp(atelier) {
     const panelProto = Object.getPrototypeOf(Main.panel);
     check(['toggleCalendar', 'closeCalendar'].every(name => Main.panel[name] === panelProto[name]),
         'calendar functions restored');
+    const trayProto = Object.getPrototypeOf(Main.messageTray);
+    check(['_showNotification', '_hideNotification', '_updateShowingNotification']
+        .every(name => Main.messageTray[name] === trayProto[name]), 'message tray restored');
 
     Main.extensionManager.enableExtension(UUID);
     await Scripting.sleep(300);
@@ -691,6 +835,7 @@ export async function run() {
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
 
         await testIsland(ext, atelier);
+        await testNotifications(ext, atelier);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

@@ -5,13 +5,14 @@ import System from 'system';
 
 import * as gtkCss from './gtkCss.test.js';
 import * as migrate from './migrate.test.js';
+import * as notifications from './notifications.test.js';
 import * as palette from './palette.test.js';
 import * as terminal from './terminal.test.js';
 import * as profiles from './profiles.test.js';
 import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
 
-const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal};
+const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications};
 
 let total = 0;
 let failures = 0;

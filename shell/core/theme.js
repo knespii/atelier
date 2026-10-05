@@ -30,6 +30,12 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-glance-event-bar { background-color: ${d.primary}; }
 .atelier-island .atelier-power-tile:focus { border-color: ${d.primary}; }
 .atelier-island .atelier-toast-check { color: ${d.primary}; }
+.atelier-island .atelier-notification-button { background-color: ${d.surfaceContainerHigh}; color: ${d.onSurface}; }
+.atelier-island .atelier-notification-button:hover,
+.atelier-island .atelier-notification-button:active { background-color: ${d.surfaceContainerHighest}; }
+.atelier-island .atelier-notification-button.atelier-notification-button-quiet { background-color: transparent; color: ${d.onSurfaceVariant}; }
+.atelier-island .atelier-notification-button:focus,
+.atelier-island .atelier-notification-content:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
 `;
 }
 

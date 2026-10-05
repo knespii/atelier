@@ -9,6 +9,7 @@ import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {IslandModule} from './shell/island/module.js';
+import {NotificationsModule} from './shell/notifications/module.js';
 import {PaletteModule} from './shell/paletteModule.js';
 import {ProfilesModule} from './shell/profilesModule.js';
 
@@ -26,6 +27,8 @@ export default class AtelierExtension extends Extension {
         this.modules.register('profiles', ctx => new ProfilesModule(ctx));
         this.modules.register('island', ctx => new IslandModule(ctx),
             {settings: this._settings.get_child('island'), key: 'enabled'});
+        this.modules.register('notifications', ctx => new NotificationsModule(ctx),
+            {settings: this._settings.get_child('notifications'), key: 'enabled'});
 
         // BG Changer's data has to be taken over before anything reads the
         // profiles, otherwise the first run would save a second "Original".

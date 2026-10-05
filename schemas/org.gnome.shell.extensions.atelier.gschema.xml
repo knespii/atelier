@@ -21,6 +21,7 @@
           path="/org/gnome/shell/extensions/atelier/">
     <child name="palette" schema="org.gnome.shell.extensions.atelier.palette"/>
     <child name="island" schema="org.gnome.shell.extensions.atelier.island"/>
+    <child name="notifications" schema="org.gnome.shell.extensions.atelier.notifications"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -159,6 +160,25 @@
     <key name="atelier-power-menu" type="as">
       <default>[]</default>
       <summary>Open the power menu in the island</summary>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.notifications"
+          path="/org/gnome/shell/extensions/atelier/notifications/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Show notifications in the island</summary>
+      <description>Banners appear in the island instead of under the top bar. GNOME still decides which notifications show (Do Not Disturb, per-app settings, the queue), and they stay in the notification list.</description>
+    </key>
+    <key name="app-buttons" type="s">
+      <default>'{"chrome-hnpfjngllnobngcgfapefoaidbinmjnm-default": "reply-mute", "com-anthropic-claude": "none"}'</default>
+      <summary>Buttons of notifications, per app</summary>
+      <description>JSON object mapping GNOME's notification app keys (e.g. "org-gnome-nautilus") to "app" (the app's own buttons, the default), "none" or "reply-mute". WhatsApp as a Chrome app gets Reply and Mute, Claude none.</description>
+    </key>
+    <key name="muted" type="s">
+      <default>'{}'</default>
+      <summary>Muted apps</summary>
+      <description>JSON object mapping app keys to the end of the mute in Unix seconds, or 0 until it is lifted. Notifications of muted apps go to the list without a banner.</description>
     </key>
   </schema>
 </schemalist>
