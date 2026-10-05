@@ -687,6 +687,46 @@ async function testBarStyles(ext) {
         Main.panel.has_style_class_name('atelier-bar-clean'), 'back to the clear bar');
 }
 
+async function testClaude(ext) {
+    const claude = ext.stateObj.modules.get('claude');
+    if (!check(claude !== null, 'Claude module running'))
+        return;
+    check(await waitFor(() => claude.hasData, 8000), 'it reads Claude Code\'s history');
+    const summary = claude.usage.summary;
+    check(summary?.block?.totals.output === 1500 && summary?.week.output === 5500,
+        `this block and the week, each answer once (${summary?.block?.totals.output}, ${summary?.week.output})`);
+    const indicator = Main.panel.statusArea['atelier-claude'];
+    check(indicator?.visible && indicator._label.text === '1.5k',
+        `the bar shows the block's output (${indicator?._label.text})`);
+    await restPointer();
+    await screenshotArea('29-bar-claude', global.stage.width - 400, 0, 400, 44);
+
+    const island = ext.stateObj.modules.get('island').island;
+    await pointerTo(...centerOf(indicator));
+    check(await waitFor(() => hasClass(island.page, 'atelier-preview'), 2000),
+        'resting on it shows the details in the island');
+    await Scripting.sleep(600);
+    await screenshotIsland('30-claude-preview', 420);
+    await restPointer();
+    check(await waitFor(() => island.page === null, 2000), 'they go when the pointer leaves');
+
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
+    island.page.setTab('claude');
+    await Scripting.sleep(600);
+    check(island.page.tab === 'claude' && claude.view.mapped, 'the control centre has a Claude tab');
+    await screenshotIsland('31-control-centre-claude', 460);
+    Main.panel.closeQuickSettings();
+    await waitFor(() => island.page === null, 1000);
+
+    const bar = ext.stateObj._settings.get_child('bar');
+    bar.set_strv('modules', []);
+    await Scripting.sleep(200);
+    check(Main.panel.statusArea['atelier-claude'] === undefined, 'it can be left out of the bar');
+    bar.reset('modules');
+    await Scripting.sleep(300);
+}
+
 async function testSwitcherAndReveal(atelier) {
     await screenshot('01-desktop');
 
@@ -1008,6 +1048,7 @@ async function testDisableCleansUp(atelier) {
     const qsMenu = Main.panel.statusArea.quickSettings.menu;
     check(!Main.layoutManager.uiGroup.get_children().some(a => hasClass(a, 'atelier-glass') || hasClass(a, 'atelier-capsule')),
         'no glass or capsules left');
+    check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
     const trayProto = Object.getPrototypeOf(Main.messageTray);
@@ -1063,6 +1104,7 @@ export async function run() {
         await testControlCentre(ext);
         await testOverviewBar();
         await testBarStyles(ext);
+        await testClaude(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

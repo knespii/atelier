@@ -16,7 +16,7 @@ import {PopupDummyMenu} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 // What stays in the bar.
 const KEEP = new Set([
     'activities', 'dateMenu', 'quickSettings', 'keyboard', 'screenRecording', 'screenSharing',
-    'atelier-island', 'atelier@local',
+    'atelier-island', 'atelier@local', 'atelier-claude', 'atelier-weather',
 ]);
 
 /**

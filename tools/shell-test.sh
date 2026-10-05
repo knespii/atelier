@@ -43,6 +43,21 @@ mkdir -p "$ROOT/data/Wallpapers"
 cp "$BG/blobs-d.svg" "$ROOT/data/Wallpapers/blobs.svg"
 cp "$BG/pills-d.jxl" "$ROOT/data/Wallpapers/pills.jxl"
 
+# Claude Code's history, made up: three answers in this block, one two days ago.
+CLAUDE="$ROOT/claude"
+mkdir -p "$CLAUDE/projects/-home-test-project"
+answer() {
+    printf '{"type":"assistant","timestamp":"%s","requestId":"req_%s","sessionId":"session","message":{"id":"msg_%s","role":"assistant","usage":{"input_tokens":3,"output_tokens":%s,"cache_creation_input_tokens":1000,"cache_read_input_tokens":20000}}}\n' \
+        "$(date -u -d "$1" +%Y-%m-%dT%H:%M:%S.000Z)" "$2" "$2" "$3"
+}
+{
+    answer '-30 min' 1 500
+    answer '-20 min' 2 500
+    answer '-10 min' 3 500
+    answer '-10 min' 3 500 # streamed twice
+    answer '-2 days' 4 4000
+} > "$CLAUDE/projects/-home-test-project/session.jsonl"
+
 PROFILES="[\
 {\"id\":\"amber\",\"name\":\"Amber\",\"wallpaper\":\"$BG/amber-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"orange\",\"iconTheme\":\"Adwaita\"},\
 {\"id\":\"rainbow\",\"name\":\"LCD Rainbow\",\"wallpaper\":\"$BG/lcd-rainbow-d.jxl\",\"colorScheme\":\"prefer-dark\",\"accentColor\":\"auto\",\"gtkTheme\":\"Adwaita-dark\",\"font\":\"Cantarell 11\"},\
@@ -80,7 +95,7 @@ status=0
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
     WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
-    GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" \
+    CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" \
     dbus-run-session -- timeout --kill-after=5 180 \
     gnome-shell --headless --virtual-monitor 1920x1080 --no-x11 \
         --wayland-display=atelier-test-0 --force-animations \

@@ -86,7 +86,10 @@ function findDescendant(widget, predicate) {
     return null;
 }
 
-function render(window, name) {
+async function render(window, name) {
+    // The window may be between frames without a renderer for a moment.
+    for (let i = 0; i < 20 && !window.get_renderer(); i++)
+        await sleep(100);
     const snapshot = new Gtk.Snapshot();
     new Gtk.WidgetPaintable({widget: window}).snapshot(snapshot, window.get_width(), window.get_height());
     const texture = window.get_renderer().render_texture(snapshot.to_node(), null);
@@ -205,6 +208,11 @@ async function runSelftest(window) {
     ['style', 'surface', 'island-shape'].forEach(key => barSettings.reset(key));
     await sleep(100);
     check(bar._style.selected === 1, 'and the rows follow the settings');
+    check(bar._claude.active && !bar._weather.active, 'the Claude module is on, the weather off');
+    bar._weather.active = true;
+    bar._claude.active = false;
+    check(JSON.stringify(barSettings.get_strv('modules')) === '["weather"]', 'modules are switched on and off');
+    barSettings.reset('modules');
     bar._controlCentre.active = false;
     check(!store.settings.get_child('control-centre').get_boolean('enabled') && !bar._extensions.sensitive,
         'without the control centre, its options are greyed out');
@@ -216,20 +224,20 @@ async function takeScreenshots(window) {
     for (const id of ['island', 'notifications', 'top-bar', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
-        render(window, id);
+        await render(window, id);
     }
 
     const page = await section(window, 'profiles');
     const [, second] = page._store.getAll();
     await page._edit(second);
     await sleep(2000);
-    render(window, 'editor-top');
+    await render(window, 'editor-top');
 
     const scrolled = findDescendant(window.visible_dialog, w => w instanceof Gtk.ScrolledWindow);
     if (scrolled) {
         scrolled.vadjustment.value = scrolled.vadjustment.upper;
         await sleep(500);
-        render(window, 'editor-bottom');
+        await render(window, 'editor-bottom');
     }
     window.visible_dialog?.close();
     await sleep(300);

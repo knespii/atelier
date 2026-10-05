@@ -102,7 +102,7 @@ export class ControlCentreModule {
      * Open the control centre on a tab, switch to the tab, or close it when
      * it shows that tab already.
      *
-     * @param {string} tab - 'controls', 'notifications', 'calendar' or 'extensions'
+     * @param {string} tab - 'controls', 'notifications', 'calendar', 'claude' or 'extensions'
      */
     toggle(tab = 'controls') {
         if (this._page?.tab === tab)
@@ -159,6 +159,14 @@ export class ControlCentreModule {
                 id: 'calendar', label: 'Calendar', icon: 'x-office-calendar-symbolic',
                 actor: this._dateMenuHost.calendar,
                 onShow: () => this._dateMenuHost?.showToday(),
+            });
+        }
+        const claude = this._modules.get('claude');
+        if (claude?.view) {
+            tabs.push({
+                id: 'claude', label: 'Claude', icon: claude.icon,
+                actor: claude.view,
+                available: () => claude.hasData,
             });
         }
         if (this._tray) {

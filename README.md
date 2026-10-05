@@ -36,6 +36,12 @@ of the desktop (desktop widgets, notes, a dock) is on its way.
   or **glass** – Atelier's own blur of the wallpaper, tinted with the palette
   – and the island floats in the bar or hangs from the top edge as a *notch*.
   (If Blur my Shell blurs the bar, turn that off.)
+- **Claude Code**: a ring in the bar shows how far the current 5-hour block
+  is, with the tokens Claude wrote in it; resting the pointer on it (or the
+  control centre's Claude tab) shows the block, today, the last seven days
+  and the sessions running. Atelier reads only the token counts in Claude
+  Code's local history (`~/.claude/projects`), in a background process, and
+  keeps them in its cache; nothing is sent anywhere.
 - **Switcher**: press <kbd>Super</kbd>+<kbd>W</kbd> (or click the button in the
   top bar). The island grows into it (without the island, a dark panel drops
   from the top of the screen), with two tabs:

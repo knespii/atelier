@@ -77,6 +77,18 @@ export class IslandModule {
         return this._island ?? null;
     }
 
+    /** @returns {object|null} GNOME's weather client, as the calendar has it */
+    get weather() {
+        return this._calendar?.weather ?? null;
+    }
+
+    /** @returns {GlancePage} a glance, e.g. for the weather in the bar */
+    createGlance() {
+        const glance = new GlancePage({events: this._calendar.events, weather: this._calendar.weather});
+        glance.connect('power-request', () => this.togglePowerMenu());
+        return glance;
+    }
+
     /** @returns {boolean} whether the island is on screen to show pages */
     get available() {
         return Boolean(this._island?.visible && this._slot?.mapped);
@@ -276,9 +288,7 @@ export class IslandModule {
         const island = this._island;
         if (island.page || !island.hover || this._calendar.isOpen)
             return;
-        const glance = new GlancePage({events: this._calendar.events, weather: this._calendar.weather});
-        glance.connect('power-request', () => this.togglePowerMenu());
-        island.open(glance);
+        island.open(this.createGlance());
     }
 
     _onClicked(button) {

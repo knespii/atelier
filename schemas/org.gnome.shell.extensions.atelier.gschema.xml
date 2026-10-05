@@ -226,6 +226,11 @@
       <summary>What the island and the capsules are made of</summary>
       <description>“classic” is black, “glass” the blurred wallpaper.</description>
     </key>
+    <key name="modules" type="as">
+      <default>['claude']</default>
+      <summary>Modules on the right of the top bar</summary>
+      <description>“claude” (Claude Code's usage in this 5-hour block) and “weather”. They only show something; resting the pointer on one shows its details in the island.</description>
+    </key>
     <key name="island-shape" enum="org.gnome.shell.extensions.atelier.IslandShape">
       <default>'floating'</default>
       <summary>Shape of the island</summary>

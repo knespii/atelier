@@ -47,6 +47,9 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-notification-button:focus,
 .atelier-island .atelier-notification-content:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
 .atelier-glass .atelier-glass-tint { background-color: ${rgba(d.surface, 0.45)}; }
+.atelier-bar-module .atelier-bar-ring { -atelier-ring-color: ${d.primary}; }
+.atelier-island .atelier-claude-progress-fill,
+.atelier-island .atelier-claude-day:today .atelier-claude-day-bar { background-color: ${d.primary}; }
 .atelier-island .atelier-cc-tab:checked { background-color: ${d.primaryContainer}; color: ${d.onPrimaryContainer}; }
 .atelier-island .atelier-cc-tab:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
 .atelier-island .atelier-cc .calendar .calendar-day.calendar-today { background-color: ${d.primary}; color: ${d.onPrimary}; }

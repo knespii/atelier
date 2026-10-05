@@ -11,7 +11,7 @@ import {IslandPage} from '../island/page.js';
  * @typedef {object} Tab
  * @property {string} id
  * @property {string} label
- * @property {string} icon - icon name
+ * @property {string|Gio.Icon} icon - an icon name or icon
  * @property {Clutter.Actor} actor - the content; it outlives the page
  * @property {Function} [available] - () => boolean, whether the tab shows
  * @property {Function} [onShow] - called when the tab comes up
@@ -32,7 +32,10 @@ class AtelierControlCentrePage extends IslandPage {
         this._buttons = new Map();
         for (const {id, label, icon} of tabs) {
             const box = new St.BoxLayout({style_class: 'atelier-cc-tab-box'});
-            box.add_child(new St.Icon({icon_name: icon, style_class: 'atelier-cc-tab-icon'}));
+            box.add_child(new St.Icon({
+                style_class: 'atelier-cc-tab-icon',
+                ...typeof icon === 'string' ? {icon_name: icon} : {gicon: icon},
+            }));
             const text = new St.Label({style_class: 'atelier-cc-tab-label', text: label, y_align: Clutter.ActorAlign.CENTER});
             box.add_child(text);
             const button = new St.Button({style_class: 'atelier-cc-tab', accessible_name: label, can_focus: true, child: box});

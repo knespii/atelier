@@ -9,6 +9,7 @@ import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {BarModule} from './shell/bar/module.js';
+import {ClaudeModule} from './shell/claude/module.js';
 import {ControlCentreModule} from './shell/controlCentre/module.js';
 import {IslandModule} from './shell/island/module.js';
 import {NotificationsModule} from './shell/notifications/module.js';
@@ -31,6 +32,7 @@ export default class AtelierExtension extends Extension {
             {settings: this._settings.get_child('island'), key: 'enabled'});
         this.modules.register('notifications', ctx => new NotificationsModule(ctx),
             {settings: this._settings.get_child('notifications'), key: 'enabled'});
+        this.modules.register('claude', ctx => new ClaudeModule(ctx));
         this.modules.register('control-centre', ctx => new ControlCentreModule(ctx),
             {settings: this._settings.get_child('control-centre'), key: 'enabled'});
         this.modules.register('bar', ctx => new BarModule(ctx));

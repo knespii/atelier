@@ -30,6 +30,21 @@ class AtelierBarPage extends Adw.PreferencesPage {
         this._shape = this._choice(look, 'island-shape', SHAPES, 'Island',
             'A capsule in the bar, or a notch hanging from the top edge');
 
+        const modules = new Adw.PreferencesGroup({
+            title: 'Modules',
+            description: 'On the right of the bar. They only show something; resting the pointer on one ' +
+                'shows its details in the island.',
+        });
+        this.add(modules);
+        this._claude = this._module(modules, 'claude', 'Claude Code',
+            'How far the 5-hour block is and what Claude wrote in it; read from this computer only');
+        this._weather = this._module(modules, 'weather', 'Weather', 'From GNOME Weather');
+        const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        this._battery = new Adw.SwitchRow({title: 'Battery percentage', subtitle: 'Next to the battery icon'});
+        iface.bind('show-battery-percentage', this._battery, 'active', Gio.SettingsBindFlags.DEFAULT);
+        this._bound.push(this._battery, 'active');
+        modules.add(this._battery);
+
         const centre = new Adw.PreferencesGroup({
             title: 'Control Centre',
             description: 'GNOME\'s quick settings – Wi-Fi, Bluetooth, sound, brightness, power mode and the ' +
@@ -66,6 +81,22 @@ class AtelierBarPage extends Adw.PreferencesPage {
             sync();
         });
         this._ids.push(this._bar.connect(`changed::${key}`, sync));
+        group.add(row);
+        return row;
+    }
+
+    _module(group, id, title, subtitle) {
+        const row = new Adw.SwitchRow({title, subtitle});
+        const sync = () => (row.active = this._bar.get_strv('modules').includes(id));
+        sync();
+        row.connect('notify::active', () => {
+            const modules = this._bar.get_strv('modules').filter(m => m !== id);
+            if (row.active)
+                modules.push(id);
+            if (modules.join() !== this._bar.get_strv('modules').join())
+                this._bar.set_strv('modules', modules);
+        });
+        this._ids.push(this._bar.connect('changed::modules', sync));
         group.add(row);
         return row;
     }

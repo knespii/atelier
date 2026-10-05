@@ -1,5 +1,6 @@
 // Base for the island's pages, and the page hosting the switcher.
 
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -17,6 +18,19 @@ export const IslandPage = GObject.registerClass({
     /** Tell the island the content changed size. */
     resized() {
         this.emit('resized');
+    }
+});
+
+export const ContentPage = GObject.registerClass(
+class AtelierContentPage extends IslandPage {
+    /**
+     * A page showing some content, e.g. a preview of a bar module.
+     *
+     * @param {Clutter.Actor} content
+     */
+    _init(content) {
+        super._init({style_class: 'atelier-preview', orientation: Clutter.Orientation.VERTICAL});
+        this.add_child(content);
     }
 });
 

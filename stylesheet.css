@@ -1105,3 +1105,159 @@
 .atelier-island.atelier-island-notch:expanded {
   border-radius: 0 0 26px 26px;
 }
+
+/* Modules on the right of the bar */
+
+.atelier-bar-module-box {
+  spacing: 6px;
+}
+
+.atelier-bar-ring {
+  width: 15px;
+  height: 15px;
+  -atelier-ring-color: -st-accent-color;
+}
+
+.atelier-bar-module:working .atelier-bar-ring {
+  -atelier-ring-color: #57e389;
+}
+
+.atelier-bar-module-label {
+  font-feature-settings: "tnum";
+}
+
+/* A preview in the island, e.g. of a module */
+
+.atelier-preview {
+  width: 340px;
+  padding: 14px 18px 16px;
+  spacing: 0;
+  background-color: transparent;
+  border: none;
+}
+
+/* Claude Code's usage */
+
+.atelier-claude,
+.atelier-claude-header,
+.atelier-claude-numbers,
+.atelier-claude-stat,
+.atelier-claude-chart,
+.atelier-claude-day,
+.atelier-claude-day-room,
+.atelier-claude-sessions {
+  background-color: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.atelier-claude {
+  spacing: 8px;
+}
+
+.atelier-claude-header,
+.atelier-claude-sessions {
+  spacing: 8px;
+}
+
+.atelier-claude-numbers {
+  spacing: 6px;
+  padding: 4px 0 2px;
+}
+
+.atelier-claude-stat {
+  spacing: 1px;
+}
+
+.atelier-claude-chart {
+  spacing: 6px;
+  padding-top: 4px;
+}
+
+.atelier-claude-day {
+  spacing: 3px;
+}
+
+.atelier-claude-title,
+.atelier-claude-left,
+.atelier-claude-span,
+.atelier-claude-value,
+.atelier-claude-name,
+.atelier-claude-line,
+.atelier-claude-day-name {
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-claude-title {
+  color: #ffffff;
+  font-size: 10.5pt;
+  font-weight: bold;
+}
+
+.atelier-claude-left {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 9.5pt;
+  font-weight: bold;
+  font-feature-settings: "tnum";
+}
+
+.atelier-claude-span {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9.5pt;
+  font-feature-settings: "tnum";
+}
+
+.atelier-claude-progress {
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-claude-progress-fill {
+  border-radius: 3px;
+  background-color: -st-accent-color;
+}
+
+.atelier-claude-value {
+  color: #ffffff;
+  font-size: 15pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-claude-name,
+.atelier-claude-day-name {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 8pt;
+  font-weight: bold;
+}
+
+.atelier-claude-line {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 9.5pt;
+  font-feature-settings: "tnum";
+}
+
+.atelier-claude-day-bar {
+  width: 14px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.32);
+}
+
+.atelier-claude-day:today .atelier-claude-day-bar {
+  background-color: -st-accent-color;
+}
+
+.atelier-claude-session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.45);
+}
+
+.atelier-claude-session-dot:active {
+  background-color: #57e389;
+}
