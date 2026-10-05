@@ -18,6 +18,11 @@
     <value nick="island" value="3"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.WidgetStyle">
+    <value nick="modern" value="0"/>
+    <value nick="analogue" value="1"/>
+  </enum>
+
   <enum id="org.gnome.shell.extensions.atelier.BarSides">
     <value nick="wallpaper" value="0"/>
     <value nick="capsules" value="1"/>
@@ -46,6 +51,7 @@
     <child name="notifications" schema="org.gnome.shell.extensions.atelier.notifications"/>
     <child name="control-centre" schema="org.gnome.shell.extensions.atelier.control-centre"/>
     <child name="bar" schema="org.gnome.shell.extensions.atelier.bar"/>
+    <child name="desktop" schema="org.gnome.shell.extensions.atelier.desktop"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -254,6 +260,39 @@
       <default>'floating'</default>
       <summary>Shape of the island</summary>
       <description>“floating” is a capsule in the bar, “notch” hangs from the top edge of the screen.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.desktop"
+          path="/org/gnome/shell/extensions/atelier/desktop/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Widgets on the desktop</summary>
+    </key>
+    <key name="widgets" type="s">
+      <default>'[{"id":"clock","kind":"clock","size":"square","x":0,"y":0},{"id":"date","kind":"date","size":"square","x":2,"y":0},{"id":"calendar","kind":"calendar","size":"large","x":0,"y":2}]'</default>
+      <summary>The widgets and where they are</summary>
+      <description>JSON array of {id, kind, size, x, y}: kind is clock, date, calendar, weather, github, claude, note or photo; size square, card, large or wide; x and y are cells of the grid over the work area of the primary monitor.</description>
+    </key>
+    <key name="style" enum="org.gnome.shell.extensions.atelier.WidgetStyle">
+      <default>'modern'</default>
+      <summary>Look of the widgets</summary>
+      <description>“modern” is dark cards in the palette's colors, “analogue” light paper with a clock that has hands.</description>
+    </key>
+    <key name="glass" type="b">
+      <default>true</default>
+      <summary>Modern widgets of glass</summary>
+      <description>The blurred wallpaper under the Modern widgets, rather than solid cards.</description>
+    </key>
+    <key name="github-user" type="s">
+      <default>''</default>
+      <summary>GitHub user of the GitHub widget</summary>
+      <description>Its contributions come from GitHub's public page of this user; no account or token is needed.</description>
+    </key>
+    <key name="photo" type="s">
+      <default>''</default>
+      <summary>Picture of the photo widget</summary>
+      <description>A picture, or a folder whose pictures take turns every hour.</description>
     </key>
   </schema>
 </schemalist>

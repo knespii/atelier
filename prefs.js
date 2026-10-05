@@ -8,6 +8,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 import {AtelierView} from './prefs/app.js';
 import {AppearancePage} from './prefs/appearancePage.js';
 import {BarPage} from './prefs/barPage.js';
+import {DesktopPage} from './prefs/desktopPage.js';
 import {IslandPage} from './prefs/islandPage.js';
 import {NotificationsPage} from './prefs/notificationsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
@@ -45,6 +46,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 id: 'profiles', title: 'Profiles', icon: 'view-grid-symbolic', group: 'THE DESK',
                 keywords: ['look', 'theme', 'icons', 'cursor', 'font', 'accent', 'new', 'switch'],
                 create: () => new ProfilesPage(settings),
+            },
+            {
+                id: 'desktop', title: 'Desktop', icon: 'preferences-desktop-wallpaper-symbolic', group: 'THE DESK',
+                keywords: ['widgets', 'clock', 'calendar', 'weather', 'github', 'claude', 'photo', 'tasks',
+                    'google', 'analogue', 'modern', 'glass'],
+                create: () => new DesktopPage(settings),
             },
             {
                 id: 'wallpapers', title: 'Wallpapers', icon: 'image-x-generic-symbolic', group: 'THE DESK',

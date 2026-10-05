@@ -12,8 +12,9 @@ import * as terminal from './terminal.test.js';
 import * as profiles from './profiles.test.js';
 import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
+import * as widgets from './widgets.test.js';
 
-const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage};
+const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets};
 
 let total = 0;
 let failures = 0;

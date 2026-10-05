@@ -105,6 +105,17 @@ async function clickAt(x, y) {
     }
 }
 
+// Press at one point, move in steps, release at another.
+async function dragFromTo(x1, y1, x2, y2) {
+    await pointerTo(x1, y1);
+    virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+    await Scripting.sleep(60);
+    for (let i = 1; i <= 6; i++)
+        await pointerTo(x1 + (x2 - x1) * i / 6, y1 + (y2 - y1) * i / 6);
+    virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+    await Scripting.sleep(300);
+}
+
 async function pressKey(keyval) {
     virtualKeyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
     for (const state of [Clutter.KeyState.PRESSED, Clutter.KeyState.RELEASED]) {
@@ -132,8 +143,9 @@ function findActor(root, predicate) {
     return false;
 }
 
+// Actors over the wallpaper other than the wallpapers (and the widgets).
 function overlayCount() {
-    return Main.layoutManager._backgroundGroup.get_n_children() -
+    return Main.layoutManager._backgroundGroup.get_children().filter(a => a.name !== 'atelier-desktop').length -
         Main.layoutManager._bgManagers.length;
 }
 
@@ -840,6 +852,98 @@ async function testBarStyles(ext) {
     'back to the spread bar on the wallpaper');
 }
 
+// A made-up GitHub page: a year with something every few days.
+function githubPage() {
+    const cells = [];
+    const day = new Date();
+    for (let i = 0; i < 365; i++) {
+        const date = new Date(day.getFullYear(), day.getMonth(), day.getDate() - i);
+        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        cells.push(`<td data-date="${iso}" data-level="${(i * 7) % 5}" class="ContributionCalendar-day"></td>`);
+    }
+    return `<h2 id="js-contribution-activity-description">\n 1,234\n contributions\n in the last year\n</h2>${cells.join('')}`;
+}
+
+async function testDesktop(ext) {
+    const desktop = ext.stateObj.modules.get('desktop');
+    if (!check(desktop !== null, 'desktop module running'))
+        return;
+    const settings = ext.stateObj._settings.get_child('desktop');
+    const layer = desktop.layer;
+    check(layer.get_parent() === Main.layoutManager._backgroundGroup,
+        'the widgets lie on the wallpaper, under the windows');
+    check(['clock', 'date', 'calendar'].every(id => desktop.widgets.get(id)?.mapped), 'a clock, the date and the calendar');
+    const clock = desktop.widgets.get('clock');
+    const [clockX, clockY] = clock.get_transformed_position();
+    const area = desktop.area;
+    check(Math.abs(clockX - area.x - 24) <= 1 && Math.abs(clockY - area.y - 24) <= 1,
+        `on the grid of the work area (${clockX}, ${clockY})`);
+    const glass = layer.get_first_child();
+    check(hasClass(glass, 'atelier-desktop-glass') && glass._rects.length === 3, 'over glass, under each of them');
+    await restPointer();
+    await screenshotArea('40-desktop-modern', 0, 0, 900, 700);
+
+    // The desktop's menu edits them.
+    const background = Main.layoutManager._bgManagers[0].backgroundActor;
+    background._backgroundMenu.open();
+    await Scripting.sleep(300);
+    const labels = background._backgroundMenu._getMenuItems().map(item => item.label?.text).filter(Boolean);
+    check(labels.includes('Edit Widgets') && labels.includes('Atelier Settings'),
+        `the desktop's menu edits them (${labels})`);
+    background._backgroundMenu.close();
+    await Scripting.sleep(200);
+
+    desktop.edit();
+    await Scripting.sleep(400);
+    check(desktop.editing && layer.get_parent() === desktop._editor.actor, 'editing, they come up over everything');
+    check(desktop.addWidget('weather') && desktop.widgets.get('weather')?.mapped, 'the gallery adds a widget');
+    const weather = desktop.widgets.get('weather');
+    check(desktop.resizeWidget('weather') && weather.entry.size === 'card', 'its button gives it another size');
+    await screenshot('41-desktop-editing');
+    // Dragged three cells to the right, it snaps there.
+    const before = {...weather.entry};
+    const [wx, wy] = centerOf(weather);
+    await dragFromTo(wx, wy, wx + 3 * 96, wy);
+    const saved = JSON.parse(settings.get_string('widgets')).find(e => e.id === 'weather');
+    check(weather.entry.x === before.x + 3 && saved?.x === before.x + 3 && saved.size === 'card',
+        `dragged, it snaps to the grid and stays there (${before.x} → ${saved?.x})`);
+    // Onto another widget: it goes back.
+    const [cx, cy] = centerOf(desktop.widgets.get('calendar'));
+    const [nx, ny] = centerOf(weather);
+    await dragFromTo(nx, ny, cx, cy);
+    check(weather.entry.x === before.x + 3, 'not over another one');
+    await pressKey(Clutter.KEY_Escape);
+    await Scripting.sleep(300);
+    check(!desktop.editing && layer.get_parent() === Main.layoutManager._backgroundGroup, 'Esc puts them back');
+
+    // GitHub: anyone's contributions (made up here; the tests stay offline).
+    const github = desktop.sources.github;
+    github._fetch = async () => github.apply('octocat', githubPage());
+    settings.set_string('github-user', 'octocat');
+    desktop.addWidget('github');
+    desktop.addWidget('claude');
+    const gh = desktop.widgets.get('github');
+    await waitFor(() => gh?._total.text.includes('1,234'), 4000);
+    check(gh?._grid?.visible && gh._total.text.includes('1,234') && gh._grid._days.length === 365,
+        `the GitHub widget shows the year (${gh?._total.text})`);
+    const claude = desktop.widgets.get('claude');
+    check(claude?._output.text === '1.5k', `the Claude widget shows this block (${claude?._output.text})`);
+    await screenshotArea('42-desktop-widgets', 0, 0, global.stage.width, 760);
+
+    // Analogue: paper, and a clock with hands.
+    settings.set_string('style', 'analogue');
+    await Scripting.sleep(500);
+    check(desktop.widgets.get('clock')._face && !hasClass(layer.get_first_child(), 'atelier-desktop-glass'),
+        'analogue: paper and a clock face');
+    await screenshotArea('43-desktop-analogue', 0, 0, global.stage.width, 760);
+
+    desktop.removeWidget('github');
+    check(!desktop.widgets.has('github') && !settings.get_string('widgets').includes('github'), 'a widget can be removed');
+    ['style', 'widgets', 'github-user'].forEach(key => settings.reset(key));
+    await Scripting.sleep(400);
+    check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
+}
+
 async function testClaude(ext) {
     const claude = ext.stateObj.modules.get('claude');
     if (!check(claude !== null, 'Claude module running'))
@@ -1210,6 +1314,8 @@ async function testDisableCleansUp(atelier) {
         'the sides back where GNOME puts them');
     check(Main.layoutManager.overviewGroup.get_first_child()?.name !== 'atelier-overview-backdrop',
         'the overview\'s own background back');
+    check(!findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-desktop'),
+        'no widgets left on the desktop');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
@@ -1269,6 +1375,7 @@ export async function run() {
         await testOverviewBar();
         await testBarStyles(ext);
         await testClaude(ext);
+        await testDesktop(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

@@ -1266,3 +1266,419 @@
 .atelier-claude-session-dot:active {
   background-color: #57e389;
 }
+
+/* Desktop widgets: cards on the wallpaper, under the windows */
+
+.atelier-widget {
+  border-radius: 22px;
+  padding: 16px 18px;
+  color: #ffffff;
+  font-size: 10.5pt;
+}
+
+.atelier-widget-content,
+.atelier-widget-clock,
+.atelier-widget-date,
+.atelier-widget-header,
+.atelier-widget-week,
+.atelier-widget-week-day,
+.atelier-widget-agenda,
+.atelier-widget-agenda-row,
+.atelier-widget-weather-now,
+.atelier-widget-forecast,
+.atelier-widget-forecast-hour,
+.atelier-widget-claude,
+.atelier-widget-claude-numbers,
+.atelier-widget-claude-line,
+.atelier-widget-controls,
+.atelier-widget-month,
+.atelier-widget-cell {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+}
+
+.atelier-widget-content {
+  spacing: 6px;
+}
+
+/* Modern: dark cards; of glass, the blurred wallpaper under a dark tint */
+.atelier-desktop-modern .atelier-widget {
+  background-color: rgba(18, 18, 22, 0.94);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+.atelier-desktop-modern.atelier-desktop-glassy .atelier-widget {
+  background-color: rgba(14, 14, 18, 0.38);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+/* Analogue: paper */
+.atelier-desktop-analogue .atelier-widget {
+  background-color: #f6f1e7;
+  color: #2a251f;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
+}
+
+.atelier-widget-title {
+  font-size: 13pt;
+  font-weight: 800;
+}
+
+.atelier-widget-caption,
+.atelier-widget-weekday-initial,
+.atelier-widget-agenda-time,
+.atelier-widget-placeholder,
+.atelier-widget-time-suffix {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-desktop-analogue .atelier-widget-caption,
+.atelier-desktop-analogue .atelier-widget-weekday-initial,
+.atelier-desktop-analogue .atelier-widget-agenda-time,
+.atelier-desktop-analogue .atelier-widget-placeholder,
+.atelier-desktop-analogue .atelier-widget-time-suffix {
+  color: rgba(42, 37, 31, 0.6);
+}
+
+.atelier-widget-caption {
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+.atelier-widget-big-caption {
+  font-size: 11pt;
+  font-weight: bold;
+}
+
+.atelier-widget-placeholder {
+  font-size: 9.5pt;
+}
+
+/* Clock */
+
+.atelier-widget-time {
+  font-size: 34pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-card .atelier-widget-time {
+  font-size: 46pt;
+}
+
+.atelier-widget-time-suffix {
+  font-size: 12pt;
+  font-weight: 800;
+  margin: 0 0 8px 5px;
+}
+
+.atelier-widget-clock {
+  spacing: 16px;
+}
+
+.atelier-widget-face {
+  color: rgba(255, 255, 255, 0.85);
+  -atelier-face-color: rgba(255, 255, 255, 0.06);
+  -atelier-hand-color: -st-accent-color;
+}
+
+.atelier-desktop-analogue .atelier-widget-face {
+  color: #2a251f;
+  -atelier-face-color: #fffdf8;
+  -atelier-hand-color: #c0392b;
+}
+
+.atelier-widget-card .atelier-widget-face {
+  width: 140px;
+}
+
+/* Date */
+
+.atelier-widget-weekday {
+  font-size: 10pt;
+  font-weight: 800;
+  color: -st-accent-color;
+}
+
+.atelier-widget-day {
+  font-size: 50pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-card .atelier-widget-date {
+  min-width: 130px;
+}
+
+/* Calendar */
+
+.atelier-widget-header {
+  spacing: 8px;
+  padding-bottom: 4px;
+}
+
+.atelier-widget-weekday-initial {
+  font-size: 8.5pt;
+  font-weight: 800;
+  padding-bottom: 2px;
+}
+
+.atelier-widget-cell {
+  spacing: 1px;
+}
+
+.atelier-widget-cell-number {
+  min-width: 28px;
+  padding: 4px 0;
+  border-radius: 999px;
+  font-size: 9.5pt;
+  font-weight: bold;
+  font-feature-settings: "tnum";
+  text-align: center;
+}
+
+.atelier-widget-cell:today .atelier-widget-cell-number {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
+.atelier-widget-cell:other-month .atelier-widget-cell-number {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.atelier-desktop-analogue .atelier-widget-cell:other-month .atelier-widget-cell-number {
+  color: rgba(42, 37, 31, 0.3);
+}
+
+.atelier-widget-cell-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.atelier-desktop-analogue .atelier-widget-cell-dot {
+  background-color: rgba(42, 37, 31, 0.5);
+}
+
+.atelier-widget-week {
+  spacing: 2px;
+}
+
+.atelier-widget-week-day {
+  spacing: 2px;
+}
+
+.atelier-widget-agenda {
+  spacing: 6px;
+  padding-top: 8px;
+}
+
+.atelier-widget-agenda-row {
+  spacing: 9px;
+}
+
+.atelier-widget-event-bar {
+  width: 3px;
+  border-radius: 2px;
+  background-color: -st-accent-color;
+}
+
+.atelier-widget-agenda-text {
+  font-size: 10pt;
+}
+
+.atelier-widget-agenda-time {
+  font-size: 9pt;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-check {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 10px;
+  background-color: transparent;
+  color: transparent;
+}
+
+.atelier-desktop-analogue .atelier-widget-check {
+  border-color: rgba(42, 37, 31, 0.4);
+}
+
+.atelier-widget-check StIcon {
+  icon-size: 10px;
+}
+
+.atelier-widget-hint {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background-color: transparent;
+  font-size: 9pt;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.atelier-widget-hint:hover {
+  color: #ffffff;
+}
+
+.atelier-desktop-analogue .atelier-widget-hint {
+  color: rgba(42, 37, 31, 0.55);
+}
+
+/* Weather */
+
+.atelier-widget-weather-now {
+  spacing: 10px;
+}
+
+.atelier-widget-weather-icon {
+  icon-size: 40px;
+}
+
+.atelier-widget-temperature {
+  font-size: 28pt;
+  font-weight: 800;
+}
+
+.atelier-widget-forecast {
+  spacing: 4px;
+  padding-top: 6px;
+}
+
+.atelier-widget-forecast-hour {
+  spacing: 3px;
+}
+
+.atelier-widget-forecast-icon {
+  icon-size: 18px;
+}
+
+/* GitHub */
+
+.atelier-widget-contributions {
+  -atelier-empty-color: rgba(255, 255, 255, 0.08);
+  -atelier-full-color: -st-accent-color;
+}
+
+.atelier-desktop-analogue .atelier-widget-contributions {
+  -atelier-empty-color: rgba(42, 37, 31, 0.08);
+}
+
+/* Claude Code */
+
+.atelier-widget-claude {
+  spacing: 16px;
+}
+
+.atelier-widget-ring {
+  width: 104px;
+  height: 104px;
+  color: #ffffff;
+  -atelier-ring-color: -st-accent-color;
+}
+
+.atelier-desktop-analogue .atelier-widget-ring {
+  color: #2a251f;
+}
+
+.atelier-widget-claude-output {
+  font-size: 17pt;
+  font-weight: 800;
+}
+
+.atelier-widget-claude-numbers {
+  spacing: 6px;
+}
+
+.atelier-widget-claude-line {
+  spacing: 8px;
+}
+
+/* Photo */
+
+.atelier-widget-photo:picture {
+  padding: 0;
+}
+
+.atelier-widget-picture {
+  border-radius: 22px;
+  background-size: cover;
+  background-position: center;
+}
+
+/* Editing the widgets */
+
+.atelier-desktop-editor {
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.atelier-desktop-grid {
+  color: rgba(255, 255, 255, 0.07);
+}
+
+.atelier-widget:dragged {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+}
+
+.atelier-widget-controls {
+  spacing: 6px;
+}
+
+.atelier-widget-control {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 13px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+}
+
+.atelier-widget-control StIcon {
+  icon-size: 13px;
+}
+
+.atelier-widget-gallery {
+  padding: 10px;
+  spacing: 4px;
+  border-radius: 28px;
+  background-color: rgba(16, 16, 20, 0.94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.atelier-widget-gallery-button {
+  min-width: 74px;
+  padding: 8px 6px;
+  border-radius: 20px;
+  background-color: transparent;
+  color: #ffffff;
+}
+
+.atelier-widget-gallery-button:hover,
+.atelier-widget-gallery-button:focus {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-widget-gallery-item {
+  spacing: 5px;
+  font-size: 9pt;
+  font-weight: bold;
+}
+
+.atelier-widget-gallery-icon {
+  icon-size: 22px;
+}
+
+.atelier-widget-gallery-done {
+  margin-left: 8px;
+  padding: 10px 20px;
+  border-radius: 20px;
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+  font-weight: bold;
+}

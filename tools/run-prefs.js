@@ -227,11 +227,28 @@ async function runSelftest(window) {
     check(!store.settings.get_child('control-centre').get_boolean('enabled') && !bar._extensions.sensitive,
         'without the control centre, its options are greyed out');
     bar._controlCentre.active = true;
+
+    // Desktop widgets.
+    const desktop = await section(window, 'desktop');
+    const desktopSettings = store.settings.get_child('desktop');
+    desktop._style.setSelected('analogue');
+    check(desktopSettings.get_string('style') === 'analogue' && !desktop._glass.sensitive,
+        'the Analogue look is saved, glass is for Modern only');
+    desktop._github.text = 'not a user!';
+    check(desktopSettings.get_string('github-user') === '' && desktop._github.has_css_class('error'),
+        'a GitHub name that can\'t be is refused');
+    desktop._github.text = 'octocat';
+    check(desktopSettings.get_string('github-user') === 'octocat' && !desktop._github.has_css_class('error'),
+        'any GitHub user can be set');
+    desktopSettings.set_string('photo', '/tmp/pictures');
+    await sleep(50);
+    check(desktop._photo.subtitle === '/tmp/pictures' && desktop._clearPhoto.visible, 'the photo shows where it is from');
+    ['style', 'github-user', 'photo'].forEach(key => desktopSettings.reset(key));
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'notifications', 'top-bar', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'top-bar', 'desktop', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         await render(window, id);
