@@ -23,6 +23,7 @@ const BLUR_BRIGHTNESS = 0.75;
 // where it curves into the top edge. (They reach a pixel into the notch and
 // above it, so no seam shows.)
 const MASK_DECLARATIONS = `
+uniform vec2 origin;
 uniform vec2 size;
 uniform vec4 rect;
 uniform vec2 radii;
@@ -41,7 +42,7 @@ float atelier_ear(vec2 p, float side, float inner) {
 `;
 
 const MASK_CODE = `
-vec2 p = cogl_tex_coord_in[0].xy * size;
+vec2 p = origin + cogl_tex_coord_in[0].xy * size;
 vec2 halfSize = rect.zw * 0.5;
 vec2 center = rect.xy + halfSize;
 float radius = p.y < center.y ? radii.x : radii.y;
@@ -55,14 +56,50 @@ if (ear > 0.0) {
 cogl_color_out *= clamp(0.5 - d, 0.0, 1.0);
 `;
 
+/**
+ * Tell a mask where its actor is in the texture it paints: Clutter paints
+ * the actor into a texture a few pixels larger than the actor (its box,
+ * padded), so the texture's coordinates don't map onto the actor one to
+ * one. (For actors that clip to their allocation, as these do.)
+ *
+ * @param {Shell.GLSLEffect} effect
+ * @param {number} origin - location of the uniform for the texture's top
+ *   left corner, in the actor's coordinates
+ * @param {number} size - location of the uniform for its size
+ */
+export function syncTextureFrame(effect, origin, size) {
+    const actor = effect.get_actor();
+    if (!actor)
+        return;
+    // As Clutter enlarges the box of an offscreen effect (in its pixels):
+    // the end rounded up past 0.75 px more, the size rounded and 3 px more.
+    const scale = Math.ceil(actor.get_resource_scale());
+    const frame = length => {
+        const scaled = length * scale;
+        const rounded = Math.round(scaled);
+        const end = Math.ceil(scaled + 0.75);
+        return [(end - rounded - 3) / scale, (rounded + 3) / scale];
+    };
+    const [x, width] = frame(actor.width);
+    const [y, height] = frame(actor.height);
+    effect.set_uniform_float(origin, 2, [x, y]);
+    effect.set_uniform_float(size, 2, [width, height]);
+}
+
 const RoundedMaskEffect = GObject.registerClass(
 class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
+        this._origin = this.get_uniform_location('origin');
         this._size = this.get_uniform_location('size');
         this._rect = this.get_uniform_location('rect');
         this._radii = this.get_uniform_location('radii');
         this._ear = this.get_uniform_location('ear');
+    }
+
+    vfunc_paint_target(node, paintContext) {
+        syncTextureFrame(this, this._origin, this._size);
+        super.vfunc_paint_target(node, paintContext);
     }
 
     vfunc_build_pipeline() {
@@ -78,6 +115,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      * @param {number} ear - radius of the ears, 0 for none
      */
     setShape(size, rect, radii, ear) {
+        this.set_uniform_float(this._origin, 2, [0, 0]);
         this.set_uniform_float(this._size, 2, size);
         this.set_uniform_float(this._rect, 4, rect);
         this.set_uniform_float(this._radii, 2, radii);
@@ -97,8 +135,12 @@ class AtelierGlassSurface extends St.Widget {
      * @param {number} [params.monitorIndex] - defaults to the primary monitor
      * @param {number} [params.reach] - how far down the monitor shapes may
      *   go, as a fraction of its height
+     * @param {boolean} [params.fromBottom] - the reach is up from the bottom
+     *   edge instead (for a dock)
+     * @param {boolean} [params.solid] - black instead of glass: the same
+     *   shapes, changing every frame without anything being laid out anew
      */
-    _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1} = {}) {
+    _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, solid = false} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -106,11 +148,13 @@ class AtelierGlassSurface extends St.Widget {
         Shell.util_set_hidden_from_pick(this, true);
         this._monitorIndex = monitorIndex;
         this._reach = reach;
+        this._fromBottom = fromBottom;
+        this._solid = solid;
         this._shape = null;
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
-        this._tint = new St.Widget({style_class: 'atelier-glass-tint'});
+        this._tint = new St.Widget({style_class: solid ? 'atelier-solid-fill' : 'atelier-glass-tint'});
         this.add_child(this._tint);
 
         this._mask = new RoundedMaskEffect();
@@ -134,12 +178,19 @@ class AtelierGlassSurface extends St.Widget {
         const monitor = Main.layoutManager.monitors[this._monitorIndex];
         if (!monitor)
             return;
-        // The surface covers the top of its monitor; the wallpaper lines up
-        // with the desktop.
+        // The surface covers the top (or the bottom) of its monitor; the
+        // wallpaper lines up with the desktop.
         const height = Math.ceil(monitor.height * this._reach);
-        this.set_position(monitor.x, monitor.y);
+        const offset = this._fromBottom ? monitor.height - height : 0;
+        this.set_position(monitor.x, monitor.y + offset);
         this.set_size(monitor.width, height);
         this._tint.set_size(monitor.width, height);
+        this._wallpaper.set_position(0, -offset);
+        if (this._solid) {
+            if (this._shape)
+                this.setShape(...this._shape);
+            return;
+        }
         this._bgManager = new Background.BackgroundManager({
             container: this._wallpaper,
             monitorIndex: this._monitorIndex,

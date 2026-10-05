@@ -12,6 +12,7 @@ import St from 'gi://St';
 
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
+import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -702,8 +703,12 @@ async function testBarStyles(ext) {
     const bar = ext.stateObj._settings.get_child('bar');
     const island = ext.stateObj.modules.get('island').island;
     const {_leftBox: left, _rightBox: right} = Main.panel;
-    const shown = name => Main.layoutManager.uiGroup.get_children().filter(a => hasClass(a, name) && a.visible);
+    const shown = name => Main.layoutManager.uiGroup.get_children()
+        .filter(a => hasClass(a, name) && a.visible && !hasClass(a, 'atelier-dock-glass') &&
+            (name !== 'atelier-glass' || !hasClass(a, 'atelier-capsule')));
     const surfaces = () => [...shown('atelier-capsule'), ...shown('atelier-glass')];
+    // [x, y, width, height] of a capsule or glass, as drawn
+    const rect = surface => surface?._shape?.slice(0, 4) ?? [NaN, NaN, NaN, NaN];
     const leftEnd = () => left.get_transformed_position()[0] + left.width;
     const rightStart = () => right.get_transformed_position()[0];
     const besideIsland = () => leftEnd() <= island.x && island.x - leftEnd() < 24 &&
@@ -740,10 +745,11 @@ async function testBarStyles(ext) {
     await Scripting.sleep(400);
     const activities = Main.panel.statusArea.activities;
     const middle = activities.get_transformed_position()[0] + activities.width / 2;
-    const capsule = surfaces().find(c => c.x < island.x);
+    const capsule = surfaces().find(c => rect(c)[0] < island.x);
+    const [capsuleX, , capsuleWidth] = rect(capsule);
     check(Main.panel.has_style_class_name('atelier-bar-capsules') && surfaces().length === 2 &&
-        capsule && capsule.x < middle && capsule.x + capsule.width > middle,
-    `in capsules: one around each side (${capsule?.x}+${capsule?.width} around ${middle})`);
+        capsule && capsuleX < middle && capsuleX + capsuleWidth > middle,
+    `in capsules: one around each side (${capsuleX}+${capsuleWidth} around ${middle})`);
     await top('25c-bar-grouped-capsules');
 
     // Glass: the island and the capsules are the blurred wallpaper.
@@ -786,10 +792,10 @@ async function testBarStyles(ext) {
     const [, panelY] = Main.panel.get_transformed_position();
     check(Math.abs(island.y - panelY) < 1 && Math.abs(island.height - Main.panel.height) < 1,
         `notch: the island hangs from the top edge (${island.y}, ${island.height})`);
-    const ears = shown('atelier-notch-ear').sort((a, b) => a.x - b.x);
-    check(ears.length === 2 && Math.abs(ears[0].x + ears[0].width - island.x) < 1 &&
-        Math.abs(ears[1].x - island.x - island.width) < 1 && ears[0].y === island.y,
-    `with ears where it meets the edge (${ears.map(e => `${e.x}+${e.width}`)})`);
+    const ears = shown('atelier-notch-ear').sort((a, b) => a.translation_x - b.translation_x);
+    check(ears.length === 2 && Math.abs(ears[0].translation_x + ears[0].width - island.x) < 1 &&
+        Math.abs(ears[1].translation_x - island.x - island.width) < 1 && ears[0].translation_y === island.y,
+    `with ears where it meets the edge (${ears.map(e => `${e.translation_x}+${e.width}`)})`);
     check(besideIsland(), `the sides keep clear of the ears (${bounds()})`);
     await top('28-bar-notch');
     bar.set_string('surface', 'glass');
@@ -812,14 +818,15 @@ async function testBarStyles(ext) {
     bar.set_string('surface', 'classic');
     await Scripting.sleep(600);
     const pill = shown('atelier-capsule');
-    check(pill.length === 1 && pill[0].x < lx && pill[0].x + pill[0].width >= rightStart() + right.width &&
-        Math.abs(pill[0].height - island.height) < 1, 'or floating, as tall as the island');
-    const middle1 = pill[0].x + pill[0].width / 2;
+    const [pillX, , pillWidth, pillHeight] = rect(pill[0]);
+    check(pill.length === 1 && pillX < lx && pillX + pillWidth >= rightStart() + right.width &&
+        Math.abs(pillHeight - island.height) < 1, 'or floating, as tall as the island');
+    const middle1 = pillX + pillWidth / 2;
     check(Math.abs(middle1 - (island.x + island.width / 2)) <= 1, `even on both sides of the time (${middle1})`);
     await top('28d-bar-one-island');
 
     // Opened, the island takes the one island's whole width (at least).
-    const restWidth = pill[0].width;
+    const restWidth = pillWidth;
     Main.panel.toggleQuickSettings();
     await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
     await Scripting.sleep(700);
@@ -1010,6 +1017,56 @@ async function testNotes(ext) {
     const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'notes.json']));
     check(file.query_exists(null) && !new TextDecoder().decode(file.load_contents(null)[1]).includes(id),
         'the notes are kept in a file');
+}
+
+async function testDock(ext) {
+    const module = ext.stateObj.modules.get('dock');
+    if (!check(module !== null && module.dock !== null, 'the dock is there (Dash to Dock is off here)'))
+        return;
+    const dock = module.dock;
+    await restPointer();
+    await Scripting.sleep(500);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const [dockX, dockY] = dock.actor.get_transformed_position();
+    check(Math.abs(dockX + dock.actor.width / 2 - (monitor.x + monitor.width / 2)) <= 1 &&
+        dockY + dock.actor.height <= monitor.y + monitor.height && dockY > monitor.height - 150,
+    `at the bottom, in the middle (${dockX}, ${dockY})`);
+    const favorites = AppFavorites.getAppFavorites().getFavorites();
+    check(favorites.length > 0 && favorites.every(app => dock.items.get(app.get_id())?.mapped),
+        `with the pinned apps (${favorites.length})`);
+    check(!dock.hidden, 'shown while no window covers it');
+    await screenshotArea('60-dock', monitor.x, monitor.y + monitor.height - 140, monitor.width, 140);
+
+    // Dynamic Music Pill finds it where it finds Dash to Dock's row.
+    const handle = Main.panel.statusArea['dash-to-dock'];
+    check(handle?._box === dock.box && !Object.keys(Main.panel.statusArea).includes('dash-to-dock'),
+        'Dynamic Music Pill finds its row (hidden from the other items of the bar)');
+    const pill = new St.Widget({style_class: 'music-pill-container', width: 120, height: 40});
+    dock.box.add_child(pill);
+    dock._redisplay();
+    check(pill.get_parent() === dock.box && dock.box.get_last_child() === pill, 'the pill stays at its end');
+
+    // An app dropped on it is pinned.
+    const app = Shell.AppSystem.get_default().get_installed()
+        .map(info => Shell.AppSystem.get_default().lookup_app(info.get_id()))
+        .find(a => a && !AppFavorites.getAppFavorites().isFavorite(a.get_id()));
+    if (app) {
+        dock.acceptDrop({app}, null, 10000);
+        check(await waitFor(() => AppFavorites.getAppFavorites().isFavorite(app.get_id()) &&
+            dock.items.has(app.get_id()), 1000), `an app dropped on it is pinned (${app.get_name()})`);
+        AppFavorites.getAppFavorites().removeFavorite(app.get_id());
+        await Scripting.sleep(400);
+    }
+
+    // With Dash to Dock on, it goes (and gives the pill back).
+    Object.defineProperty(module, 'blocked', {get: () => true, configurable: true});
+    module._sync();
+    check(module.dock === null && Main.panel.statusArea['dash-to-dock'] === undefined &&
+        pill.get_parent() === null && !pill._destroyed, 'with Dash to Dock on, it goes and lets the pill go');
+    delete module.blocked;
+    module._sync();
+    check(module.dock !== null, 'and comes back without it');
+    pill.destroy();
 }
 
 async function testClaude(ext) {
@@ -1385,6 +1442,8 @@ async function testDisableCleansUp(atelier) {
     check(!findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-desktop'),
         'no widgets left on the desktop');
     check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')), 'no notes left on the edges');
+    check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock') &&
+        Main.panel.statusArea['dash-to-dock'] === undefined, 'no dock left');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
@@ -1446,6 +1505,7 @@ export async function run() {
         await testClaude(ext);
         await testDesktop(ext);
         await testNotes(ext);
+        await testDock(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

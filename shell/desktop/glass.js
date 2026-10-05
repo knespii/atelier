@@ -12,11 +12,14 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {syncTextureFrame} from '../core/glass.js';
+
 const MAX_RECTS = 32;
 const BLUR_RADIUS = 40; // logical pixels
 const BLUR_BRIGHTNESS = 0.8;
 
 const DECLARATIONS = `
+uniform vec2 origin;
 uniform vec2 size;
 uniform float radius;
 uniform float count;
@@ -24,7 +27,7 @@ uniform vec4 rects[${MAX_RECTS}];
 `;
 
 const CODE = `
-vec2 p = cogl_tex_coord_in[0].xy * size;
+vec2 p = origin + cogl_tex_coord_in[0].xy * size;
 float cover = 0.0;
 for (int i = 0; i < ${MAX_RECTS}; i++) {
     if (float(i) >= count)
@@ -41,6 +44,7 @@ const RectsMaskEffect = GObject.registerClass(
 class AtelierRectsMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
+        this._origin = this.get_uniform_location('origin');
         this._size = this.get_uniform_location('size');
         this._radius = this.get_uniform_location('radius');
         this._count = this.get_uniform_location('count');
@@ -51,6 +55,11 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, DECLARATIONS, CODE, false);
     }
 
+    vfunc_paint_target(node, paintContext) {
+        syncTextureFrame(this, this._origin, this._size);
+        super.vfunc_paint_target(node, paintContext);
+    }
+
     /**
      * @param {number[]} size - [width, height] of the actor
      * @param {number[][]} rects - [x, y, width, height] in it
@@ -59,6 +68,7 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
     setRects(size, rects, radius) {
         const values = new Array(MAX_RECTS * 4).fill(0);
         rects.slice(0, MAX_RECTS).forEach((rect, i) => values.splice(i * 4, 4, ...rect));
+        this.set_uniform_float(this._origin, 2, [0, 0]);
         this.set_uniform_float(this._size, 2, size);
         this.set_uniform_float(this._radius, 1, [radius]);
         this.set_uniform_float(this._count, 1, [Math.min(rects.length, MAX_RECTS)]);

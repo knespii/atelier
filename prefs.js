@@ -9,6 +9,7 @@ import {AtelierView} from './prefs/app.js';
 import {AppearancePage} from './prefs/appearancePage.js';
 import {BarPage} from './prefs/barPage.js';
 import {DesktopPage} from './prefs/desktopPage.js';
+import {DockPage} from './prefs/dockPage.js';
 import {IslandPage} from './prefs/islandPage.js';
 import {NotificationsPage} from './prefs/notificationsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
@@ -52,6 +53,11 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 keywords: ['widgets', 'clock', 'calendar', 'weather', 'github', 'claude', 'photo', 'tasks',
                     'google', 'analogue', 'modern', 'glass'],
                 create: () => new DesktopPage(settings),
+            },
+            {
+                id: 'dock', title: 'Dock', icon: 'focus-windows-symbolic', group: 'THE DESK',
+                keywords: ['dash', 'apps', 'favorites', 'pinned', 'intellihide', 'music', 'pill', 'dash to dock'],
+                create: () => new DockPage(settings),
             },
             {
                 id: 'wallpapers', title: 'Wallpapers', icon: 'image-x-generic-symbolic', group: 'THE DESK',

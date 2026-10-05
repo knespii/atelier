@@ -65,8 +65,9 @@ export class NotchEars {
             if (ear.width !== radius || ear.height !== radius)
                 ear.set_size(radius, radius);
         }
-        left.set_position(x - radius, y);
-        right.set_position(x + width, y);
+        // Moved, not laid out anew: this follows the island every frame.
+        left.set_translation(x - radius, y, 0);
+        right.set_translation(x + width, y, 0);
     }
 
     /**

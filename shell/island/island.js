@@ -145,10 +145,16 @@ export const Island = GObject.registerClass({
 
     /** @returns {number[]|null} [x, width] of the island at rest, once placed */
     restBounds() {
+        const rect = this.restRect();
+        return rect ? [rect[0], rect[2]] : null;
+    }
+
+    /** @returns {number[]|null} [x, y, width, height] of the island at rest, once placed */
+    restRect() {
         if (!this._anchor)
             return null;
-        const [width] = this.idleSize();
-        return [Math.round(this._anchor.centerX - width / 2), width];
+        const [width, height] = this.idleSize();
+        return [Math.round(this._anchor.centerX - width / 2), this._anchor.top, width, height];
     }
 
     /**

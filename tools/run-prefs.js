@@ -249,11 +249,20 @@ async function runSelftest(window) {
     check(!notesSettings.get_boolean('enabled') && !desktop._edgesOnDesktop.sensitive,
         'notes can be turned off, and their options grey out');
     notesSettings.reset('enabled');
+
+    // The dock.
+    const dock = await section(window, 'dock');
+    const dockSettings = store.settings.get_child('dock');
+    dock._size.value = 40;
+    dock._intellihide.active = false;
+    check(dockSettings.get_int('icon-size') === 40 && !dockSettings.get_boolean('intellihide'),
+        'the dock\'s icon size and hiding are saved');
+    ['icon-size', 'intellihide'].forEach(key => dockSettings.reset(key));
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'notifications', 'top-bar', 'desktop', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'top-bar', 'desktop', 'dock', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         await render(window, id);

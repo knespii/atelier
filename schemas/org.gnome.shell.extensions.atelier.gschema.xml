@@ -53,6 +53,7 @@
     <child name="bar" schema="org.gnome.shell.extensions.atelier.bar"/>
     <child name="desktop" schema="org.gnome.shell.extensions.atelier.desktop"/>
     <child name="notes" schema="org.gnome.shell.extensions.atelier.notes"/>
+    <child name="dock" schema="org.gnome.shell.extensions.atelier.dock"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -312,6 +313,25 @@
     <key name="atelier-open-notes" type="as">
       <default>[]</default>
       <summary>Open the notes</summary>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.dock"
+          path="/org/gnome/shell/extensions/atelier/dock/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Atelier's dock</summary>
+      <description>Pinned apps and those with windows on the workspace, at the bottom of the screen, with room for Dynamic Music Pill. It stays off while Dash to Dock is on.</description>
+    </key>
+    <key name="intellihide" type="b">
+      <default>true</default>
+      <summary>Out of the way of windows</summary>
+      <description>The dock moves away when a window of the focused app covers it, and comes back when the pointer reaches the bottom edge.</description>
+    </key>
+    <key name="icon-size" type="i">
+      <range min="32" max="64"/>
+      <default>48</default>
+      <summary>Size of the dock's icons, logical pixels</summary>
     </key>
   </schema>
 </schemalist>

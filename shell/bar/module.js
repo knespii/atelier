@@ -18,7 +18,6 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
-import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
 import {ContentPage} from '../island/page.js';
 import {CompactBar} from './compact.js';
@@ -38,19 +37,18 @@ const EDGE = 4; // between a capsule and the screen's edge
 const GAP = 6; // between the island and a grouped side
 const ISLAND_PADDING = 6; // of the one island, beyond the icons at its ends
 
-// Something under the bar: a capsule behind one side, or the one island
-// behind all of it. Black (with black ears for a notch), or glass.
+// Something under the bar: a capsule behind one side, the one island
+// behind all of it, or GNOME's bar. Glass or black; its shape changes
+// every frame the island does, without anything being laid out anew.
 class Surface {
     constructor(glass) {
         this._glass = glass;
-        this.actor = glass
-            ? new GlassSurface({reach: 0.1})
-            : new St.Widget({style_class: 'atelier-capsule', reactive: false});
+        this.actor = new GlassSurface({reach: 0.1, solid: !glass});
+        if (!glass)
+            this.actor.add_style_class_name('atelier-capsule');
         // (Never the target of a drag and drop.)
         Shell.util_set_hidden_from_pick(this.actor, true);
         Main.layoutManager.uiGroup.insert_child_below(this.actor, Main.layoutManager.panelBox);
-        this._ears = null;
-        this._radii = '';
     }
 
     get glass() {
@@ -59,7 +57,6 @@ class Surface {
 
     hide() {
         this.actor.visible = false;
-        this._ears?.show(false);
     }
 
     /**
@@ -69,33 +66,12 @@ class Surface {
      * @param {number} ear - radius of a notch's ears, 0 for none
      */
     show([x, y, width, height], radius, bottomRadius, ear) {
-        this.actor.visible = true;
-        if (this._glass) {
-            this.actor.setShape(x, y, width, height, radius, bottomRadius, ear);
-            return;
-        }
-        this.actor.set_position(x, y);
-        this.actor.set_size(width, height);
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const [top, bottom] = [radius / scale, bottomRadius / scale];
-        const radii = `border-radius: ${top}px ${top}px ${bottom}px ${bottom}px;`;
-        if (radii !== this._radii) {
-            this._radii = radii;
-            this.actor.style = radii;
-        }
-        if (ear > 0) {
-            this._ears ??= new NotchEars(Main.layoutManager.panelBox);
-            this._ears.show(true);
-            this._ears.setShape(x, y, width, ear);
-        } else {
-            this._ears?.destroy();
-            this._ears = null;
-        }
+        if (!this.actor.visible)
+            this.actor.visible = true;
+        this.actor.setShape(x, y, width, height, radius, bottomRadius, ear);
     }
 
     destroy() {
-        this._ears?.destroy();
-        this._ears = null;
         this.actor.destroy();
         this.actor = null;
     }
@@ -326,8 +302,10 @@ export class BarModule {
         const [panelX, panelY] = panel.get_transformed_position();
         const monitor = Main.layoutManager.primaryMonitor;
         const [minX, maxX] = [monitor.x + EDGE * scale, monitor.x + monitor.width - EDGE * scale];
-        const height = capsuleHeight(panel.height, scale);
-        const y = Math.round(panelY + (panel.height - height) / 2);
+        // As tall as the island at rest, and at its height (floating).
+        const rest = this._look.notch ? null : this._island?.restRect();
+        const height = rest?.[3] ?? capsuleHeight(panel.height, scale);
+        const y = rest?.[1] ?? Math.round(panelY + (panel.height - height) / 2);
         // [start, end] of a side's icons on the stage, if it shows any
         const extent = box => {
             if (!box.get_children().some(child => child.visible && child.width > 0))

@@ -1074,11 +1074,8 @@
   box-shadow: none;
 }
 
-.atelier-capsule {
+.atelier-solid-fill {
   background-color: #000000;
-  border: none;
-  border-radius: 999px;
-  box-shadow: none;
 }
 
 /* Glass: the blurred wallpaper, a little darker */
@@ -1903,4 +1900,57 @@
 
 .atelier-note-tab-right {
   border-radius: 16px 0 0 16px;
+}
+
+/* The dock */
+
+.atelier-dock {
+  padding: 6px 8px;
+  border-radius: 24px;
+  background-color: rgba(18, 18, 22, 0.82);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.atelier-dock.atelier-dock-glassy {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.atelier-dock-box {
+  spacing: 2px;
+}
+
+.atelier-dock .dash-item-container > StButton {
+  padding: 4px;
+  border-radius: 16px;
+}
+
+.atelier-dock .overview-tile {
+  padding: 4px;
+  margin: 0;
+  border-radius: 16px;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.atelier-dock .overview-tile:hover,
+.atelier-dock .overview-tile:focus,
+.atelier-dock .overview-tile:selected {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-dock .app-grid-running-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  margin-bottom: 0;
+  offset-y: 2px;
+  background-color: #ffffff;
+}
+
+.atelier-dock-separator {
+  width: 1px;
+  height: 32px;
+  margin: 0 6px;
+  background-color: rgba(255, 255, 255, 0.18);
 }
