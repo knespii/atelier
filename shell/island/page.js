@@ -4,11 +4,19 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 export const IslandPage = GObject.registerClass({
-    Signals: {'close-request': {}},
+    Signals: {
+        'close-request': {},
+        'resized': {},
+    },
 }, class AtelierIslandPage extends St.BoxLayout {
     /** Ask the island to close the page. */
     close() {
         this.emit('close-request');
+    }
+
+    /** Tell the island the content changed size. */
+    resized() {
+        this.emit('resized');
     }
 });
 

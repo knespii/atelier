@@ -2,8 +2,9 @@
 // shape. At rest it shows the time; it grows into whatever page it shows
 // (a glance, a toast, the switcher, the power menu…) and back.
 //
-// A page is any widget that emits 'close-request' when it wants to go away.
-// It may also implement handleKeyPress(event) and handleScroll(event), which
+// A page is any widget that emits 'close-request' when it wants to go away,
+// and 'resized', if it has that signal, when its content changed size. It
+// may also implement handleKeyPress(event) and handleScroll(event), which
 // return whether they handled the event, and focus(), called when it opens
 // with the keyboard.
 
@@ -169,6 +170,12 @@ export const Island = GObject.registerClass({
             old?.disconnectObject(this);
             this._page = page;
             page.connectObject('close-request', () => this.close(page), this);
+            if (GObject.signal_lookup('resized', page.constructor.$gtype)) {
+                page.connectObject('resized', () => {
+                    if (this._shown === page)
+                        this._resize(page, true);
+                }, this);
+            }
         }
         this._show(page);
         if (modal)

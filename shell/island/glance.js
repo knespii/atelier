@@ -115,6 +115,7 @@ export const GlancePage = GObject.registerClass({
         this._date.text = format(today, '%A, %B %-d');
         this._syncWeek(today);
         this._syncEvents(today);
+        this.resized();
     }
 
     _syncWeek(today) {
@@ -202,6 +203,13 @@ export const GlancePage = GObject.registerClass({
     }
 
     _syncWeather() {
+        const wasVisible = this._weatherRow.visible;
+        this._updateWeather();
+        if (this._weatherRow.visible !== wasVisible)
+            this.resized();
+    }
+
+    _updateWeather() {
         const client = this._weather;
         const info = client?.info;
         const usable = client?.available && client.hasLocation && info;
