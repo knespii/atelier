@@ -212,9 +212,12 @@ export async function run() {
         if (!check(ext?.state === ExtensionState.ACTIVE,
             `extension active (state ${ext?.state}${ext?.error ? `, error: ${ext.error}` : ''})`))
             return;
-        const atelier = ext.stateObj;
+        // The profiles feature lives in its own module.
+        const atelier = ext.stateObj.modules.get('profiles');
+        if (!check(atelier !== null, 'profiles module running'))
+            return;
 
-        check(atelier._settings.get_boolean('migrated-from-bg-changer'), 'BG Changer data taken over');
+        check(ext.stateObj._settings.get_boolean('migrated-from-bg-changer'), 'BG Changer data taken over');
         check(['amber', 'rainbow', 'glass', 'hostile', 'modern'].every(id => atelier._store.get(id)),
             'all BG Changer profiles migrated');
         const desktop = new Gio.Settings({schema_id: 'org.gnome.desktop.background'}).get_string('picture-uri');
