@@ -7,6 +7,7 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 import {AtelierView} from './prefs/app.js';
 import {AppearancePage} from './prefs/appearancePage.js';
+import {IslandPage} from './prefs/islandPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
 import {WallpapersPage} from './prefs/wallpapersPage.js';
@@ -20,6 +21,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
         window.search_enabled = false;
 
         const view = new AtelierView([
+            {
+                id: 'island', title: 'Island', icon: 'preferences-system-time-symbolic', group: 'THE SHELL',
+                keywords: ['clock', 'time', 'date', 'glance', 'calendar', 'weather', 'power', 'microphone',
+                    'toast', 'top bar', 'panel'],
+                create: () => new IslandPage(settings),
+            },
             {
                 id: 'profiles', title: 'Profiles', icon: 'view-grid-symbolic', group: 'THE DESK',
                 keywords: ['look', 'theme', 'icons', 'cursor', 'font', 'accent', 'new', 'switch'],

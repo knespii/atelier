@@ -153,11 +153,23 @@ async function runSelftest(window) {
     appearance._variants.setSelected('muted');
     check(appearance._palette.get_string('variant') === 'muted', 'variant cards set the variant');
     appearance._palette.reset('variant');
+
+    // Island: the switches write the island's settings; turning it off
+    // disables its options.
+    const island = await section(window, 'island');
+    const islandSettings = island._island;
+    const dateRow = findDescendant(island, w => w instanceof Adw.SwitchRow && w.title === 'Show the date');
+    dateRow.active = true;
+    check(islandSettings.get_boolean('show-date'), 'Show the date writes the island setting');
+    island._enabled.active = false;
+    check(!islandSettings.get_boolean('enabled') && !dateRow.sensitive, 'turning the island off greys out its options');
+    island._enabled.active = true;
+    islandSettings.reset('show-date');
 }
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         render(window, id);
