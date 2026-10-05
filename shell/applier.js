@@ -5,7 +5,7 @@ import Gio from 'gi://Gio';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 
-import {linkGtk4Theme, unlinkGtk4Theme} from '../lib/gtk4.js';
+import {linkGtk4Theme, linkedGtk4Theme, unlinkGtk4Theme} from '../lib/gtk4.js';
 import {AUTO_ACCENT, LookStore, effectiveWallpaper, isAccentColor} from '../lib/looks.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
 import {accentForWallpaper} from '../lib/thumbnails.js';
@@ -33,6 +33,7 @@ export class Applier {
         this._running = null;
         this._targetId = null;
         this._destroyed = false;
+        this._gtk4Chain = Promise.resolve();
 
         /** Optional wallpaper transition, see reveal.js */
         this.transition = null;
@@ -221,25 +222,50 @@ export class Applier {
         }
     }
 
+    /** Run GTK 4 link changes one after another; they touch the same files. */
+    _serializeGtk4(task) {
+        const run = this._gtk4Chain.then(task);
+        this._gtk4Chain = run.catch(() => {});
+        return run;
+    }
+
+    /**
+     * Follow a change of the light/dark style: GTK 4 only reads gtk.css, so
+     * the link has to point at the matching variant of the theme.
+     *
+     * @returns {Promise<void>}
+     */
+    syncGtk4Variant() {
+        return this._serializeGtk4(async () => {
+            const theme = linkedGtk4Theme(this._settings);
+            if (!theme || this._destroyed)
+                return;
+            const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+            await linkGtk4Theme(this._settings, theme, iface.get_string('color-scheme') === 'prefer-dark');
+        }).catch(e => console.warn(`BG Changer: could not update the GTK 4 link: ${e.message}`));
+    }
+
     async _syncGtk4(look, plan, problems) {
         // A look that leaves the GTK theme alone leaves its GTK 4 links alone too.
         if (look.gtkTheme === null || !plan.iface['gtk-theme'])
             return [];
 
         try {
-            if (look.gtk4 && plan.gtkThemeDir) {
-                const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-                const dark = iface.get_string('color-scheme') === 'prefer-dark';
-                const result = await linkGtk4Theme(this._settings, plan.gtkThemeDir, dark);
-                if (!result.ok) {
-                    problems.push(`GTK 4 apps were not themed: ${result.reason}`);
-                    return [];
+            return await this._serializeGtk4(async () => {
+                if (look.gtk4 && plan.gtkThemeDir) {
+                    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+                    const dark = iface.get_string('color-scheme') === 'prefer-dark';
+                    const result = await linkGtk4Theme(this._settings, plan.gtkThemeDir, dark);
+                    if (!result.ok) {
+                        problems.push(`GTK 4 apps were not themed: ${result.reason}`);
+                        return [];
+                    }
+                    return result.changed ? ['Restart open apps to see the GTK 4 theme.'] : [];
                 }
-                return result.changed ? ['Restart open apps to see the GTK 4 theme.'] : [];
-            }
 
-            const removed = await unlinkGtk4Theme(this._settings);
-            return removed ? ['Restart open apps to bring back their default GTK 4 look.'] : [];
+                const removed = await unlinkGtk4Theme(this._settings);
+                return removed ? ['Restart open apps to bring back their default GTK 4 look.'] : [];
+            });
         } catch (e) {
             // e.g. ~/.config/gtk-4.0 not writable
             problems.push(`GTK 4 apps were not themed: ${e.message}`);

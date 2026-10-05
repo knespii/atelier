@@ -1,5 +1,6 @@
 // BG Changer: save looks (wallpaper + themes) and switch between them.
 
+import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
@@ -26,6 +27,11 @@ export default class BgChangerExtension extends Extension {
         this._applier.transition = new WallpaperTransition(this._settings);
         this._switcher = null;
         this._indicator = null;
+
+        // Keep a GTK 4 theme link on the light or dark variant matching the style.
+        this._interfaceSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        this._interfaceSettings.connectObject('changed::color-scheme',
+            () => this._applier.syncGtk4Variant(), this);
 
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),
@@ -59,6 +65,8 @@ export default class BgChangerExtension extends Extension {
         this._indicator = null;
         this._applier.destroy();
         this._applier = null;
+        this._interfaceSettings.disconnectObject(this);
+        this._interfaceSettings = null;
         this._settings.disconnectObject(this);
         this._settings = null;
         this._store = null;
