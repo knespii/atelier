@@ -112,7 +112,11 @@ class BgChangerLookEditor extends Adw.Dialog {
         });
         group.add(this._nameRow);
 
-        this._wallpaperRow = new Adw.ActionRow({title: 'Wallpaper', subtitle_lines: 1});
+        this._wallpaperRow = new Adw.ActionRow({
+            title: 'Wallpaper',
+            subtitle_lines: 1,
+            use_markup: false, // the subtitle is a file name
+        });
         const choose = new Gtk.Button({label: 'Choose…', valign: Gtk.Align.CENTER});
         choose.connect('clicked', () => this._chooseWallpaper().catch(e => toast(this, e.message)));
         this._wallpaperRow.add_suffix(choose);
@@ -238,6 +242,7 @@ class BgChangerLookEditor extends Adw.Dialog {
         const font = this._draft.font ?? null;
         this._fontRow = new Adw.ExpanderRow({
             title: 'Interface font',
+            use_markup: false, // the subtitle is a font name
             show_enable_switch: true,
             enable_expansion: font !== null,
             expanded: font !== null,
@@ -392,7 +397,11 @@ class BgChangerLookEditor extends Adw.Dialog {
 
             const parent = this.get_root();
             this.close();
-            parent?.add_toast?.(new Adw.Toast({title: `Saved “${fields.name}”`, timeout: 2}));
+            parent?.add_toast?.(new Adw.Toast({
+                title: `Saved “${fields.name}”`,
+                timeout: 2,
+                use_markup: false,
+            }));
         } catch (e) {
             console.error('BG Changer: saving a look failed', e);
             toast(this, `Could not save: ${e.message}`);

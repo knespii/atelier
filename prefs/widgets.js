@@ -111,7 +111,8 @@ export function requestApply(settings, id) {
  */
 export function toast(widget, title) {
     const window = widget.get_root();
-    window?.add_toast?.(new Adw.Toast({title, timeout: 3}));
+    // Titles carry look names and error messages: no markup.
+    window?.add_toast?.(new Adw.Toast({title, timeout: 3, use_markup: false}));
 }
 
 /**
