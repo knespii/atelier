@@ -1,6 +1,6 @@
 import GLib from 'gi://GLib';
 
-import {scanThemes} from '../lib/themes.js';
+import {locateTheme, scanThemes} from '../lib/themes.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
 const fn = (...parts) => GLib.build_filenamev(parts);
@@ -74,4 +74,13 @@ export async function testRealSystemScanDoesNotThrow() {
     const result = await scanThemes();
     assert(result.gtk.some(t => t.name === 'Adwaita'), 'Adwaita is always offered');
     assert(result.gtk.every(t => !t.name.endsWith('.tar.xz')), 'archives are ignored');
+}
+
+export async function testLocateTheme() {
+    assert(await locateTheme('gtk', 'Adwaita') !== null, 'Adwaita GTK theme');
+    assertEqual(await locateTheme('shell', ''), '', 'default shell theme needs no files');
+    assert(await locateTheme('icons', 'Adwaita'), 'Adwaita icons');
+    assert(await locateTheme('cursors', 'Adwaita'), 'Adwaita cursors');
+    for (const kind of ['gtk', 'shell', 'icons', 'cursors'])
+        assertEqual(await locateTheme(kind, 'No-Such-Theme-42'), null, kind);
 }
