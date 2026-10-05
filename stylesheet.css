@@ -1058,3 +1058,50 @@
   background-color: -st-accent-color;
   color: -st-accent-fg-color;
 }
+
+/* Grouped bar: the sides in capsules like the island */
+
+#panel.atelier-bar-grouped .panel-button {
+  text-shadow: none;
+}
+
+#panel.atelier-bar-grouped .panel-button .system-status-icon {
+  icon-shadow: none;
+}
+
+#panel.atelier-bar-grouped .panel-button#panelActivities .workspace-dot {
+  box-shadow: none;
+}
+
+.atelier-capsule {
+  background-color: #000000;
+  border: none;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+/* Glass: the blurred wallpaper, a little darker */
+
+.atelier-glass {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.atelier-glass-tint {
+  background-color: rgba(12, 12, 14, 0.38);
+}
+
+.atelier-island.atelier-island-glass {
+  background-color: transparent;
+}
+
+/* Notch: the island hangs from the top edge */
+
+.atelier-island.atelier-island-notch {
+  border-radius: 0 0 14px 14px;
+}
+
+.atelier-island.atelier-island-notch:expanded {
+  border-radius: 0 0 26px 26px;
+}

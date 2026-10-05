@@ -11,6 +11,22 @@
     <value nick="preset" value="2"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.BarStyle">
+    <value nick="gnome" value="0"/>
+    <value nick="clear" value="1"/>
+    <value nick="grouped" value="2"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.Surface">
+    <value nick="classic" value="0"/>
+    <value nick="glass" value="1"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.IslandShape">
+    <value nick="floating" value="0"/>
+    <value nick="notch" value="1"/>
+  </enum>
+
   <enum id="org.gnome.shell.extensions.atelier.PaletteVariant">
     <value nick="vibrant" value="0"/>
     <value nick="muted" value="1"/>
@@ -200,9 +216,20 @@
 
   <schema id="org.gnome.shell.extensions.atelier.bar"
           path="/org/gnome/shell/extensions/atelier/bar/">
-    <key name="transparent" type="b">
-      <default>true</default>
-      <summary>Top bar without a background</summary>
+    <key name="style" enum="org.gnome.shell.extensions.atelier.BarStyle">
+      <default>'clear'</default>
+      <summary>Look of the top bar</summary>
+      <description>“gnome” keeps GNOME's bar, “clear” has no background (the workspaces, the island and the status icons on the wallpaper), “grouped” puts the left and the right side into capsules like the island.</description>
+    </key>
+    <key name="surface" enum="org.gnome.shell.extensions.atelier.Surface">
+      <default>'classic'</default>
+      <summary>What the island and the capsules are made of</summary>
+      <description>“classic” is black, “glass” the blurred wallpaper.</description>
+    </key>
+    <key name="island-shape" enum="org.gnome.shell.extensions.atelier.IslandShape">
+      <default>'floating'</default>
+      <summary>Shape of the island</summary>
+      <description>“floating” is a capsule in the bar, “notch” hangs from the top edge of the screen.</description>
     </key>
   </schema>
 </schemalist>

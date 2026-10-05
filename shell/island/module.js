@@ -15,6 +15,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 import {effectiveWallpaper} from '../../lib/profiles.js';
+import {capsuleHeight} from '../core/barMetrics.js';
+import {GlassSurface} from '../core/glass.js';
 import {switcherWidth} from '../switcherContent.js';
 import {CalendarBridge} from './calendar.js';
 import {GlancePage} from './glance.js';
@@ -29,11 +31,8 @@ export const SLOT_ROLE = 'atelier-island';
 
 const GLANCE_DELAY = 300;
 const GLANCE_HIDE_DELAY = 250;
-// Height of the capsule at rest, logical pixels: the top bar's height minus
-// a margin, within these bounds.
-const IDLE_MARGIN = 3;
-const IDLE_MIN_HEIGHT = 20;
-const IDLE_MAX_HEIGHT = 28;
+// How far down the screen the island may grow, for its glass.
+const GLASS_REACH = 0.9;
 
 // Keeps the island's place in the center of the top bar.
 const IslandSlot = GObject.registerClass(
@@ -121,11 +120,23 @@ export class IslandModule {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this.togglePowerMenu());
 
+        // What it is made of and its shape follow the top bar's look.
+        this._barSettings = this._settings.get_child('bar');
+        this._barSettings.connectObject(
+            'changed::surface', () => this._syncLook(),
+            'changed::island-shape', () => this._syncLook(),
+            this);
+        this._syncLook();
+
         this._queueLayout();
     }
 
     disable() {
         Main.wm.removeKeybinding('atelier-power-menu');
+        this._barSettings?.disconnectObject(this);
+        this._barSettings = null;
+        this._glass?.destroy();
+        this._glass = null;
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         // Whoever waits for an announcement goes on without it.
@@ -318,8 +329,9 @@ export class IslandModule {
     _layout() {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const panelHeight = Main.panel.height;
-        const height = Math.round(Math.max(IDLE_MIN_HEIGHT * scale,
-            Math.min(IDLE_MAX_HEIGHT * scale, panelHeight - 2 * IDLE_MARGIN * scale)));
+        // A notch hangs from the top edge, as tall as the bar.
+        const notch = this._barSettings?.get_string('island-shape') === 'notch';
+        const height = notch ? panelHeight : capsuleHeight(panelHeight, scale);
         const restyled = this._restyled || this._idle.height !== height;
         this._restyled = false;
         this._idle.height = height;
@@ -335,6 +347,50 @@ export class IslandModule {
         this._island.setAnchor(Math.round(x + slotWidth / 2), Math.round(panelY + (panelHeight - height) / 2));
         if (restyled)
             this._island.relayout();
+    }
+
+    _syncLook() {
+        const island = this._island;
+        const notch = this._barSettings.get_string('island-shape') === 'notch';
+        const glass = this._barSettings.get_string('surface') === 'glass';
+        if (notch)
+            island.add_style_class_name('atelier-island-notch');
+        else
+            island.remove_style_class_name('atelier-island-notch');
+
+        if (glass && !this._glass) {
+            this._glass = new GlassSurface({reach: GLASS_REACH});
+            Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
+            island.add_style_class_name('atelier-island-glass');
+            island.connectObject(
+                'notify::x', () => this._syncGlass(),
+                'notify::y', () => this._syncGlass(),
+                'notify::width', () => this._syncGlass(),
+                'notify::height', () => this._syncGlass(),
+                'notify::visible', () => this._syncGlass(),
+                'notify::opacity', () => this._syncGlass(),
+                'style-changed', () => this._syncGlass(),
+                this._glass);
+        } else if (!glass && this._glass) {
+            island.disconnectObject(this._glass);
+            island.remove_style_class_name('atelier-island-glass');
+            this._glass.destroy();
+            this._glass = null;
+        }
+        this._syncGlass();
+        this._queueLayout(true);
+    }
+
+    // The glass under the island takes its shape, every frame it changes.
+    _syncGlass() {
+        const island = this._island;
+        const glass = this._glass;
+        if (!glass)
+            return;
+        glass.visible = island.visible && island.opacity > 0;
+        const node = island.get_theme_node();
+        glass.setShape(island.x, island.y, island.width, island.height,
+            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT));
     }
 
     _setTimeout(name, delay, callback) {

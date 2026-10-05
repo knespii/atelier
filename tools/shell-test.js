@@ -633,6 +633,60 @@ async function testOverviewBar() {
     check(backdrop?.opacity === 0, 'and the wallpaper strip behind it is gone on the desktop');
 }
 
+async function testBarStyles(ext) {
+    const bar = ext.stateObj._settings.get_child('bar');
+    const island = ext.stateObj.modules.get('island').island;
+    const surfaces = () => Main.layoutManager.uiGroup.get_children()
+        .filter(a => hasClass(a, 'atelier-capsule') || hasClass(a, 'atelier-glass'));
+    await restPointer();
+
+    // Grouped: the sides in black capsules.
+    bar.set_string('style', 'grouped');
+    await Scripting.sleep(400);
+    const capsules = surfaces();
+    const activities = Main.panel.statusArea.activities;
+    const [ax] = activities.get_transformed_position();
+    const left = capsules.find(c => c.x < global.stage.width / 2);
+    const middle = ax + activities.width / 2;
+    check(Main.panel.has_style_class_name('atelier-bar-grouped') && capsules.length === 2 &&
+        left && left.x < middle && left.x + left.width > middle && left.width >= activities.width - 16,
+    `grouped: the sides sit in capsules (${left?.x}+${left?.width} around ${ax}+${activities.width})`);
+    await screenshotArea('25-bar-grouped', 0, 0, global.stage.width, 44);
+
+    // Glass: the island and the capsules are the blurred wallpaper.
+    bar.set_string('surface', 'glass');
+    await Scripting.sleep(600);
+    const glass = surfaces().filter(a => hasClass(a, 'atelier-glass'));
+    check(glass.length === 3 && island.has_style_class_name('atelier-island-glass'),
+        `glass: the island and the capsules (${glass.length} surfaces)`);
+    await screenshotArea('26-bar-glass', 0, 0, global.stage.width, 44);
+    const islandGlass = glass.find(g => g.get_parent() === island.get_parent() &&
+        island.get_parent().get_children().indexOf(g) === island.get_parent().get_children().indexOf(island) - 1);
+    await pointerTo(...centerOf(island));
+    await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
+    await Scripting.sleep(600);
+    const shape = islandGlass?._shape ?? [];
+    check(Math.abs(shape[2] - island.width) < 1 && Math.abs(shape[3] - island.height) < 1,
+        'the island\'s glass grows with it');
+    await screenshotIsland('27-glance-glass', 420);
+    await restPointer();
+    await waitFor(() => island.page === null, 2000);
+    await Scripting.sleep(400);
+
+    // Notch: the island hangs from the top edge.
+    bar.set_string('island-shape', 'notch');
+    await Scripting.sleep(600);
+    const [, panelY] = Main.panel.get_transformed_position();
+    check(Math.abs(island.y - panelY) < 1 && Math.abs(island.height - Main.panel.height) < 1,
+        `notch: the island hangs from the top edge (${island.y}, ${island.height})`);
+    await screenshotArea('28-bar-notch', 0, 0, global.stage.width, 44);
+
+    ['style', 'surface', 'island-shape'].forEach(key => bar.reset(key));
+    await Scripting.sleep(500);
+    check(surfaces().length === 0 && !island.has_style_class_name('atelier-island-glass') &&
+        Main.panel.has_style_class_name('atelier-bar-clean'), 'back to the clear bar');
+}
+
 async function testSwitcherAndReveal(atelier) {
     await screenshot('01-desktop');
 
@@ -952,6 +1006,8 @@ async function testDisableCleansUp(atelier) {
     check(['toggleCalendar', 'closeCalendar'].every(name => Main.panel[name] === panelProto[name]),
         'calendar functions restored');
     const qsMenu = Main.panel.statusArea.quickSettings.menu;
+    check(!Main.layoutManager.uiGroup.get_children().some(a => hasClass(a, 'atelier-glass') || hasClass(a, 'atelier-capsule')),
+        'no glass or capsules left');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
     const trayProto = Object.getPrototypeOf(Main.messageTray);
@@ -1006,6 +1062,7 @@ export async function run() {
         await testNotifications(ext, atelier);
         await testControlCentre(ext);
         await testOverviewBar();
+        await testBarStyles(ext);
         await testSwitcherAndReveal(atelier);
         await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);

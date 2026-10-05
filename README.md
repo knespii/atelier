@@ -30,9 +30,12 @@ of the desktop (desktop widgets, notes, a dock) is on its way.
   the calendar, and the icons extensions put into the top bar, as tiles that
   do what the icons did. GNOME's own menus don't open anymore; the status
   icons in the bar only show the state.
-- **Top bar** without a background: the workspaces on the left, the island in
-  the middle and the status icons on the right. (If Blur my Shell blurs the
-  bar, turn that off for a clean bar.)
+- **Top bar**: *Clear* (no background: the workspaces on the left, the island
+  in the middle and the status icons on the right), *Grouped* (the sides in
+  capsules like the island) or GNOME's. The island and the capsules are black
+  or **glass** – Atelier's own blur of the wallpaper, tinted with the palette
+  – and the island floats in the bar or hangs from the top edge as a *notch*.
+  (If Blur my Shell blurs the bar, turn that off.)
 - **Switcher**: press <kbd>Super</kbd>+<kbd>W</kbd> (or click the button in the
   top bar). The island grows into it (without the island, a dark panel drops
   from the top of the screen), with two tabs:

@@ -196,12 +196,18 @@ async function runSelftest(window) {
 
     // Top bar and control centre.
     const bar = await section(window, 'top-bar');
-    bar._transparent.active = false;
-    check(!store.settings.get_child('bar').get_boolean('transparent'), 'the bar\'s background can come back');
+    const barSettings = store.settings.get_child('bar');
+    bar._style.selected = 2;
+    bar._surface.selected = 1;
+    bar._shape.selected = 1;
+    check(barSettings.get_string('style') === 'grouped' && barSettings.get_string('surface') === 'glass' &&
+        barSettings.get_string('island-shape') === 'notch', 'bar style, glass and notch are saved');
+    ['style', 'surface', 'island-shape'].forEach(key => barSettings.reset(key));
+    await sleep(100);
+    check(bar._style.selected === 1, 'and the rows follow the settings');
     bar._controlCentre.active = false;
     check(!store.settings.get_child('control-centre').get_boolean('enabled') && !bar._extensions.sensitive,
         'without the control centre, its options are greyed out');
-    bar._transparent.active = true;
     bar._controlCentre.active = true;
 }
 

@@ -9,6 +9,16 @@ Gio._promisify(Gio.File.prototype, 'replace_contents_bytes_async', 'replace_cont
 Gio._promisify(Gio.File.prototype, 'delete_async');
 
 /**
+ * @param {string} hex - '#rrggbb'
+ * @param {number} alpha - 0..1
+ * @returns {string} the color as rgba() for St
+ */
+function rgba(hex, alpha) {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
  * The palette-dependent part of Atelier's shell styles. Everything here
  * overrides a rule of stylesheet.css, which keeps the defaults; the extra
  * class in each selector makes these rules win regardless of load order.
@@ -36,6 +46,7 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-notification-button.atelier-notification-button-quiet { background-color: transparent; color: ${d.onSurfaceVariant}; }
 .atelier-island .atelier-notification-button:focus,
 .atelier-island .atelier-notification-content:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
+.atelier-glass .atelier-glass-tint { background-color: ${rgba(d.surface, 0.45)}; }
 .atelier-island .atelier-cc-tab:checked { background-color: ${d.primaryContainer}; color: ${d.onPrimaryContainer}; }
 .atelier-island .atelier-cc-tab:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
 .atelier-island .atelier-cc .calendar .calendar-day.calendar-today { background-color: ${d.primary}; color: ${d.onPrimary}; }
