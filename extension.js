@@ -9,7 +9,7 @@ import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {LookStore, readCurrentAppearance} from './lib/looks.js';
-import {importWallpaper} from './lib/paths.js';
+import {deleteWallpaperIfUnused, importWallpaper} from './lib/paths.js';
 import {USER_THEME_UUID, getUserThemeSettings} from './lib/themes.js';
 import {ensureThumbnail} from './lib/thumbnails.js';
 import {Applier} from './shell/applier.js';
@@ -49,9 +49,11 @@ export default class BgChangerExtension extends Extension {
         Main.wm.addKeybinding('bgc-next-look', this._settings, flags, modes, () => this._step(1));
         Main.wm.addKeybinding('bgc-previous-look', this._settings, flags, modes, () => this._step(-1));
 
-        if (!this._settings.get_boolean('first-run-done')) {
-            this._createOriginalLook().catch(e =>
-                console.error('BG Changer: could not save the original look', e));
+        if (!this._settings.get_boolean('first-run-done') && !this._originalPending) {
+            this._originalPending = true;
+            this._createOriginalLook()
+                .catch(e => console.error('BG Changer: could not save the original look', e))
+                .finally(() => (this._originalPending = false));
         }
     }
 
@@ -148,8 +150,6 @@ export default class BgChangerExtension extends Extension {
      * is always a way back.
      */
     async _createOriginalLook() {
-        this._settings.set_boolean('first-run-done', true);
-
         const userThemesActive =
             Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
         const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
@@ -160,11 +160,18 @@ export default class BgChangerExtension extends Extension {
         });
         const wallpaper = current.wallpaper ? await copy(current.wallpaper) : null;
         const wallpaperDark = wallpaper && current.wallpaperDark ? await copy(current.wallpaperDark) : null;
-        if (!this._store)
-            return; // disabled meanwhile
+
+        if (!this._store) {
+            // Disabled meanwhile: drop the copies, the next enable starts over.
+            for (const path of [wallpaper, wallpaperDark].filter(Boolean))
+                await deleteWallpaperIfUnused(path, []).catch(() => {});
+            return;
+        }
 
         const look = this._store.add({...current, wallpaper, wallpaperDark, name: 'Original'});
         this._store.activeId = look.id;
+        // Only now: an interrupted first run is retried on the next enable.
+        this._settings.set_boolean('first-run-done', true);
         if (wallpaper)
             ensureThumbnail(wallpaper).catch(() => {});
     }
