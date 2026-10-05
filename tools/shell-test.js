@@ -93,6 +93,44 @@ async function testSwitcherAndReveal(atelier) {
     check(atelier._store.activeId === 'rainbow', 'active profile recorded');
 }
 
+function hexOf(color) {
+    return `#${[color.red, color.green, color.blue].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function testPalette(ext, atelier) {
+    const paletteModule = ext.stateObj.modules.get('palette');
+    if (!check(paletteModule !== null, 'palette module running'))
+        return;
+
+    // rainbow is applied now: the palette follows its wallpaper
+    check(await waitFor(() => paletteModule.palette?.swatches.length > 0, 4000),
+        `palette computed from the wallpaper (source ${paletteModule.palette?.source})`);
+    const stored = JSON.parse(ext.stateObj._settings.get_child('palette').get_string('current') || 'null');
+    check(stored?.source === paletteModule.palette.source, 'palette stored for the preferences');
+    const sheets = St.ThemeContext.get_for_stage(global.stage).get_theme().get_custom_stylesheets()
+        .map(f => f.get_basename());
+    check(sheets.some(name => /^shell-[0-9a-f]{12}\.css$/.test(name)), `palette stylesheet loaded (${sheets})`);
+
+    // The selected card of the switcher uses the palette's primary color.
+    atelier.toggleSwitcher();
+    await Scripting.sleep(400);
+    const card = atelier._switcher._cards[atelier._switcher._selected];
+    const border = hexOf(card.get_theme_node().get_border_color(St.Side.TOP));
+    check(border === paletteModule.palette.dark.primary,
+        `switcher highlight follows the palette (${border} vs ${paletteModule.palette.dark.primary})`);
+    atelier._switcher.close();
+    await Scripting.sleep(300);
+
+    // A fixed palette replaces the wallpaper's colors.
+    const before = paletteModule.palette.source;
+    ext.stateObj._settings.get_child('palette').set_string('source', 'preset');
+    ext.stateObj._settings.get_child('palette').set_string('preset', 'sea');
+    check(await waitFor(() => paletteModule.palette?.source === '#2f8fb0', 3000),
+        `preset palette applied (was ${before})`);
+    ext.stateObj._settings.get_child('palette').reset('source');
+    check(await waitFor(() => paletteModule.palette?.source === before, 3000), 'back to the wallpaper colors');
+}
+
 async function testShortcutsAndRequests(atelier) {
     atelier._step(1); // rainbow -> glass
     check(await waitFor(() => atelier._store.activeId === 'glass', 5000), 'next-profile applies the following profile');
@@ -234,6 +272,7 @@ export async function run() {
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
 
         await testSwitcherAndReveal(atelier);
+        await testPalette(ext, atelier);
         await testShortcutsAndRequests(atelier);
         await testFromOverview(atelier);
         await testHostileShellTheme(atelier);

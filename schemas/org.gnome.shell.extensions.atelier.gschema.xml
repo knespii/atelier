@@ -5,8 +5,21 @@
     <value nick="fade" value="1"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.PaletteSource">
+    <value nick="wallpaper" value="0"/>
+    <value nick="swatch" value="1"/>
+    <value nick="preset" value="2"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.PaletteVariant">
+    <value nick="vibrant" value="0"/>
+    <value nick="muted" value="1"/>
+    <value nick="monochrome" value="2"/>
+  </enum>
+
   <schema id="org.gnome.shell.extensions.atelier"
           path="/org/gnome/shell/extensions/atelier/">
+    <child name="palette" schema="org.gnome.shell.extensions.atelier.palette"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -59,6 +72,48 @@
       <default>''</default>
       <summary>Request from the preferences to apply a profile</summary>
       <description>JSON object with the profile ID and a nonce. Written by the preferences window, handled by the shell.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.palette"
+          path="/org/gnome/shell/extensions/atelier/palette/">
+    <key name="source" enum="org.gnome.shell.extensions.atelier.PaletteSource">
+      <default>'wallpaper'</default>
+      <summary>Where the palette comes from</summary>
+      <description>“wallpaper” picks the most fitting color of the wallpaper, “swatch” uses the chosen swatch of the wallpaper, “preset” uses a fixed palette.</description>
+    </key>
+    <key name="swatch" type="i">
+      <range min="0" max="7"/>
+      <default>0</default>
+      <summary>Swatch of the wallpaper used when the source is “swatch”</summary>
+    </key>
+    <key name="preset" type="s">
+      <default>'ochre'</default>
+      <summary>Fixed palette used when the source is “preset”</summary>
+    </key>
+    <key name="variant" enum="org.gnome.shell.extensions.atelier.PaletteVariant">
+      <default>'vibrant'</default>
+      <summary>How colorful the palette is</summary>
+    </key>
+    <key name="gtk-apps" type="b">
+      <default>false</default>
+      <summary>Color GTK apps with the palette</summary>
+    </key>
+    <key name="terminal" type="b">
+      <default>false</default>
+      <summary>Color GNOME Terminal with the palette</summary>
+    </key>
+    <key name="terminal-profile" type="s">
+      <default>''</default>
+      <summary>GNOME Terminal profile created by Atelier</summary>
+    </key>
+    <key name="terminal-previous-default" type="s">
+      <default>''</default>
+      <summary>GNOME Terminal profile that was the default before Atelier's</summary>
+    </key>
+    <key name="current" type="s">
+      <default>''</default>
+      <summary>The palette in use (JSON), written by the shell</summary>
     </key>
   </schema>
 </schemalist>

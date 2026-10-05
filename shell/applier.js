@@ -8,7 +8,7 @@ import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js
 import {linkGtk4Theme, linkedGtk4Theme, unlinkGtk4Theme} from '../lib/gtk4.js';
 import {AUTO_ACCENT, ProfileStore, effectiveWallpaper, isAccentColor} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
-import {accentForWallpaper} from '../lib/thumbnails.js';
+import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
 
 const THEME_FIELDS = [
     // [kind for locateTheme, profile field, org.gnome.desktop.interface key, label]
@@ -153,12 +153,11 @@ export class Applier {
         if (profile.accentColor !== null && iface.settings_schema.has_key('accent-color')) {
             let accent = profile.accentColor;
             if (accent === AUTO_ACCENT) {
+                // The same palette the shell will compute once the wallpaper is set.
                 const shown = plan.background?.shown.get_path();
                 accent = shown
-                    ? await accentForWallpaper(shown).catch(e => {
-                        console.warn(`Atelier: no accent for ${shown}: ${e.message}`);
-                        return null;
-                    })
+                    ? (await paletteForWallpaper(shown,
+                        readPaletteOptions(this._settings.get_child('palette')))).accent
                     : null;
             }
             if (isAccentColor(accent))

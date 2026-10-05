@@ -2,8 +2,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import GLib from 'gi://GLib';
 
 import {
-    THUMB_HEIGHT, THUMB_WIDTH, accentForWallpaper, accentFromPixbuf, ensureThumbnail,
-    hasThumbnail, removeThumbnail,
+    THUMB_HEIGHT, THUMB_WIDTH, ensureThumbnail, hasThumbnail, removeThumbnail, sampleWallpaper,
 } from '../lib/thumbnails.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
@@ -49,36 +48,10 @@ export async function testSlideshowUsesFirstImage() {
     assert(GLib.file_test(thumb, GLib.FileTest.EXISTS));
 }
 
-export function testAccentFromSolidColors() {
-    const cases = {
-        teal: 0x2190a4ff,
-        orange: 0xed5b00ff,
-        blue: 0x3584e4ff,
-        purple: 0x9141acff,
-        green: 0x3a944aff,
-        red: 0xe62d42ff,
-        slate: 0x808080ff,
-    };
-    for (const [expected, rgba] of Object.entries(cases))
-        assertEqual(accentFromPixbuf(solid(64, 40, rgba)), expected, `0x${rgba.toString(16)}`);
-}
-
-export function testAccentFollowsDominantColor() {
-    // Mostly sky blue with a small orange object
-    const pixbuf = solid(100, 100, 0x2f80d8ff);
-    solid(20, 20, 0xed5b00ff).copy_area(0, 0, 20, 20, pixbuf, 40, 40);
-    assertEqual(accentFromPixbuf(pixbuf), 'blue');
-}
-
-export async function testAccentForWallpaper() {
-    const wallpaper = savePng(solid(1200, 800, 0xd56199ff), 'pink.png');
-    assertEqual(await accentForWallpaper(wallpaper), 'pink');
-}
-
-export function testAccentOnDarkBackground() {
-    // Colorful details on a black background still produce a color.
-    const pixbuf = solid(100, 100, 0x050505ff);
-    solid(30, 30, 0xed5b00ff).copy_area(0, 0, 30, 30, pixbuf, 10, 10);
-    assertEqual(accentFromPixbuf(pixbuf), 'orange');
-    assertEqual(accentFromPixbuf(solid(64, 40, 0x000000ff)), 'slate', 'pure black');
+export async function testSampleWallpaper() {
+    const wallpaper = savePng(solid(1200, 800, 0x2190a4ff), 'sample.png');
+    const sample = await sampleWallpaper(wallpaper, 32, 20);
+    assertEqual(sample.width, 32);
+    assert(sample.pixels.length >= 20 * sample.rowstride - sample.rowstride, 'pixels for every row');
+    assertEqual([sample.pixels[0], sample.pixels[1], sample.pixels[2]], [0x21, 0x90, 0xa4]);
 }

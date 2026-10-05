@@ -8,6 +8,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
+import {PaletteModule} from './shell/paletteModule.js';
 import {ProfilesModule} from './shell/profilesModule.js';
 
 export default class AtelierExtension extends Extension {
@@ -19,6 +20,7 @@ export default class AtelierExtension extends Extension {
             store: new ProfileStore(this._settings),
         };
         this.modules = new ModuleManager(context);
+        this.modules.register('palette', ctx => new PaletteModule(ctx));
         this.modules.register('profiles', ctx => new ProfilesModule(ctx));
 
         // BG Changer's data has to be taken over before anything reads the

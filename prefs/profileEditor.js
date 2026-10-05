@@ -8,7 +8,8 @@ import Pango from 'gi://Pango';
 
 import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, isInLibrary, prettyName} from '../lib/paths.js';
-import {accentForWallpaper, ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
+import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
+import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {chooseImages, createThumbnail, toast} from './widgets.js';
 
 const KEEP = 'Don’t change';
@@ -64,7 +65,7 @@ class AtelierProfileEditor extends Adw.Dialog {
             content_height: 820,
         });
         this._store = store;
-        this._look = profile;
+        this._profile = profile;
         this._draft = profile ?? initial ?? {};
         this._themes = themes;
         this._wallpaper = this._draft.wallpaper ?? null;
@@ -290,10 +291,11 @@ class AtelierProfileEditor extends Adw.Dialog {
             this._accentRow.subtitle = 'Auto: matches the wallpaper';
             const wallpaper = this._wallpaper;
             if (wallpaper) {
-                accentForWallpaper(wallpaper).then(color => {
-                    if (this._accent === AUTO_ACCENT && this._wallpaper === wallpaper)
-                        this._accentRow.subtitle = `Auto: ${capitalize(color)} for this wallpaper`;
-                }).catch(() => {});
+                paletteForWallpaper(wallpaper, readPaletteOptions(this._store.settings.get_child('palette')))
+                    .then(palette => {
+                        if (this._accent === AUTO_ACCENT && this._wallpaper === wallpaper)
+                            this._accentRow.subtitle = `Auto: ${capitalize(palette.accent)} for this wallpaper`;
+                    }).catch(() => {});
             }
         } else {
             this._accentRow.subtitle = capitalize(accent);
@@ -380,9 +382,9 @@ class AtelierProfileEditor extends Adw.Dialog {
                 font: this._fontRow.enable_expansion ? this._fontButton.font_desc.to_string() : null,
             };
 
-            if (this._look) {
-                const {wallpaper: previous, wallpaperDark: previousDark} = this._look;
-                this._store.update(this._look.id, fields);
+            if (this._profile) {
+                const {wallpaper: previous, wallpaperDark: previousDark} = this._profile;
+                this._store.update(this._profile.id, fields);
                 const profiles = this._store.getAll();
                 if (previous && previous !== wallpaper &&
                     await deleteWallpaperIfUnused(previous, profiles))
