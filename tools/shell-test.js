@@ -159,6 +159,12 @@ function overlayCount() {
         Main.layoutManager._bgManagers.length;
 }
 
+// The wallpapers in place: none still loading, or fading in.
+function wallpapersSettled() {
+    return waitFor(() => Main.layoutManager._bgManagers.every(m => !m._newBackgroundActor) && overlayCount() === 0,
+        8000);
+}
+
 // Stand-ins: the tests never lock, suspend or power off the machine, and
 // the calendar and weather have known content.
 function fakeSystemActions(calls) {
@@ -1192,6 +1198,8 @@ async function testTwoMonitors(ext) {
     const left = notes.store.create({title: 'Left', color: 'blue'});
     const right = notes.store.create({title: 'Right', color: 'blue', pin: 'right'});
     await restPointer();
+    // (The profile in use put its wallpaper in at the start.)
+    await wallpapersSettled();
     await Scripting.sleep(400);
 
     // At the main monitor's edge (x), halfway down a paper: its strip
@@ -1223,6 +1231,7 @@ async function testTwoMonitors(ext) {
     await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0');
     check(await waitFor(() => Main.layoutManager.primaryMonitor.x > 0, 3000), 'the other monitor moved to the left');
     await restPointer();
+    await wallpapersSettled();
     await Scripting.sleep(600);
     main = Main.layoutManager.primaryMonitor;
     const tab = notes._edges._tabs.get(left.id);
