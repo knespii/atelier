@@ -8,13 +8,13 @@ export function testNewAndParse() {
         note,
         {id: note.id, title: 'duplicate'},
         {title: 'no id'},
-        {id: 'b', color: 'tartan', pin: 'top', created: 5, desk: {x: 'left'}},
-        {id: 'c', desk: {x: 10.4, y: 300}},
+        {id: 'b', color: 'tartan', pin: 'top', created: 5},
+        {id: 'c', pin: 'right'},
     ]));
     assertEqual(parsed.map(n => n.id), [note.id, 'b', 'c'], 'unique ids only');
-    assertEqual([parsed[1].color, parsed[1].pin, parsed[1].modified, parsed[1].desk], ['yellow', null, 5, null],
-        'cleaned up');
-    assertEqual(parsed[2].desk, {x: 10, y: 300}, 'stuck on the desktop');
+    assertEqual([parsed[1].color, parsed[1].pin, parsed[1].modified], ['yellow', null, 5], 'cleaned up');
+    assertEqual(parsed[2].pin, 'right');
+    assertEqual(note.pin, 'left', 'a new note goes on the left edge');
     assertEqual(parseNotes(serializeNotes(parsed)), parsed);
     assertEqual(parseNotes('{'), []);
     assert(Object.keys(COLORS).includes('yellow'));

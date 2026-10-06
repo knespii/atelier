@@ -2,7 +2,8 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    ProfileStore, describeProfile, effectiveWallpaper, keepWidgets, normalizePaletteOptions, normalizeProfile,
+    ProfileStore, describeProfile, effectiveWallpaper, giveWidgets, keepWidgets, normalizePaletteOptions,
+    normalizeProfile,
     readCurrentAppearance,
 } from '../lib/profiles.js';
 import {
@@ -205,4 +206,17 @@ export function testProfilesKeepTheirWidgets() {
     keepWidgets(store, desktop);
     desktop.reset('widgets');
     desktop.reset('style');
+}
+
+export function testProfilesFromBeforeGetTheirOwnWidgets() {
+    const store = makeStore();
+    const desktop = store.settings.get_child('desktop');
+    desktop.set_string('widgets', JSON.stringify([{id: 'date', kind: 'date', size: 'square', x: 0, y: 0}]));
+    const a = store.add({name: 'A'});
+    const b = store.add({name: 'B', widgets: {layout: [], style: 'analogue', glass: false}});
+    assertEqual(giveWidgets(store, desktop), 1, 'only the one without');
+    assertEqual(store.get(a.id).widgets.layout.map(e => e.kind), ['date']);
+    assertEqual(store.get(b.id).widgets.style, 'analogue', 'the other keeps its own');
+    assertEqual(giveWidgets(store, desktop), 0, 'once');
+    desktop.reset('widgets');
 }

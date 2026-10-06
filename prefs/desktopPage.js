@@ -169,8 +169,8 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         const notes = new Adw.PreferencesGroup({
             title: 'Notes',
             description: 'Written in the island, on the control centre\'s Notes tab, or with "New Note" in the ' +
-                'desktop\'s menu. A note sticks on the desktop like a sticky note – drag it anywhere, click it to ' +
-                'write – or is pinned to an edge of the screen. Notes are the same whatever the profile.',
+                'desktop\'s menu. They are pinned to the left edge of the screen (or the right one) as square ' +
+                'papers, like sticky notes, and are the same whatever the profile.',
         });
         this.add(notes);
         this._notesSettings = settings.get_child('notes');

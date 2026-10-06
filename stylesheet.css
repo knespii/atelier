@@ -1880,89 +1880,37 @@
   spacing: 6px;
 }
 
-/* Sticky notes on the desktop: as big as what is on them, within bounds */
-
-.atelier-sticky {
-  min-width: 150px;
-  max-width: 280px;
-  min-height: 70px;
-  padding: 14px 16px 16px;
-  border-radius: 4px 4px 18px 4px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
-  spacing: 0;
-}
-
-.atelier-sticky:hover {
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
-}
-
-.atelier-sticky:dragged {
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
-}
-
-.atelier-sticky:editing {
-  min-width: 240px;
-  min-height: 160px;
-}
-
-.atelier-sticky .atelier-note-content {
-  spacing: 4px;
-}
-
-.atelier-sticky .atelier-note-title {
-  font-size: 12pt;
-}
-
-.atelier-sticky .atelier-note-line,
-.atelier-sticky .atelier-note-check-text {
-  font-size: 10.5pt;
-}
-
-.atelier-sticky-editor {
-  spacing: 4px;
-}
-
-.atelier-sticky-title,
-.atelier-sticky-text {
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  background-color: transparent;
-  selection-background-color: rgba(0, 0, 0, 0.25);
-}
-
-.atelier-sticky-title {
-  font-size: 12pt;
-  font-weight: 800;
-}
-
-.atelier-sticky-text {
-  font-size: 10.5pt;
-}
-
-.atelier-sticky-title StLabel.hint-text,
-.atelier-sticky-text StLabel.hint-text {
-  color: rgba(0, 0, 0, 0.4);
-}
-
 .atelier-notes-button:checked {
   background-color: rgba(255, 255, 255, 0.22);
 }
 
-/* Pinned to an edge */
+/* Pinned to an edge: square papers of one size, like sticky notes */
 
 .atelier-note-tab {
-  padding: 12px 14px;
+  min-width: 196px;
+  width: 196px;
+  max-width: 196px;
+  min-height: 196px;
+  height: 196px;
+  max-height: 196px;
+  padding: 16px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
 
 .atelier-note-tab-left {
-  border-radius: 0 16px 16px 0;
+  border-radius: 0 4px 18px 0;
 }
 
 .atelier-note-tab-right {
-  border-radius: 16px 0 0 16px;
+  border-radius: 4px 0 0 18px;
+}
+
+.atelier-note-tab .atelier-note-content {
+  spacing: 4px;
+}
+
+.atelier-note-tab .atelier-note-title {
+  font-size: 11.5pt;
 }
 
 /* The dock */

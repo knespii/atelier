@@ -15,7 +15,7 @@ import {LEGACY_UUID} from '../lib/migrate.js';
 import {
     deleteWallpaperIfUnused, importWallpaper, listWallpapers, prettyName, wallpaperFolder,
 } from '../lib/paths.js';
-import {normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
+import {giveWidgets, normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
 import {ensureThumbnail} from '../lib/thumbnails.js';
 import {readPaletteOptions} from '../lib/wallpaperPalette.js';
@@ -58,6 +58,9 @@ export class ProfilesModule {
     enable() {
         this._applier = new Applier(this._settings);
         this._applier.transition = new WallpaperTransition(this._settings);
+        // Each profile keeps its widgets: those from before get a copy of
+        // the ones on the desktop now.
+        giveWidgets(this._store, this._settings.get_child('desktop'));
 
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),

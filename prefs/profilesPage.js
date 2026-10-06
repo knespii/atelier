@@ -15,6 +15,7 @@ import {exportProfile, readExportedProfile} from '../lib/profileTransfer.js';
 import {getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {readWidgets} from '../lib/widgets.js';
 import {ProfileEditor} from './profileEditor.js';
 import {chooseImages, createThumbnail, requestApply, toast} from './widgets.js';
 
@@ -322,7 +323,12 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
             if (profile[key])
                 profile[key] = await importWallpaper(profile[key]);
         }
-        const added = this._store.add({...profile, id: ''});
+        // (Without widgets of its own, it keeps those on the desktop now.)
+        const added = this._store.add({
+            ...profile,
+            id: '',
+            widgets: profile.widgets ?? readWidgets(this._settings.get_child('desktop')),
+        });
         if (profile.wallpaper)
             ensureThumbnail(profile.wallpaper).catch(() => {});
         toast(this, `Imported “${profile.name}”`);

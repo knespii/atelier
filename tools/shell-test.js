@@ -147,7 +147,7 @@ function findActor(root, predicate) {
 // Actors over the wallpaper other than the wallpapers (and the widgets).
 function overlayCount() {
     return Main.layoutManager._backgroundGroup.get_children()
-        .filter(a => !['atelier-desktop', 'atelier-stickies'].includes(a.name)).length -
+        .filter(a => a.name !== 'atelier-desktop').length -
         Main.layoutManager._bgManagers.length;
 }
 
@@ -988,60 +988,38 @@ async function testNotes(ext) {
     Main.panel.closeQuickSettings();
     await waitFor(() => island.page === null, 1000);
 
-    // Pinned to the left edge: a strip of it peeks out, all of it on hover.
-    notes.store.update(id, {pin: 'left'});
+    // A new note goes on the left edge: a square paper, of which a strip
+    // peeks out; all of it on hover.
+    check(note.pin === 'left', 'a new note is pinned to the left edge');
     await Scripting.sleep(400);
     const tab = notes._edges._tabs.get(id);
     const [tabX] = tab?.get_transformed_position() ?? [NaN];
     check(tab?.mapped && tabX < 0 && tabX + tab.width > 0 && tabX + tab.width < 40,
         `pinned to the edge, a strip of it shows (${tabX})`);
+    check(Math.abs(tab.width - tab.height) < 1 && tab.width > 150, `a square paper (${tab.width}x${tab.height})`);
+    const size = [tab.width, tab.height];
+    const one = notes.store.create({title: 'One line'});
+    await Scripting.sleep(400);
+    const small = notes._edges._tabs.get(one.id);
+    check(small?.width === size[0] && small.height === size[1], 'of one size, however little is on it');
+    notes.store.update(id, {text: `${notes.store.get(id).text}\nand a much longer line that wraps on the paper`});
+    await Scripting.sleep(300);
+    check(tab.width === size[0] && tab.height === size[1], 'or much');
+    const [, oneY] = small.get_transformed_position();
+    check(oneY >= tab.get_transformed_position()[1] + tab.height, 'the next one below it');
     await pointerTo(5, tab.get_transformed_position()[1] + tab.height / 2);
     await Scripting.sleep(500);
     check(Math.abs(tab.get_transformed_position()[0]) < 1, 'and all of it on hover');
     await screenshotArea('52-note-edge', 0, 0, 600, global.stage.height);
     await restPointer();
     await Scripting.sleep(400);
+    notes.store.remove(one.id);
+    check(!desktop.kinds.has('note'), 'no note widgets on the desktop');
 
-    // Stuck on the desktop: a sticky note as big as what is on it.
-    notes.store.update(id, {pin: null, desk: {x: 600, y: 120}});
+    // Archived, it leaves the edge and the papers.
+    notes.store.update(id, {archived: true});
     await Scripting.sleep(300);
-    const sticky = notes.stickies.stickies.get(id);
-    const [stickyX, stickyY] = sticky?.get_transformed_position() ?? [NaN, NaN];
-    const area = desktop.area;
-    check(sticky?.mapped && Math.abs(stickyX - area.x - 600) < 1 && Math.abs(stickyY - area.y - 120) < 1 &&
-        !notes._edges._tabs.has(id), `stuck on the desktop where it was put (${stickyX}, ${stickyY})`);
-    const before = [sticky.width, sticky.height];
-    notes.store.update(id, {text: `${notes.store.get(id).text}\nand a much longer line that has to wrap onto the next ones`});
-    await Scripting.sleep(300);
-    check(sticky.height > before[1] && sticky.width <= 320, `it grows with what is written (${before} → ${sticky.width}x${sticky.height})`);
-    check(!desktop.kinds.has('note'), 'no square note widgets any more');
-    // Dragged elsewhere, it stays there.
-    const [cx, cy] = centerOf(sticky);
-    await dragFromTo(cx, cy, cx + 150, cy + 100);
-    const desk = notes.store.get(id).desk;
-    check(Math.abs(desk.x - 750) <= 2 && Math.abs(desk.y - 220) <= 2, `dragged, it stays where it was dropped (${desk.x}, ${desk.y})`);
-    // A click writes on it, right there; a click elsewhere is done.
-    await clickAt(...centerOf(sticky));
-    check(await waitFor(() => sticky.editing && global.stage.key_focus === sticky._text.clutter_text, 1000),
-        'a click writes on it');
-    sticky._text.text = 'Typed on the desktop';
-    await Scripting.sleep(100);
-    await screenshotArea('53-sticky-editing', area.x + 500, area.y, 700, 500);
-    await clickAt(area.x + 100, area.y + area.height - 100);
-    check(await waitFor(() => !sticky.editing, 1000) && notes.store.get(id).text === 'Typed on the desktop',
-        'a click elsewhere is done, the text kept');
-    await screenshotArea('54-sticky', area.x + 500, area.y, 700, 500);
-
-    // "New Note" in the desktop's menu sticks a new one where it was asked.
-    const fresh = notes.newSticky([area.x + 200, area.y + 300]);
-    check(await waitFor(() => notes.stickies.stickies.get(fresh.id)?.editing, 1000), 'a new sticky is written on at once');
-    await pressKey(Clutter.KEY_Escape);
-    check(await waitFor(() => !notes.store.get(fresh.id), 1000), 'and goes when left empty');
-
-    // Archived, it leaves the desktop and the papers.
-    notes.store.update(id, {archived: true, desk: null});
-    await Scripting.sleep(300);
-    check(!notes.stickies.stickies.has(id) && !notes.store.all().some(n => n.id === id) &&
+    check(!notes._edges._tabs.has(id) && !notes.store.all().some(n => n.id === id) &&
         notes.store.all({archived: true}).some(n => n.id === id), 'archived, it is in the archive only');
     notes.store.remove(id);
     notes.store.destroy(); // writes now
@@ -1472,9 +1450,7 @@ async function testDisableCleansUp(atelier) {
         'the overview\'s own background back');
     check(!findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-desktop'),
         'no widgets left on the desktop');
-    check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')) &&
-        !findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-stickies'),
-    'no notes left on the edges or the desktop');
+    check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')), 'no notes left on the edges');
     check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock') &&
         Main.panel.statusArea['dash-to-dock'] === undefined, 'no dock left');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');

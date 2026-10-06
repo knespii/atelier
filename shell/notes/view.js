@@ -12,21 +12,17 @@ import {COLORS, toggleLine} from '../../lib/notes.js';
 import {NoteContent, paperStyle} from './card.js';
 
 const COLUMNS = 3;
-const PINS = [null, 'left', 'right'];
+const PINS = ['left', 'right', null];
 const PIN_LABELS = {left: 'Pinned left', right: 'Pinned right'};
 
 export const NotesView = GObject.registerClass(
 class AtelierNotesView extends St.BoxLayout {
     /**
      * @param {NotesStore} store
-     * @param {object} params
-     * @param {Function} params.placeOnDesktop - () => where a note stuck on
-     *   the desktop goes, {x, y}
      */
-    _init(store, {placeOnDesktop}) {
+    _init(store) {
         super._init({style_class: 'atelier-notes', orientation: Clutter.Orientation.VERTICAL});
         this._store = store;
-        this._placeOnDesktop = placeOnDesktop;
         this._editing = null;
         this._archived = false;
         store.connectObject('changed', () => this._onChanged(), this);
@@ -188,15 +184,10 @@ class AtelierNotesView extends St.BoxLayout {
             return b;
         };
         button('Checkbox', () => this._toggleCheckbox());
-        // On the desktop as a sticky, or on an edge of the screen.
-        this._desk = button('', () => {
-            const current = this._store.get(id);
-            this._store.update(id, current.desk ? {desk: null} : {desk: this._placeOnDesktop(), pin: null});
-        });
+        // On the left edge of the screen, the right one, or neither.
         this._pin = button('', () => {
             const current = this._store.get(id);
-            const pin = PINS[(PINS.indexOf(current.pin) + 1) % PINS.length];
-            this._store.update(id, pin ? {pin, desk: null} : {pin});
+            this._store.update(id, {pin: PINS[(PINS.indexOf(current.pin) + 1) % PINS.length]});
         });
         bottom.add_child(new St.Widget({x_expand: true}));
         button(note.archived ? 'Unarchive' : 'Archive', () => {
@@ -257,12 +248,7 @@ class AtelierNotesView extends St.BoxLayout {
             else
                 dot.remove_style_pseudo_class('checked');
         }
-        this._pin.label = PIN_LABELS[note.pin] ?? 'Pin to the edge';
-        this._desk.label = note.desk ? 'On the desktop' : 'Stick on the desktop';
-        if (note.desk)
-            this._desk.add_style_pseudo_class('checked');
-        else
-            this._desk.remove_style_pseudo_class('checked');
+        this._pin.label = PIN_LABELS[note.pin] ?? 'Not pinned';
     }
 
     _onChanged() {
