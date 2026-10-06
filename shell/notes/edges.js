@@ -27,13 +27,19 @@ class AtelierNoteTab extends St.Button {
             style_class: `atelier-note-tab atelier-note-tab-${side}`,
             track_hover: true,
             can_focus: false,
-            clip_to_allocation: true,
         });
         this.side = side;
         this.noteId = note.id;
         this._content = new NoteContent(store, {maxLines: LINES, wrap: true});
-        // Written from the top of the paper down.
-        const page = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_expand: true});
+        // Written from the top of the paper down; what doesn't fit is cut
+        // off at its bottom. (Not the paper itself: it would cut its shadow
+        // into its rounded corners.)
+        const page = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+            y_expand: true,
+            clip_to_allocation: true,
+        });
         page.add_child(this._content);
         this.child = page;
         this.sync(note);
