@@ -8,7 +8,7 @@ import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {EDGE_ROOM, EdgeTabs} from './edges.js';
+import {EdgeTabs} from './edges.js';
 import {NotesStore} from './store.js';
 import {NotesView} from './view.js';
 
@@ -34,8 +34,6 @@ export class NotesModule {
         this._edges = new EdgeTabs(this.store, id => this.open(id));
 
         this._notesSettings.connectObject('changed::edges-on-desktop-only', () => this._syncEdges(), this);
-        // The widgets keep clear of the edges with papers on them.
-        this.store.connectObject('changed', () => this._keepEdgesClear(), this);
         this._modules.connectObject(
             'started', (_, id) => id === 'desktop' && this._joinDesktop(),
             'stopped', (_, id) => id === 'desktop' && this._syncEdges(),
@@ -50,8 +48,6 @@ export class NotesModule {
         this._modules.disconnectObject(this);
         this._notesSettings?.disconnectObject(this);
         this._modules.get('desktop')?.removeMenuItem('New Note');
-        this._modules.get('desktop')?.setEdges(0, 0);
-        this.store?.disconnectObject(this);
         this._edges?.destroy();
         this._edges = null;
         this.view?.destroy();
@@ -83,17 +79,6 @@ export class NotesModule {
     _syncEdges() {
         const onDesktop = this._notesSettings.get_boolean('edges-on-desktop-only');
         this._edges?.setLayer(onDesktop ? this._modules.get('desktop')?.layer ?? null : null);
-        this._keepEdgesClear();
-    }
-
-    // (On the desktop only, the papers lie among the widgets anyway.)
-    _keepEdgesClear() {
-        const desktop = this._modules.get('desktop');
-        if (!desktop || !this.store)
-            return;
-        const onDesktop = this._notesSettings.get_boolean('edges-on-desktop-only');
-        const sides = new Set(onDesktop ? [] : this.store.pinned().map(note => note.pin));
-        desktop.setEdges(sides.has('left') ? EDGE_ROOM : 0, sides.has('right') ? EDGE_ROOM : 0);
     }
 
     /**

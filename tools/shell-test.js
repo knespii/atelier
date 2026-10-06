@@ -997,8 +997,6 @@ async function testNotes(ext) {
     check(tab?.mapped && tabX < 0 && tabX + tab.width > 0 && tabX + tab.width < 40,
         `pinned to the edge, a strip of it shows (${tabX})`);
     check(Math.abs(tab.width - tab.height) < 1 && tab.width > 150, `a square paper (${tab.width}x${tab.height})`);
-    const [clockX] = desktop.widgets.get('clock')?.get_transformed_position() ?? [NaN];
-    check(clockX >= tabX + tab.width + 20, `the widgets keep clear of its strip (${clockX} vs ${tabX + tab.width})`);
     const size = [tab.width, tab.height];
     const one = notes.store.create({title: 'One line'});
     await Scripting.sleep(400);

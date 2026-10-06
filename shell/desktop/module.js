@@ -254,31 +254,13 @@ export class DesktopModule {
         });
     }
 
-    /**
-     * Keep the widgets clear of the screen's edges by this much, e.g. of
-     * the notes pinned there.
-     *
-     * @param {number} left - logical pixels
-     * @param {number} right
-     */
-    setEdges(left, right) {
-        if (this._edges?.left === left && this._edges?.right === right)
-            return;
-        this._edges = {left, right};
-        this._syncArea();
-        this._place();
-    }
-
     _syncArea() {
         const index = Main.layoutManager.primaryIndex;
-        const work = index >= 0 ? Main.layoutManager.getWorkAreaForMonitor(index) : null;
-        if (!work)
+        const area = index >= 0 ? Main.layoutManager.getWorkAreaForMonitor(index) : null;
+        if (!area)
             return;
+        this._area = {x: area.x, y: area.y, width: area.width, height: area.height};
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const left = (this._edges?.left ?? 0) * scale;
-        const right = (this._edges?.right ?? 0) * scale;
-        const area = {x: work.x + left, y: work.y, width: work.width - left - right, height: work.height};
-        this._area = area;
         this._grid = gridSize(area.width / scale, area.height / scale);
         if (!this._editor)
             this._layer.set_position(area.x, area.y);
