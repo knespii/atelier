@@ -1,8 +1,8 @@
 import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
 import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
-    DEFAULT_LAYOUT, PITCH, UNIT, cellAt, cellOrigin, findSpot, fitLayout, fits, gridSize, newId, nextSize,
-    parseLayout, pixelSize, serializeLayout,
+    DEFAULT_LAYOUT, PITCH, UNIT, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridSize, nearestSize,
+    nearestSpot, newId, nextSize, parseLayout, pixelSize, serializeLayout,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
@@ -52,6 +52,25 @@ export function testPlacing() {
     assertEqual(newId([{id: 'clock'}, {id: 'clock-2'}], 'clock'), 'clock-3');
     assertEqual(nextSize('clock', 'square'), 'card');
     assertEqual(nextSize('clock', 'card'), 'square');
+}
+
+export function testDraggingAndStretching() {
+    const grid = [8, 6];
+    const calendar = {id: 'c', kind: 'calendar', size: 'large', x: 0, y: 0};
+    const clock = {id: 'k', kind: 'clock', size: 'square', x: 6, y: 0};
+    const layout = [calendar, clock];
+    assertEqual(nearestSpot(layout, clock, grid, 4.3, 2.6), {x: 4, y: 3}, 'dragged, it lands on the nearest cells');
+    assertEqual(nearestSpot(layout, clock, grid, 1, 1), {x: 4, y: 1}, 'over another widget, beside it');
+    assertEqual(nearestSpot(layout, clock, grid, 9, -3), {x: 6, y: 0}, 'past the edge, on the grid');
+    const full = [{id: 'g', kind: 'github', size: 'wide', x: 0, y: 0}, {...clock, id: 'o'}];
+    assertEqual(nearestSpot(full, {...clock, x: 3, y: 1}, [8, 2], 0, 0), {x: 3, y: 1},
+        'where it was when it fits nowhere');
+
+    assertEqual(cellsOf(pixelSize('card')[0]), 4);
+    assertEqual(nearestSize(layout, {...clock, x: 4, y: 2}, grid, 3.6, 2.2), 'card', 'stretched, the nearest size');
+    assertEqual(nearestSize(layout, {...clock, x: 4, y: 2}, grid, 2.4, 1.5), 'square');
+    assertEqual(nearestSize(layout, clock, grid, 4, 2), 'square', 'only a size that fits where it is');
+    assertEqual(nearestSize(layout, {id: 'p', kind: 'photo', size: 'square', x: 4, y: 2}, grid, 4.4, 3.8), 'large');
 }
 
 // A made-up page in the shape of GitHub's.

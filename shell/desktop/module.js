@@ -17,7 +17,8 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 
 import {keepWidgets} from '../../lib/profiles.js';
 import {
-    KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, newId, nextSize, parseLayout, serializeLayout,
+    KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
+    serializeLayout,
 } from '../../lib/widgets.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
@@ -353,7 +354,11 @@ export class DesktopModule {
         if (!Kind)
             return null;
         const widget = new Kind(entry, this._context);
-        widget.connectObject('menu-request', () => this._showWidgetMenu(widget), this);
+        widget.connectObject(
+            'menu-request', () => this._showWidgetMenu(widget),
+            // (The glass under it follows it as it moves or is stretched.)
+            'notify::allocation', () => this.syncGlass(),
+            this);
         this._layer.add_child(widget);
         this._widgets.set(entry.id, widget);
         this._editor?.adopt(widget);
@@ -483,6 +488,55 @@ export class DesktopModule {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Give a widget one of the sizes it comes in, where it is.
+     *
+     * @param {string} id
+     * @param {string} size
+     * @returns {boolean} whether it has that size now (it fits there)
+     */
+    setWidgetSize(id, size) {
+        const widget = this._widgets.get(id);
+        const layout = this._shownLayout();
+        const entry = layout.find(e => e.id === id);
+        if (!widget || !entry || !KINDS[entry.kind]?.sizes.includes(size) || !fits(layout, {...entry, size}, this._grid))
+            return false;
+        this._layout = layout.map(e => (e.id === id ? {...e, size} : e));
+        this._save();
+        // (While it is stretched, it may show that size already.)
+        if (widget.entry.size !== size)
+            widget.fill(size);
+        widget.fit();
+        this._place();
+        return true;
+    }
+
+    /**
+     * Where a widget being dragged would land.
+     *
+     * @param {string} id
+     * @param {number} fx - its top left corner, in cells of the grid (not whole ones)
+     * @param {number} fy
+     * @returns {object} {x, y}: the free cells nearest to that
+     */
+    spotFor(id, fx, fy) {
+        const layout = this._shownLayout();
+        return nearestSpot(layout, layout.find(e => e.id === id), this._grid, fx, fy);
+    }
+
+    /**
+     * The size a widget being stretched would take.
+     *
+     * @param {string} id
+     * @param {number} fw - its width, in cells (not whole ones)
+     * @param {number} fh - its height
+     * @returns {string} of its sizes that fit where it is, the nearest to that
+     */
+    sizeFor(id, fw, fh) {
+        const layout = this._shownLayout();
+        return nearestSize(layout, layout.find(e => e.id === id), this._grid, fw, fh);
     }
 
     /**

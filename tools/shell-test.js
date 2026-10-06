@@ -108,15 +108,21 @@ async function clickAt(x, y) {
     }
 }
 
-// Press at one point, move in steps, release at another.
-async function dragFromTo(x1, y1, x2, y2) {
-    await pointerTo(x1, y1);
+async function pointerDown(x, y) {
+    await pointerTo(x, y);
     virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
     await Scripting.sleep(60);
-    for (let i = 1; i <= 6; i++)
-        await pointerTo(x1 + (x2 - x1) * i / 6, y1 + (y2 - y1) * i / 6);
+}
+
+async function pointerUp() {
     virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
     await Scripting.sleep(300);
+}
+
+// From one point towards another, in steps, the button held.
+async function pointerAlong(x1, y1, x2, y2) {
+    for (let i = 1; i <= 6; i++)
+        await pointerTo(x1 + (x2 - x1) * i / 6, y1 + (y2 - y1) * i / 6);
 }
 
 async function pressKey(keyval) {
@@ -940,23 +946,78 @@ async function testDesktop(ext) {
     check(desktop.editing && layer.get_parent() === desktop._editor.actor, 'editing, they come up over everything');
     check(desktop.addWidget('weather') && desktop.widgets.get('weather')?.mapped, 'the gallery adds a widget');
     const weather = desktop.widgets.get('weather');
-    check(desktop.resizeWidget('weather') && weather.entry.size === 'card', 'its button gives it another size');
+    await Scripting.sleep(200);
+    check(Boolean(weather._editHandle?.mapped), 'it has a handle on its corner');
+    await clickAt(...centerOf(weather._editHandle));
+    await Scripting.sleep(300);
+    check(weather.entry.size === 'card', `a click on the handle gives it the next size (${weather.entry.size})`);
     await screenshot('41-desktop-editing');
-    // Dragged three cells to the right, it snaps there.
+
+    // Dragged three cells to the right: a shadow on the grid shows where it
+    // lands, and it snaps there.
+    const ghost = desktop._editor._ghost;
+    const cellLeft = n => area.x + 24 + n * 96;
+    const saved = () => JSON.parse(settings.get_string('widgets')).find(e => e.id === 'weather');
     const before = {...weather.entry};
     const [wx, wy] = centerOf(weather);
-    await dragFromTo(wx, wy, wx + 3 * 96, wy);
-    const saved = JSON.parse(settings.get_string('widgets')).find(e => e.id === 'weather');
-    check(weather.entry.x === before.x + 3 && saved?.x === before.x + 3 && saved.size === 'card',
-        `dragged, it snaps to the grid and stays there (${before.x} → ${saved?.x})`);
-    // Onto another widget: it goes back.
-    const [cx, cy] = centerOf(desktop.widgets.get('calendar'));
-    const [nx, ny] = centerOf(weather);
-    await dragFromTo(nx, ny, cx, cy);
-    check(weather.entry.x === before.x + 3, 'not over another one');
-    await pressKey(Clutter.KEY_Escape);
+    await pointerDown(wx, wy);
+    await pointerAlong(wx, wy, wx + 3 * 96 + 30, wy + 10);
     await Scripting.sleep(300);
-    check(!desktop.editing && layer.get_parent() === Main.layoutManager._backgroundGroup, 'Esc puts them back');
+    check(ghost.visible && Math.abs(ghost.get_transformed_position()[0] - cellLeft(before.x + 3)) <= 1 &&
+        ghost.width === weather.width, 'dragged, a shadow on the cells where it lands');
+    await screenshot('47-desktop-dragging');
+    await pointerUp();
+    check(weather.entry.x === before.x + 3 && saved()?.x === before.x + 3 && saved().size === 'card' && !ghost.visible,
+        `let go, it snaps there and stays (${before.x} → ${saved()?.x})`);
+
+    // Over another widget: beside it, where the shadow shows.
+    const calendar = desktop.widgets.get('calendar');
+    const overlapping = (a, b) => {
+        const [ax, ay] = a.get_transformed_position();
+        const [bx, by] = b.get_transformed_position();
+        return ax < bx + b.width && bx < ax + a.width && ay < by + b.height && by < ay + a.height;
+    };
+    const [nx, ny] = centerOf(weather);
+    const [cx, cy] = centerOf(calendar);
+    await pointerDown(nx, ny);
+    await pointerAlong(nx, ny, cx, cy);
+    await Scripting.sleep(300);
+    const shadow = ghost.get_transformed_position();
+    check(!overlapping(ghost, calendar), 'over another widget, the shadow is beside it');
+    await pointerUp();
+    const landed = weather.get_transformed_position();
+    check(Math.abs(landed[0] - shadow[0]) <= 1 && Math.abs(landed[1] - shadow[1]) <= 1 &&
+        !overlapping(weather, calendar), 'and it lands there');
+
+    // Stretched by its corner, it follows the pointer and shows the size
+    // nearest to how big it is; let go, it takes that size.
+    const [square, card] = [2 * 96 - 12, 4 * 96 - 12];
+    let [hx, hy] = centerOf(weather._editHandle);
+    await pointerDown(hx, hy);
+    await pointerAlong(hx, hy, hx - 150, hy);
+    await Scripting.sleep(300);
+    check(Math.abs(weather.width - (card - 150)) <= 1 && ghost.width === square && weather.entry.size === 'square',
+        `stretched, it follows the pointer, and the shadow has the size nearest to that (${weather.width})`);
+    await screenshot('48-desktop-stretching');
+    await pointerUp();
+    check(weather.width === square && saved()?.size === 'square', 'let go, it takes that size');
+    [hx, hy] = centerOf(weather._editHandle);
+    await pointerDown(hx, hy);
+    await pointerAlong(hx, hy, hx + 400, hy);
+    await Scripting.sleep(300);
+    check(weather.width > card && weather.width <= card + 24 && ghost.width === card,
+        `past its biggest size, it gives a little only (${weather.width})`);
+    await pointerUp();
+    check(weather.width === card && saved()?.size === 'card', 'and it is a card again');
+
+    // Esc, even while stretching one, puts them back as they were.
+    [hx, hy] = centerOf(weather._editHandle);
+    await pointerDown(hx, hy);
+    await pointerAlong(hx, hy, hx - 190, hy);
+    await pressKey(Clutter.KEY_Escape);
+    await pointerUp();
+    check(!desktop.editing && layer.get_parent() === Main.layoutManager._backgroundGroup &&
+        weather.width === card && weather.entry.size === 'card' && saved()?.size === 'card', 'Esc puts them back');
 
     // GitHub: anyone's contributions (made up here; the tests stay offline).
     const github = desktop.sources.github;

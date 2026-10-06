@@ -1631,6 +1631,29 @@
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
 }
 
+/* Where a widget being dragged lands; the size a stretched one takes */
+.atelier-widget-ghost {
+  border-radius: 22px;
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+
+.atelier-widget-ghost:outline {
+  background-color: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+}
+
+/* An arc around a widget's corner, to stretch it */
+.atelier-widget-handle {
+  width: 40px;
+  height: 40px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.atelier-widget-handle:hover {
+  color: #ffffff;
+}
+
 .atelier-widget-controls {
   spacing: 6px;
 }
