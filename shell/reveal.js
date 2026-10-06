@@ -134,7 +134,11 @@ export class WallpaperTransition {
         if (ok)
             background.set_color(color);
 
+        // Over GNOME's wallpapers, under the desktop's widgets: they stay as
+        // the new wallpaper comes in under them (and take the new look once
+        // it is applied).
         const group = Main.layoutManager._backgroundGroup;
+        const widgets = group.get_children().find(child => child.name === 'atelier-desktop') ?? null;
         for (const monitor of Main.layoutManager.monitors) {
             const actor = new Meta.BackgroundActor({
                 meta_display: global.display,
@@ -148,7 +152,10 @@ export class WallpaperTransition {
             effect.setAspect(monitor.width / monitor.height);
             actor.add_effect_with_name(EFFECT_NAME, effect);
 
-            group.add_child(actor); // last child = drawn above GNOME's backgrounds
+            if (widgets)
+                group.insert_child_below(actor, widgets);
+            else
+                group.add_child(actor); // last child = drawn above GNOME's backgrounds
             session.overlays.push(actor);
         }
 

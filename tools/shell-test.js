@@ -291,7 +291,8 @@ async function testIsland(ext, atelier) {
     await pointerTo(islandX, islandY);
     check(await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000), 'resting on the island opens the glance');
     await Scripting.sleep(500);
-    check(island.height > 200, `the island grew into the glance (${island.height}px)`);
+    // (How much depends on what is left of today: less late in the evening.)
+    check(island.height > module._idle.height * 3, `the island grew into the glance (${island.height}px)`);
     const glance = island.page;
     // (fewer when the test runs shortly before midnight)
     const now = new Date();
@@ -1578,6 +1579,12 @@ async function testSwitcherAndReveal(atelier) {
     const duration = atelier._settings.get_uint('transition-duration');
     check(await waitFor(() => atelier._switcher === null, 1000), 'the switcher gives way to the toast');
     check(await waitFor(() => overlayCount() > 0, 3000), 'reveal overlay is on screen during the transition');
+    const group = Main.layoutManager._backgroundGroup;
+    const overlays = atelier._applier.transition?._session?.overlays ?? [];
+    const widgets = group.get_children().find(child => child.name === 'atelier-desktop');
+    check(overlays.length > 0 && widgets && overlays.every(overlay =>
+        group.get_children().indexOf(overlay) < group.get_children().indexOf(widgets)),
+    'the widgets stay over the new wallpaper as it comes in');
     await Scripting.sleep(Math.round(duration * 0.4));
     await screenshot('04-reveal-half');
 
