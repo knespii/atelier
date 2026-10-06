@@ -1,7 +1,7 @@
 #!/bin/sh
 # Load the extension in a throwaway headless GNOME Shell and run
-# tools/shell-test.js inside it. Settings (keyfile backend), data and caches
-# live in tests/output/shell, so the running session is never touched.
+# tools/shell-test.js inside it. Settings (keyfile backend) and data live in
+# tests/output/shell, caches in /tmp, so the running session is never touched.
 #
 # Usage: make shell-test        (results in tests/output/shell)
 #        tools/shell-test.sh two-monitors
@@ -24,19 +24,25 @@ UUID="atelier@local"
 BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache" "$ROOT/bin"
-mkdir -m 700 "$ROOT/runtime"
+mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/bin"
+# Sockets' paths have to fit in 108 bytes, too few under a deep checkout (a
+# git worktree, say): the runtime dir, with the Wayland socket, and the
+# cache are in /tmp. (Without its socket, an ibus-daemon ate memory without
+# end and outlived the session.)
+RUNTIME=$(mktemp -d)
+CACHE=$(mktemp -d)
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
 
 # The helper services the session starts (calendar, accounts, files...)
-# could outlive it; they go with it, also when the test is stopped. An input
-# method left behind once ate all the memory, so the session gets none.
+# could outlive it; they go with it, also when the test is stopped, and so
+# do its runtime dir and cache. (It gets no input method at all.)
 cleanup() {
     for dir in /proc/[0-9]*; do
         if grep -qzxF "ATELIER_TEST_OUTPUT=$ROOT" "$dir/environ" 2>/dev/null; then
             kill "${dir#/proc/}" 2>/dev/null || true
         fi
     done
+    rm -rf "$RUNTIME" "$CACHE"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
@@ -118,9 +124,10 @@ EOF
 status=0
 # A private runtime dir keeps the helper services this session starts away
 # from the sockets of the real session (keyring, gvfs, document portal...).
+# gvfs mounts nothing in it, so that it can be removed.
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
-    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" PATH="$ROOT/bin:$PATH" \
-    XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
+    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 PATH="$ROOT/bin:$PATH" \
+    XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 180 \
     gnome-shell --headless $MONITORS --no-x11 \
@@ -132,6 +139,26 @@ echo "gnome-shell exited with status $status (log: $ROOT/shell.log)"
 grep -E "JS ERROR|JS WARNING|Atelier|bg-changer" "$ROOT/shell.log" | head -40 || true
 echo
 if [ -f "$ROOT/results.txt" ]; then
+    # Shutting down, the shell takes its UI down while JS still runs. What
+    # is out of it is left to the garbage collector, which can't run its
+    # handlers and says so: GNOME's actors that Atelier holds, say.
+    exit_log=$(sed -n '/Shutting down GNOME Shell/,$p' "$ROOT/shell.log")
+    if [ -z "$exit_log" ]; then
+        echo "FAIL  the shell shuts down at the end" >> "$ROOT/results.txt"
+    elif printf '%s\n' "$exit_log" | grep -m 5 -E "sweeping phase of GC|JS callback during garbage collection"; then
+        echo "FAIL  nothing is left to the garbage collector as the shell shuts down" >> "$ROOT/results.txt"
+    else
+        echo "PASS  nothing is left to the garbage collector as the shell shuts down" >> "$ROOT/results.txt"
+    fi
+    # The main loop turns a while longer then: what waited for a frame or a
+    # timeout must not run and touch the actors that are gone.
+    if [ -n "$exit_log" ]; then
+        if printf '%s\n' "$exit_log" | grep -m 5 -A 4 -E "already disposed|not in the stage"; then
+            echo "FAIL  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"
+        else
+            echo "PASS  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"
+        fi
+    fi
     cat "$ROOT/results.txt"
     ! grep -q '^FAIL' "$ROOT/results.txt"
 else

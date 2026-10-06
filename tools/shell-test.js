@@ -1974,7 +1974,42 @@ async function testDisableCleansUp(atelier) {
     bar.reset('island-shape');
 }
 
+// The shell quits with the control centre open, GNOME's tiles, list and
+// icons in the island (tools/shell-test.sh checks how it all goes down;
+// on two monitors, the shell quits with it closed).
+async function testQuitWithControlCentreOpen(ext) {
+    const islandModule = ext.stateObj.modules.get('island');
+    await waitFor(() => islandModule?.available, 2000);
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => hasClass(islandModule?.island?.page, 'atelier-cc'), 1000),
+        'the control centre is open as the shell quits');
+}
+
+// The shell quits with the island's layout, the bar's and the dock's
+// places and the dock's check still to come: none of it may run once GNOME
+// has taken its UI down (tools/shell-test.sh checks the log).
+function testQuitWithWorkQueued(ext) {
+    const modules = ext.stateObj.modules;
+    const island = modules.get('island');
+    const bar = modules.get('bar');
+    const dock = modules.get('dock')?.dock;
+    island?._queueLayout();
+    bar?._queuePlace();
+    dock?._queueRedisplay();
+    dock?._queuePlace();
+    dock?._queueCheck();
+    check(island?._laterId && bar?._laterId && dock?._laterId && dock._placeId && dock._timeouts.has('check'),
+        'layout, places and a check still to come as the shell quits');
+}
+
 export async function run() {
+    // GNOME's helper for these scripts quits after a while without calls,
+    // and the shell then exits at once instead of shutting down as at the
+    // end of a session (which tools/shell-test.sh checks): keep it awake.
+    const helperId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
+        Scripting.waitTestWindows();
+        return GLib.SOURCE_CONTINUE;
+    });
     try {
         await Scripting.sleep(1000);
         // The session starts in the overview; begin on the desktop.
@@ -2011,6 +2046,7 @@ export async function run() {
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
+            testQuitWithWorkQueued(ext);
             return;
         }
 
@@ -2036,9 +2072,13 @@ export async function run() {
         await testNewProfile(ext, atelier);
         await testDisableCleansUp(atelier);
         await testSwitcherPopupGoesWithAtelier();
+        // (Last: they set up how the shell quits.)
+        await testQuitWithControlCentreOpen(ext);
+        testQuitWithWorkQueued(ext);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
     } finally {
+        GLib.source_remove(helperId);
         GLib.file_set_contents(`${OUTPUT}/results.txt`, `${results.join('\n')}\n`);
     }
 }

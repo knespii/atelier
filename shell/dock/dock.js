@@ -42,6 +42,7 @@ export class Dock {
         this._forced = 0;
         this._timeouts = new Map();
         this._laterId = 0;
+        this._stopped = false;
 
         this.actor = new St.Widget({name: 'atelier-dock', reactive: false});
         this._box = new St.BoxLayout({style_class: 'atelier-dock-box'});
@@ -97,6 +98,7 @@ export class Dock {
         this._box.connect('notify::width', () => this._queuePlace());
         this._box.connect('notify::height', () => this._queuePlace());
         settings.connectObject('changed::intellihide', () => this._queueCheck(), this);
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._stop(), this);
         global.get_window_actors().forEach(actor => this._watchWindow(actor.meta_window));
 
         this._redisplay();
@@ -148,7 +150,7 @@ export class Dock {
     }
 
     _queueRedisplay() {
-        if (this._laterId)
+        if (this._laterId || this._stopped)
             return;
         this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._laterId = 0;
@@ -192,7 +194,7 @@ export class Dock {
     }
 
     _queuePlace() {
-        if (this._placeId)
+        if (this._placeId || this._stopped)
             return;
         this._placeId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._placeId = 0;
@@ -317,7 +319,7 @@ export class Dock {
 
     _after(name, delay, callback) {
         this._clear(name);
-        if (this._destroyed)
+        if (this._destroyed || this._stopped)
             return;
         this._timeouts.set(name, GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             this._timeouts.delete(name);
@@ -396,6 +398,20 @@ export class Dock {
         }
     }
 
+    // When the shell quits, GNOME takes its UI down with uiGroup while JS
+    // still runs, then turns the main loop a while longer: nothing that
+    // waits may touch the dock then.
+    _stop() {
+        this._stopped = true;
+        this._timeouts.forEach(id => GLib.source_remove(id));
+        this._timeouts.clear();
+        for (const id of [this._laterId, this._placeId]) {
+            if (id)
+                global.compositor.get_laters().remove(id);
+        }
+        this._laterId = this._placeId = 0;
+    }
+
     destroy() {
         // Its icons' menus close as they go, and say so: nothing is started
         // anew from here on.
@@ -414,6 +430,7 @@ export class Dock {
         global.display.disconnectObject(this);
         Shell.WindowTracker.get_default().disconnectObject(this);
         Main.overview.disconnectObject(this);
+        Main.layoutManager.uiGroup.disconnectObject(this);
         this._settings.disconnectObject(this);
         global.get_window_actors().forEach(actor => actor.disconnectObject(this));
         this._glass?.destroy();
