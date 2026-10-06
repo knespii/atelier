@@ -174,8 +174,20 @@ function overlayCount() {
 
 // The wallpapers in place: none still loading, or fading in.
 function wallpapersSettled() {
-    return waitFor(() => Main.layoutManager._bgManagers.every(m => !m._newBackgroundActor) && overlayCount() === 0,
-        8000);
+    // Nothing being applied (a profile at the start, with its transition),
+    // loading or fading in – for a while in a row.
+    const applier = Main.extensionManager.lookup(UUID)?.stateObj?.modules?.get('profiles')?._applier;
+    const quiet = () => !applier?.targetId && overlayCount() === 0 &&
+        Main.layoutManager._bgManagers.every(m => !m._newBackgroundActor);
+    let since = 0;
+    return waitFor(() => {
+        if (!quiet()) {
+            since = 0;
+            return false;
+        }
+        since ||= GLib.get_monotonic_time();
+        return GLib.get_monotonic_time() - since > 800 * 1000;
+    }, 10000);
 }
 
 // Stand-ins: the tests never lock, suspend or power off the machine, and
@@ -1317,22 +1329,30 @@ async function testTwoMonitors(ext) {
     await Scripting.sleep(400);
 
     // At the main monitor's edge (x), halfway down a paper: its strip
-    // inside, and outside what is there without the papers too.
+    // inside, and outside what is there without the papers too. (Each
+    // monitor in a picture of its own: across two of different heights, the
+    // other one comes out black or garbled here.)
     const atEdge = async (name, tab, x, outsideOnTheLeft) => {
         const y = Math.round(tab.get_transformed_position()[1] + tab.height / 2);
-        const [inside, outside] = outsideOnTheLeft ? [44, 26] : [26, 44];
+        const [insideX, outsideX] = outsideOnTheLeft ? [x, x - 40] : [x - 40, x];
+        const shoot = async suffix => {
+            await screenshotArea(`${name}-inside${suffix}`, insideX, y - 20, 40, 40);
+            await screenshotArea(`${name}-outside${suffix}`, outsideX, y - 20, 40, 40);
+        };
         const tabs = [...notes._edges._tabs.values()];
         tabs.forEach(t => t.hide());
         await Scripting.sleep(100);
-        await screenshotArea(`${name}-bare`, x - 40, y - 20, 80, 40);
+        await shoot('-bare');
         tabs.forEach(t => t.show());
         await Scripting.sleep(100);
-        await screenshotArea(name, x - 40, y - 20, 80, 40);
+        await shoot('');
         const picked = global.stage.get_actor_at_pos(Clutter.PickMode.ALL, outsideOnTheLeft ? x - 9 : x + 9, y);
+        // (Next to the edge: 4 to 14 pixels from it, either side.)
+        const [stripAt, besideAt] = outsideOnTheLeft ? [4, 26] : [26, 4];
         return {
-            strip: colorDistance(averageColor(name, inside, 10, 10, 20), paper) < 30,
-            beside: colorDistance(averageColor(name, outside, 10, 10, 20),
-                averageColor(`${name}-bare`, outside, 10, 10, 20)) < 8 && !tabs.some(t => t.contains(picked)),
+            strip: colorDistance(averageColor(`${name}-inside`, stripAt, 10, 10, 20), paper) < 30,
+            beside: colorDistance(averageColor(`${name}-outside`, besideAt, 10, 10, 20),
+                averageColor(`${name}-outside-bare`, besideAt, 10, 10, 20)) < 8 && !tabs.some(t => t.contains(picked)),
         };
     };
 
