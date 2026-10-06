@@ -921,7 +921,8 @@
 .atelier-cc-notifications,
 .atelier-cc-calendar,
 .atelier-cc-calendar-month,
-.atelier-cc-calendar-side {
+.atelier-cc-calendar-side,
+.atelier-cc-calendar-events {
   padding: 0;
   margin: 0;
   background-color: transparent;
@@ -933,19 +934,30 @@
   height: 380px;
 }
 
-/* The month on the left, under today; events, clocks and weather beside it */
+/* The month on the left, under today; the day's events beside it */
 .atelier-cc-calendar {
-  spacing: 12px;
-  max-height: 640px;
+  spacing: 14px;
+  padding: 2px 0 4px;
 }
 
 .atelier-cc-calendar-month {
-  spacing: 6px;
+  spacing: 10px;
 }
 
 .atelier-cc-calendar-side {
-  width: 280px;
-  spacing: 6px;
+  width: 250px;
+}
+
+.atelier-cc .atelier-cc-calendar .events-button {
+  padding: 14px 16px;
+}
+
+.atelier-cc .atelier-cc-calendar .events-button .events-box {
+  spacing: 10px;
+}
+
+.atelier-cc .atelier-cc-calendar .events-button .events-list {
+  spacing: 12px;
 }
 
 .atelier-cc .datemenu-today-button,
@@ -956,10 +968,6 @@
   margin: 0;
 }
 
-/* Everything under the calendar shows, without a fade at the bottom. */
-.atelier-cc .datemenu-displays-section {
-  -st-vfade-offset: 0;
-}
 
 .atelier-cc .message-list {
   width: 0;
@@ -1872,19 +1880,74 @@
   spacing: 6px;
 }
 
-/* A note on the desktop is its own paper */
+/* Sticky notes on the desktop: as big as what is on them, within bounds */
 
-.atelier-widget-note {
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
+.atelier-sticky {
+  min-width: 150px;
+  max-width: 280px;
+  min-height: 70px;
+  padding: 14px 16px 16px;
+  border-radius: 4px 4px 18px 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+  spacing: 0;
 }
 
-.atelier-widget-note .atelier-note-title {
+.atelier-sticky:hover {
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
+}
+
+.atelier-sticky:dragged {
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
+}
+
+.atelier-sticky:editing {
+  min-width: 240px;
+  min-height: 160px;
+}
+
+.atelier-sticky .atelier-note-content {
+  spacing: 4px;
+}
+
+.atelier-sticky .atelier-note-title {
   font-size: 12pt;
 }
 
-.atelier-widget-note .atelier-note-line,
-.atelier-widget-note .atelier-note-check-text {
+.atelier-sticky .atelier-note-line,
+.atelier-sticky .atelier-note-check-text {
   font-size: 10.5pt;
+}
+
+.atelier-sticky-editor {
+  spacing: 4px;
+}
+
+.atelier-sticky-title,
+.atelier-sticky-text {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background-color: transparent;
+  selection-background-color: rgba(0, 0, 0, 0.25);
+}
+
+.atelier-sticky-title {
+  font-size: 12pt;
+  font-weight: 800;
+}
+
+.atelier-sticky-text {
+  font-size: 10.5pt;
+}
+
+.atelier-sticky-title StLabel.hint-text,
+.atelier-sticky-text StLabel.hint-text {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.atelier-notes-button:checked {
+  background-color: rgba(255, 255, 255, 0.22);
 }
 
 /* Pinned to an edge */

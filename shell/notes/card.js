@@ -24,16 +24,29 @@ class AtelierNoteContent extends St.BoxLayout {
      * @param {NotesStore} store
      * @param {object} [options]
      * @param {number} [options.maxLines] - lines shown at most
+     * @param {boolean} [options.wrap] - long lines go on, wrapped, instead
+     *   of being cut short (the paper grows with them)
      */
-    _init(store, {maxLines = 6} = {}) {
+    _init(store, {maxLines = 6, wrap = false} = {}) {
         super._init({style_class: 'atelier-note-content', orientation: Clutter.Orientation.VERTICAL, x_expand: true});
         this._store = store;
         this._maxLines = maxLines;
+        this._wrap = wrap;
         this._id = null;
     }
 
+    _fit(label) {
+        if (this._wrap) {
+            label.clutter_text.set({line_wrap: true, line_wrap_mode: Pango.WrapMode.WORD_CHAR,
+                ellipsize: Pango.EllipsizeMode.NONE});
+        } else {
+            label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        }
+        return label;
+    }
+
     /** @param {string|null} id - the note shown */
-    show(id) {
+    setNote(id) {
         this._id = id;
         this.sync();
     }
@@ -43,9 +56,7 @@ class AtelierNoteContent extends St.BoxLayout {
         const note = this._id ? this._store.get(this._id) : null;
         if (!note)
             return;
-        const title = new St.Label({style_class: 'atelier-note-title', text: displayTitle(note)});
-        title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        this.add_child(title);
+        this.add_child(this._fit(new St.Label({style_class: 'atelier-note-title', text: displayTitle(note)})));
         // The text without its first line when that one is the title.
         const all = lines(note.text).map((line, index) => ({...line, index}));
         const body = note.title.trim() ? all : all.slice(all.findIndex(line => line.text.trim()) + 1);
@@ -61,9 +72,7 @@ class AtelierNoteContent extends St.BoxLayout {
     }
 
     _text(text) {
-        const label = new St.Label({style_class: 'atelier-note-line', text: text || ' '});
-        label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        return label;
+        return this._fit(new St.Label({style_class: 'atelier-note-line', text: text || ' '}));
     }
 
     _checkbox(note, line) {

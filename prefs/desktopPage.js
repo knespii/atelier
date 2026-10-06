@@ -10,6 +10,7 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {validUser} from '../lib/github.js';
+import {ProfileStore, keepWidgets} from '../lib/profiles.js';
 import {OptionCards} from './optionCards.js';
 import {ShortcutRow} from './shortcutRow.js';
 
@@ -87,7 +88,8 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         const widgets = new Adw.PreferencesGroup({
             title: 'Widgets',
             description: 'Right-click the desktop and choose Edit Widgets to add, move, resize or remove them. ' +
-                'They lie on the wallpaper, under the windows.',
+                'They lie on the wallpaper, under the windows. Each profile keeps its own widgets and look; ' +
+                'the GitHub user and the photo are the same for all.',
         });
         this.add(widgets);
         this._enabled = this._switch(widgets, 'enabled', 'Widgets on the desktop', '');
@@ -109,14 +111,29 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
             selected: this._desktop.get_string('style'),
         });
         this._style.margin_top = 10;
+        // (The look belongs to the profile in use, like the widgets.)
+        this._profiles = new ProfileStore(settings);
         this._style.connect('changed', (_, id) => {
-            if (this._desktop.get_string('style') !== id)
-                this._desktop.set_string('style', id);
+            if (this._desktop.get_string('style') === id)
+                return;
+            this._desktop.set_string('style', id);
+            keepWidgets(this._profiles, this._desktop);
         });
         lookBox.append(this._style);
         lookRow.set_child(lookBox);
         widgets.add(lookRow);
-        this._glass = this._switch(widgets, 'glass', 'Glass', 'The blurred wallpaper under the Modern cards');
+        this._glass = new Adw.SwitchRow({title: 'Glass', subtitle: 'The blurred wallpaper under the Modern cards'});
+        this._glass.active = this._desktop.get_boolean('glass');
+        this._glass.connect('notify::active', () => {
+            if (this._desktop.get_boolean('glass') === this._glass.active)
+                return;
+            this._desktop.set_boolean('glass', this._glass.active);
+            keepWidgets(this._profiles, this._desktop);
+        });
+        this._ids.push(this._desktop.connect('changed::glass', () => {
+            this._glass.active = this._desktop.get_boolean('glass');
+        }));
+        widgets.add(this._glass);
         const syncStyle = () => {
             const style = this._desktop.get_string('style');
             this._style.setSelected(style);
@@ -152,7 +169,8 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         const notes = new Adw.PreferencesGroup({
             title: 'Notes',
             description: 'Written in the island, on the control centre\'s Notes tab, or with "New Note" in the ' +
-                'desktop\'s menu. A note can sit on the desktop as a widget, or be pinned to an edge of the screen.',
+                'desktop\'s menu. A note sticks on the desktop like a sticky note – drag it anywhere, click it to ' +
+                'write – or is pinned to an edge of the screen. Notes are the same whatever the profile.',
         });
         this.add(notes);
         this._notesSettings = settings.get_child('notes');

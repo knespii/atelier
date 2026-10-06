@@ -2,7 +2,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    ProfileStore, describeProfile, effectiveWallpaper, normalizePaletteOptions, normalizeProfile,
+    ProfileStore, describeProfile, effectiveWallpaper, keepWidgets, normalizePaletteOptions, normalizeProfile,
     readCurrentAppearance,
 } from '../lib/profiles.js';
 import {
@@ -179,4 +179,30 @@ export async function testListWallpapers() {
     assertEqual(wallpaperFolder(settings), dir);
     settings.reset('wallpaper-folder');
     assert(wallpaperFolder(settings).endsWith('/Wallpapers'), 'default folder');
+}
+
+export function testProfilesKeepTheirWidgets() {
+    const store = makeStore();
+    const desktop = store.settings.get_child('desktop');
+    desktop.reset('widgets');
+    desktop.reset('style');
+    const a = store.add({name: 'A', wallpaper: null});
+    store.settings.set_string('active-profile', a.id);
+    assertEqual(store.get(a.id).widgets, null, 'none kept until they are edited');
+
+    desktop.set_string('widgets', JSON.stringify([{id: 'clock', kind: 'clock', size: 'card', x: 3, y: 1},
+        {id: 'x', kind: 'toaster', x: 0, y: 0}]));
+    desktop.set_string('style', 'analogue');
+    keepWidgets(store, desktop);
+    const kept = store.get(a.id).widgets;
+    assertEqual(kept.layout.map(e => [e.kind, e.size, e.x]), [['clock', 'card', 3]], 'only known widgets');
+    assertEqual([kept.style, kept.glass], ['analogue', true]);
+    assert(describeProfile(store.get(a.id)).some(p => p.label === 'Widgets' && p.value === '1 widget'));
+
+    const odd = normalizeProfile({id: 'b', widgets: {layout: 'nope'}});
+    assertEqual(odd.widgets, null, 'a broken layout is dropped');
+    store.settings.reset('active-profile');
+    keepWidgets(store, desktop);
+    desktop.reset('widgets');
+    desktop.reset('style');
 }

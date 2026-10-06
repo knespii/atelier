@@ -10,6 +10,7 @@ import {hasGtk4Support} from '../lib/gtkCss.js';
 import {AUTO_ACCENT, ProfileStore, effectiveWallpaper, isAccentColor} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {serializeLayout} from '../lib/widgets.js';
 
 const THEME_FIELDS = [
     // [kind for locateTheme, profile field, org.gnome.desktop.interface key, label]
@@ -126,7 +127,10 @@ export class Applier {
 
     async _resolve(profile, problems) {
         const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-        const plan = {background: null, iface: {}, shellTheme: null, gtkThemeDir: null, palette: profile.palette};
+        const plan = {
+            background: null, iface: {}, shellTheme: null, gtkThemeDir: null,
+            palette: profile.palette, widgets: profile.widgets,
+        };
         const scheme = profile.colorScheme ?? iface.get_string('color-scheme');
 
         if (profile.wallpaper) {
@@ -234,6 +238,15 @@ export class Applier {
             const userTheme = getUserThemeSettings();
             if (userTheme)
                 setIfChanged(userTheme, 'name', plan.shellTheme);
+        }
+
+        // The profile's widgets on the desktop.
+        if (plan.widgets) {
+            const desktop = this._settings.get_child('desktop');
+            setIfChanged(desktop, 'widgets', serializeLayout(plan.widgets.layout));
+            setIfChanged(desktop, 'style', plan.widgets.style);
+            if (desktop.get_boolean('glass') !== plan.widgets.glass)
+                desktop.set_boolean('glass', plan.widgets.glass);
         }
     }
 

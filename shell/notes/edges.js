@@ -33,7 +33,7 @@ class AtelierNoteTab extends St.Button {
 
     sync(note) {
         this.style = `${paperStyle(note.color)} width: ${WIDTH}px;`;
-        this._content.show(note.id);
+        this._content.setNote(note.id);
     }
 
     /** How far it is out: hidden but for its strip, or out. */

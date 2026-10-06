@@ -146,7 +146,8 @@ function findActor(root, predicate) {
 
 // Actors over the wallpaper other than the wallpapers (and the widgets).
 function overlayCount() {
-    return Main.layoutManager._backgroundGroup.get_children().filter(a => a.name !== 'atelier-desktop').length -
+    return Main.layoutManager._backgroundGroup.get_children()
+        .filter(a => !['atelier-desktop', 'atelier-stickies'].includes(a.name)).length -
         Main.layoutManager._bgManagers.length;
 }
 
@@ -287,11 +288,12 @@ async function testIsland(ext, atelier) {
     island.page.setTab('calendar');
     await Scripting.sleep(500);
     check(dateMenu._calendar.mapped, 'and the calendar on its own tab');
-    check(dateMenu._displaysSection.get_effect('fade') === null, 'with nothing faded out under it');
     const [calendarX, calendarY] = dateMenu._calendar.get_transformed_position();
-    const [eventsX] = dateMenu._displaysSection.get_transformed_position();
+    const [eventsX] = dateMenu._eventsItem.get_transformed_position();
     check(eventsX >= calendarX + dateMenu._calendar.width && calendarY < 200 &&
         dateMenu._calendar.layout_manager.column_homogeneous, 'the events beside the month, its days spread evenly');
+    check(island.page.contains(dateMenu._eventsItem) && !island.page.contains(dateMenu._clocksItem) &&
+        !island.page.contains(dateMenu._weatherItem), 'without the world clocks and the weather');
     await screenshotIsland('12b-control-centre-calendar', 640);
     Main.panel.toggleCalendar();
     check(await waitFor(() => island.page?.tab === 'notifications', 1000), 'Super+V again goes to the notifications');
@@ -658,6 +660,7 @@ async function testControlCentre(ext) {
     const dateMenu = Main.panel.statusArea.dateMenu;
     check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea' &&
+        dateMenu._eventsItem.get_parent() === dateMenu._clocksItem.get_parent() &&
         Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menus and the icons are back');
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => quickSettings.menu.isOpen, 1000) && island.page === null,
@@ -999,19 +1002,47 @@ async function testNotes(ext) {
     await restPointer();
     await Scripting.sleep(400);
 
-    // On the desktop: a note widget shows it.
-    check(desktop.addWidget('note'), 'a note widget can be added');
-    const widget = [...desktop.widgets.values()].find(w => w.entry.kind === 'note');
-    check(widget?.entry.note === id && JSON.parse(desktop._desktopSettings.get_string('widgets'))
-        .find(e => e.kind === 'note')?.note === id, 'it shows the latest note, and remembers which');
-    await screenshotArea('53-note-desktop', 0, 0, global.stage.width, 760);
-
-    // Archived, it leaves the edge and the papers.
-    notes.store.update(id, {archived: true});
+    // Stuck on the desktop: a sticky note as big as what is on it.
+    notes.store.update(id, {pin: null, desk: {x: 600, y: 120}});
     await Scripting.sleep(300);
-    check(!notes._edges._tabs.has(id) && !notes.store.all().some(n => n.id === id) &&
+    const sticky = notes.stickies.stickies.get(id);
+    const [stickyX, stickyY] = sticky?.get_transformed_position() ?? [NaN, NaN];
+    const area = desktop.area;
+    check(sticky?.mapped && Math.abs(stickyX - area.x - 600) < 1 && Math.abs(stickyY - area.y - 120) < 1 &&
+        !notes._edges._tabs.has(id), `stuck on the desktop where it was put (${stickyX}, ${stickyY})`);
+    const before = [sticky.width, sticky.height];
+    notes.store.update(id, {text: `${notes.store.get(id).text}\nand a much longer line that has to wrap onto the next ones`});
+    await Scripting.sleep(300);
+    check(sticky.height > before[1] && sticky.width <= 320, `it grows with what is written (${before} → ${sticky.width}x${sticky.height})`);
+    check(!desktop.kinds.has('note'), 'no square note widgets any more');
+    // Dragged elsewhere, it stays there.
+    const [cx, cy] = centerOf(sticky);
+    await dragFromTo(cx, cy, cx + 150, cy + 100);
+    const desk = notes.store.get(id).desk;
+    check(Math.abs(desk.x - 750) <= 2 && Math.abs(desk.y - 220) <= 2, `dragged, it stays where it was dropped (${desk.x}, ${desk.y})`);
+    // A click writes on it, right there; a click elsewhere is done.
+    await clickAt(...centerOf(sticky));
+    check(await waitFor(() => sticky.editing && global.stage.key_focus === sticky._text.clutter_text, 1000),
+        'a click writes on it');
+    sticky._text.text = 'Typed on the desktop';
+    await Scripting.sleep(100);
+    await screenshotArea('53-sticky-editing', area.x + 500, area.y, 700, 500);
+    await clickAt(area.x + 100, area.y + area.height - 100);
+    check(await waitFor(() => !sticky.editing, 1000) && notes.store.get(id).text === 'Typed on the desktop',
+        'a click elsewhere is done, the text kept');
+    await screenshotArea('54-sticky', area.x + 500, area.y, 700, 500);
+
+    // "New Note" in the desktop's menu sticks a new one where it was asked.
+    const fresh = notes.newSticky([area.x + 200, area.y + 300]);
+    check(await waitFor(() => notes.stickies.stickies.get(fresh.id)?.editing, 1000), 'a new sticky is written on at once');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !notes.store.get(fresh.id), 1000), 'and goes when left empty');
+
+    // Archived, it leaves the desktop and the papers.
+    notes.store.update(id, {archived: true, desk: null});
+    await Scripting.sleep(300);
+    check(!notes.stickies.stickies.has(id) && !notes.store.all().some(n => n.id === id) &&
         notes.store.all({archived: true}).some(n => n.id === id), 'archived, it is in the archive only');
-    desktop.removeWidget(widget.entry.id);
     notes.store.remove(id);
     notes.store.destroy(); // writes now
     const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'notes.json']));
@@ -1441,7 +1472,9 @@ async function testDisableCleansUp(atelier) {
         'the overview\'s own background back');
     check(!findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-desktop'),
         'no widgets left on the desktop');
-    check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')), 'no notes left on the edges');
+    check(!findActor(Main.uiGroup, a => hasClass(a, 'atelier-note-tab')) &&
+        !findActor(Main.layoutManager._backgroundGroup, a => a.name === 'atelier-stickies'),
+    'no notes left on the edges or the desktop');
     check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock') &&
         Main.panel.statusArea['dash-to-dock'] === undefined, 'no dock left');
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');

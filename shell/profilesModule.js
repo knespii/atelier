@@ -19,6 +19,7 @@ import {normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
 import {ensureThumbnail} from '../lib/thumbnails.js';
 import {readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {readWidgets} from '../lib/widgets.js';
 import {Applier} from './applier.js';
 import {Indicator} from './indicator.js';
 import {WallpaperTransition} from './reveal.js';
@@ -322,6 +323,7 @@ export class ProfilesModule {
             wallpaper,
             wallpaperDark,
             palette: readPaletteOptions(this._settings.get_child('palette')),
+            widgets: readWidgets(this._settings.get_child('desktop')),
             name: name ?? this._nameFor(current.wallpaper),
         });
         if (wallpaper)

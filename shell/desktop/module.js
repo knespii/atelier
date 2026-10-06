@@ -13,6 +13,7 @@ import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+import {keepWidgets} from '../../lib/profiles.js';
 import {
     KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, newId, nextSize, parseLayout, serializeLayout,
 } from '../../lib/widgets.js';
@@ -47,10 +48,11 @@ export class DesktopModule {
      * @param {ModuleManager} context.modules
      * @param {object} context.extension
      */
-    constructor({settings, modules, extension}) {
+    constructor({settings, modules, extension, store}) {
         this._settings = settings;
         this._modules = modules;
         this._extension = extension;
+        this._store = store;
         this._injections = new InjectionManager();
         this._widgets = new Map();
         this._menus = new Map();
@@ -105,9 +107,7 @@ export class DesktopModule {
             sources: this.sources,
             style: () => this._desktopSettings.get_string('style'),
             claude: () => this._modules.get('claude'),
-            notes: () => this._modules.get('notes'),
             openSettings: () => this._extension.openPreferences(),
-            setOption: (id, key, value) => this._setOption(id, key, value),
         };
 
         // Above the wallpaper, under the windows: inside the wallpapers'
@@ -301,15 +301,6 @@ export class DesktopModule {
         this._load();
     }
 
-    // A widget's own choice (which note it shows, say), kept with its place.
-    _setOption(id, key, value) {
-        const entry = this._layout.find(e => e.id === id);
-        if (!entry || entry[key] === value)
-            return;
-        entry[key] = value;
-        this._save();
-    }
-
     // The widgets as the settings have them.
     _load() {
         this._layout = parseLayout(this._desktopSettings.get_string('widgets'));
@@ -388,10 +379,14 @@ export class DesktopModule {
         }
     }
 
+    // Kept in the settings, and in the profile in use: each profile has
+    // its widgets.
     _save() {
         this._saving = true;
         this._desktopSettings.set_string('widgets', serializeLayout(this._layout));
         this._saving = false;
+        if (this._store)
+            keepWidgets(this._store, this._desktopSettings);
     }
 
     // The layout as shown, for editing it.

@@ -274,7 +274,7 @@
     <key name="widgets" type="s">
       <default>'[{"id":"clock","kind":"clock","size":"square","x":0,"y":0},{"id":"date","kind":"date","size":"square","x":2,"y":0},{"id":"calendar","kind":"calendar","size":"large","x":0,"y":2}]'</default>
       <summary>The widgets and where they are</summary>
-      <description>JSON array of {id, kind, size, x, y}: kind is clock, date, calendar, weather, github, claude, note or photo; size square, card, large or wide; x and y are cells of the grid over the work area of the primary monitor.</description>
+      <description>JSON array of {id, kind, size, x, y}: kind is clock, date, calendar, weather, github, claude or photo; size square, card, large or wide; x and y are cells of the grid over the work area of the primary monitor.</description>
     </key>
     <key name="style" enum="org.gnome.shell.extensions.atelier.WidgetStyle">
       <default>'modern'</default>

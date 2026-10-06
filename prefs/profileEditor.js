@@ -10,6 +10,7 @@ import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, isInLibrary, prettyName} from '../lib/paths.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {readWidgets} from '../lib/widgets.js';
 import {chooseImages, createThumbnail, toast} from './widgets.js';
 
 const KEEP = 'Don’t change';
@@ -382,9 +383,12 @@ class AtelierProfileEditor extends Adw.Dialog {
                 font: this._fontRow.enable_expansion ? this._fontButton.font_desc.to_string() : null,
             };
 
-            // A profile saved from the current setup keeps its palette too.
+            // A profile saved from the current setup keeps its palette too;
+            // a new profile keeps the widgets on the desktop.
             if (!this._profile && this._draft.palette)
                 fields.palette = this._draft.palette;
+            if (!this._profile)
+                fields.widgets = this._draft.widgets ?? readWidgets(this._store.settings.get_child('desktop'));
 
             if (this._profile) {
                 const {wallpaper: previous, wallpaperDark: previousDark} = this._profile;
