@@ -943,6 +943,11 @@ async function testDesktop(ext) {
     check(layer.get_parent() === Main.layoutManager._backgroundGroup,
         'the widgets lie on the wallpaper, under the windows');
     check(['clock', 'date', 'calendar'].every(id => desktop.widgets.get(id)?.mapped), 'a clock, the date and the calendar');
+    const month = desktop.widgets.get('calendar');
+    const firstDay = month._grid?.get_child_at_index(10);
+    month._tick();
+    check(firstDay && month._grid.get_child_at_index(10) === firstDay,
+        'a tick of the clock leaves the calendar\'s month as it is');
     const clock = desktop.widgets.get('clock');
     const [clockX, clockY] = clock.get_transformed_position();
     const area = desktop.area;
@@ -1091,10 +1096,35 @@ async function testDesktop(ext) {
     check(desktop.widgets.get('clock')._face && !hasClass(layer.get_first_child(), 'atelier-desktop-glass'),
         'analogue: paper and a clock face');
     await screenshotArea('43-desktop-analogue', 0, 0, global.stage.width, 760);
+    // Built anew for the look, the Claude widget still reads the numbers once.
+    let reads = 0;
+    const read = claude._sync;
+    claude._sync = function () {
+        reads++;
+        return read.call(this);
+    };
+    ext.stateObj.modules.get('claude').usage.emit('changed');
+    delete claude._sync;
+    check(reads === 1, `built anew, the Claude widget reads the numbers once (${reads} times)`);
+
+    // A photo, from a copy as big as its card: the picture itself (a big one
+    // here) is never decoded whole.
+    const photoPath = `${OUTPUT}/photo.jpg`;
+    const big = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 1770, 3929);
+    big.fill(0x3a944aff);
+    big.savev(photoPath, 'jpeg', [], []);
+    settings.set_string('photo', photoPath);
+    desktop.addWidget('photo');
+    const photo = desktop.widgets.get('photo');
+    const shown = () => /url\("([^"]+)"\)/.exec(photo?._picture?.style ?? '')?.[1] ?? null;
+    check(await waitFor(() => shown()?.includes('/atelier/pictures/'), 4000), `a photo shows from a copy (${shown()})`);
+    const copy = shown() ? GdkPixbuf.Pixbuf.new_from_file(Gio.File.new_for_uri(shown()).get_path()) : null;
+    check(copy?.get_width() === photo.width && copy?.get_height() === photo.height,
+        `as big as its card (${copy?.get_width()}×${copy?.get_height()} for ${photo.width}×${photo.height})`);
 
     desktop.removeWidget('github');
     check(!desktop.widgets.has('github') && !settings.get_string('widgets').includes('github'), 'a widget can be removed');
-    ['style', 'widgets', 'github-user'].forEach(key => settings.reset(key));
+    ['style', 'widgets', 'github-user', 'photo'].forEach(key => settings.reset(key));
     await Scripting.sleep(400);
     check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
 }
@@ -1345,6 +1375,16 @@ async function testDock(ext) {
     check(!dock.hidden, 'shown while no window covers it');
     await screenshotArea('60-dock', monitor.x, monitor.y + monitor.height - 140, monitor.width, 140);
 
+    // Brought back by the bottom edge, it stays while the pointer rests
+    // there (going, it would uncover the edge under the pointer and come
+    // back, on and on), and goes once the pointer leaves.
+    await pointerTo(dockX + dock.actor.width / 2, monitor.y + monitor.height - 1);
+    dock._reveal();
+    await Scripting.sleep(2000);
+    check(dock._revealed, 'brought back by the edge, it stays while the pointer rests there');
+    await restPointer();
+    check(await waitFor(() => !dock._revealed, 3000), 'and goes once the pointer leaves');
+
     // Dynamic Music Pill finds it where it finds Dash to Dock's row.
     const handle = Main.panel.statusArea['dash-to-dock'];
     check(handle?._box === dock.box && !Object.keys(Main.panel.statusArea).includes('dash-to-dock'),
@@ -1413,7 +1453,13 @@ async function testClaude(ext) {
     bar.set_strv('modules', []);
     await Scripting.sleep(200);
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'it can be left out of the bar');
+    // Then nothing shows the numbers: read once more, they are not read on
+    // and on – until something shows them again.
+    claude.usage.refresh();
+    check(await waitFor(() => !claude.usage._cancellable, 8000) && claude.usage._timeoutId === 0,
+        'with nothing showing the numbers, they are not read on and on');
     bar.reset('modules');
+    check(await waitFor(() => claude.usage._timeoutId !== 0, 8000), 'back in the bar, they are');
     await Scripting.sleep(300);
 }
 
@@ -1795,6 +1841,44 @@ async function testNewProfile(ext, atelier) {
     bar.reset('surface');
     bar.reset('island-shape');
     await Scripting.sleep(300);
+
+    // With animations off (an accessibility setting, or GNOME without
+    // graphics acceleration), the sheet shows and goes all the same.
+    settings.inhibit_animations();
+    try {
+        atelier.toggleSwitcher();
+        await Scripting.sleep(300);
+        atelier._switcher._activate(atelier._switcher._cards.length - 1);
+        check(await waitFor(() => islandModule._sheet?.opened && islandModule._sheet.opacity === 255, 3000),
+            'with animations off, the sheet shows');
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => islandModule._sheet === null && islandModule._liquid === null, 3000) &&
+            atelier._store.getAll().length === count + 1, 'and goes, saving nothing');
+    } finally {
+        settings.uninhibit_animations();
+    }
+    await waitFor(() => islandModule.island.page === null, 2000);
+}
+
+async function testSwitcherPopupGoesWithAtelier() {
+    // Without the island (or beside a full screen window), the switcher is a
+    // popup. Turned off while it is open – as when the screen locks – it
+    // goes, and so does its grab: clicks and keys reach the desktop again.
+    const islandSettings = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('island');
+    islandSettings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    Main.extensionManager.lookup(UUID).stateObj.modules.get('profiles').toggleSwitcher();
+    await Scripting.sleep(400);
+    const popup = () => findActor(Main.uiGroup, a => hasClass(a, 'atelier-panel'));
+    check(popup() && Main.actionMode === Shell.ActionMode.POPUP, 'without the island, the switcher is a popup');
+    Main.extensionManager.disableExtension(UUID);
+    await Scripting.sleep(300);
+    check(!popup() && Main.actionMode === Shell.ActionMode.NORMAL,
+        'turned off while it is open, it goes, and so does its grab');
+    Main.extensionManager.enableExtension(UUID);
+    await waitFor(() => Main.extensionManager.lookup(UUID).stateObj.modules?.get('profiles'), 3000);
+    islandSettings.reset('enabled');
+    await Scripting.sleep(300);
 }
 
 async function testDisableCleansUp(atelier) {
@@ -1913,6 +1997,7 @@ export async function run() {
         await testWallpapersTab(atelier);
         await testNewProfile(ext, atelier);
         await testDisableCleansUp(atelier);
+        await testSwitcherPopupGoesWithAtelier();
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
     } finally {
