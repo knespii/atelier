@@ -1651,21 +1651,78 @@ async function testNewProfile(ext, atelier) {
     await Scripting.sleep(400);
     await screenshotIsland('17-switcher-new-profile', 300);
 
+    // The island drips a sheet to name it and give it a style: a drop forms
+    // under it, falls and spreads.
+    const islandModule = ext.stateObj.modules.get('island');
+    // (Held still at points of the way: swelling, its neck, falling, spreading.)
+    const dropShot = async name => {
+        const sheet = islandModule._sheet;
+        // (It drips from the island at rest, once the switcher is back in it.)
+        await waitFor(() => sheet._timeline.is_playing(), 2000);
+        sheet._timeline.pause();
+        let falling = true;
+        for (const [n, t] of [[1, 0.18], [2, 0.3], [3, 0.45], [4, 0.7]]) {
+            sheet._frame(t);
+            await Scripting.sleep(150);
+            falling &&= (sheet._liquid._drop?.[3] ?? 0) > 0;
+            await screenshotArea(`${name}-${n}`, Math.round(global.stage.width / 2) - 360, 0, 720, 760);
+        }
+        sheet._timeline.start();
+        return falling;
+    };
     switcher._activate(last);
-    check(await waitFor(() => atelier._store.getAll().length === count + 1, 3000), 'it saves a new profile');
+    check(await waitFor(() => islandModule._sheet !== null, 3000), 'the island drips a sheet for a new profile');
+    check(await dropShot('18-new-profile-drop'), 'a drop falls from it');
+    const sheet = islandModule._sheet;
+    check(await waitFor(() => sheet.opened && sheet.opacity === 255, 3000), 'and spreads into the sheet');
+    const form = sheet.form;
+    check(form._name.text === 'Pills' && global.stage.key_focus === form._name.clutter_text,
+        `named after the wallpaper, ready to be named anew (${form._name.text})`);
+    check(atelier._store.getAll().length === count, 'not saved yet');
+    await screenshot('19-new-profile-sheet');
+    form._name.text = 'Pills at night';
+    form._accents.find(swatch => swatch._value === 'teal').emit('clicked', 1);
+    form._schemes.find(segment => segment._value === 'prefer-dark').emit('clicked', 1);
+    await pressKey(Clutter.KEY_Return);
+    check(await waitFor(() => atelier._store.getAll().length === count + 1, 3000), 'Enter saves it');
     const added = atelier._store.getAll().at(-1);
-    check(added.name === 'Pills' && atelier._store.activeId === added.id,
-        `named after the wallpaper and active (${added.name})`);
+    check(added.name === 'Pills at night' && added.accentColor === 'teal' && added.colorScheme === 'prefer-dark' &&
+        atelier._store.activeId === added.id, `with its name and style, active (${added.name}, ${added.accentColor})`);
     check(added.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`),
         `with its own copy of the wallpaper (${added.wallpaper})`);
     const palette = ext.stateObj._settings.get_child('palette');
     check(added.palette?.variant === palette.get_string('variant') && added.gtkTheme === 'HighContrast',
         'and the palette and themes in use');
-    const island = ext.stateObj.modules.get('island').island;
+    check(await waitFor(() => islandModule._sheet === null && islandModule._liquid === null, 3000),
+        'the sheet goes back into the island');
+    const island = islandModule.island;
     check(await waitFor(() => hasClass(island.page, 'atelier-toast') && island.page.title === added.name, 2000),
         'the island announces it');
-    check(await waitFor(() => atelier._switcher === null, 2000), 'in place of the switcher');
+    check(atelier._switcher === null, 'in place of the switcher');
+    const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    check(await waitFor(() => desktopInterface.get_string('accent-color') === 'teal', 3000),
+        'and the desktop takes its style');
     await waitFor(() => island.page === null, 4000);
+
+    // Out of glass, from a notch; Esc saves nothing.
+    const bar = ext.stateObj._settings.get_child('bar');
+    bar.set_string('surface', 'glass');
+    bar.set_string('island-shape', 'notch');
+    await Scripting.sleep(500);
+    atelier.toggleSwitcher();
+    await Scripting.sleep(400);
+    atelier._switcher._activate(atelier._switcher._cards.length - 1);
+    check(await waitFor(() => islandModule._sheet !== null, 3000), 'again, from a notch of glass');
+    await dropShot('20-new-profile-drop-glass');
+    check(await waitFor(() => islandModule._sheet?.opened, 3000), 'the sheet open');
+    await Scripting.sleep(200);
+    await screenshot('21-new-profile-sheet-glass');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => islandModule._sheet === null, 3000) && atelier._store.getAll().length === count + 1,
+        'Esc saves nothing');
+    bar.reset('surface');
+    bar.reset('island-shape');
+    await Scripting.sleep(300);
 }
 
 async function testDisableCleansUp(atelier) {

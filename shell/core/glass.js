@@ -2,7 +2,8 @@
 // GNOME's lock screen – a static blur, which costs nothing while it stays.
 // A surface is the blurred wallpaper of the top of its monitor, masked to a
 // rounded rectangle that can move and change size every frame (the island
-// growing) without blurring anything again.
+// growing) without blurring anything again – and to a drop beside it, which
+// melts into it where they meet (the island dripping).
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -21,13 +22,18 @@ const BLUR_BRIGHTNESS = 0.75;
 // bottom corners may differ (a notch has square top corners), and a notch
 // may have ears: beside its top corners, squares less a quarter circle,
 // where it curves into the top edge. (They reach a pixel into the notch and
-// above it, so no seam shows.)
+// above it, so no seam shows.) The drop is a rounded rectangle too, joined
+// with a smooth minimum: within blend pixels of each other, the two flow
+// together like liquid.
 const MASK_DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
 uniform vec4 rect;
 uniform vec2 radii;
 uniform float ear;
+uniform vec4 drop;
+uniform float dropRadius;
+uniform float blend;
 
 float atelier_box(vec2 p, vec2 center, vec2 halfSize) {
     vec2 q = abs(p - center) - halfSize;
@@ -52,6 +58,13 @@ if (ear > 0.0) {
     float left = atelier_ear(p, rect.x - ear, rect.x + 1.0);
     float right = atelier_ear(p, rect.x + rect.z + ear, rect.x + rect.z - 1.0);
     d = min(d, min(left, right));
+}
+if (drop.z > 0.0 && drop.w > 0.0) {
+    vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
+    float b = length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius;
+    float k = max(blend, 0.001);
+    float h = clamp(0.5 + 0.5 * (b - d) / k, 0.0, 1.0);
+    d = mix(b, d, h) - k * h * (1.0 - h);
 }
 cogl_color_out *= clamp(0.5 - d, 0.0, 1.0);
 `;
@@ -95,6 +108,10 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this._rect = this.get_uniform_location('rect');
         this._radii = this.get_uniform_location('radii');
         this._ear = this.get_uniform_location('ear');
+        this._drop = this.get_uniform_location('drop');
+        this._dropRadius = this.get_uniform_location('dropRadius');
+        this._blend = this.get_uniform_location('blend');
+        this.setDrop([0, 0, 0, 0], 0, 1);
     }
 
     vfunc_paint_target(node, paintContext) {
@@ -120,6 +137,19 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._rect, 4, rect);
         this.set_uniform_float(this._radii, 2, radii);
         this.set_uniform_float(this._ear, 1, [ear]);
+        this.queue_repaint();
+    }
+
+    /**
+     * @param {number[]} drop - [centerX, centerY, halfWidth, halfHeight]
+     *   relative to the actor; no width or height for none
+     * @param {number} radius - of its corners
+     * @param {number} blend - how near it melts into the rectangle
+     */
+    setDrop(drop, radius, blend) {
+        this.set_uniform_float(this._drop, 4, drop);
+        this.set_uniform_float(this._dropRadius, 1, [radius]);
+        this.set_uniform_float(this._blend, 1, [blend]);
         this.queue_repaint();
     }
 });
@@ -151,6 +181,7 @@ class AtelierGlassSurface extends St.Widget {
         this._fromBottom = fromBottom;
         this._solid = solid;
         this._shape = null;
+        this._drop = null;
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -189,6 +220,8 @@ class AtelierGlassSurface extends St.Widget {
         if (this._solid) {
             if (this._shape)
                 this.setShape(...this._shape);
+            if (this._drop)
+                this.setDrop(...this._drop);
             return;
         }
         this._bgManager = new Background.BackgroundManager({
@@ -200,6 +233,8 @@ class AtelierGlassSurface extends St.Widget {
         this._blurBackground();
         if (this._shape)
             this.setShape(...this._shape);
+        if (this._drop)
+            this.setDrop(...this._drop);
     }
 
     _blurBackground() {
@@ -231,5 +266,28 @@ class AtelierGlassSurface extends St.Widget {
         const limit = Math.min(width / 2, height / 2);
         this._mask.setShape([this.width, this.height], [x - this.x, y - this.y, width, height],
             [Math.min(radius, limit), Math.min(bottomRadius, limit)], ear);
+    }
+
+    /**
+     * Fill a drop as well, a rounded rectangle in stage coordinates, which
+     * melts into the other one where they come near.
+     *
+     * @param {number} centerX
+     * @param {number} centerY
+     * @param {number} halfWidth
+     * @param {number} halfHeight
+     * @param {number} radius - of its corners
+     * @param {number} blend - how near they melt into each other
+     */
+    setDrop(centerX, centerY, halfWidth, halfHeight, radius, blend) {
+        this._drop = [centerX, centerY, halfWidth, halfHeight, radius, blend];
+        this._mask.setDrop([centerX - this.x, centerY - this.y, halfWidth, halfHeight],
+            Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
+    }
+
+    /** No drop. */
+    clearDrop() {
+        this._drop = null;
+        this._mask.setDrop([0, 0, 0, 0], 0, 1);
     }
 });

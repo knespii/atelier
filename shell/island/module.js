@@ -26,6 +26,7 @@ import {MicWatcher, UnseenWatcher} from './indicators.js';
 import {Island, MORPH_TIME} from './island.js';
 import {SwitcherPage} from './page.js';
 import {POWER_ACTIONS, PowerPage} from './power.js';
+import {LiquidSheet} from './sheet.js';
 import {ToastPage} from './toast.js';
 
 export const SLOT_ROLE = 'atelier-island';
@@ -70,6 +71,8 @@ export class IslandModule {
         this._laterId = 0;
         this._glanceBlocked = false;
         this._ear = 0;
+        this._sheet = null;
+        this._liquid = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -159,6 +162,10 @@ export class IslandModule {
         Main.wm.removeKeybinding('atelier-power-menu');
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
+        this._sheet?.destroy();
+        this._sheet = null;
+        this._liquid?.destroy();
+        this._liquid = null;
         this._glass?.destroy();
         this._glass = null;
         this._ears?.destroy();
@@ -245,6 +252,42 @@ export class IslandModule {
             return Promise.resolve(false);
         }
         return this._wait(MORPH_TIME);
+    }
+
+    /**
+     * Open a sheet that drips from the island and spreads into a panel of
+     * the island's glass (or black), with a form on it.
+     *
+     * @param {St.Widget} form
+     * @returns {LiquidSheet|null} the sheet (close() takes it back into the
+     *   island); null when there is no island to drip from
+     */
+    openSheet(form) {
+        const island = this._island;
+        if (this._sheet || !island?.visible || !this._slot.mapped)
+            return null;
+        // The drop is of the island's stuff, and the island is drawn along
+        // with it, so they flow into each other.
+        const glass = this._barSettings.get_string('surface') === 'glass';
+        this._liquid = new GlassSurface({solid: !glass});
+        Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
+        const sheet = new LiquidSheet(island, this._liquid, form);
+        Main.layoutManager.uiGroup.insert_child_above(sheet, this._liquid);
+        this._sheet = sheet;
+        sheet.connect('closed', () => this._dropSheet());
+        this._clearTimeout('show-glance');
+        this._syncShape();
+        sheet.open();
+        return sheet;
+    }
+
+    _dropSheet() {
+        this._sheet?.destroy();
+        this._sheet = null;
+        this._liquid?.destroy();
+        this._liquid = null;
+        if (this._island)
+            this._syncShape();
     }
 
     /** Open the power menu, or close it when it's open. */
@@ -415,18 +458,25 @@ export class IslandModule {
         this._queueLayout(true);
     }
 
-    // The glass under the island and the ears take its shape.
+    // The glass under the island and the ears take its shape, and so does
+    // the liquid of a sheet dripping from it.
     _syncShape() {
         const island = this._island;
-        if (!this._glass && !this._ears)
+        if (!this._glass && !this._ears && !this._liquid)
             return;
         const shown = island.visible && island.opacity > 0;
         const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const node = island.get_theme_node();
+        const shape = [island.x, island.y, island.width, island.height,
+            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
         if (this._glass) {
-            this._glass.visible = shown;
-            const node = island.get_theme_node();
-            this._glass.setShape(island.x, island.y, island.width, island.height,
-                node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear);
+            // (Under a sheet, its liquid is the island's glass too.)
+            this._glass.visible = shown && !this._liquid;
+            this._glass.setShape(...shape);
+        }
+        if (this._liquid) {
+            this._liquid.visible = shown;
+            this._liquid.setShape(...shape);
         }
         if (this._ears) {
             this._ears.show(shown, island.opacity);

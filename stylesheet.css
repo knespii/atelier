@@ -1102,6 +1102,176 @@
   background-color: transparent;
 }
 
+/* A sheet dripping from the island: what it is made of is drawn under it,
+   the island's glass or black; the sheet is only its form */
+
+.atelier-sheet {
+  background-color: transparent;
+}
+
+.atelier-profile-sheet {
+  width: 420px;
+  padding: 22px 24px 20px;
+  spacing: 10px;
+  color: #f4f4f5;
+  font-size: 10.5pt;
+}
+
+.atelier-profile-sheet-header {
+  spacing: 16px;
+  margin-bottom: 6px;
+}
+
+.atelier-profile-sheet-picture {
+  width: 120px;
+  height: 68px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.08);
+  background-size: cover;
+  background-position: center;
+}
+
+.atelier-profile-sheet-titles {
+  spacing: 4px;
+}
+
+.atelier-profile-sheet-title {
+  font-size: 14pt;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.atelier-profile-sheet-caption {
+  font-size: 9pt;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-profile-sheet-label {
+  font-size: 9pt;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 4px;
+}
+
+.atelier-profile-sheet-entry {
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+  color: #ffffff;
+  caret-color: #ffffff;
+  selection-background-color: -st-accent-color;
+  selected-color: #ffffff;
+  font-size: 11pt;
+}
+
+.atelier-profile-sheet-entry:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.atelier-profile-sheet-entry StLabel.hint-text {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.atelier-profile-sheet-row {
+  margin-top: 4px;
+}
+
+.atelier-profile-sheet-segments {
+  spacing: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.atelier-profile-sheet-segment {
+  padding: 5px 14px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 9.5pt;
+  font-weight: bold;
+}
+
+.atelier-profile-sheet-segment:hover {
+  color: #ffffff;
+}
+
+.atelier-profile-sheet-segment:checked {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.atelier-profile-sheet-swatches {
+  spacing: 8px;
+}
+
+.atelier-profile-sheet-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  color: #ffffff;
+}
+
+.atelier-profile-sheet-swatch-plain {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-profile-sheet-swatch:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.atelier-profile-sheet-swatch:checked {
+  border-color: #ffffff;
+}
+
+.atelier-profile-sheet-swatch StIcon {
+  icon-size: 13px;
+}
+
+.atelier-profile-sheet-buttons {
+  spacing: 8px;
+  margin-top: 10px;
+}
+
+.atelier-profile-sheet-button {
+  padding: 8px 18px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 10pt;
+  font-weight: bold;
+}
+
+.atelier-profile-sheet-button:hover,
+.atelier-profile-sheet-button:focus {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.atelier-profile-sheet-more {
+  padding: 8px 4px;
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.atelier-profile-sheet-more:hover,
+.atelier-profile-sheet-more:focus {
+  background-color: transparent;
+  color: #ffffff;
+}
+
+.atelier-profile-sheet-save {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
+.atelier-profile-sheet-save:insensitive {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.4);
+}
+
 /* Notch: the island hangs from the top edge, which curves into its sides */
 
 .atelier-notch-ear {

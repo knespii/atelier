@@ -22,6 +22,7 @@ import {readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {readWidgets} from '../lib/widgets.js';
 import {Applier} from './applier.js';
 import {Indicator} from './indicator.js';
+import {ProfileSheet} from './profileSheet.js';
 import {WallpaperTransition} from './reveal.js';
 import {SwitcherPopup} from './switcher.js';
 import {SwitcherContent} from './switcherContent.js';
@@ -219,7 +220,9 @@ export class ProfilesModule {
     }
 
     /**
-     * Save what the desktop shows now as a new profile and make it active.
+     * A new profile of what the desktop shows now. The island drips a sheet
+     * to name it and give it a style, and it is saved from there; without
+     * the island, it is saved as it is.
      *
      * @param {SwitcherContent} switcher
      */
@@ -228,11 +231,23 @@ export class ProfilesModule {
             return;
         this._saving = true;
         try {
-            const profile = await this._saveCurrentSetup();
-            if (!profile)
+            const draft = await this._captureCurrentSetup();
+            if (!draft)
                 return;
-            this._store.activeId = profile.id;
             const island = this._modules?.get('island');
+            const form = new ProfileSheet(normalizeProfile({id: 'atelier-draft', ...draft}));
+            // (The switcher goes back into the island as the drop forms.)
+            switcher.close();
+            const sheet = island?.openSheet(form);
+            if (sheet) {
+                this._fillIn(sheet, form, draft, island);
+                return;
+            }
+            form.destroy();
+            const profile = this._store.add(draft);
+            this._store.activeId = profile.id;
+            if (profile.wallpaper)
+                ensureThumbnail(profile.wallpaper).catch(() => {});
             if (!(island && await island.announceProfile(profile, {subtitle: 'New profile'})))
                 switcher.close();
         } catch (e) {
@@ -241,6 +256,48 @@ export class ProfilesModule {
         } finally {
             this._saving = false;
         }
+    }
+
+    /**
+     * The sheet for a new profile: saved with its name and style, or not.
+     *
+     * @param {LiquidSheet} sheet
+     * @param {ProfileSheet} form
+     * @param {object} draft - the profile as taken from the desktop
+     * @param {IslandModule} island
+     */
+    _fillIn(sheet, form, draft, island) {
+        let done = false;
+        const finish = async ({save, more = false}) => {
+            if (done)
+                return;
+            done = true;
+            const fields = form.fields;
+            const profile = save ? this._store.add({...draft, ...fields}) : null;
+            if (profile) {
+                this._store.activeId = profile.id;
+                if (profile.wallpaper)
+                    ensureThumbnail(profile.wallpaper).catch(() => {});
+            }
+            await sheet.close();
+            if (!profile) {
+                // Its copies of the wallpapers go, unless a profile has them.
+                for (const path of [draft.wallpaper, draft.wallpaperDark].filter(Boolean))
+                    await deleteWallpaperIfUnused(path, this._store.getAll()).catch(() => {});
+                return;
+            }
+            if (more)
+                this._extension.openPreferences();
+            await island.announceProfile(profile, {subtitle: 'New profile'});
+            // A style other than the desktop's, now.
+            if (this._applier && (fields.colorScheme !== draft.colorScheme || fields.accentColor !== draft.accentColor))
+                await this._applier.apply(profile, {animate: false});
+        };
+        const run = options => finish(options).catch(e => Main.notifyError('Atelier', `Could not save the profile: ${e.message}`));
+        form.connect('save', () => run({save: true}));
+        form.connect('more', () => run({save: true, more: true}));
+        form.connect('cancel', () => run({save: false}));
+        sheet.connect('dismissed', () => run({save: false}));
     }
 
     _step(delta) {
@@ -295,13 +352,30 @@ export class ProfilesModule {
     }
 
     /**
-     * Save what the desktop shows now as a profile. Its wallpapers are copied
-     * into the library, so it keeps working when the pictures move.
+     * Save what the desktop shows now as a profile.
      *
      * @param {string} [name] - by default one made from the wallpaper
      * @returns {Promise<object|null>} the profile; null if Atelier was turned off meanwhile
      */
     async _saveCurrentSetup(name = null) {
+        const fields = await this._captureCurrentSetup();
+        if (!fields)
+            return null;
+        const profile = this._store.add({...fields, name: name ?? fields.name});
+        if (profile.wallpaper)
+            ensureThumbnail(profile.wallpaper).catch(() => {});
+        return profile;
+    }
+
+    /**
+     * What the desktop shows now, as the fields of a profile. Its wallpapers
+     * are copied into the library, so it keeps working when the pictures
+     * move.
+     *
+     * @returns {Promise<object|null>} the fields, named after the wallpaper;
+     *   null if Atelier was turned off meanwhile
+     */
+    async _captureCurrentSetup() {
         const userThemesActive =
             Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
         const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
@@ -321,17 +395,14 @@ export class ProfilesModule {
             return null;
         }
 
-        const profile = this._store.add({
+        return {
             ...current,
             wallpaper,
             wallpaperDark,
             palette: readPaletteOptions(this._settings.get_child('palette')),
             widgets: readWidgets(this._settings.get_child('desktop')),
-            name: name ?? this._nameFor(current.wallpaper),
-        });
-        if (wallpaper)
-            ensureThumbnail(wallpaper).catch(() => {});
-        return profile;
+            name: this._nameFor(current.wallpaper),
+        };
     }
 
     /**
