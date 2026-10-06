@@ -81,14 +81,14 @@ export const ProfileSheet = GObject.registerClass({
         this.add_child(this._label('Name'));
         this.add_child(this._name);
 
-        const style = new St.BoxLayout({style_class: 'atelier-profile-sheet-row'});
+        const style = new St.BoxLayout({style_class: 'atelier-sheet-row'});
         const styleLabel = this._label('Light or dark');
         styleLabel.x_expand = true;
         styleLabel.y_align = Clutter.ActorAlign.CENTER;
         style.add_child(styleLabel);
-        const segments = new St.BoxLayout({style_class: 'atelier-profile-sheet-segments'});
+        const segments = new St.BoxLayout({style_class: 'atelier-sheet-segments'});
         this._schemes = SCHEMES.map(([value, text]) => {
-            const button = new St.Button({style_class: 'atelier-profile-sheet-segment', label: text, can_focus: true});
+            const button = new St.Button({style_class: 'atelier-sheet-segment', label: text, can_focus: true});
             button._value = value;
             button.connect('clicked', () => {
                 this._scheme = value;
@@ -124,17 +124,17 @@ export const ProfileSheet = GObject.registerClass({
         });
         this.add_child(swatches);
 
-        const buttons = new St.BoxLayout({style_class: 'atelier-profile-sheet-buttons'});
+        const buttons = new St.BoxLayout({style_class: 'atelier-sheet-buttons'});
         const button = (text, signal, extra = '') => {
-            const b = new St.Button({style_class: `atelier-profile-sheet-button ${extra}`, label: text, can_focus: true});
+            const b = new St.Button({style_class: `atelier-sheet-button ${extra}`, label: text, can_focus: true});
             b.connect('clicked', () => this.emit(signal));
             buttons.add_child(b);
             return b;
         };
-        button('More in Settings…', 'more', 'atelier-profile-sheet-more');
+        button('More in Settings…', 'more', 'atelier-sheet-flat');
         buttons.add_child(new St.Widget({x_expand: true}));
         button('Cancel', 'cancel');
-        this._save = button('Save', 'save', 'atelier-profile-sheet-save');
+        this._save = button('Save', 'save', 'atelier-sheet-primary');
         this.add_child(buttons);
         this._sync();
     }
@@ -154,7 +154,7 @@ export const ProfileSheet = GObject.registerClass({
     }
 
     _label(text) {
-        return new St.Label({style_class: 'atelier-profile-sheet-label', text});
+        return new St.Label({style_class: 'atelier-sheet-label', text});
     }
 
     _sync() {

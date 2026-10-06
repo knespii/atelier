@@ -1,7 +1,8 @@
-// Notes: written in the island (the control centre's Notes tab) and pinned
-// to the screen's left (or right) edge as square papers, like sticky notes –
-// the same whatever the profile. The desktop's menu and a shortcut start a
-// new one.
+// Notes: pinned to the screen's left (or right) edge as square papers, like
+// sticky notes – the same whatever the profile. A new one is written on a
+// sheet that drips from the island (from the desktop's menu, or the Notes
+// tab); they are read and changed in the island (the control centre's Notes
+// tab), which a shortcut opens.
 
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -9,6 +10,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {EdgeTabs} from './edges.js';
+import {NoteSheet} from './sheet.js';
 import {NotesStore} from './store.js';
 import {NotesView} from './view.js';
 
@@ -31,6 +33,7 @@ export class NotesModule {
         this._dropNoteWidgets();
         // The control centre's Notes tab; it outlives the control centre.
         this.view = new NotesView(this.store);
+        this.view.connect('create-request', () => this.create());
         this._edges = new EdgeTabs(this.store, id => this.open(id));
 
         this._notesSettings.connectObject('changed::edges-on-desktop-only', () => this._syncEdges(), this);
@@ -89,6 +92,44 @@ export class NotesModule {
      * @param {boolean} [options.create] - a new note
      */
     open(id = null, {create = false} = {}) {
+        if (create) {
+            this.create();
+            return;
+        }
+        this._openTab(id);
+    }
+
+    /**
+     * Write a new note, on a sheet that drips from the island; saved there,
+     * or kept when let go of with something on it (Esc, a click beside).
+     * Without the island to drip from, in the Notes tab.
+     */
+    create() {
+        const controlCentre = this._modules.get('control-centre');
+        // (A page in the island goes back into it as the drop forms.)
+        controlCentre?.close();
+        const form = new NoteSheet();
+        const sheet = this._modules.get('island')?.openSheet(form) ?? null;
+        if (!sheet) {
+            form.destroy();
+            this._openTab(null, {create: true});
+            return;
+        }
+        let done = false;
+        const finish = keep => {
+            if (done)
+                return;
+            done = true;
+            if (keep && !form.empty)
+                this.store?.create(form.fields);
+            sheet.close();
+        };
+        form.connect('save', () => finish(true));
+        form.connect('cancel', () => finish(false));
+        sheet.connect('dismissed', () => finish(true));
+    }
+
+    _openTab(id, {create = false} = {}) {
         const controlCentre = this._modules.get('control-centre');
         if (!controlCentre?.available)
             return;

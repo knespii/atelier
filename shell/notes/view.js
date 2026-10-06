@@ -15,8 +15,12 @@ const COLUMNS = 3;
 const PINS = ['left', 'right', null];
 const PIN_LABELS = {left: 'Pinned left', right: 'Pinned right'};
 
-export const NotesView = GObject.registerClass(
-class AtelierNotesView extends St.BoxLayout {
+export const NotesView = GObject.registerClass({
+    Signals: {
+        // the "New note" paper: whoever made the view writes it (on a sheet)
+        'create-request': {},
+    },
+}, class AtelierNotesView extends St.BoxLayout {
     /**
      * @param {NotesStore} store
      */
@@ -80,7 +84,7 @@ class AtelierNotesView extends St.BoxLayout {
             box.add_child(new St.Icon({icon_name: 'list-add-symbolic', x_align: Clutter.ActorAlign.CENTER}));
             box.add_child(new St.Label({text: 'New note', x_align: Clutter.ActorAlign.CENTER}));
             add.child = box;
-            add.connect('clicked', () => this.edit(this._store.create().id));
+            add.connect('clicked', () => this.emit('create-request'));
             papers.push(add);
         }
         for (const note of this._store.all({archived: this._archived})) {

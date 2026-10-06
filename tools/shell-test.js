@@ -133,6 +133,19 @@ async function pressKey(keyval) {
     }
 }
 
+// Keys held down together, e.g. Ctrl and Return.
+async function pressKeys(...keyvals) {
+    virtualKeyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    for (const keyval of keyvals) {
+        virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
+        await Scripting.sleep(40);
+    }
+    for (const keyval of [...keyvals].reverse()) {
+        virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
+        await Scripting.sleep(40);
+    }
+}
+
 // Away from the island and anything the tests open.
 const restPointer = () => pointerTo(global.stage.width / 2, global.stage.height - 200);
 
@@ -1137,30 +1150,55 @@ async function testNotes(ext) {
     const desktop = ext.stateObj.modules.get('desktop');
     await restPointer();
 
-    // A new note, written in the island.
+    // A new note drips from the island onto a sheet, a paper to write on.
+    const islandModule = ext.stateObj.modules.get('island');
+    const count = notes.store.all().length;
     notes.open(null, {create: true});
-    check(await waitFor(() => island.page?.tab === 'notes' && notes.view.editing, 1000),
-        'a new note opens in the island, on the Notes tab');
-    const id = notes.view.editing;
-    notes.view._title.text = 'Groceries';
-    notes.view._text.text = 'Saturday\n- [ ] milk\n- [x] bread';
-    const note = notes.store.get(id);
-    check(note.title === 'Groceries' && note.text.includes('- [ ] milk'), 'what is written is kept');
-    notes.view._colors.get_children().find(dot => dot._color === 'mint').emit('clicked', 1);
-    check(notes.store.get(id).color === 'mint', 'it can have another paper');
-    await Scripting.sleep(400);
-    await screenshotIsland('50-notes-editor', 480);
-
-    // Back among the papers, its checkboxes tick off.
-    notes.view._leave();
+    check(await waitFor(() => islandModule._sheet?.opened, 3000), 'a new note drips from the island onto a sheet');
+    let form = islandModule._sheet.form;
+    check(global.stage.key_focus === form._text.clutter_text && notes.store.all().length === count,
+        'ready to write on, not saved yet');
+    form._title.text = 'Groceries';
+    form._text.text = 'Saturday\n- [ ] milk\n- [x] bread';
+    form._colors.find(dot => dot._color === 'mint').emit('clicked', 1);
     await Scripting.sleep(300);
-    const paper = notes.view.get_children()[1].child.get_children().find(child => child.child?._id === id);
+    await screenshot('50-note-sheet');
+    await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_Return);
+    check(await waitFor(() => notes.store.all().length === count + 1, 2000), 'Ctrl+Enter saves it');
+    const note = notes.store.all().find(n => n.title === 'Groceries');
+    const id = note?.id;
+    check(note?.color === 'mint' && note.text.includes('- [ ] milk'), 'as written, on its paper');
+    check(await waitFor(() => islandModule._sheet === null, 3000), 'the sheet goes back into the island');
+
+    // Among the papers in the Notes tab, its checkboxes tick off.
+    notes.open();
+    check(await waitFor(() => island.page?.tab === 'notes', 1000), 'the Notes tab has the papers');
+    await Scripting.sleep(300);
+    const papers = () => notes.view.get_children()[1].child.get_children();
+    const paper = papers().find(child => child.child?._id === id);
     check(Boolean(paper), 'the note is among the papers');
     await screenshotIsland('51-notes-grid', 480);
     const box = paper.child.get_children().find(child => child.has_style_class_name?.('atelier-note-check-row'));
     box?.get_first_child().emit('clicked', 1);
     check(notes.store.get(id).text.includes('- [x] milk'), 'a checkbox is ticked off right on the paper');
-    Main.panel.closeQuickSettings();
+
+    // "New note" there drips a sheet too; Cancel throws it away, Esc keeps
+    // what is written.
+    papers().find(child => hasClass(child, 'atelier-note-new')).emit('clicked', 1);
+    check(await waitFor(() => islandModule._sheet?.opened && island.page === null, 3000),
+        '"New note" in the tab drips a sheet, the tab going back into the island');
+    form = islandModule._sheet.form;
+    form._text.text = 'thrown away';
+    form.emit('cancel');
+    check(await waitFor(() => islandModule._sheet === null, 3000) && notes.store.all().length === count + 1,
+        'Cancel throws it away');
+    notes.open(null, {create: true});
+    await waitFor(() => islandModule._sheet?.opened, 3000);
+    islandModule._sheet.form._text.text = 'kept';
+    await pressKey(Clutter.KEY_Escape);
+    const kept = () => notes.store.all().find(n => n.text === 'kept');
+    check(await waitFor(() => islandModule._sheet === null && kept(), 3000), 'Esc keeps what is written');
+    notes.store.remove(kept()?.id);
     await waitFor(() => island.page === null, 1000);
 
     // A new note goes on the left edge: a square paper, of which a strip
