@@ -233,7 +233,12 @@ export class DesktopModule {
         add('Atelier Settings', () => this._extension.openPreferences());
         items.forEach(item => menu.addMenuItem(item));
         this._menus.set(menu, items);
-        menu.connectObject('destroy', () => this._menus.delete(menu), this);
+        // (Gone with its wallpaper, when that changes. The menu is no actor:
+        // its connection would otherwise be kept, and the menu with it.)
+        menu.connectObject('destroy', () => {
+            menu.disconnectObject(this);
+            this._menus.delete(menu);
+        }, this);
     }
 
     /**

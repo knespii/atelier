@@ -427,6 +427,9 @@ export class BarModule {
                     return;
                 }
                 const preview = {page, indicator, island};
+                // (One whose page another took the place of may be left:
+                // it lets go of the island.)
+                this._closePreview(false);
                 this._preview = preview;
                 // (Its own connection: the bar follows the island too.)
                 island.connectObject('notify::hover', () => this._maybeClosePreview(), preview);

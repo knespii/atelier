@@ -289,6 +289,14 @@ export class ProfilesModule {
         form.connect('more', () => run({save: true, more: true}));
         form.connect('cancel', () => run({save: false}));
         sheet.connect('dismissed', () => run({save: false}));
+        // Gone unanswered (Atelier turned off, the screen locked): nothing is
+        // saved, and the copies of the wallpapers go.
+        sheet.connect('destroy', () => {
+            if (done)
+                return;
+            done = true;
+            copies.then(paths => this._dropCopies(paths)).catch(() => {});
+        });
     }
 
     _step(delta) {
