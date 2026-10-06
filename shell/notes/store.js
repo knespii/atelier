@@ -1,6 +1,7 @@
 // The notes, kept in ~/.local/share/atelier/notes.json. Changes are
-// written a moment later (typing doesn't write every key), and right away
-// when the store goes.
+// written a moment later (typing doesn't write every key), in GIO's worker
+// threads – a write waits for the disk, and the shell must not – and right
+// away when the store goes.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -9,7 +10,10 @@ import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {newNote, parseNotes, serializeNotes, sortNotes} from '../../lib/notes.js';
 
+Gio._promisify(Gio.File.prototype, 'replace_contents_bytes_async', 'replace_contents_finish');
+
 const SAVE_DELAY = 600; // milliseconds
+const FLAGS = Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION;
 
 export class NotesStore extends EventEmitter {
     /**
@@ -19,6 +23,10 @@ export class NotesStore extends EventEmitter {
         super();
         this._file = Gio.File.new_for_path(path);
         this._saveId = 0;
+        // Writes under way, one after another (a later one is never
+        // overtaken by an earlier one).
+        this._writing = Promise.resolve();
+        this._writes = 0;
         this._notes = [];
         try {
             const [, contents] = this._file.load_contents(null);
@@ -93,26 +101,35 @@ export class NotesStore extends EventEmitter {
         }
     }
 
+    _contents() {
+        GLib.mkdir_with_parents(this._file.get_parent().get_path(), 0o755);
+        return new TextEncoder().encode(serializeNotes(this._notes));
+    }
+
     _save() {
-        try {
-            this._file.get_parent().make_directory_with_parents(null);
-        } catch {
-            // it exists
-        }
-        try {
-            this._file.replace_contents(new TextEncoder().encode(serializeNotes(this._notes)),
-                null, true, Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION, null);
-        } catch (e) {
-            console.error(`Atelier: the notes could not be saved: ${e.message}`);
-        }
+        const contents = new GLib.Bytes(this._contents());
+        this._writes++;
+        this._writing = this._writing
+            .then(() => this._file.replace_contents_bytes_async(contents, null, true, FLAGS, null))
+            .catch(e => console.error(`Atelier: the notes could not be saved: ${e.message}`))
+            .finally(() => this._writes--);
     }
 
     /** Write what is left to write. */
     destroy() {
-        if (this._saveId) {
-            GLib.source_remove(this._saveId);
-            this._saveId = 0;
+        if (!this._saveId)
+            return;
+        GLib.source_remove(this._saveId);
+        this._saveId = 0;
+        // After a write under way; otherwise at once, as Atelier goes.
+        if (this._writes > 0) {
             this._save();
+            return;
+        }
+        try {
+            this._file.replace_contents(this._contents(), null, true, FLAGS, null);
+        } catch (e) {
+            console.error(`Atelier: the notes could not be saved: ${e.message}`);
         }
     }
 }

@@ -47,6 +47,11 @@ class AtelierNoteTab extends St.Button {
     }
 
     sync(note) {
+        // (Writing another note, as every key changes the notes, leaves
+        // this one as it is.)
+        if (note.title === this._title && note.text === this._text && note.color === this._color)
+            return;
+        [this._title, this._text, this._color] = [note.title, note.text, note.color];
         this.style = paperStyle(note.color);
         this._content.setNote(note.id);
     }
