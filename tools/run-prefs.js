@@ -13,6 +13,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
 import System from 'system';
+import {exportProfile} from '../lib/profileTransfer.js';
 
 for (const name of ['org.gnome.Shell.Extensions.src', 'gnome-shell-dbus-interfaces'])
     Gio.Resource.load(`/usr/share/gnome-shell/${name}.gresource`)._register();
@@ -145,7 +146,18 @@ async function runSelftest(window) {
 
     store.move(copy.id, -1);
     check(store.getAll().at(-2).id === copy.id, 'move up');
-    check(page._rows.length === store.getAll().length, 'list shows every profile');
+    await sleep(100);
+    check(page._rows.length === store.getAll().length, 'a card for every profile');
+    check(page._rows.filter(card => card.has_css_class('active')).length === (store.activeId ? 1 : 0),
+        'the one in use stands out');
+
+    // Exported to a folder and imported back.
+    const count = store.getAll().length;
+    const exported = await exportProfile(renamed, GLib.get_user_cache_dir());
+    const imported = await page._import(exported);
+    await sleep(100);
+    check(imported?.name === 'Renamed' && imported.id !== renamed.id && store.getAll().length === count + 1 &&
+        page._rows.some(card => card.profileId === imported.id), 'an exported profile can be imported');
 
     // Sidebar search narrows the sections.
     const view = window.atelierView;

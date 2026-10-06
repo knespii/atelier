@@ -30,6 +30,24 @@ const CSS = `
   outline: 2px solid @accent_color; outline-offset: -2px;
   background: alpha(@accent_bg_color, 0.12);
 }
+.atelier-profile-card {
+  padding: 10px; border-radius: 18px;
+  background: alpha(currentColor, 0.05);
+}
+.atelier-profile-card.active {
+  outline: 2px solid @accent_color; outline-offset: -2px;
+  background: alpha(@accent_bg_color, 0.1);
+}
+.atelier-profile-thumb { border-radius: 12px; background-color: alpha(currentColor, 0.08); }
+.atelier-switch {
+  min-height: 0; padding: 2px 12px; border-radius: 999px;
+  font-size: 9pt; font-weight: bold;
+}
+.atelier-in-use {
+  padding: 2px 10px; border-radius: 999px;
+  background: @accent_bg_color; color: @accent_fg_color;
+  font-size: 9pt; font-weight: bold;
+}
 .atelier-color-button { min-width: 0; min-height: 0; padding: 4px; border-radius: 999px; }
 .atelier-color-button:checked { outline: 2px solid @accent_color; outline-offset: 1px; }
 .atelier-swatch {

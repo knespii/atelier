@@ -1,6 +1,9 @@
-// "Profiles" page: the list of saved profiles and the ways to create new ones.
+// "Profiles" page: the saved profiles as cards – the wallpaper, what else
+// it sets, "In use" or "Switch" – with renaming, exporting and the rest in
+// their menus, and the ways to create new ones or import them.
 
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
@@ -8,6 +11,7 @@ import Gtk from 'gi://Gtk';
 
 import {ProfileStore, describeProfile, readCurrentAppearance} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, prettyName} from '../lib/paths.js';
+import {exportProfile, readExportedProfile} from '../lib/profileTransfer.js';
 import {getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {readPaletteOptions} from '../lib/wallpaperPalette.js';
@@ -15,6 +19,9 @@ import {ProfileEditor} from './profileEditor.js';
 import {chooseImages, createThumbnail, requestApply, toast} from './widgets.js';
 
 Gio._promisify(Adw.AlertDialog.prototype, 'choose', 'choose_finish');
+Gio._promisify(Gtk.FileDialog.prototype, 'select_folder', 'select_folder_finish');
+
+const DATA_DIR = GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier']);
 
 function shortcutLabel(settings) {
     const [accel] = settings.get_strv('atelier-open-switcher');
@@ -38,13 +45,23 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
 
         this._group = new Adw.PreferencesGroup({title: 'Saved Profiles'});
         this.add(this._group);
+        this._cards = new Gtk.FlowBox({
+            selection_mode: Gtk.SelectionMode.NONE,
+            homogeneous: true,
+            min_children_per_line: 2,
+            max_children_per_line: 3,
+            column_spacing: 12,
+            row_spacing: 12,
+        });
+        this._group.add(this._cards);
 
         const actions = new Adw.PreferencesGroup();
         this.add(actions);
         for (const [title, icon, handler] of [
             ['New Profile…', 'list-add-symbolic', () => this._newProfile()],
-            ['Add Wallpapers…', 'image-x-generic-symbolic', () => this._addWallpapers()],
             ['Save Current Setup…', 'document-save-symbolic', () => this._saveCurrent()],
+            ['Add Wallpapers…', 'image-x-generic-symbolic', () => this._addWallpapers()],
+            ['Import a Profile…', 'document-open-symbolic', () => this._import()],
         ]) {
             const row = new Adw.ButtonRow({title, start_icon_name: icon});
             row.connect('activated', () => handler().catch(e => {
@@ -53,6 +70,20 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
             }));
             actions.add(row);
         }
+
+        const data = new Adw.PreferencesGroup({title: 'Data'});
+        this.add(data);
+        const where = new Adw.ActionRow({
+            title: 'Profiles and their wallpapers',
+            subtitle: DATA_DIR.replace(GLib.get_home_dir(), '~'),
+        });
+        const open = new Gtk.Button({label: 'Open', valign: Gtk.Align.CENTER});
+        open.connect('clicked', () => {
+            GLib.mkdir_with_parents(DATA_DIR, 0o755);
+            new Gtk.FileLauncher({file: Gio.File.new_for_path(DATA_DIR)}).launch(this.get_root(), null, null);
+        });
+        where.add_suffix(open);
+        data.add(where);
 
         this._settingsIds = [
             settings.connect('changed::profiles', () => this._rebuild()),
@@ -76,58 +107,75 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
     }
 
     _rebuild() {
-        this._rows.forEach(row => this._group.remove(row));
+        this._rows.forEach(card => this._cards.remove(card));
         this._rows = [];
+        this._empty?.get_parent()?.remove(this._empty);
 
         const profiles = this._store.getAll();
         const activeId = this._store.activeId;
         if (profiles.length === 0) {
-            const row = new Adw.ActionRow({
+            this._empty ??= new Adw.ActionRow({
                 title: 'No profiles yet',
                 subtitle: 'Add some wallpapers or save your current setup below.',
             });
-            this._group.add(row);
-            this._rows.push(row);
+            this._group.add(this._empty);
             return;
         }
 
         profiles.forEach((profile, index) => {
-            const row = this._createRow(profile, index, profiles.length, profile.id === activeId);
-            this._group.add(row);
-            this._rows.push(row);
+            const card = this._createCard(profile, index, profiles.length, profile.id === activeId);
+            this._cards.append(card);
+            this._rows.push(card);
         });
     }
 
-    _createRow(profile, index, count, active) {
-        const parts = describeProfile(profile).map(({label, value}) => `${label}: ${value}`);
-        const row = new Adw.ActionRow({
-            title: GLib.markup_escape_text(profile.name, -1),
-            subtitle: GLib.markup_escape_text(parts.join(' · ') || 'Wallpaper only', -1),
-            subtitle_lines: 2,
-            activatable: true,
+    _createCard(profile, index, count, active) {
+        const card = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 8,
+            css_classes: active ? ['atelier-profile-card', 'active'] : ['atelier-profile-card'],
         });
-        row.add_prefix(createThumbnail(profile.wallpaper, 96).widget);
-        row.connect('activated', () => this._edit(profile).catch(e => toast(this, e.message)));
+        card.profileId = profile.id;
+        const thumbnail = createThumbnail(profile.wallpaper, 280, 'atelier-profile-thumb').widget;
+        thumbnail.halign = Gtk.Align.FILL;
+        card.append(thumbnail);
+        // Clicking the picture edits it.
+        const click = new Gtk.GestureClick();
+        click.connect('released', () => this._edit(profile).catch(e => toast(this, e.message)));
+        thumbnail.add_controller(click);
+        thumbnail.cursor = Gdk.Cursor.new_from_name('pointer', null);
 
+        const top = new Gtk.Box({spacing: 8});
+        top.append(new Gtk.Label({
+            label: profile.name,
+            xalign: 0,
+            hexpand: true,
+            ellipsize: 3, // end
+            css_classes: ['heading'],
+        }));
         if (active) {
-            row.add_suffix(new Gtk.Image({
-                icon_name: 'object-select-symbolic',
-                tooltip_text: 'Active profile',
-                css_classes: ['accent'],
-            }));
+            top.append(new Gtk.Label({label: 'In use', css_classes: ['atelier-in-use'], valign: Gtk.Align.CENTER}));
+        } else {
+            const apply = new Gtk.Button({label: 'Switch', valign: Gtk.Align.CENTER, css_classes: ['atelier-switch']});
+            apply.connect('clicked', () => {
+                requestApply(this._settings, profile.id);
+                toast(this, `Switching to “${profile.name}”`);
+            });
+            top.append(apply);
         }
+        card.append(top);
 
-        const apply = new Gtk.Button({
-            icon_name: 'media-playback-start-symbolic',
-            tooltip_text: 'Apply',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
-        });
-        apply.connect('clicked', () => {
-            requestApply(this._settings, profile.id);
-            toast(this, `Applying “${profile.name}”`);
-        });
-        row.add_suffix(apply);
+        const bottom = new Gtk.Box({spacing: 4});
+        const parts = describeProfile(profile).map(({value}) => value);
+        bottom.append(new Gtk.Label({
+            label: parts.join(' · ') || 'Wallpaper only',
+            xalign: 0,
+            hexpand: true,
+            wrap: true,
+            lines: 2,
+            ellipsize: 3,
+            css_classes: ['dim-label', 'caption'],
+        }));
 
         const menu = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2});
         const popover = new Gtk.Popover({child: menu});
@@ -145,19 +193,23 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
             menu.append(button);
         };
         addItem('Edit…', () => this._edit(profile));
+        addItem('Rename…', () => this._rename(profile));
         addItem('Duplicate', () => this._duplicate(profile));
-        addItem('Move Up', () => this._store.move(profile.id, -1), {sensitive: index > 0});
-        addItem('Move Down', () => this._store.move(profile.id, 1), {sensitive: index < count - 1});
+        addItem('Export…', () => this._export(profile));
+        if (active)
+            addItem('Restore', () => this._restore(profile));
+        addItem('Move Earlier', () => this._store.move(profile.id, -1), {sensitive: index > 0});
+        addItem('Move Later', () => this._store.move(profile.id, 1), {sensitive: index < count - 1});
         addItem('Delete…', () => this._delete(profile), {destructive: true});
-
-        row.add_suffix(new Gtk.MenuButton({
+        bottom.append(new Gtk.MenuButton({
             icon_name: 'view-more-symbolic',
             tooltip_text: 'More',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
+            valign: Gtk.Align.START,
+            css_classes: ['flat', 'circular'],
             popover,
         }));
-        return row;
+        card.append(bottom);
+        return card;
     }
 
     async _openEditor(profile, initial = null) {
@@ -215,6 +267,66 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
 
     _duplicate(profile) {
         this._store.add({...profile, id: '', name: `${profile.name} (copy)`});
+    }
+
+    async _rename(profile) {
+        const entry = new Gtk.Entry({text: profile.name, activates_default: true});
+        const dialog = new Adw.AlertDialog({
+            heading: 'Rename Profile',
+            extra_child: entry,
+            close_response: 'cancel',
+            default_response: 'rename',
+        });
+        dialog.add_response('cancel', 'Cancel');
+        dialog.add_response('rename', 'Rename');
+        dialog.set_response_appearance('rename', Adw.ResponseAppearance.SUGGESTED);
+        entry.connect('changed', () => dialog.set_response_enabled('rename', entry.text.trim() !== ''));
+        if (await dialog.choose(this, null) !== 'rename')
+            return;
+        this._store.update(profile.id, {name: entry.text.trim()});
+    }
+
+    // Back to the profile as saved (after a wallpaper for now, say).
+    _restore(profile) {
+        requestApply(this._settings, profile.id);
+        toast(this, `“${profile.name}” is as saved again`);
+    }
+
+    async _export(profile) {
+        const dialog = new Gtk.FileDialog({title: 'Export to a Folder', modal: true});
+        let folder;
+        try {
+            folder = await dialog.select_folder(this.get_root(), null);
+        } catch (e) {
+            if (e.matches?.(Gtk.DialogError, Gtk.DialogError.DISMISSED))
+                return;
+            throw e;
+        }
+        const dir = await exportProfile(profile, folder.get_path());
+        toast(this, `Exported to ${GLib.path_get_basename(dir)}`);
+    }
+
+    async _import(path = null) {
+        if (!path) {
+            const dialog = new Gtk.FileDialog({title: 'Import an Exported Profile', modal: true});
+            try {
+                path = (await dialog.select_folder(this.get_root(), null)).get_path();
+            } catch (e) {
+                if (e.matches?.(Gtk.DialogError, Gtk.DialogError.DISMISSED))
+                    return null;
+                throw e;
+            }
+        }
+        const profile = await readExportedProfile(path);
+        for (const key of ['wallpaper', 'wallpaperDark']) {
+            if (profile[key])
+                profile[key] = await importWallpaper(profile[key]);
+        }
+        const added = this._store.add({...profile, id: ''});
+        if (profile.wallpaper)
+            ensureThumbnail(profile.wallpaper).catch(() => {});
+        toast(this, `Imported “${profile.name}”`);
+        return added;
     }
 
     async _delete(profile) {
