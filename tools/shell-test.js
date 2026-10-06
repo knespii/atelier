@@ -1703,6 +1703,23 @@ async function testQuitWithControlCentreOpen(ext) {
         'the control centre is open as the shell quits');
 }
 
+// The shell quits with the island's layout, the bar's and the dock's
+// places and the dock's check still to come: none of it may run once GNOME
+// has taken its UI down (tools/shell-test.sh checks the log).
+function testQuitWithWorkQueued(ext) {
+    const modules = ext.stateObj.modules;
+    const island = modules.get('island');
+    const bar = modules.get('bar');
+    const dock = modules.get('dock')?.dock;
+    island?._queueLayout();
+    bar?._queuePlace();
+    dock?._queueRedisplay();
+    dock?._queuePlace();
+    dock?._queueCheck();
+    check(island?._laterId && bar?._laterId && dock?._laterId && dock._placeId && dock._timeouts.has('check'),
+        'layout, places and a check still to come as the shell quits');
+}
+
 export async function run() {
     // GNOME's helper for these scripts quits after a while without calls,
     // and the shell then exits at once instead of shutting down as at the
@@ -1747,6 +1764,7 @@ export async function run() {
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
+            testQuitWithWorkQueued(ext);
             return;
         }
 
@@ -1771,6 +1789,7 @@ export async function run() {
         await testNewProfile(ext, atelier);
         await testDisableCleansUp(atelier);
         await testQuitWithControlCentreOpen(ext);
+        testQuitWithWorkQueued(ext);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
     } finally {

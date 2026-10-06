@@ -137,6 +137,15 @@ if [ -f "$ROOT/results.txt" ]; then
     else
         echo "PASS  nothing is left to the garbage collector as the shell shuts down" >> "$ROOT/results.txt"
     fi
+    # The main loop turns a while longer then: what waited for a frame or a
+    # timeout must not run and touch the actors that are gone.
+    if [ -n "$exit_log" ]; then
+        if printf '%s\n' "$exit_log" | grep -m 5 -A 4 -E "already disposed|not in the stage"; then
+            echo "FAIL  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"
+        else
+            echo "PASS  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"
+        fi
+    fi
     cat "$ROOT/results.txt"
     ! grep -q '^FAIL' "$ROOT/results.txt"
 else
