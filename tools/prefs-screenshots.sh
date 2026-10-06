@@ -9,13 +9,28 @@ ROOT="$PWD/tests/output/prefs"
 SOCKET=atelier-prefs-0
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT/config" "$ROOT/data" "$ROOT/cache"
+mkdir -p "$ROOT/config" "$ROOT/data" "$ROOT/cache" "$ROOT/bin"
 mkdir -m 700 "$ROOT/runtime"
+
+# The helper services the session starts could outlive it; they go with it,
+# also when this is stopped. (No input method: one left behind once ate all
+# the memory.)
+cleanup() {
+    for dir in /proc/[0-9]*; do
+        if grep -qzxF "ATELIER_PREFS_OUTPUT=$ROOT" "$dir/environ" 2>/dev/null; then
+            kill "${dir#/proc/}" 2>/dev/null || true
+        fi
+    done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+printf '#!/bin/sh\nexit 0\n' > "$ROOT/bin/ibus-daemon"
+chmod +x "$ROOT/bin/ibus-daemon"
 
 # A private runtime dir keeps the helper services this session starts away
 # from the sockets of the real session (keyring, gvfs, document portal...).
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_DISPLAY -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
-    XDG_RUNTIME_DIR="$ROOT/runtime" \
+    XDG_RUNTIME_DIR="$ROOT/runtime" PATH="$ROOT/bin:$PATH" ATELIER_PREFS_OUTPUT="$ROOT" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
     GSETTINGS_BACKEND=memory GDK_DEBUG=no-portals NO_AT_BRIDGE=1 ROOT="$ROOT" SOCKET="$SOCKET" \
     dbus-run-session -- sh -c '

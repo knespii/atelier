@@ -24,9 +24,24 @@ UUID="atelier@local"
 BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache"
+mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache" "$ROOT/bin"
 mkdir -m 700 "$ROOT/runtime"
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
+
+# The helper services the session starts (calendar, accounts, files...)
+# could outlive it; they go with it, also when the test is stopped. An input
+# method left behind once ate all the memory, so the session gets none.
+cleanup() {
+    for dir in /proc/[0-9]*; do
+        if grep -qzxF "ATELIER_TEST_OUTPUT=$ROOT" "$dir/environ" 2>/dev/null; then
+            kill "${dir#/proc/}" 2>/dev/null || true
+        fi
+    done
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+printf '#!/bin/sh\nexit 0\n' > "$ROOT/bin/ibus-daemon"
+chmod +x "$ROOT/bin/ibus-daemon"
 
 # A deliberately hostile, outdated shell theme: the switcher must stay usable.
 mkdir -p "$ROOT/data/themes/Hostile/gnome-shell"
@@ -104,7 +119,7 @@ status=0
 # A private runtime dir keeps the helper services this session starts away
 # from the sockets of the real session (keyring, gvfs, document portal...).
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
-    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" \
+    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" PATH="$ROOT/bin:$PATH" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 180 \
