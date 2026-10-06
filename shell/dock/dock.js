@@ -260,13 +260,24 @@ export class Dock {
         this._sync();
     }
 
+    // On it, or below it on the way to the edge that brought it.
+    _pointerAtDock() {
+        const [x, y] = global.get_pointer();
+        const monitor = Main.layoutManager.primaryMonitor;
+        return x >= this.actor.x && x < this.actor.x + this.actor.width &&
+            y >= this.actor.y && y < monitor.y + monitor.height;
+    }
+
     _reveal() {
         this._revealed = true;
         this._sync();
-        // Away again once the pointer isn't on it (after a moment to get there).
+        // Away again once the pointer isn't on it (after a moment to get
+        // there). Still at the edge, it stays: going, it would uncover the
+        // edge under the pointer, which brings it back – up and down for as
+        // long as the pointer rests there.
         this._clear('revealed');
         this._timeouts.set('revealed', GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-            if (this._container.hover)
+            if (this._container.hover || this._pointerAtDock())
                 return GLib.SOURCE_CONTINUE;
             this._timeouts.delete('revealed');
             this._revealed = false;
@@ -276,6 +287,9 @@ export class Dock {
     }
 
     _sync() {
+        // (A menu of it closing as it goes, say.)
+        if (this._destroyed)
+            return;
         const intellihide = this._settings.get_boolean('intellihide');
         const away = Main.overview.visible ||
             (intellihide && this._overlapped && !this._forced && !this._container.hover && !this._revealed);
@@ -303,6 +317,8 @@ export class Dock {
 
     _after(name, delay, callback) {
         this._clear(name);
+        if (this._destroyed)
+            return;
         this._timeouts.set(name, GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             this._timeouts.delete(name);
             callback();
@@ -381,6 +397,9 @@ export class Dock {
     }
 
     destroy() {
+        // Its icons' menus close as they go, and say so: nothing is started
+        // anew from here on.
+        this._destroyed = true;
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         for (const id of [this._laterId, this._placeId]) {
