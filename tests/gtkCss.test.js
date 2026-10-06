@@ -86,12 +86,15 @@ export async function testLeavesForeignFilesAlone() {
     const result = await writeStylesheet(path, `${MARKER} x */\n`);
     assertEqual(result.ok, false);
     assertEqual(read(path), '/* my own tweaks */', 'user file untouched');
-    assertEqual((await writeStylesheet(path, null)).ok, false, 'and never deleted');
+    // With nothing to write (GTK apps not colored), it is no problem.
+    assertEqual(await writeStylesheet(path, null), {ok: true, changed: false}, 'nothing to write over it');
+    assertEqual(read(path), '/* my own tweaks */', 'and never deleted');
 
     const linkPath = fn(config, 'gtk-4.0-links', 'gtk.css');
     GLib.mkdir_with_parents(GLib.path_get_dirname(linkPath), 0o755);
     Gio.File.new_for_path(linkPath).make_symbolic_link(fn(modern, 'gtk-4.0', 'gtk.css'), null);
     assertEqual((await writeStylesheet(linkPath, `${MARKER} x */\n`)).ok, false, 'foreign link kept');
+    assertEqual(await writeStylesheet(linkPath, null), {ok: true, changed: false}, 'nothing to write over the link');
     assertEqual(target(linkPath), fn(modern, 'gtk-4.0', 'gtk.css'));
 }
 
