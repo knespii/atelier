@@ -116,7 +116,7 @@ export class BarModule {
             box.connectObject('notify::allocation', () => this._queuePlace(), this);
         Main.layoutManager.panelBox.connectObject(
             'notify::allocation', () => this._queuePlace(),
-            'notify::visible', () => this._queuePlace(),
+            'notify::visible', () => this._place(),
             this);
         this._followIsland();
         this._sync();
@@ -260,6 +260,11 @@ export class BarModule {
         if (!this._look)
             return;
         const panel = Main.panel;
+        // With GNOME's bar away (a window full screen), nothing of it shows.
+        if (!Main.layoutManager.panelBox.visible || !panel.visible) {
+            this._surfaces.forEach(surface => surface.hide());
+            return;
+        }
         // Placed once the bar is laid out anew, e.g. after a style change.
         // (Hidden, it waits until it shows again.)
         if (!panel.has_allocation()) {

@@ -694,6 +694,52 @@ async function testControlCentre(ext) {
     indicator.destroy();
 }
 
+// A window full screen on the main monitor: nothing of the bar, the island
+// or their glass stays on it, whatever the look. (Full screen as GNOME's
+// layout manager sees it.)
+async function testFullscreen(ext) {
+    const bar = ext.stateObj._settings.get_child('bar');
+    const layout = Main.layoutManager;
+    const monitor = layout.primaryMonitor;
+    const shown = () => layout.uiGroup.get_children()
+        .filter(a => a.visible && a.opacity > 0 &&
+            ['atelier-glass', 'atelier-island', 'atelier-notch-ear'].some(name => hasClass(a, name)))
+        .map(a => a.get_style_class_name());
+    // (The monitor asks mutter; here it says full screen for a while.)
+    const fullscreen = async on => {
+        if (on)
+            Object.defineProperty(monitor, 'inFullscreen', {value: true, configurable: true});
+        else
+            delete monitor.inFullscreen;
+        layout._updateVisibility();
+        await Scripting.sleep(400);
+    };
+    try {
+        for (const [style, surface, shape] of [
+            ['spread', 'glass', 'notch'], ['grouped', 'glass', 'notch'], ['island', 'classic', 'notch'],
+            ['grouped', 'classic', 'floating'], ['gnome', 'glass', 'floating'],
+        ]) {
+            bar.set_string('style', style);
+            bar.set_string('surface', surface);
+            bar.set_string('island-shape', shape);
+            await Scripting.sleep(500);
+            const before = shown().length;
+            await fullscreen(true);
+            const during = shown();
+            await screenshotArea(`23-fullscreen-${style}-${surface}-${shape}`, 0, 0, global.stage.width, 120);
+            await fullscreen(false);
+            const after = shown().length;
+            check(before > 0 && during.length === 0 && after === before,
+                `full screen, nothing of the bar or the island (${style}, ${surface}, ${shape}): ${during.join(', ') || 'none'}`);
+        }
+    } finally {
+        delete monitor.inFullscreen;
+        layout._updateVisibility();
+        ['style', 'surface', 'island-shape'].forEach(key => bar.reset(key));
+        await Scripting.sleep(400);
+    }
+}
+
 async function testOverviewBar() {
     await restPointer();
     Main.overview.show();
@@ -1845,6 +1891,7 @@ export async function run() {
         await testControlCentre(ext);
         await testOverviewBar();
         await testBarStyles(ext);
+        await testFullscreen(ext);
         await testClaude(ext);
         await testDesktop(ext);
         await testNotes(ext);

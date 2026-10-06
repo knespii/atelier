@@ -63,6 +63,8 @@ export class Dock {
             this._container.add_style_class_name('atelier-dock-glassy');
             for (const signal of ['notify::translation-y', 'notify::allocation'])
                 this._container.connect(signal, () => this._syncGlass());
+            // (Away with the dock, as when a window is full screen.)
+            this.actor.connect('notify::visible', () => this._syncGlass());
         }
 
         this._separator = new St.Widget({style_class: 'atelier-dock-separator', y_align: Clutter.ActorAlign.CENTER});
