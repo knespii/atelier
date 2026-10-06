@@ -25,7 +25,15 @@ BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache"
-mkdir -m 700 "$ROOT/runtime"
+# The Wayland socket's path has to fit in 108 bytes, too few in a deep
+# checkout (a git worktree, say): the runtime dir is in /tmp then.
+RUNTIME="$ROOT/runtime"
+if [ ${#RUNTIME} -gt 90 ]; then
+    RUNTIME=$(mktemp -d)
+    trap 'rm -rf "$RUNTIME"' EXIT
+else
+    mkdir -m 700 "$RUNTIME"
+fi
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
 
 # A deliberately hostile, outdated shell theme: the switcher must stay usable.
@@ -103,8 +111,9 @@ EOF
 status=0
 # A private runtime dir keeps the helper services this session starts away
 # from the sockets of the real session (keyring, gvfs, document portal...).
+# gvfs mounts nothing in it, so that it can be removed.
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
-    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$ROOT/runtime" \
+    WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 180 \
