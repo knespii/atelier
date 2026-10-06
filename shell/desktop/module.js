@@ -2,6 +2,7 @@
 // look (dark glass) or the Analogue one (paper). Where they are is kept in
 // the settings; the desktop's right-click menu edits them.
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
@@ -12,6 +13,7 @@ import * as BackgroundMenu from 'resource:///org/gnome/shell/ui/backgroundMenu.j
 import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAnimation.js';
 
 import {keepWidgets} from '../../lib/profiles.js';
 import {
@@ -137,6 +139,16 @@ export class DesktopModule {
                 desktop._extendMenu(this);
                 return original.call(this, ...args);
             });
+        // Switching workspaces, GNOME slides copies of their wallpapers (and
+        // desktop windows) over the desktop: the widgets go on them too, or
+        // they would be gone until the switch is over.
+        if (WorkspaceAnimation.WorkspaceGroup?.prototype._createDesktopWindows) {
+            this._injections.overrideMethod(WorkspaceAnimation.WorkspaceGroup.prototype, '_createDesktopWindows',
+                original => function (...args) {
+                    original.call(this, ...args);
+                    desktop._joinWorkspaceSwitch(this);
+                });
+        }
 
         this._syncArea();
         this._syncLook(false);
@@ -172,6 +184,18 @@ export class DesktopModule {
             group.add_child(this._layer);
         if (this._area)
             this._layer.set_position(this._area.x, this._area.y);
+    }
+
+    // A copy of the widgets, where they are, on a wallpaper that slides
+    // while workspaces switch. (Only the main monitor has them.)
+    _joinWorkspaceSwitch(group) {
+        const monitor = group._monitor;
+        if (!this._layer || this._editor || !this._area || !group._background ||
+            monitor?.index !== Main.layoutManager.primaryIndex)
+            return;
+        const copy = new Clutter.Clone({source: this._layer});
+        copy.set_position(this._area.x - monitor.x, this._area.y - monitor.y);
+        group._background.add_child(copy);
     }
 
     /** Edit the widgets: they come up over the windows. */

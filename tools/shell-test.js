@@ -895,6 +895,31 @@ async function testDesktop(ext) {
     await restPointer();
     await screenshotArea('40-desktop-modern', 0, 0, 900, 700);
 
+    // Switching workspaces, they slide along with the wallpaper rather than
+    // be gone until the switch is over.
+    const [clockLeft, clockTop, clockWidth, clockHeight] = [clockX, clockY, clock.width, clock.height].map(Math.round);
+    await screenshotArea('44-desktop-still', clockLeft, clockTop, clockWidth, clockHeight);
+    const still = averageColor('44-desktop-still', 0, 0, clockWidth, clockHeight);
+    const switcher = Main.wm._workspaceAnimation;
+    switcher._prepareWorkspaceSwitch();
+    const monitorGroup = switcher._switchData.monitors.find(m => m.index === Main.layoutManager.primaryIndex);
+    await Scripting.sleep(200);
+    await screenshotArea('45-desktop-switching', clockLeft, clockTop, clockWidth, clockHeight);
+    const copies = monitorGroup._workspaceGroups.map(group => group._background.get_children()
+        .filter(child => child instanceof Clutter.Clone && child.source === layer).length);
+    const switching = averageColor('45-desktop-switching', 0, 0, clockWidth, clockHeight);
+    check(copies.length > 0 && copies.every(n => n === 1) && colorDistance(switching, still) < 10,
+        `switching workspaces, the widgets are on each workspace's wallpaper (${copies}; ${switching} for ${still})`);
+    const shift = Math.round(monitorGroup.baseDistance / 4);
+    monitorGroup._container.x = shift;
+    await Scripting.sleep(200);
+    await screenshotArea('46-desktop-sliding', clockLeft + shift, clockTop, clockWidth, clockHeight);
+    await screenshotArea('46-desktop-sliding-wide', 0, 0, 1200, 760);
+    check(colorDistance(averageColor('46-desktop-sliding', 0, 0, clockWidth, clockHeight), still) < 10,
+        'and slide along with it');
+    switcher._finishWorkspaceSwitch(switcher._switchData);
+    await Scripting.sleep(200);
+
     // The desktop's menu edits them.
     const background = Main.layoutManager._bgManagers[0].backgroundActor;
     background._backgroundMenu.open();
