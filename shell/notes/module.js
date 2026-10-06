@@ -1,8 +1,8 @@
 // Notes: pinned to the screen's left (or right) edge as square papers, like
-// sticky notes – the same whatever the profile. A new one is written on a
-// sheet that drips from the island (from the desktop's menu, or the Notes
-// tab); they are read and changed in the island (the control centre's Notes
-// tab), which a shortcut opens.
+// sticky notes – the same whatever the profile. One is written on a sheet
+// that drips from the island: a new one (from the desktop's menu, or the
+// Notes tab), or one clicked on (its paper on the edge, or in the Notes tab,
+// the island's place for all of them, which a shortcut opens).
 
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -34,6 +34,7 @@ export class NotesModule {
         // The control centre's Notes tab; it outlives the control centre.
         this.view = new NotesView(this.store);
         this.view.connect('create-request', () => this.create());
+        this.view.connect('open-request', (_, id) => this.edit(id));
         this._edges = new EdgeTabs(this.store, id => this.open(id));
 
         this._notesSettings.connectObject('changed::edges-on-desktop-only', () => this._syncEdges(), this);
@@ -85,61 +86,83 @@ export class NotesModule {
     }
 
     /**
-     * Open the notes in the island.
+     * Open the notes: one on a sheet that drips from the island, or the
+     * papers in the island's Notes tab.
      *
-     * @param {string|null} [id] - a note to write, or the list
+     * @param {string|null} [id] - a note to write, or the papers
      * @param {object} [options]
      * @param {boolean} [options.create] - a new note
      */
     open(id = null, {create = false} = {}) {
-        if (create) {
+        if (create)
             this.create();
-            return;
-        }
-        this._openTab(id);
+        else if (id)
+            this.edit(id);
+        else
+            this._openTab();
+    }
+
+    /** Write a new note, on a sheet that drips from the island. */
+    create() {
+        this._openSheet(null);
     }
 
     /**
-     * Write a new note, on a sheet that drips from the island; saved there,
-     * or kept when let go of with something on it (Esc, a click beside).
-     * Without the island to drip from, in the Notes tab.
+     * Change a note, on a sheet that drips from the island.
+     *
+     * @param {string} id
      */
-    create() {
-        const controlCentre = this._modules.get('control-centre');
+    edit(id) {
+        const note = this.store?.get(id);
+        if (note)
+            this._openSheet(note);
+    }
+
+    // A note on a sheet: saved, or kept when let go of (Esc, a click beside),
+    // with something on it – emptied, it goes; archived or deleted from
+    // there. (No island to drip from: the papers in the Notes tab.)
+    _openSheet(note) {
         // (A page in the island goes back into it as the drop forms.)
-        controlCentre?.close();
-        const form = new NoteSheet();
+        this._modules.get('control-centre')?.close();
+        const form = new NoteSheet(note);
         const sheet = this._modules.get('island')?.openSheet(form) ?? null;
         if (!sheet) {
             form.destroy();
-            this._openTab(null, {create: true});
+            this._openTab();
             return;
         }
         let done = false;
-        const finish = keep => {
+        const finish = action => {
             if (done)
                 return;
             done = true;
-            if (keep && !form.empty)
-                this.store?.create(form.fields);
+            const store = this.store;
+            const fields = form.fields;
+            if (store && note && store.get(note.id)) {
+                if (action === 'delete' || (action === 'keep' && form.empty))
+                    store.remove(note.id);
+                else if (action === 'keep')
+                    store.update(note.id, fields);
+                else if (action === 'archive')
+                    store.update(note.id, {...fields, archived: !note.archived});
+            } else if (store && !note && action === 'keep' && !form.empty) {
+                store.create(fields);
+            }
             sheet.close();
         };
-        form.connect('save', () => finish(true));
-        form.connect('cancel', () => finish(false));
-        sheet.connect('dismissed', () => finish(true));
+        form.connect('save', () => finish('keep'));
+        form.connect('cancel', () => finish('cancel'));
+        form.connect('archive', () => finish('archive'));
+        form.connect('delete', () => finish('delete'));
+        sheet.connect('dismissed', () => finish('keep'));
     }
 
-    _openTab(id, {create = false} = {}) {
+    _openTab() {
         const controlCentre = this._modules.get('control-centre');
         if (!controlCentre?.available)
             return;
         controlCentre.open('notes');
-        if (create)
-            this.view.editNew();
-        else if (id)
-            this.view.edit(id);
-        else
-            this.view.showGrid();
+        this.view.showGrid();
         this.view.focus();
     }
 }

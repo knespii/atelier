@@ -1286,6 +1286,14 @@
   spacing: 6px;
 }
 
+.atelier-sheet-icon {
+  padding: 8px 10px;
+}
+
+.atelier-sheet-icon StIcon {
+  icon-size: 16px;
+}
+
 .atelier-note-sheet-color {
   width: 22px;
   height: 22px;

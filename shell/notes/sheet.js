@@ -1,7 +1,8 @@
-// The form on the sheet that drips from the island for a new note: a paper
-// to write on – its title and its text, a line starting with "- [ ]" a
-// checkbox – in one of the paper colors, and the edge it is pinned to.
-// Ctrl+Enter saves it from anywhere on it.
+// The form on the sheet that drips from the island for a note, new or not:
+// a paper to write on – its title and its text, a line starting with "- [ ]"
+// a checkbox – in one of the paper colors, and the edge it is pinned to; one
+// that is there already can be archived or deleted, too. Ctrl+Enter saves
+// it from anywhere on it.
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -17,22 +18,28 @@ export const NoteSheet = GObject.registerClass({
     Signals: {
         'save': {},
         'cancel': {},
+        'archive': {},
+        'delete': {},
     },
 }, class AtelierNoteSheet extends St.BoxLayout {
-    _init() {
+    /**
+     * @param {object|null} [note] - the note to change; none for a new one
+     */
+    _init(note = null) {
         super._init({style_class: 'atelier-note-sheet', orientation: Clutter.Orientation.VERTICAL});
         // As new notes are: yellow, on the left edge.
-        this._color = 'yellow';
-        this._pin = 'left';
+        this._color = note?.color ?? 'yellow';
+        this._pin = note ? note.pin : 'left';
 
         // The paper: its title, and its text from the top, scrolled when
         // long; a click under it writes on.
         this._paper = new St.BoxLayout({style_class: 'atelier-note-sheet-paper', orientation: Clutter.Orientation.VERTICAL});
-        this._title = new St.Entry({style_class: 'atelier-note-title-entry', hint_text: 'Title', can_focus: true});
+        this._title = new St.Entry({style_class: 'atelier-note-title-entry', hint_text: 'Title', can_focus: true,
+            text: note?.title ?? ''});
         this._title.clutter_text.connect('activate', () => this._text.grab_key_focus());
         this._paper.add_child(this._title);
         this._text = new St.Entry({style_class: 'atelier-note-text-entry', hint_text: 'Write something…',
-            can_focus: true, x_expand: true});
+            can_focus: true, x_expand: true, text: note?.text ?? ''});
         const text = this._text.clutter_text;
         text.single_line_mode = false;
         text.activatable = false;
@@ -102,6 +109,22 @@ export const NoteSheet = GObject.registerClass({
             return b;
         };
         button('Checkbox', () => this._toggleCheckbox(), 'atelier-sheet-flat');
+        // One that is there already: into the archive (or out of it), or gone.
+        if (note) {
+            for (const [icon, name, signal] of [
+                ['package-x-generic-symbolic', note.archived ? 'Unarchive' : 'Archive', 'archive'],
+                ['user-trash-symbolic', 'Delete', 'delete'],
+            ]) {
+                const b = new St.Button({
+                    style_class: 'atelier-sheet-button atelier-sheet-icon',
+                    accessible_name: name,
+                    can_focus: true,
+                    child: new St.Icon({icon_name: icon}),
+                });
+                b.connect('clicked', () => this.emit(signal));
+                buttons.add_child(b);
+            }
+        }
         buttons.add_child(new St.Widget({x_expand: true}));
         button('Cancel', () => this.emit('cancel'));
         this._save = button('Save', () => this.emit('save'), 'atelier-sheet-primary');
@@ -121,6 +144,8 @@ export const NoteSheet = GObject.registerClass({
 
     focus() {
         this._text.grab_key_focus();
+        // (At the end of what is written.)
+        this._text.clutter_text.set_cursor_position(-1);
     }
 
     _onKey(event) {

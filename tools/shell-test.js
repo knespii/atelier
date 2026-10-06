@@ -1194,6 +1194,23 @@ async function testNotes(ext) {
     box?.get_first_child().emit('clicked', 1);
     check(notes.store.get(id).text.includes('- [x] milk'), 'a checkbox is ticked off right on the paper');
 
+    // A paper clicked on there: the note on a sheet, as it is; changed
+    // there, it is kept when let go of.
+    papers().find(child => child.child?._id === id).emit('clicked', 1);
+    check(await waitFor(() => islandModule._sheet?.opened && island.page === null, 3000),
+        'a paper in the tab opens on a sheet, the tab going back into the island');
+    form = islandModule._sheet.form;
+    check(form._title.text === 'Groceries' && form._color === 'mint' && form._text.text.includes('- [x] milk') &&
+        form._pin === 'left', 'the note as it is');
+    form._text.text = `${form._text.text}\neggs`;
+    await screenshot('52-note-sheet-open');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => islandModule._sheet === null && notes.store.get(id).text.endsWith('eggs'), 3000),
+        'changed there, it is kept when let go of');
+    notes.open();
+    await waitFor(() => island.page?.tab === 'notes', 1000);
+    await Scripting.sleep(300);
+
     // "New note" there drips a sheet too; Cancel throws it away, Esc keeps
     // what is written.
     papers().find(child => hasClass(child, 'atelier-note-new')).emit('clicked', 1);
@@ -1266,11 +1283,32 @@ async function testNotes(ext) {
     const back = notes._edges._tabs.get(id);
     check(Boolean(back?.mapped) && !global.window_group.contains(back), 'over the windows again');
 
-    // Archived, it leaves the edge and the papers.
-    notes.store.update(id, {archived: true});
+    // Its paper on the edge opens it too; archived from the sheet, it leaves
+    // the edge and the papers.
+    notes._edges._tabs.get(id).emit('clicked', 1);
+    check(await waitFor(() => islandModule._sheet?.opened && islandModule._sheet.form._title.text === 'Groceries', 3000),
+        'its paper on the edge opens it on a sheet');
+    const button = (root, name) => {
+        for (const child of root.get_children()) {
+            if (child.accessible_name === name)
+                return child;
+            const found = button(child, name);
+            if (found)
+                return found;
+        }
+        return null;
+    };
+    button(islandModule._sheet.form, 'Archive')?.emit('clicked', 1);
+    check(await waitFor(() => islandModule._sheet === null, 3000) && !notes._edges._tabs.has(id) &&
+        !notes.store.all().some(n => n.id === id) && notes.store.all({archived: true}).some(n => n.id === id),
+        'archived, it is in the archive only');
+    // Deleted from a sheet, it is gone.
+    const scrap = notes.store.create({title: 'Scrap'});
     await Scripting.sleep(300);
-    check(!notes._edges._tabs.has(id) && !notes.store.all().some(n => n.id === id) &&
-        notes.store.all({archived: true}).some(n => n.id === id), 'archived, it is in the archive only');
+    notes._edges._tabs.get(scrap.id).emit('clicked', 1);
+    await waitFor(() => islandModule._sheet?.opened, 3000);
+    button(islandModule._sheet.form, 'Delete')?.emit('clicked', 1);
+    check(await waitFor(() => islandModule._sheet === null && !notes.store.get(scrap.id), 3000), 'deleted from a sheet, it is gone');
     notes.store.remove(id);
     notes.store.destroy(); // writes now
     const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'notes.json']));
