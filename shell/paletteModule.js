@@ -26,6 +26,8 @@ export class PaletteModule extends Signals.EventEmitter {
         this._palette = null;
         this._timeoutId = 0;
         this._serial = 0;
+        this._monitor = null;
+        this._watched = null;
     }
 
     /** @returns {object|null} the palette in use */
@@ -70,6 +72,7 @@ export class PaletteModule extends Signals.EventEmitter {
             GLib.source_remove(this._timeoutId);
         this._timeoutId = 0;
         this._serial++;
+        this._watch(null);
 
         this._background.disconnectObject(this);
         this._interface.disconnectObject(this);
@@ -103,10 +106,41 @@ export class PaletteModule extends Signals.EventEmitter {
         });
     }
 
+    /**
+     * Follow the wallpaper's file itself: a picture set from another app
+     * (through the wallpaper portal) always goes to ~/.config/background,
+     * so the setting stays the same while the picture changes.
+     *
+     * @param {string|null} path
+     */
+    _watch(path) {
+        if (path === this._watched)
+            return;
+        this._monitor?.disconnectObject(this);
+        this._monitor?.cancel();
+        this._monitor = null;
+        this._watched = path;
+        if (!path)
+            return;
+        try {
+            this._monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.NONE, null);
+        } catch (e) {
+            console.warn(`Atelier: ${path} can't be followed: ${e.message}`);
+            return;
+        }
+        // As GNOME's own backgrounds do: CHANGED and CREATED are followed
+        // by CHANGES_DONE_HINT once the file is complete.
+        this._monitor.connectObject('changed', (_monitor, _file, _other, event) => {
+            if (event !== Gio.FileMonitorEvent.CHANGED && event !== Gio.FileMonitorEvent.CREATED)
+                this._queue();
+        }, this);
+    }
+
     async _recompute() {
         const serial = ++this._serial;
-        const palette = await paletteForWallpaper(this._currentWallpaper(),
-            readPaletteOptions(this._paletteSettings));
+        const wallpaper = this._currentWallpaper();
+        this._watch(wallpaper);
+        const palette = await paletteForWallpaper(wallpaper, readPaletteOptions(this._paletteSettings));
         // Superseded by a newer change, or disabled meanwhile.
         if (serial !== this._serial || !this._theme)
             return;

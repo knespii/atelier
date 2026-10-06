@@ -135,7 +135,7 @@ rm ~/.local/share/gnome-shell/extensions/bg-changer@local
 | --- | --- |
 | Profiles and settings | GSettings `org.gnome.shell.extensions.atelier` |
 | Copies of the wallpapers | `~/.local/share/atelier/wallpapers/` |
-| Thumbnails, generated shell styles | `~/.cache/atelier/` |
+| Thumbnails, smaller copies of the photo widget's pictures, generated shell styles | `~/.cache/atelier/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |
 
