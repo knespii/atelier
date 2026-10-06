@@ -25,13 +25,14 @@ export const CalendarWidget = GObject.registerClass(
 class AtelierCalendarWidget extends DesktopWidget {
     build(box, size) {
         if (!this._clock) {
-            // GNOME's calendar knows the events; the clock says when the day
-            // changes.
+            // GNOME's calendar knows the events, of the month it shows (this
+            // one, but while someone leafs through it). The clock says when
+            // the day changes.
             this._events = Main.panel.statusArea.dateMenu?._eventSource ?? null;
             this._events?.connectObject('changed', () => this._sync(), this);
-            this._context.sources.tasks.connectObject('changed', () => this._sync(), this);
+            this._context.sources.tasks.connectObject('changed', () => this._syncAgenda(), this);
             this._clock = new GnomeDesktop.WallClock({time_only: true});
-            this._clock.connectObject('notify::clock', () => this._sync(), this);
+            this._clock.connectObject('notify::clock', () => this._tick(), this);
         }
         if (size === 'large') {
             const header = new St.BoxLayout({style_class: 'atelier-widget-header'});
@@ -59,25 +60,32 @@ class AtelierCalendarWidget extends DesktopWidget {
             y_expand: true,
         });
         box.add_child(this._agenda);
-        this._day = null;
         this._sync();
     }
 
+    // Everything anew: the days (and their dots) and the agenda.
     _sync() {
         if (!this._agenda)
             return;
         const today = dayStart(new Date());
-        if (this._day?.getTime() !== today.getTime()) {
-            this._day = today;
-            // This month's events (the card shows a few days beyond it).
-            const first = new Date(today.getFullYear(), today.getMonth(), 1);
-            this._events?.requestRange(addDays(first, -7), addDays(new Date(today.getFullYear(), today.getMonth() + 1, 1), 7));
-        }
+        this._day = today.getTime();
         if (this._grid)
             this._syncMonth(today);
         else
             this._syncWeek(today);
-        this._syncAgenda(today);
+        this._syncAgenda();
+    }
+
+    // The clock ticks every minute, or every second when it shows seconds:
+    // the days change at midnight, what's left of today as events end.
+    _tick() {
+        if (!this._agenda)
+            return;
+        const now = new Date();
+        if (dayStart(now).getTime() !== this._day)
+            this._sync();
+        else if (Math.floor(now.getTime() / 60000) !== this._minute)
+            this._syncAgenda();
     }
 
     _hasEvents(day) {
@@ -141,11 +149,15 @@ class AtelierCalendarWidget extends DesktopWidget {
         }
     }
 
-    _syncAgenda(today) {
+    _syncAgenda() {
+        if (!this._agenda)
+            return;
         this._agenda.destroy_all_children();
         const tasks = this._context.sources.tasks;
         const room = this.entry.size === 'large' ? 4 : 3;
         const now = new Date();
+        this._minute = Math.floor(now.getTime() / 60000);
+        const today = dayStart(now);
         const tomorrow = addDays(today, 1);
         const events = this._events?.hasCalendars
             ? this._events.getEvents(today, tomorrow).filter(event => event.end > now)
