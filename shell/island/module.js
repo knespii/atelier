@@ -127,6 +127,11 @@ export class IslandModule {
             this);
         this._slot.connectObject('notify::allocation', () => this._queueLayout(), this);
         Main.layoutManager.panelBox.connectObject('notify::allocation', () => this._queueLayout(), this);
+        // (Its glass is of the wallpaper in the overview.)
+        Main.overview.connectObject(
+            'showing', () => this._syncShape(),
+            'hidden', () => this._syncShape(),
+            this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'changed', () => this._queueLayout(true),
             'notify::scale-factor', () => this._queueLayout(true),
@@ -184,6 +189,7 @@ export class IslandModule {
 
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         Main.layoutManager.panelBox.disconnectObject(this);
+        Main.overview.disconnectObject(this);
         this._calendar?.disable();
         this._calendar = null;
         // The page shown, the idle view and their connections go with it.
@@ -469,14 +475,19 @@ export class IslandModule {
         const node = island.get_theme_node();
         const shape = [island.x, island.y, island.width, island.height,
             node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
+        // Grown out over the windows, its glass is live: of them too, not
+        // just of the wallpaper (which the overview shows, though).
+        const live = !Main.overview.visible;
         if (this._glass) {
             // (Under a sheet, its liquid is the island's glass too.)
             this._glass.visible = shown && !this._liquid;
             this._glass.setShape(...shape);
+            this._glass.setLive(live && island.has_style_pseudo_class('expanded'));
         }
         if (this._liquid) {
             this._liquid.visible = shown;
             this._liquid.setShape(...shape);
+            this._liquid.setLive(live);
         }
         if (this._ears) {
             this._ears.show(shown, island.opacity);

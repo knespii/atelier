@@ -1764,11 +1764,16 @@ async function testNewProfile(ext, atelier) {
     bar.set_string('surface', 'glass');
     bar.set_string('island-shape', 'notch');
     await Scripting.sleep(500);
+    check(islandModule._glass?._live === null, 'at rest, the island\'s glass is of the wallpaper');
     atelier.toggleSwitcher();
-    await Scripting.sleep(400);
+    await Scripting.sleep(500);
+    // Grown out, live glass: of the windows (and widgets) under it too.
+    check(islandModule._glass?._live?.visible === true, 'open, it is live glass, of what is under it');
+    await screenshotIsland('20-switcher-live-glass', 420);
     check(await watchDrip('20-new-profile-drop-glass',
         () => atelier._switcher._activate(atelier._switcher._cards.length - 1)), 'again, from a notch of glass');
     check(await waitFor(() => islandModule._sheet?.opened, 8000), 'the sheet open');
+    check(islandModule._liquid?._live?.visible === true, 'the sheet of live glass too');
     await Scripting.sleep(200);
     await screenshot('21-new-profile-sheet-glass');
     // Going, slowed down: it gathers into a drop that rises back into the
@@ -1786,6 +1791,7 @@ async function testNewProfile(ext, atelier) {
     }
     check(await waitFor(() => islandModule._sheet === null, 6000) && atelier._store.getAll().length === count + 1,
         'Esc saves nothing');
+    check(await waitFor(() => islandModule._glass?._live === null, 3000), 'and the island at rest, of the wallpaper again');
     bar.reset('surface');
     bar.reset('island-shape');
     await Scripting.sleep(300);

@@ -1,5 +1,7 @@
 // Atelier's glass: the wallpaper under a surface, blurred and tinted, like
 // GNOME's lock screen – a static blur, which costs nothing while it stays.
+// For a while, it may be live glass instead: of what is under it now, the
+// windows too, blurred again whenever that changes.
 // A surface is the blurred wallpaper of the top of its monitor, masked to a
 // rounded rectangle that can move and change size every frame (the island
 // growing) without blurring anything again – and to a drop beside it, which
@@ -16,6 +18,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const BLUR_RADIUS = 36; // logical pixels
 const BLUR_BRIGHTNESS = 0.75;
+// Live glass is blurred over the bounds of its shapes, in steps of this many
+// logical pixels (so it isn't made anew every frame they change).
+const LIVE_STEP = 64;
 
 // Pixels outside the rounded rectangle are dropped; its edge gets one pixel
 // of antialiasing. Everything is in pixels of the actor. The top and the
@@ -176,6 +181,16 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     }
 });
 
+// The windows' group as it is on the stage, one to one, for live glass.
+// (The group says it has no size, and a plain clone scales its source to
+// its own size: by infinity, to nothing.)
+const WindowsClone = GObject.registerClass(
+class AtelierWindowsClone extends Clutter.Clone {
+    vfunc_allocate(box) {
+        this.set_allocation(box);
+    }
+});
+
 /**
  * A glass surface: put it into the scene (below what stands on it) and
  * give it the rectangle to fill with setShape().
@@ -205,6 +220,7 @@ class AtelierGlassSurface extends St.Widget {
         this._shape = null;
         this._drop = null;
         this._neck = null;
+        this._live = null;
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -264,6 +280,75 @@ class AtelierGlassSurface extends St.Widget {
             this.setNeck(...this._neck);
     }
 
+    /**
+     * Live glass: of what is under the surface now, the windows too, rather
+     * than of the wallpaper. Dearer – blurred again whenever that changes –
+     * so for a while only, over the bounds of its shapes.
+     *
+     * @param {boolean} live
+     */
+    setLive(live) {
+        if (this._solid || live === (this._live !== null))
+            return;
+        if (live) {
+            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+            this._live = new St.Widget({clip_to_allocation: true});
+            const windows = new WindowsClone({source: global.window_group});
+            windows.set_size(global.stage.width, global.stage.height);
+            this._live.add_child(windows);
+            this._live.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
+                mode: Shell.BlurMode.ACTOR,
+                radius: BLUR_RADIUS * scale,
+                brightness: BLUR_BRIGHTNESS,
+            }));
+            this.insert_child_above(this._live, this._wallpaper);
+            this._wallpaper.hide();
+            this._syncLive();
+        } else {
+            this._live.destroy();
+            this._live = null;
+            this._wallpaper.show();
+        }
+    }
+
+    // The live glass where the shapes are, and as far around as the blur
+    // reaches, so its edges are blurred like the rest.
+    _syncLive() {
+        if (!this._live)
+            return;
+        const boxes = [];
+        if (this._shape) {
+            const [x, y, width, height, , , ear] = this._shape;
+            boxes.push([x - ear, y, x + width + ear, y + height]);
+        }
+        if (this._drop && this._drop[2] > 0 && this._drop[3] > 0) {
+            const [cx, cy, hw, hh] = this._drop;
+            boxes.push([cx - hw, cy - hh, cx + hw, cy + hh]);
+        }
+        if (this._neck && this._neck[3] > 0) {
+            const [cx, top, bottom, hw] = this._neck;
+            boxes.push([cx - hw, top, cx + hw, bottom]);
+        }
+        if (boxes.length === 0 || this.width === 0) {
+            this._live.hide();
+            return;
+        }
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const margin = BLUR_RADIUS * scale;
+        const step = LIVE_STEP * scale;
+        const down = v => Math.floor(v / step) * step;
+        const up = v => Math.ceil(v / step) * step;
+        const x1 = Math.max(this.x, down(Math.min(...boxes.map(b => b[0])) - margin));
+        const y1 = Math.max(this.y, down(Math.min(...boxes.map(b => b[1])) - margin));
+        const x2 = Math.min(this.x + this.width, up(Math.max(...boxes.map(b => b[2])) + margin));
+        const y2 = Math.min(this.y + this.height, up(Math.max(...boxes.map(b => b[3])) + margin));
+        this._live.set_position(x1 - this.x, y1 - this.y);
+        this._live.set_size(Math.max(1, x2 - x1), Math.max(1, y2 - y1));
+        // (What is at x1, y1 on the stage at its corner.)
+        this._live.get_first_child().set_position(-x1, -y1);
+        this._live.show();
+    }
+
     _blurBackground() {
         const actor = this._bgManager?.backgroundActor;
         if (!actor)
@@ -293,6 +378,7 @@ class AtelierGlassSurface extends St.Widget {
         const limit = Math.min(width / 2, height / 2);
         this._mask.setShape([this.width, this.height], [x - this.x, y - this.y, width, height],
             [Math.min(radius, limit), Math.min(bottomRadius, limit)], ear);
+        this._syncLive();
     }
 
     /**
@@ -310,6 +396,7 @@ class AtelierGlassSurface extends St.Widget {
         this._drop = [centerX, centerY, halfWidth, halfHeight, radius, blend];
         this._mask.setDrop([centerX - this.x, centerY - this.y, halfWidth, halfHeight],
             Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
+        this._syncLive();
     }
 
     /**
@@ -324,6 +411,7 @@ class AtelierGlassSurface extends St.Widget {
     setNeck(centerX, top, bottom, halfWidth) {
         this._neck = [centerX, top, bottom, halfWidth];
         this._mask.setNeck([centerX - this.x, top - this.y, bottom - this.y, Math.max(0, halfWidth)]);
+        this._syncLive();
     }
 
     /** No drop, nor its neck. */
@@ -332,5 +420,6 @@ class AtelierGlassSurface extends St.Widget {
         this._neck = null;
         this._mask.setDrop([0, 0, 0, 0], 0, 1);
         this._mask.setNeck([0, 0, 0, 0]);
+        this._syncLive();
     }
 });
