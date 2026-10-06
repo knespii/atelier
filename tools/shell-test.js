@@ -1248,6 +1248,37 @@ async function testTwoMonitors(ext) {
     check(!notes._edges._sheet?.contains(middle), 'what the papers lie on is in the way of nothing');
     notes.store.remove(left.id);
     notes.store.remove(right.id);
+
+    // Widgets placed on the main monitor. When the smaller one is the main
+    // one (as when the bigger one is unplugged), they are near the same
+    // edges there; when the bigger one is again, where they were on it.
+    const desktop = ext.stateObj.modules.get('desktop');
+    const desktopSettings = ext.stateObj._settings.get_child('desktop');
+    const grid = [...desktop.grid];
+    desktopSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'square', x: 0, y: 0, grid},
+        {id: 'calendar', kind: 'calendar', size: 'large', x: 0, y: 2, grid},
+        {id: 'weather', kind: 'weather', size: 'square', x: grid[0] - 2, y: 0, grid},
+        {id: 'photo', kind: 'photo', size: 'square', x: grid[0] - 2, y: grid[1] - 2, grid},
+    ]));
+    await Scripting.sleep(400);
+    const cells = () => JSON.stringify(Object.fromEntries([...desktop.widgets.values()]
+        .map(widget => [widget.entry.id, [widget.entry.x, widget.entry.y]])));
+    const placed = cells();
+    const layout = desktopSettings.get_string('widgets');
+    await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-1');
+    check(await waitFor(() => desktop.grid[0] < grid[0], 3000), `the smaller monitor the main one (${desktop.grid})`);
+    await wallpapersSettled();
+    await Scripting.sleep(400);
+    const [columns, rows] = desktop.grid;
+    const near = JSON.stringify({clock: [0, 0], calendar: [0, 2], weather: [columns - 2, 0], photo: [columns - 2, rows - 2]});
+    check(cells() === near, `the widgets near the same edges on it (${cells()})`);
+    check(desktopSettings.get_string('widgets') === layout, 'where they were placed is kept');
+    await screenshotArea('63-monitors-smaller-main', 0, 0, 1280, 1024);
+    await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0');
+    await waitFor(() => desktop.grid[0] === grid[0], 3000);
+    await Scripting.sleep(400);
+    check(cells() === placed, `the bigger one the main one again, where they were on it (${cells()})`);
 }
 
 async function testDock(ext) {

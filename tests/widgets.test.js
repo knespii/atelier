@@ -2,7 +2,7 @@ import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
 import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
     DEFAULT_LAYOUT, PITCH, UNIT, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridSize, nearestSize,
-    nearestSpot, newId, nextSize, parseLayout, pixelSize, serializeLayout,
+    nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
@@ -48,10 +48,57 @@ export function testPlacing() {
         {id: 'a', kind: 'clock', size: 'square', x: 0, y: 0},
         {id: 'b', kind: 'weather', size: 'square', x: 9, y: 0},
     ], [6, 4]);
-    assertEqual(moved.map(e => [e.x, e.y]), [[0, 0], [2, 0]], 'a widget off a smaller screen moves on it');
+    assertEqual(moved.map(e => [e.x, e.y]), [[0, 0], [4, 0]], 'a widget off a smaller screen goes to its edge');
     assertEqual(newId([{id: 'clock'}, {id: 'clock-2'}], 'clock'), 'clock-3');
     assertEqual(nextSize('clock', 'square'), 'card');
     assertEqual(nextSize('clock', 'card'), 'square');
+}
+
+export function testOtherScreens() {
+    const big = [25, 13];
+    const small = [13, 6];
+    const layout = [
+        {id: 'clock', kind: 'clock', size: 'square', x: 0, y: 0, grid: big},
+        {id: 'date', kind: 'date', size: 'square', x: 2, y: 0, grid: big},
+        {id: 'calendar', kind: 'calendar', size: 'large', x: 0, y: 2, grid: big},
+        {id: 'github', kind: 'github', size: 'wide', x: 19, y: 0, grid: big},
+        {id: 'photo', kind: 'photo', size: 'square', x: 23, y: 11, grid: big},
+        {id: 'weather', kind: 'weather', size: 'square', x: 12, y: 6, grid: big},
+    ];
+    const where = shown => Object.fromEntries(shown.map(e => [e.id, [e.x, e.y]]));
+    assertEqual(where(fitLayout(layout, big)), where(layout), 'on the screen they were placed on, as they were');
+    const onSmall = {clock: [0, 0], date: [2, 0], calendar: [0, 2], github: [7, 0], photo: [11, 4], weather: [6, 2]};
+    assertEqual(where(fitLayout(layout, small)), onSmall,
+        'on a smaller one: near the same edges, those that touch together, the middle one in the middle');
+    assertEqual(where(fitLayout(layout.map(({grid: _, ...e}) => e), small)), onSmall,
+        'placed before grids were kept: as from a screen big enough for them');
+
+    // Placed anew on the smaller screen: there, and on the bigger one again
+    // where it was there.
+    const moved = layout.map(e => (e.id === 'weather' ? placeAt(e, 9, 2, small) : e));
+    assertEqual(moved[5].grid, small);
+    assertEqual(moved[5].places, {'25x13': [12, 6]});
+    assertEqual(where(fitLayout(moved, small)).weather, [9, 2]);
+    assertEqual(where(fitLayout(moved, big)).weather, [12, 6]);
+
+    // Placed on the smaller one first: on a bigger one, those that touch stay
+    // together, near the same edges.
+    const first = fitLayout(layout, small).map(e => ({...e, grid: small}));
+    assertEqual(where(fitLayout(first, big)),
+        {clock: [0, 0], date: [2, 0], calendar: [0, 2], github: [19, 0], photo: [23, 11], weather: [18, 2]});
+
+    // Where others had them first, the free cells nearest to that.
+    const crowded = [{id: 'k', kind: 'clock', size: 'square', x: 11, y: 0, grid: small}, ...layout];
+    assertEqual(where(fitLayout(crowded, small)).github, [5, 0], 'taken: the free cells nearest to it');
+
+    // A few other screens are remembered, the latest.
+    let entry = {id: 'k', kind: 'clock', size: 'square', x: 0, y: 0, grid: [10, 5]};
+    for (const [x, grid] of [[1, [11, 5]], [2, [12, 5]], [3, [13, 5]], [4, [14, 5]]])
+        entry = placeAt(entry, x, 0, grid);
+    assertEqual(Object.keys(entry.places), ['11x5', '12x5', '13x5']);
+    assertEqual(parseLayout(serializeLayout([entry]))[0], entry, 'kept as they are');
+    const odd = parseLayout(JSON.stringify([{kind: 'clock', grid: [0, 'x'], places: {'1x1': [0, 0], 'a': [1, 1], '2x2': [-1, 0]}}]));
+    assertEqual([odd[0].grid, odd[0].places], [undefined, {'1x1': [0, 0]}], 'grids that make no sense are dropped');
 }
 
 export function testDraggingAndStretching() {

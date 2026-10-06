@@ -18,7 +18,7 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 import {keepWidgets} from '../../lib/profiles.js';
 import {
     KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
-    serializeLayout,
+    placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
@@ -372,8 +372,9 @@ export class DesktopModule {
         widget.destroy();
     }
 
-    // Everything on the grid, as far as the screen allows (only shown:
-    // the layout stays as saved until it is edited).
+    // Everything on the grid, as far as the screen allows: on another
+    // monitor, near the same edges (only shown: the layout stays as it was
+    // placed until it is edited).
     _place() {
         if (!this._grid)
             return;
@@ -418,6 +419,16 @@ export class DesktopModule {
             keepWidgets(this._store, this._desktopSettings);
     }
 
+    // A widget placed (or given a size) on the screen there is now: kept
+    // where it is for screens of this size. The others stay as they were
+    // placed, on the screens they were.
+    _keep({id, kind, size, x, y}) {
+        const stored = this._layout.find(e => e.id === id);
+        const kept = placeAt({...stored ?? {id, kind}, size}, x, y, this._grid);
+        this._layout = stored ? this._layout.map(e => (e === stored ? kept : e)) : [...this._layout, kept];
+        this._save();
+    }
+
     // The layout as shown, for editing it.
     _shownLayout() {
         // (Entries of kinds not known now stay as they are.)
@@ -440,8 +451,7 @@ export class DesktopModule {
         const spot = findSpot(layout, entry, this._grid);
         if (!spot)
             return false;
-        this._layout = [...layout, {...entry, ...spot}];
-        this._save();
+        this._keep({...entry, ...spot});
         this._createWidget({...entry, ...spot});
         this._place();
         return true;
@@ -452,7 +462,7 @@ export class DesktopModule {
         const widget = this._widgets.get(id);
         if (!widget)
             return;
-        this._layout = this._shownLayout().filter(entry => entry.id !== id);
+        this._layout = this._layout.filter(entry => entry.id !== id);
         this._widgets.delete(id);
         this._dropWidget(widget);
         this._save();
@@ -481,8 +491,7 @@ export class DesktopModule {
                     continue;
                 resized = {...resized, ...spot};
             }
-            this._layout = layout.map(e => (e.id === id ? resized : e));
-            this._save();
+            this._keep(resized);
             widget.resize(size);
             this._place();
             return true;
@@ -503,8 +512,7 @@ export class DesktopModule {
         const entry = layout.find(e => e.id === id);
         if (!widget || !entry || !KINDS[entry.kind]?.sizes.includes(size) || !fits(layout, {...entry, size}, this._grid))
             return false;
-        this._layout = layout.map(e => (e.id === id ? {...e, size} : e));
-        this._save();
+        this._keep({...entry, size});
         // (While it is stretched, it may show that size already.)
         if (widget.entry.size !== size)
             widget.fill(size);
@@ -552,8 +560,7 @@ export class DesktopModule {
         const entry = layout.find(e => e.id === id);
         if (!entry || !fits(layout, {...entry, x, y}, this._grid))
             return false;
-        this._layout = layout.map(e => (e.id === id ? {...e, x, y} : e));
-        this._save();
+        this._keep({...entry, x, y});
         const widget = this._widgets.get(id);
         widget.entry = {...widget.entry, x, y};
         return true;
