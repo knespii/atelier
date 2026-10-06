@@ -1651,30 +1651,35 @@ async function testNewProfile(ext, atelier) {
     await Scripting.sleep(400);
     await screenshotIsland('17-switcher-new-profile', 300);
 
-    // The island drips a sheet to name it and give it a style: a drop forms
-    // under it, falls and spreads.
+    // The island drips a sheet to name it and give it a style. Slowed down
+    // to look at: the switcher draws back into the island, and a drop of it
+    // stays behind on a neck, which snaps; the drop falls and spreads.
+    // (Pictures every 0.9 s of the slowed down way.)
     const islandModule = ext.stateObj.modules.get('island');
-    // (Held still at points of the way: swelling, its neck, falling, spreading.)
-    const dropShot = async name => {
-        const sheet = islandModule._sheet;
-        // (It drips from the island at rest, once the switcher is back in it.)
-        await waitFor(() => sheet._timeline.is_playing(), 2000);
-        sheet._timeline.pause();
-        let falling = true;
-        for (const [n, t] of [[1, 0.18], [2, 0.3], [3, 0.45], [4, 0.7]]) {
-            sheet._frame(t);
-            await Scripting.sleep(150);
-            falling &&= (sheet._liquid._drop?.[3] ?? 0) > 0;
-            await screenshotArea(`${name}-${n}`, Math.round(global.stage.width / 2) - 360, 0, 720, 760);
+    const watchDrip = async (name, start) => {
+        const island = islandModule.island;
+        const settings = St.Settings.get();
+        let hung = false;
+        settings.slow_down_factor = 8;
+        try {
+            start();
+            if (!await waitFor(() => islandModule._sheet !== null, 3000))
+                return false;
+            for (let n = 1; n <= 6; n++) {
+                await Scripting.sleep(n === 1 ? 500 : 900);
+                const neck = islandModule._sheet?._liquid._neck?.[3] ?? 0;
+                hung ||= neck > 0 && Boolean(island.get_transition('height'));
+                await screenshotArea(`${name}-${n}`, Math.round(global.stage.width / 2) - 360, 0, 720, 760);
+            }
+        } finally {
+            settings.slow_down_factor = 1;
         }
-        sheet._timeline.start();
-        return falling;
+        return hung;
     };
-    switcher._activate(last);
-    check(await waitFor(() => islandModule._sheet !== null, 3000), 'the island drips a sheet for a new profile');
-    check(await dropShot('18-new-profile-drop'), 'a drop falls from it');
+    check(await watchDrip('18-new-profile-drop', () => switcher._activate(last)),
+        'as the switcher goes back into the island, a drop of it hangs on, then falls');
     const sheet = islandModule._sheet;
-    check(await waitFor(() => sheet.opened && sheet.opacity === 255, 3000), 'and spreads into the sheet');
+    check(await waitFor(() => sheet?.opened && sheet.opacity === 255, 8000), 'and spreads into a sheet');
     const form = sheet.form;
     check(form._name.text === 'Pills' && global.stage.key_focus === form._name.clutter_text,
         `named after the wallpaper, ready to be named anew (${form._name.text})`);
@@ -1711,14 +1716,25 @@ async function testNewProfile(ext, atelier) {
     await Scripting.sleep(500);
     atelier.toggleSwitcher();
     await Scripting.sleep(400);
-    atelier._switcher._activate(atelier._switcher._cards.length - 1);
-    check(await waitFor(() => islandModule._sheet !== null, 3000), 'again, from a notch of glass');
-    await dropShot('20-new-profile-drop-glass');
-    check(await waitFor(() => islandModule._sheet?.opened, 3000), 'the sheet open');
+    check(await watchDrip('20-new-profile-drop-glass',
+        () => atelier._switcher._activate(atelier._switcher._cards.length - 1)), 'again, from a notch of glass');
+    check(await waitFor(() => islandModule._sheet?.opened, 8000), 'the sheet open');
     await Scripting.sleep(200);
     await screenshot('21-new-profile-sheet-glass');
-    await pressKey(Clutter.KEY_Escape);
-    check(await waitFor(() => islandModule._sheet === null, 3000) && atelier._store.getAll().length === count + 1,
+    // Going, slowed down: it gathers into a drop that rises back into the
+    // island on a neck.
+    const settings = St.Settings.get();
+    settings.slow_down_factor = 8;
+    try {
+        await pressKey(Clutter.KEY_Escape);
+        for (let n = 1; n <= 5; n++) {
+            await Scripting.sleep(900);
+            await screenshotArea(`22-new-profile-close-glass-${n}`, Math.round(global.stage.width / 2) - 360, 0, 720, 760);
+        }
+    } finally {
+        settings.slow_down_factor = 1;
+    }
+    check(await waitFor(() => islandModule._sheet === null, 6000) && atelier._store.getAll().length === count + 1,
         'Esc saves nothing');
     bar.reset('surface');
     bar.reset('island-shape');

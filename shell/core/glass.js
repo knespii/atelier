@@ -22,8 +22,9 @@ const BLUR_BRIGHTNESS = 0.75;
 // bottom corners may differ (a notch has square top corners), and a notch
 // may have ears: beside its top corners, squares less a quarter circle,
 // where it curves into the top edge. (They reach a pixel into the notch and
-// above it, so no seam shows.) The drop is a rounded rectangle too, joined
-// with a smooth minimum: within blend pixels of each other, the two flow
+// above it, so no seam shows.) The drop is a rounded rectangle too, and its
+// neck a thin upright capsule (from the island to the drop, as it hangs),
+// joined with a smooth minimum: within blend pixels of each other, they flow
 // together like liquid.
 const MASK_DECLARATIONS = `
 uniform vec2 origin;
@@ -33,7 +34,13 @@ uniform vec2 radii;
 uniform float ear;
 uniform vec4 drop;
 uniform float dropRadius;
+uniform vec4 neck;
 uniform float blend;
+
+float atelier_smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
 
 float atelier_box(vec2 p, vec2 center, vec2 halfSize) {
     vec2 q = abs(p - center) - halfSize;
@@ -59,12 +66,16 @@ if (ear > 0.0) {
     float right = atelier_ear(p, rect.x + rect.z + ear, rect.x + rect.z - 1.0);
     d = min(d, min(left, right));
 }
+float k = max(blend, 0.001);
+if (neck.w > 0.0) {
+    vec2 pa = p - neck.xy;
+    vec2 ba = vec2(0.0, neck.z - neck.y);
+    float s = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
+    d = atelier_smin(d, length(pa - ba * s) - neck.w, k);
+}
 if (drop.z > 0.0 && drop.w > 0.0) {
     vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
-    float b = length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius;
-    float k = max(blend, 0.001);
-    float h = clamp(0.5 + 0.5 * (b - d) / k, 0.0, 1.0);
-    d = mix(b, d, h) - k * h * (1.0 - h);
+    d = atelier_smin(d, length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius, k);
 }
 cogl_color_out *= clamp(0.5 - d, 0.0, 1.0);
 `;
@@ -110,8 +121,10 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this._ear = this.get_uniform_location('ear');
         this._drop = this.get_uniform_location('drop');
         this._dropRadius = this.get_uniform_location('dropRadius');
+        this._neck = this.get_uniform_location('neck');
         this._blend = this.get_uniform_location('blend');
         this.setDrop([0, 0, 0, 0], 0, 1);
+        this.setNeck([0, 0, 0, 0]);
     }
 
     vfunc_paint_target(node, paintContext) {
@@ -152,6 +165,15 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._blend, 1, [blend]);
         this.queue_repaint();
     }
+
+    /**
+     * @param {number[]} neck - [centerX, top, bottom, halfWidth] relative to
+     *   the actor; no width for none
+     */
+    setNeck(neck) {
+        this.set_uniform_float(this._neck, 4, neck);
+        this.queue_repaint();
+    }
 });
 
 /**
@@ -182,6 +204,7 @@ class AtelierGlassSurface extends St.Widget {
         this._solid = solid;
         this._shape = null;
         this._drop = null;
+        this._neck = null;
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -222,6 +245,8 @@ class AtelierGlassSurface extends St.Widget {
                 this.setShape(...this._shape);
             if (this._drop)
                 this.setDrop(...this._drop);
+            if (this._neck)
+                this.setNeck(...this._neck);
             return;
         }
         this._bgManager = new Background.BackgroundManager({
@@ -235,6 +260,8 @@ class AtelierGlassSurface extends St.Widget {
             this.setShape(...this._shape);
         if (this._drop)
             this.setDrop(...this._drop);
+        if (this._neck)
+            this.setNeck(...this._neck);
     }
 
     _blurBackground() {
@@ -285,9 +312,25 @@ class AtelierGlassSurface extends St.Widget {
             Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
     }
 
-    /** No drop. */
+    /**
+     * A neck the drop hangs on: an upright capsule, in stage coordinates,
+     * which melts into the rest where it comes near.
+     *
+     * @param {number} centerX
+     * @param {number} top
+     * @param {number} bottom
+     * @param {number} halfWidth - none for no neck
+     */
+    setNeck(centerX, top, bottom, halfWidth) {
+        this._neck = [centerX, top, bottom, halfWidth];
+        this._mask.setNeck([centerX - this.x, top - this.y, bottom - this.y, Math.max(0, halfWidth)]);
+    }
+
+    /** No drop, nor its neck. */
     clearDrop() {
         this._drop = null;
+        this._neck = null;
         this._mask.setDrop([0, 0, 0, 0], 0, 1);
+        this._mask.setNeck([0, 0, 0, 0]);
     }
 });
