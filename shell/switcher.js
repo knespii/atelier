@@ -36,8 +36,20 @@ class AtelierSwitcherPopup extends St.Widget {
         Main.layoutManager.connectObject(
             'system-modal-opened', () => content.close(),
             'monitors-changed', () => content.close(), this);
-        content.connectObject('close-request', () => this._close(), this);
+        content.connectObject(
+            'close-request', () => this._close(),
+            // Gone with Atelier (turned off, or the screen locked while the
+            // popup was open): the popup and its grab go too, or nothing
+            // would close them and they would take every click and key.
+            'destroy', () => this._onContentDestroyed(),
+            this);
         this.connect('destroy', () => this._onDestroy());
+    }
+
+    _onContentDestroyed() {
+        // (Out of the panel first: it is on its way out already.)
+        this._panel.set_child(null);
+        this.destroy();
     }
 
     get _scale() {
