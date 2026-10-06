@@ -66,6 +66,9 @@ class AtelierNoteTab extends St.Button {
     }
 });
 
+/** How much of the screen's edge the papers keep, logical pixels. */
+export const EDGE_ROOM = PEEK + 6;
+
 export class EdgeTabs {
     /**
      * @param {NotesStore} store
