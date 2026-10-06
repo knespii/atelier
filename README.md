@@ -150,7 +150,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, notifications, the control centre, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; screenshots land in `tests/output/shell` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, notifications, the control centre, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make pack` | Builds `dist/atelier@local.shell-extension.zip` |

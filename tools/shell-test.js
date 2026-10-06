@@ -22,6 +22,8 @@ import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
+// 'main', or 'two-monitors': the session on two monitors
+const SUITE = GLib.getenv('ATELIER_TEST_SUITE') ?? 'main';
 
 export const METRICS = {};
 
@@ -1053,6 +1055,101 @@ async function testNotes(ext) {
         'the notes are kept in a file');
 }
 
+function displayConfig(method, params, replyType = null) {
+    return new Promise((resolve, reject) => {
+        Gio.DBus.session.call('org.gnome.Mutter.DisplayConfig', '/org/gnome/Mutter/DisplayConfig',
+            'org.gnome.Mutter.DisplayConfig', method, params, replyType && new GLib.VariantType(replyType),
+            Gio.DBusCallFlags.NONE, -1, null, (connection, result) => {
+                try {
+                    resolve(connection.call_finish(result));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+    });
+}
+
+/**
+ * Put the monitors side by side, as the Displays settings do.
+ *
+ * @param {string[]} connectors - from left to right
+ * @param {string} primary - the main one
+ */
+async function arrangeMonitors(connectors, primary) {
+    const state = await displayConfig('GetCurrentState', null,
+        '(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})');
+    const [serial, monitors] = state.recursiveUnpack();
+    const modes = new Map(monitors.map(([[connector], list]) => [connector, list.find(mode => mode[6]['is-current'])]));
+    let x = 0;
+    const logical = connectors.map(connector => {
+        const [mode, width] = modes.get(connector);
+        const monitor = [x, 0, 1.0, 0, connector === primary, [[connector, mode, {}]]];
+        x += width;
+        return monitor;
+    });
+    await displayConfig('ApplyMonitorsConfig',
+        new GLib.Variant('(uua(iiduba(ssa{sv}))a{sv})', [serial, 1, logical, {}]));
+}
+
+// The papers on the main monitor's edges, and nothing of them on the
+// monitor beside it, whichever side that one is on.
+async function testTwoMonitors(ext) {
+    const notes = ext.stateObj.modules.get('notes');
+    if (!check(Main.layoutManager.monitors.length === 2 && notes !== null, 'two monitors, and the notes'))
+        return;
+    const paper = [0xcd, 0xe1, 0xf7];
+    const left = notes.store.create({title: 'Left', color: 'blue'});
+    const right = notes.store.create({title: 'Right', color: 'blue', pin: 'right'});
+    await restPointer();
+    await Scripting.sleep(400);
+
+    // At the main monitor's edge (x), halfway down a paper: its strip
+    // inside, and outside what is there without the papers too.
+    const atEdge = async (name, tab, x, outsideOnTheLeft) => {
+        const y = Math.round(tab.get_transformed_position()[1] + tab.height / 2);
+        const [inside, outside] = outsideOnTheLeft ? [44, 26] : [26, 44];
+        const tabs = [...notes._edges._tabs.values()];
+        tabs.forEach(t => t.hide());
+        await Scripting.sleep(100);
+        await screenshotArea(`${name}-bare`, x - 40, y - 20, 80, 40);
+        tabs.forEach(t => t.show());
+        await Scripting.sleep(100);
+        await screenshotArea(name, x - 40, y - 20, 80, 40);
+        const picked = global.stage.get_actor_at_pos(Clutter.PickMode.ALL, outsideOnTheLeft ? x - 9 : x + 9, y);
+        return {
+            strip: colorDistance(averageColor(name, inside, 10, 10, 20), paper) < 30,
+            beside: colorDistance(averageColor(name, outside, 10, 10, 20),
+                averageColor(`${name}-bare`, outside, 10, 10, 20)) < 8 && !tabs.some(t => t.contains(picked)),
+        };
+    };
+
+    let main = Main.layoutManager.primaryMonitor;
+    let edge = await atEdge('60-monitors-right-edge', notes._edges._tabs.get(right.id), main.x + main.width, false);
+    check(edge.strip, 'the main monitor on the left: a paper on its right edge shows a strip');
+    check(edge.beside, 'and none of it is on the monitor to the right');
+
+    // The other monitor to the left of the main one.
+    await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0');
+    check(await waitFor(() => Main.layoutManager.primaryMonitor.x > 0, 3000), 'the other monitor moved to the left');
+    await restPointer();
+    await Scripting.sleep(600);
+    main = Main.layoutManager.primaryMonitor;
+    const tab = notes._edges._tabs.get(left.id);
+    edge = await atEdge('61-monitors-left-edge', tab, main.x, true);
+    check(edge.strip, 'a paper on the left edge goes along with the main monitor');
+    check(edge.beside, 'and none of it is on the monitor to the left');
+    await pointerTo(main.x + 5, tab.get_transformed_position()[1] + tab.height / 2);
+    await Scripting.sleep(500);
+    check(Math.abs(tab.get_transformed_position()[0] - main.x) < 1, 'all of it on hover, on the main monitor');
+    await screenshotArea('62-monitors-note-out', main.x - 200, 0, 600, 500);
+    await restPointer();
+    const middle = global.stage.get_actor_at_pos(Clutter.PickMode.ALL,
+        main.x + main.width / 2, main.y + main.height / 2);
+    check(!notes._edges._sheet?.contains(middle), 'what the papers lie on is in the way of nothing');
+    notes.store.remove(left.id);
+    notes.store.remove(right.id);
+}
+
 async function testDock(ext) {
     const module = ext.stateObj.modules.get('dock');
     if (!check(module !== null && module.dock !== null, 'the dock is there (Dash to Dock is off here)'))
@@ -1530,6 +1627,10 @@ export async function run() {
         check(original?.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`),
             `original wallpaper copied into the library (${original?.wallpaper})`);
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
+        if (SUITE === 'two-monitors') {
+            await testTwoMonitors(ext);
+            return;
+        }
 
         await testIsland(ext, atelier);
         await testNotifications(ext, atelier);

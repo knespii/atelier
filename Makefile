@@ -50,9 +50,10 @@ prefs: schemas
 prefs-screenshots: schemas
 	tools/prefs-screenshots.sh
 
-# Load the extension in a throwaway headless GNOME Shell with isolated settings.
+# Load the extension in a throwaway headless GNOME Shell with isolated settings:
+# on one monitor, then on two.
 shell-test: schemas
-	tools/shell-test.sh
+	status=0; tools/shell-test.sh || status=1; tools/shell-test.sh two-monitors || status=1; exit $$status
 
 clean:
 	rm -rf dist schemas/gschemas.compiled tests/output
