@@ -214,10 +214,18 @@ export class ControlCentreModule {
         this._quickSettings.can_focus = false;
         this._quickSettings.track_hover = false;
         this._syncTray();
+        // When the shell quits, GNOME takes its UI down with uiGroup while
+        // JS still runs (extensions stay enabled). Everything goes back
+        // first and goes down the way GNOME's own does: out of the stage
+        // while the control centre is closed, GNOME's tiles, list and icons
+        // would be swept up by the garbage collector instead, which can't
+        // run their handlers and says so in the journal.
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._release(), this);
     }
 
     // Give everything back to GNOME.
     _release() {
+        Main.layoutManager.uiGroup.disconnectObject(this);
         this.close();
         this._quickSettingsHost?.release();
         this._quickSettingsHost = null;
