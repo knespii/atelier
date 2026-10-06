@@ -222,7 +222,8 @@ export class ProfilesModule {
     /**
      * A new profile of what the desktop shows now. The island drips a sheet
      * to name it and give it a style, and it is saved from there; without
-     * the island, it is saved as it is.
+     * the island, it is saved as it is. (Its wallpapers are copied into the
+     * library meanwhile.)
      *
      * @param {SwitcherContent} switcher
      */
@@ -231,24 +232,20 @@ export class ProfilesModule {
             return;
         this._saving = true;
         try {
-            const draft = await this._captureCurrentSetup();
-            if (!draft)
-                return;
+            const current = this._readCurrentSetup();
+            const copies = this._copyWallpapers(current);
             const island = this._modules?.get('island');
-            const form = new ProfileSheet(normalizeProfile({id: 'atelier-draft', ...draft}));
+            const form = new ProfileSheet(normalizeProfile({id: 'atelier-draft', ...current}));
             // (The switcher goes back into the island as the drop forms.)
             switcher.close();
             const sheet = island?.openSheet(form);
             if (sheet) {
-                this._fillIn(sheet, form, draft, island);
+                this._fillIn(sheet, form, current, copies, island);
                 return;
             }
             form.destroy();
-            const profile = this._store.add(draft);
-            this._store.activeId = profile.id;
-            if (profile.wallpaper)
-                ensureThumbnail(profile.wallpaper).catch(() => {});
-            if (!(island && await island.announceProfile(profile, {subtitle: 'New profile'})))
+            const profile = await this._addProfile(current, await copies);
+            if (profile && !(island && await island.announceProfile(profile, {subtitle: 'New profile'})))
                 switcher.close();
         } catch (e) {
             Main.notifyError('Atelier', `Could not save the profile: ${e.message}`);
@@ -263,34 +260,28 @@ export class ProfilesModule {
      *
      * @param {LiquidSheet} sheet
      * @param {ProfileSheet} form
-     * @param {object} draft - the profile as taken from the desktop
+     * @param {object} current - the profile as taken from the desktop
+     * @param {Promise<object>} copies - its wallpapers in the library, once copied
      * @param {IslandModule} island
      */
-    _fillIn(sheet, form, draft, island) {
+    _fillIn(sheet, form, current, copies, island) {
         let done = false;
         const finish = async ({save, more = false}) => {
             if (done)
                 return;
             done = true;
             const fields = form.fields;
-            const profile = save ? this._store.add({...draft, ...fields}) : null;
-            if (profile) {
-                this._store.activeId = profile.id;
-                if (profile.wallpaper)
-                    ensureThumbnail(profile.wallpaper).catch(() => {});
-            }
+            const profile = save ? await this._addProfile({...current, ...fields}, await copies) : null;
             await sheet.close();
             if (!profile) {
-                // Its copies of the wallpapers go, unless a profile has them.
-                for (const path of [draft.wallpaper, draft.wallpaperDark].filter(Boolean))
-                    await deleteWallpaperIfUnused(path, this._store.getAll()).catch(() => {});
+                await this._dropCopies(await copies);
                 return;
             }
             if (more)
                 this._extension.openPreferences();
             await island.announceProfile(profile, {subtitle: 'New profile'});
             // A style other than the desktop's, now.
-            if (this._applier && (fields.colorScheme !== draft.colorScheme || fields.accentColor !== draft.accentColor))
+            if (this._applier && (fields.colorScheme !== current.colorScheme || fields.accentColor !== current.accentColor))
                 await this._applier.apply(profile, {animate: false});
         };
         const run = options => finish(options).catch(e => Main.notifyError('Atelier', `Could not save the profile: ${e.message}`));
@@ -358,51 +349,68 @@ export class ProfilesModule {
      * @returns {Promise<object|null>} the profile; null if Atelier was turned off meanwhile
      */
     async _saveCurrentSetup(name = null) {
-        const fields = await this._captureCurrentSetup();
-        if (!fields)
+        const current = this._readCurrentSetup();
+        return this._addProfile({...current, name: name ?? current.name}, await this._copyWallpapers(current));
+    }
+
+    /**
+     * What the desktop shows now, as the fields of a profile.
+     *
+     * @returns {object} the fields, named after the wallpaper (whose files
+     *   are where the desktop has them)
+     */
+    _readCurrentSetup() {
+        const userThemesActive =
+            Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
+        const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
+        return {
+            ...current,
+            palette: readPaletteOptions(this._settings.get_child('palette')),
+            widgets: readWidgets(this._settings.get_child('desktop')),
+            name: this._nameFor(current.wallpaper),
+        };
+    }
+
+    /**
+     * Copy a profile's wallpapers into the library, so it keeps working when
+     * the pictures move.
+     *
+     * @param {object} fields - with the wallpapers where the desktop has them
+     * @returns {Promise<object>} {wallpaper, wallpaperDark}: the copies
+     */
+    async _copyWallpapers(fields) {
+        const copy = path => importWallpaper(path).catch(e => {
+            console.warn(`Atelier: could not copy ${path}: ${e.message}`);
             return null;
-        const profile = this._store.add({...fields, name: name ?? fields.name});
+        });
+        const wallpaper = fields.wallpaper ? await copy(fields.wallpaper) : null;
+        const wallpaperDark = wallpaper && fields.wallpaperDark ? await copy(fields.wallpaperDark) : null;
+        return {wallpaper, wallpaperDark};
+    }
+
+    /**
+     * @param {object} fields - of the new profile
+     * @param {object} copies - its wallpapers in the library
+     * @returns {Promise<object|null>} the profile, active; null if Atelier
+     *   was turned off meanwhile
+     */
+    async _addProfile(fields, copies) {
+        if (!this._applier) {
+            await this._dropCopies(copies);
+            return null;
+        }
+        const profile = this._store.add({...fields, ...copies});
+        this._store.activeId = profile.id;
         if (profile.wallpaper)
             ensureThumbnail(profile.wallpaper).catch(() => {});
         return profile;
     }
 
-    /**
-     * What the desktop shows now, as the fields of a profile. Its wallpapers
-     * are copied into the library, so it keeps working when the pictures
-     * move.
-     *
-     * @returns {Promise<object|null>} the fields, named after the wallpaper;
-     *   null if Atelier was turned off meanwhile
-     */
-    async _captureCurrentSetup() {
-        const userThemesActive =
-            Main.extensionManager.lookup(USER_THEME_UUID)?.state === ExtensionState.ACTIVE;
-        const current = readCurrentAppearance(userThemesActive ? getUserThemeSettings() : null);
-
-        const copy = path => importWallpaper(path).catch(e => {
-            console.warn(`Atelier: could not copy ${path}: ${e.message}`);
-            return null;
-        });
-        const wallpaper = current.wallpaper ? await copy(current.wallpaper) : null;
-        const wallpaperDark = wallpaper && current.wallpaperDark ? await copy(current.wallpaperDark) : null;
-
-        if (!this._applier) {
-            // Turned off meanwhile: drop new copies (files profiles use stay).
-            const profiles = this._store.getAll();
-            for (const path of [wallpaper, wallpaperDark].filter(Boolean))
-                await deleteWallpaperIfUnused(path, profiles).catch(() => {});
-            return null;
-        }
-
-        return {
-            ...current,
-            wallpaper,
-            wallpaperDark,
-            palette: readPaletteOptions(this._settings.get_child('palette')),
-            widgets: readWidgets(this._settings.get_child('desktop')),
-            name: this._nameFor(current.wallpaper),
-        };
+    // Copies of wallpapers no profile ended up with go.
+    async _dropCopies({wallpaper, wallpaperDark}) {
+        const profiles = this._store.getAll();
+        for (const path of [wallpaper, wallpaperDark].filter(Boolean))
+            await deleteWallpaperIfUnused(path, profiles).catch(() => {});
     }
 
     /**

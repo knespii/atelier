@@ -1,7 +1,8 @@
 // A sheet that drips from the island: as the island draws back (from the
-// page it showed, or at rest), a drop of it stays behind, hanging on a neck
-// that thins out until it snaps; the drop falls and spreads into a panel of
-// what the island is made of (its glass, or black), which holds a form.
+// page it showed), a bead of it rides along at its bottom; at rest, the bead
+// swells into a drop that hangs from the island on a neck, which thins out
+// until it snaps; the drop falls and spreads into a panel of what the island
+// is made of (its glass, or black), which holds a form.
 // Closing, the panel gathers into a drop again that rises back into the
 // island. The drop and the panel are drawn by a surface that shows the
 // island as well, so they flow into each other where they meet; the sheet
@@ -18,15 +19,17 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const OPEN_TIME = 960;
-const CLOSE_TIME = 700;
+const OPEN_TIME = 1150;
+const CLOSE_TIME = 760;
 const FADE_TIME = 140;
-// Parts of the way: the drop hangs while the island draws back, its neck has
-// snapped, it has landed, and the form shows on its way in.
-const HANG = 0.3;
-const SNAPPED = 0.4;
-const LANDED = 0.66;
-const SHOWN = 0.86;
+// Parts of the way: the island has drawn back (as long as it takes to, with
+// a bead at its bottom), the drop hangs from it, its neck has snapped, it
+// has landed, and the form shows on its way in.
+const BACK = 0.24;
+const HANG = 0.46;
+const SNAPPED = 0.54;
+const LANDED = 0.76;
+const SHOWN = 0.9;
 // Logical pixels: the drop, how near things melt into each other, the
 // panel's corners (as the island's pages have them), and how far below the
 // island at rest the panel is at least.
@@ -38,6 +41,7 @@ const FALL = 72;
 const lerp = (a, b, t) => a + (b - a) * t;
 const easeOutQuad = t => 1 - (1 - t) ** 2;
 const easeInQuad = t => t * t;
+const easeInOutQuad = t => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 // Past the end a little and back, like liquid settling.
 const easeOutBack = t => 1 + 2.4 * (t - 1) ** 3 + 1.4 * (t - 1) ** 2;
 
@@ -80,12 +84,11 @@ export const LiquidSheet = GObject.registerClass({
     }
 
     /**
-     * Drip, and spread into the panel – right away: as a page goes back
-     * into the island, a drop of it stays behind.
+     * Drip, and spread into the panel – right away, as a page goes back into
+     * the island.
      */
     open() {
         this._place();
-        this._from = this._hangingFrom();
         this._grab = Main.pushModal(this, {actionMode: Shell.ActionMode.POPUP});
         this.form.focus?.();
         this._frame(0);
@@ -104,9 +107,6 @@ export const LiquidSheet = GObject.registerClass({
             this._closing = resolve;
         });
         this._releaseGrab();
-        // Up into the island as it is now (at rest, after the page it showed).
-        if (this.opened)
-            this._from = this._hangingFrom();
         this.opened = false;
         this.remove_transition('opacity');
         this.ease({opacity: 0, duration: FADE_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
@@ -118,19 +118,6 @@ export const LiquidSheet = GObject.registerClass({
         this._timeline.advance(Math.round(this._progress * duration));
         this._timeline.start();
         return this._closingPromise;
-    }
-
-    // Where the drop hangs from: the bottom of the island as it is now. Of
-    // a page, the drop is there already, hidden in it until it draws back.
-    _hangingFrom() {
-        const island = this._island;
-        const rest = island.restRect();
-        const bottom = island.y + island.height;
-        return {
-            centerX: island.x + island.width / 2,
-            bottom,
-            fromPage: Boolean(rest) && bottom > rest[1] + rest[3] + DROP,
-        };
     }
 
     // Centered on the main monitor, a little above the middle, and below
@@ -150,31 +137,38 @@ export const LiquidSheet = GObject.registerClass({
     }
 
     // The drop at a point of the way, 0 (in the island) to 1 (the panel).
+    // Until it falls, it goes with the island as it is (drawing back).
     _frame(t) {
         this._progress = t;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const island = this._island;
         const [x, y, width, height] = this._rect;
         const r = DROP * scale;
-        const {centerX, bottom, fromPage} = this._from;
+        const centerX = island.x + island.width / 2;
+        const bottom = island.y + island.height;
+        const bead = r * 0.55;
+        const hung = [centerX, bottom + r * 1.6];
         const end = [x + width / 2, y + height / 2];
-        // Of a page, it is part of the drop already; at rest, it swells out.
-        const r0 = fromPage ? r * 0.7 : 0;
-        const hung = [centerX, bottom + r * 0.25];
         let center, half, radius;
-        if (t < HANG) {
-            // Hanging where it was, gathering, as the island draws back.
-            const u = easeOutQuad(t / HANG);
-            const size = lerp(r0, r, u);
-            center = [centerX, lerp(bottom - r0 * 0.5, hung[1], u)];
+        if (t < BACK) {
+            // A bead at the bottom of the island, riding along as it draws back.
+            const size = bead * easeOutQuad(t / BACK);
+            center = [centerX, bottom + size * 0.1];
             half = [size, size];
+            radius = size;
+        } else if (t < HANG) {
+            // Swelling into a drop that sags from the island.
+            const u = easeInOutQuad((t - BACK) / (HANG - BACK));
+            const size = lerp(bead, r, u);
+            center = [centerX, bottom + lerp(bead * 0.1, r * 1.6, u)];
+            half = [size, size * (1 + 0.12 * u)];
             radius = size;
         } else if (t < LANDED) {
             // Falling, faster and faster, drawn out on its way.
             const u = (t - HANG) / (LANDED - HANG);
             const stretch = Math.sin(Math.PI * u);
             center = [lerp(hung[0], end[0], u), lerp(hung[1], end[1], easeInQuad(u))];
-            half = [r * (1 - 0.18 * stretch), r * (1 + 0.5 * stretch)];
+            half = [r * (1 - 0.18 * stretch), r * (1.12 + 0.4 * stretch)];
             radius = Math.min(...half);
         } else {
             // Spreading: wide first, then tall, a little too far and back;
@@ -186,13 +180,15 @@ export const LiquidSheet = GObject.registerClass({
         }
         this._liquid.setDrop(center[0], center[1], half[0], half[1], radius, BLEND * scale);
 
-        // Its neck, from the island down to it: thinner the further the
-        // island draws back, until it snaps as the drop lets go.
-        const top = island.y + island.height;
-        const thick = t < SNAPPED ? lerp(r * 0.75, r * 0.12, easeOutQuad(t / SNAPPED)) *
-            (t < HANG ? 1 : 1 - (t - HANG) / (SNAPPED - HANG)) : 0;
-        if (thick > 0.5 * scale && center[1] > top)
-            this._liquid.setNeck(centerX, top - 2 * scale, center[1], thick);
+        // Its neck, from the island down to it as it sags: thinner the
+        // further it hangs, until it snaps as the drop lets go.
+        let thick = 0;
+        if (t >= BACK && t < HANG)
+            thick = lerp(r * 0.5, r * 0.14, (t - BACK) / (HANG - BACK));
+        else if (t >= HANG && t < SNAPPED)
+            thick = r * 0.14 * (1 - (t - HANG) / (SNAPPED - HANG));
+        if (thick > 0.5 * scale && center[1] > bottom)
+            this._liquid.setNeck(centerX, bottom - 2 * scale, center[1], thick);
         else
             this._liquid.setNeck(centerX, 0, 0, 0);
 

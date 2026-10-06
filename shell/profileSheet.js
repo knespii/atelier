@@ -8,7 +8,7 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import {ACCENT_COLORS, AUTO_ACCENT, describeProfile, effectiveWallpaper} from '../lib/profiles.js';
-import {hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
+import {ensureThumbnail} from '../lib/thumbnails.js';
 
 const SCHEMES = [[null, 'Keep'], ['default', 'Light'], ['prefer-dark', 'Dark']];
 const ACCENTS = [
@@ -36,11 +36,16 @@ export const ProfileSheet = GObject.registerClass({
         // The wallpaper, and what else it keeps.
         const header = new St.BoxLayout({style_class: 'atelier-profile-sheet-header'});
         const picture = new St.Widget({style_class: 'atelier-profile-sheet-picture', y_align: Clutter.ActorAlign.CENTER});
+        // (A thumbnail, made aside if there is none yet: the picture itself
+        // could take long enough to stop the drop.)
         const wallpaper = effectiveWallpaper(draft, draft.colorScheme ?? 'default');
         if (wallpaper) {
-            const path = hasThumbnail(wallpaper) ? thumbnailPath(wallpaper) : wallpaper;
-            picture.style = `background-image: url("${Gio.File.new_for_path(path).get_uri()}");`;
+            ensureThumbnail(wallpaper).then(path => {
+                if (!this._destroyed)
+                    picture.style = `background-image: url("${Gio.File.new_for_path(path).get_uri()}");`;
+            }).catch(() => {});
         }
+        this.connect('destroy', () => (this._destroyed = true));
         header.add_child(picture);
         const titles = new St.BoxLayout({
             style_class: 'atelier-profile-sheet-titles',

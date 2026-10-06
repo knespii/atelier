@@ -1651,33 +1651,35 @@ async function testNewProfile(ext, atelier) {
     await Scripting.sleep(400);
     await screenshotIsland('17-switcher-new-profile', 300);
 
-    // The island drips a sheet to name it and give it a style. Slowed down
-    // to look at: the switcher draws back into the island, and a drop of it
-    // stays behind on a neck, which snaps; the drop falls and spreads.
+    // The island drips a sheet to name it and give it a style, right away.
+    // Slowed down to look at: as the switcher draws back into the island, a
+    // bead rides along at its bottom; then it swells into a drop that hangs
+    // from the island on a neck, which snaps; the drop falls and spreads.
     // (Pictures every 0.9 s of the slowed down way.)
     const islandModule = ext.stateObj.modules.get('island');
     const watchDrip = async (name, start) => {
         const island = islandModule.island;
         const settings = St.Settings.get();
-        let hung = false;
+        let [riding, hanging] = [false, false];
         settings.slow_down_factor = 8;
         try {
             start();
-            if (!await waitFor(() => islandModule._sheet !== null, 3000))
+            if (!await waitFor(() => islandModule._sheet !== null, 1000))
                 return false;
-            for (let n = 1; n <= 6; n++) {
-                await Scripting.sleep(n === 1 ? 500 : 900);
-                const neck = islandModule._sheet?._liquid._neck?.[3] ?? 0;
-                hung ||= neck > 0 && Boolean(island.get_transition('height'));
+            for (let n = 1; n <= 8; n++) {
+                await Scripting.sleep(n === 1 ? 400 : 900);
+                const liquid = islandModule._sheet?._liquid;
+                riding ||= (liquid?._drop?.[2] ?? 0) > 0 && Boolean(island.get_transition('height'));
+                hanging ||= (liquid?._neck?.[3] ?? 0) > 0 && !island.get_transition('height');
                 await screenshotArea(`${name}-${n}`, Math.round(global.stage.width / 2) - 360, 0, 720, 760);
             }
         } finally {
             settings.slow_down_factor = 1;
         }
-        return hung;
+        return riding && hanging;
     };
     check(await watchDrip('18-new-profile-drop', () => switcher._activate(last)),
-        'as the switcher goes back into the island, a drop of it hangs on, then falls');
+        'as the switcher goes back into the island, a drop of it forms and hangs from the island, then falls');
     const sheet = islandModule._sheet;
     check(await waitFor(() => sheet?.opened && sheet.opacity === 255, 8000), 'and spreads into a sheet');
     const form = sheet.form;
