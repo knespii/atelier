@@ -122,6 +122,7 @@ class AtelierClaudeView extends St.BoxLayout {
             usage.refresh();
             this._syncProgress();
         });
+        usage.watch(this);
         this._sync();
     }
 

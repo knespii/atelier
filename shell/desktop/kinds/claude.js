@@ -74,7 +74,8 @@ class AtelierClaudeWidget extends DesktopWidget {
             });
             row.add_child(this._numbers);
         }
-        this._usage = null;
+        // (Its connection to the usage stays: built anew for another size or
+        // look, it would otherwise get one more each time.)
         this._sync();
     }
 
@@ -87,6 +88,7 @@ class AtelierClaudeWidget extends DesktopWidget {
             this._usage?.disconnectObject(this);
             this._usage = usage;
             usage?.connectObject('changed', () => this._sync(), this);
+            usage?.watch(this);
         }
         const summary = usage?.summary;
         const block = summary?.block;

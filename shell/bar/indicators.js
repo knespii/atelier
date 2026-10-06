@@ -38,6 +38,8 @@ class AtelierClaudeIndicator extends ModuleButton {
         this._label = new St.Label({style_class: 'atelier-bar-module-label', y_align: Clutter.ActorAlign.CENTER});
         this._box.add_child(this._label);
         this._usage.connectObject('changed', () => this._sync(), this);
+        // (In a compact bar, hidden: then it needs no reading.)
+        this._usage.watch(this);
         this._sync();
     }
 
