@@ -1016,6 +1016,31 @@ async function testNotes(ext) {
     notes.store.remove(one.id);
     check(!desktop.kinds.has('note'), 'no note widgets on the desktop');
 
+    // On the desktop only: among the widgets and over them, also when they
+    // are made anew; over the windows while there are none.
+    const notesSettings = ext.stateObj._settings.get_child('notes');
+    const desktopSettings = ext.stateObj._settings.get_child('desktop');
+    const overWidgets = edgeTab => {
+        const layer = ext.stateObj.modules.get('desktop')?.layer;
+        return Boolean(edgeTab?.mapped && layer?.get_last_child()?.contains(edgeTab));
+    };
+    notesSettings.set_boolean('edges-on-desktop-only', true);
+    await Scripting.sleep(300);
+    ext.stateObj.modules.get('desktop').reload();
+    await Scripting.sleep(300);
+    check(overWidgets(notes._edges._tabs.get(id)), 'on the desktop only: among the widgets, over them');
+    desktopSettings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    const alone = notes._edges._tabs.get(id);
+    check(Boolean(alone?.mapped) && !global.window_group.contains(alone), 'without the widgets: over the windows');
+    desktopSettings.set_boolean('enabled', true);
+    await Scripting.sleep(500);
+    check(overWidgets(notes._edges._tabs.get(id)), 'and among them again when they are back');
+    notesSettings.reset('edges-on-desktop-only');
+    await Scripting.sleep(300);
+    const back = notes._edges._tabs.get(id);
+    check(Boolean(back?.mapped) && !global.window_group.contains(back), 'over the windows again');
+
     // Archived, it leaves the edge and the papers.
     notes.store.update(id, {archived: true});
     await Scripting.sleep(300);
