@@ -1,8 +1,8 @@
-// A sheet that drips from the island: as the island draws back (from the
-// page it showed), a bead of it rides along at its bottom; at rest, the bead
-// swells into a drop that hangs from the island on a neck, which thins out
-// until it snaps; the drop falls and spreads into a panel of what the island
-// is made of (its glass, or black), which holds a form.
+// A sheet that drips from the island: as the island has all but drawn back
+// (from the page it showed), a drop swells out of its bottom and hangs from
+// it on a neck, which thins out until it snaps; the drop falls and spreads
+// into a panel of what the island is made of (its glass, or black), which
+// holds a form.
 // Closing, the panel gathers into a drop again that rises back into the
 // island. The drop and the panel are drawn by a surface that shows the
 // island as well, so they flow into each other where they meet; the sheet
@@ -22,13 +22,15 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 const OPEN_TIME = 1150;
 const CLOSE_TIME = 760;
 const FADE_TIME = 140;
-// Parts of the way: the island has drawn back (as long as it takes to, with
-// a bead at its bottom), the drop hangs from it, its neck has snapped, it
-// has landed, and the form shows on its way in.
-const BACK = 0.24;
-const HANG = 0.46;
-const SNAPPED = 0.54;
-const LANDED = 0.76;
+// Parts of the way: the island has all but drawn back from the page it
+// showed (its morph does most of the way early), the drop has swollen out
+// of it, it hangs from it, its neck has snapped, it has landed, and the
+// form shows on its way in.
+const BACK = 0.1;
+const SWOLLEN = 0.24;
+const HANG = 0.44;
+const SNAPPED = 0.52;
+const LANDED = 0.74;
 const SHOWN = 0.9;
 // Logical pixels: the drop, how near things melt into each other, the
 // panel's corners (as the island's pages have them), and how far below the
@@ -146,19 +148,25 @@ export const LiquidSheet = GObject.registerClass({
         const r = DROP * scale;
         const centerX = island.x + island.width / 2;
         const bottom = island.y + island.height;
-        const bead = r * 0.55;
+        const bead = r * 0.6;
         const hung = [centerX, bottom + r * 1.6];
         const end = [x + width / 2, y + height / 2];
         let center, half, radius;
         if (t < BACK) {
-            // A bead at the bottom of the island, riding along as it draws back.
-            const size = bead * easeOutQuad(t / BACK);
+            // Nothing yet, while the island draws back.
+            center = [centerX, bottom];
+            half = [0, 0];
+            radius = 0;
+        } else if (t < SWOLLEN) {
+            // Swelling out of the island's bottom edge (with the island, the
+            // last of the way it draws back).
+            const size = bead * easeOutQuad((t - BACK) / (SWOLLEN - BACK));
             center = [centerX, bottom + size * 0.1];
             half = [size, size];
             radius = size;
         } else if (t < HANG) {
-            // Swelling into a drop that sags from the island.
-            const u = easeInOutQuad((t - BACK) / (HANG - BACK));
+            // Into a drop that sags from the island.
+            const u = easeInOutQuad((t - SWOLLEN) / (HANG - SWOLLEN));
             const size = lerp(bead, r, u);
             center = [centerX, bottom + lerp(bead * 0.1, r * 1.6, u)];
             half = [size, size * (1 + 0.12 * u)];
@@ -183,8 +191,8 @@ export const LiquidSheet = GObject.registerClass({
         // Its neck, from the island down to it as it sags: thinner the
         // further it hangs, until it snaps as the drop lets go.
         let thick = 0;
-        if (t >= BACK && t < HANG)
-            thick = lerp(r * 0.5, r * 0.14, (t - BACK) / (HANG - BACK));
+        if (t >= SWOLLEN && t < HANG)
+            thick = lerp(r * 0.5, r * 0.14, (t - SWOLLEN) / (HANG - SWOLLEN));
         else if (t >= HANG && t < SNAPPED)
             thick = r * 0.14 * (1 - (t - HANG) / (SNAPPED - HANG));
         if (thick > 0.5 * scale && center[1] > bottom)
