@@ -68,6 +68,7 @@ export class IslandModule {
         this._timeouts = new Map();
         this._waits = new Map();
         this._laterId = 0;
+        this._stopped = false;
         this._glanceBlocked = false;
         this._ear = 0;
         /** GNOME's SystemActions unless replaced (tests never power off) */
@@ -152,6 +153,7 @@ export class IslandModule {
             this);
         this._syncLook();
 
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._stop(), this);
         this._queueLayout();
     }
 
@@ -177,6 +179,7 @@ export class IslandModule {
 
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         Main.layoutManager.panelBox.disconnectObject(this);
+        Main.layoutManager.uiGroup.disconnectObject(this);
         this._calendar?.disable();
         this._calendar = null;
         // The page shown, the idle view and their connections go with it.
@@ -347,7 +350,7 @@ export class IslandModule {
      */
     _queueLayout(restyled = false) {
         this._restyled ||= restyled;
-        if (this._laterId)
+        if (this._laterId || this._stopped)
             return;
         this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._laterId = 0;
@@ -436,6 +439,8 @@ export class IslandModule {
 
     _setTimeout(name, delay, callback) {
         this._clearTimeout(name);
+        if (this._stopped)
+            return;
         this._timeouts.set(name, GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             this._timeouts.delete(name);
             callback();
@@ -459,5 +464,19 @@ export class IslandModule {
         if (id)
             GLib.source_remove(id);
         this._timeouts.delete(name);
+    }
+
+    // When the shell quits, GNOME takes its UI down with uiGroup while JS
+    // still runs, then turns the main loop a while longer: what waits for a
+    // frame or a timeout would touch actors that are gone (and GJS says so
+    // in the journal). The waits for announcements touch nothing; they run
+    // out as usual.
+    _stop() {
+        this._stopped = true;
+        this._timeouts.forEach(id => GLib.source_remove(id));
+        this._timeouts.clear();
+        if (this._laterId)
+            global.compositor.get_laters().remove(this._laterId);
+        this._laterId = 0;
     }
 }

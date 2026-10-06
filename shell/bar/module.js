@@ -93,6 +93,7 @@ export class BarModule {
         this._island = null;
         this._overview = null;
         this._laterId = 0;
+        this._stopped = false;
         this._indicators = new Map();
         this._preview = null;
         this._timeouts = new Map();
@@ -129,6 +130,7 @@ export class BarModule {
             'stopped', (_, id) => this._onModule(id, false),
             this);
         this._syncModules();
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._stop(), this);
     }
 
     disable() {
@@ -150,6 +152,7 @@ export class BarModule {
             box.translation_x = 0;
         }
         Main.layoutManager.panelBox.disconnectObject(this);
+        Main.layoutManager.uiGroup.disconnectObject(this);
         if (this._laterId)
             global.compositor.get_laters().remove(this._laterId);
         this._laterId = 0;
@@ -357,7 +360,7 @@ export class BarModule {
     }
 
     _queuePlace() {
-        if (this._laterId)
+        if (this._laterId || this._stopped)
             return;
         this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._laterId = 0;
@@ -461,6 +464,8 @@ export class BarModule {
 
     _after(name, delay, callback) {
         this._clear(name);
+        if (this._stopped)
+            return;
         this._timeouts.set(name, GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             this._timeouts.delete(name);
             callback();
@@ -473,5 +478,17 @@ export class BarModule {
         if (id)
             GLib.source_remove(id);
         this._timeouts.delete(name);
+    }
+
+    // When the shell quits, GNOME takes its UI down with uiGroup while JS
+    // still runs, then turns the main loop a while longer: nothing that
+    // waits may place the sides or show a preview then.
+    _stop() {
+        this._stopped = true;
+        this._timeouts.forEach(id => GLib.source_remove(id));
+        this._timeouts.clear();
+        if (this._laterId)
+            global.compositor.get_laters().remove(this._laterId);
+        this._laterId = 0;
     }
 }
