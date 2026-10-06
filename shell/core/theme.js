@@ -88,12 +88,14 @@ export class ThemeManager {
     constructor() {
         this._file = null;
         this._serial = 0;
+        this._wanted = null;
         this._destroyed = false;
         this._dir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'atelier']);
     }
 
     /**
-     * Load the styles for a palette, replacing the previous ones.
+     * Load the styles for a palette, replacing the previous ones. The newest
+     * call wins, also one for the styles loaded already.
      *
      * @param {object} palette
      * @returns {Promise<void>}
@@ -102,17 +104,21 @@ export class ThemeManager {
         const css = paletteStylesheet(palette);
         const hash = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, css, -1).slice(0, 12);
         const name = `shell-${hash}.css`;
+        const serial = ++this._serial;
+        this._wanted = name;
         if (this._file?.get_basename() === name)
             return;
 
-        const serial = ++this._serial;
         GLib.mkdir_with_parents(this._dir, 0o755);
         // A new name each time: St caches stylesheets by file.
         const file = Gio.File.new_for_path(GLib.build_filenamev([this._dir, name]));
         await file.replace_contents_bytes_async(new GLib.Bytes(new TextEncoder().encode(css)),
             null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
         if (serial !== this._serial || this._destroyed) {
-            file.delete_async(GLib.PRIORITY_DEFAULT, null).catch(() => {});
+            // Superseded – unless a newer call wants the same file, or it
+            // is the one loaded.
+            if (this._destroyed || (name !== this._wanted && name !== this._file?.get_basename()))
+                file.delete_async(GLib.PRIORITY_DEFAULT, null).catch(() => {});
             return;
         }
 
