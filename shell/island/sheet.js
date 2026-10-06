@@ -40,6 +40,11 @@ const BLEND = 18;
 const RADIUS = 26;
 const FALL = 72;
 
+// With animations off, GNOME makes every duration 0 – and a timeline of no
+// time never starts, nor ends: the sheet would neither show nor close. One
+// millisecond is over within a frame.
+const timelineTime = msecs => Math.max(1, adjustAnimationTime(msecs));
+
 const lerp = (a, b, t) => a + (b - a) * t;
 const easeOutQuad = t => 1 - (1 - t) ** 2;
 const easeInQuad = t => t * t;
@@ -75,7 +80,7 @@ export const LiquidSheet = GObject.registerClass({
         this._closing = null;
         this._progress = 0;
         this.opened = false;
-        this._timeline = new Clutter.Timeline({actor: this, duration: adjustAnimationTime(OPEN_TIME)});
+        this._timeline = new Clutter.Timeline({actor: this, duration: timelineTime(OPEN_TIME)});
         this._timeline.connect('new-frame', () => this._frame(this._timeline.get_progress()));
         this._timeline.connect('completed', () => this._onCompleted());
         this.connect('destroy', () => {
@@ -112,7 +117,7 @@ export const LiquidSheet = GObject.registerClass({
         this.opened = false;
         this.remove_transition('opacity');
         this.ease({opacity: 0, duration: FADE_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-        const duration = adjustAnimationTime(CLOSE_TIME);
+        const duration = timelineTime(CLOSE_TIME);
         this._timeline.stop();
         this._timeline.duration = duration;
         this._timeline.direction = Clutter.TimelineDirection.BACKWARD;

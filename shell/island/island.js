@@ -94,7 +94,9 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
 export const Island = GObject.registerClass({
     Signals: {
         'clicked': {param_types: [GObject.TYPE_UINT]},
-        'page-closed': {param_types: [GObject.TYPE_OBJECT]},
+        // (Without the page: with animations off, it has faded out and gone
+        // by then.)
+        'page-closed': {},
         'idle-resized': {},
     },
 }, class AtelierIsland extends St.Widget {
@@ -260,7 +262,7 @@ export const Island = GObject.registerClass({
         if (modal)
             page.focus?.();
         if (old && old !== page)
-            this.emit('page-closed', old);
+            this.emit('page-closed');
         return true;
     }
 
@@ -276,7 +278,7 @@ export const Island = GObject.registerClass({
         page.disconnectObject(this);
         this._releaseGrab();
         this._show(this._idle);
-        this.emit('page-closed', page);
+        this.emit('page-closed');
     }
 
     _releaseGrab() {
