@@ -1592,7 +1592,25 @@ async function testDisableCleansUp(atelier) {
     bar.reset('island-shape');
 }
 
+// The shell quits with the control centre open, GNOME's tiles, list and
+// icons in the island (tools/shell-test.sh checks how it all goes down;
+// on two monitors, the shell quits with it closed).
+async function testQuitWithControlCentreOpen(ext) {
+    const islandModule = ext.stateObj.modules.get('island');
+    await waitFor(() => islandModule?.available, 2000);
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => hasClass(islandModule?.island?.page, 'atelier-cc'), 1000),
+        'the control centre is open as the shell quits');
+}
+
 export async function run() {
+    // GNOME's helper for these scripts quits after a while without calls,
+    // and the shell then exits at once instead of shutting down as at the
+    // end of a session (which tools/shell-test.sh checks): keep it awake.
+    const helperId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
+        Scripting.waitTestWindows();
+        return GLib.SOURCE_CONTINUE;
+    });
     try {
         await Scripting.sleep(1000);
         // The session starts in the overview; begin on the desktop.
@@ -1652,9 +1670,11 @@ export async function run() {
         await testWallpapersTab(atelier);
         await testNewProfile(ext, atelier);
         await testDisableCleansUp(atelier);
+        await testQuitWithControlCentreOpen(ext);
     } catch (e) {
         check(false, `exception: ${e}\n${e.stack}`);
     } finally {
+        GLib.source_remove(helperId);
         GLib.file_set_contents(`${OUTPUT}/results.txt`, `${results.join('\n')}\n`);
     }
 }

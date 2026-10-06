@@ -126,6 +126,17 @@ echo "gnome-shell exited with status $status (log: $ROOT/shell.log)"
 grep -E "JS ERROR|JS WARNING|Atelier|bg-changer" "$ROOT/shell.log" | head -40 || true
 echo
 if [ -f "$ROOT/results.txt" ]; then
+    # Shutting down, the shell takes its UI down while JS still runs. What
+    # is out of it is left to the garbage collector, which can't run its
+    # handlers and says so: GNOME's actors that Atelier holds, say.
+    exit_log=$(sed -n '/Shutting down GNOME Shell/,$p' "$ROOT/shell.log")
+    if [ -z "$exit_log" ]; then
+        echo "FAIL  the shell shuts down at the end" >> "$ROOT/results.txt"
+    elif printf '%s\n' "$exit_log" | grep -m 5 -E "sweeping phase of GC|JS callback during garbage collection"; then
+        echo "FAIL  nothing is left to the garbage collector as the shell shuts down" >> "$ROOT/results.txt"
+    else
+        echo "PASS  nothing is left to the garbage collector as the shell shuts down" >> "$ROOT/results.txt"
+    fi
     cat "$ROOT/results.txt"
     ! grep -q '^FAIL' "$ROOT/results.txt"
 else
