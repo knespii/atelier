@@ -1,7 +1,7 @@
 #!/bin/sh
 # Load the extension in a throwaway headless GNOME Shell and run
-# tools/shell-test.js inside it. Settings (keyfile backend), data and caches
-# live in tests/output/shell, so the running session is never touched.
+# tools/shell-test.js inside it. Settings (keyfile backend) and data live in
+# tests/output/shell, caches in /tmp, so the running session is never touched.
 #
 # Usage: make shell-test        (results in tests/output/shell)
 #        tools/shell-test.sh two-monitors
@@ -24,16 +24,14 @@ UUID="atelier@local"
 BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$ROOT/cache"
-# The Wayland socket's path has to fit in 108 bytes, too few in a deep
-# checkout (a git worktree, say): the runtime dir is in /tmp then.
-RUNTIME="$ROOT/runtime"
-if [ ${#RUNTIME} -gt 90 ]; then
-    RUNTIME=$(mktemp -d)
-    trap 'rm -rf "$RUNTIME"' EXIT
-else
-    mkdir -m 700 "$RUNTIME"
-fi
+mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions"
+# Sockets' paths have to fit in 108 bytes, too few under a deep checkout (a
+# git worktree, say): the runtime dir, with the Wayland socket, and the
+# cache, with ibus-daemon's, are in /tmp. (Without its socket, the
+# ibus-daemon GNOME starts eats memory without end and outlives the session.)
+RUNTIME=$(mktemp -d)
+CACHE=$(mktemp -d)
+trap 'rm -rf "$RUNTIME" "$CACHE"' EXIT
 ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
 
 # A deliberately hostile, outdated shell theme: the switcher must stay usable.
@@ -114,7 +112,7 @@ status=0
 # gvfs mounts nothing in it, so that it can be removed.
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
     WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 \
-    XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$ROOT/cache" \
+    XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 180 \
     gnome-shell --headless $MONITORS --no-x11 \
