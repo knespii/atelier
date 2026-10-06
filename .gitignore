@@ -10,3 +10,6 @@ tests/output/
 
 # Claude Code scheduler state
 .claude/*.lock
+
+# Launch video work (tools/showcase.sh frames, renders)
+brag-output/

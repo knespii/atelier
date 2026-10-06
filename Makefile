@@ -2,7 +2,7 @@ UUID := atelier@local
 INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 JS_FILES = $(shell git ls-files --cached --others --exclude-standard '*.js')
 
-.PHONY: all schemas install uninstall pack check test prefs prefs-screenshots shell-test clean
+.PHONY: all schemas install uninstall pack check test prefs prefs-screenshots shell-test showcase clean
 
 all: schemas
 
@@ -54,6 +54,13 @@ prefs-screenshots: schemas
 # on one monitor, then on two.
 shell-test: schemas
 	status=0; tools/shell-test.sh || status=1; tools/shell-test.sh two-monitors || status=1; exit $$status
+
+# The pictures in docs/screenshots, taken headlessly (the settings' ones from
+# the preference screenshots).
+showcase: schemas prefs-screenshots
+	tools/showcase.sh
+	for page in profiles top-bar appearance; do \
+		cp tests/output/prefs/$$page.png docs/screenshots/prefs-$$page.png; done
 
 clean:
 	rm -rf dist schemas/gschemas.compiled tests/output
