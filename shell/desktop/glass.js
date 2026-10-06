@@ -108,13 +108,19 @@ class AtelierDesktopGlass extends St.Widget {
         const monitor = Main.layoutManager.monitors[index];
         if (!monitor)
             return;
+        this._wallpaper.set_position(monitor.x - area.x, monitor.y - area.y);
+        // A new copy of the wallpaper for another monitor only: blurring it
+        // again shows. (The work area changes as workspaces come and go.)
+        const key = [index, monitor.x, monitor.y, monitor.width, monitor.height].join(' ');
+        if (this._bgManager && key === this._monitorKey)
+            return;
+        this._monitorKey = key;
         this._bgManager?.destroy();
         this._bgManager = new Background.BackgroundManager({
             container: this._wallpaper,
             monitorIndex: index,
             controlPosition: false,
         });
-        this._wallpaper.set_position(monitor.x - area.x, monitor.y - area.y);
         this._bgManager.connect('changed', () => this._blur());
         this._blur();
     }

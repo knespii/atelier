@@ -892,6 +892,11 @@ async function testDesktop(ext) {
         `on the grid of the work area (${clockX}, ${clockY})`);
     const glass = layer.get_first_child();
     check(hasClass(glass, 'atelier-desktop-glass') && glass._rects.length === 3, 'over glass, under each of them');
+    // (The work area changes as workspaces come and go.)
+    const blurred = glass._bgManager;
+    global.display.emit('workareas-changed');
+    await Scripting.sleep(200);
+    check(glass._bgManager === blurred, 'the glass is not blurred again when the work area changes');
     await restPointer();
     await screenshotArea('40-desktop-modern', 0, 0, 900, 700);
 
