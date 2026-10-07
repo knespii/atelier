@@ -1247,8 +1247,13 @@ async function testDesktop(ext) {
     const [cardX, cardY] = dateCard.get_transformed_position().map(Math.round);
     const patch = [cardX + 8, cardY + dateCard.height - 20, 16, 12];
     await screenshotArea('43a-card-before', ...patch);
+    // (As a profile switch does: the look it had stays until the shell is
+    // calm, then fades over.)
+    desktop.freezeLook();
     settings.set_string('style', 'analogue');
-    await Scripting.sleep(200);
+    check(Boolean(desktop._frozen?.mapped), 'switching, the desktop keeps the look it had over it');
+    await waitFor(() => !desktop._frozen, 4000);
+    await Scripting.sleep(300);
     await screenshotArea('43b-card-fading', ...patch);
     await Scripting.sleep(900);
     await screenshotArea('43c-card-after', ...patch);
@@ -1914,8 +1919,8 @@ async function testSwitcherAndReveal(atelier) {
     await screenshot('04-reveal-half');
 
     check(await waitFor(() => !atelier._applier.busy, duration + 6000), 'apply finished');
-    await Scripting.sleep(300);
-    check(overlayCount() === 0, `overlay removed (extra actors: ${overlayCount()})`);
+    // (The desktop's look as it was fades over once the shell is calm.)
+    check(await waitFor(() => overlayCount() === 0, 4000), `overlay removed (extra actors: ${overlayCount()})`);
     await screenshot('05-applied');
 
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});

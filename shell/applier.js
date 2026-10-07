@@ -38,6 +38,8 @@ export class Applier {
 
         /** Optional wallpaper transition, see reveal.js */
         this.transition = null;
+        /** Called right before a profile's settings are written (by other modules) */
+        this.beforeWrite = new Set();
     }
 
     destroy() {
@@ -109,6 +111,13 @@ export class Applier {
         try {
             if (this._destroyed)
                 return;
+            for (const callback of this.beforeWrite) {
+                try {
+                    callback();
+                } catch (e) {
+                    console.error('Atelier: before applying a profile', e);
+                }
+            }
             this._write(plan);
             if (!keepActive)
                 this._store.activeId = profile.id;

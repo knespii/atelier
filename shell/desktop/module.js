@@ -6,6 +6,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Mtk from 'gi://Mtk';
 import St from 'gi://St';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -69,6 +70,10 @@ const CALM_GAP = 90;
 const CALM_TICKS = 6;
 const CALM_TICK = 50;
 const CALM_LONGEST = 3000;
+// A profile switches the desktop's look (palette, glass or paper) at once,
+// while the shell stalls: the desktop as it looked stays over it, and fades
+// over to the new look once the shell is calm.
+const LOOK_TIME = 700;
 
 export class DesktopModule {
     /**
@@ -146,7 +151,12 @@ export class DesktopModule {
         this._glass = null;
 
         this._desktopSettings.connectObject(
-            'changed::widgets', () => !this._saving && this._loadWhenCalm(),
+            'changed::widgets', () => {
+                if (this._saving)
+                    return;
+                this._loadPending = true;
+                this._settleWhenCalm();
+            },
             'changed::style', () => this._syncLook(true),
             'changed::glass', () => this._syncLook(false),
             this);
@@ -155,9 +165,17 @@ export class DesktopModule {
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => this._queueArea(), this);
         this._modules.connectObject(
-            'started', (_, id) => id === 'claude' && this._refresh('claude'),
+            'started', (_, id) => {
+                if (id === 'claude')
+                    this._refresh('claude');
+                if (id === 'profiles')
+                    this._watchApplier();
+            },
             'stopped', (_, id) => id === 'claude' && this._refresh('claude'),
             this);
+        // (Before a profile is written: the look it had.)
+        this._freezeLook = () => this.freezeLook();
+        this._watchApplier();
 
         // The desktop's menu edits them.
         const desktop = this;
@@ -185,6 +203,8 @@ export class DesktopModule {
     disable() {
         this._cancelCalm();
         this._finishFlow();
+        this._thaw(false);
+        this._modules.get('profiles')?.applier?.beforeWrite.delete(this._freezeLook);
         this.stopEditing();
         this._injections.clear();
         this._resetMenus();
@@ -361,11 +381,73 @@ export class DesktopModule {
         this._load();
     }
 
-    // The widgets as the settings have them.
-    _loadWhenCalm() {
+    _watchApplier() {
+        this._modules.get('profiles')?.applier?.beforeWrite.add(this._freezeLook);
+    }
+
+    /**
+     * Keep the desktop as it looks now (the wallpaper and the widgets)
+     * over it, until the shell is calm: then it fades over to how it looks
+     * by then.
+     */
+    freezeLook() {
+        if (!this._layer?.mapped || !this._area || this._editor || Main.overview.visible ||
+            !St.Settings.get().enable_animations)
+            return;
+        this._thaw(false);
+        // (Only them: what is over them is out of the way for the moment
+        // it is painted – never on the screen.)
+        const background = Main.layoutManager._backgroundGroup;
+        const over = [
+            ...global.window_group.get_children().filter(actor => actor !== background),
+            ...Main.layoutManager.uiGroup.get_children().filter(actor => actor !== global.window_group),
+        ].filter(actor => actor.visible && actor.opacity > 0);
+        const opacities = over.map(actor => actor.opacity);
+        over.forEach(actor => (actor.opacity = 0));
+        const {x, y, width, height} = this._area;
+        let content = null;
+        try {
+            content = global.stage.paint_to_content(new Mtk.Rectangle({x, y, width, height}),
+                this._layer.get_resource_scale(), Clutter.PaintFlag.NO_CURSORS);
+        } catch (e) {
+            console.warn('Atelier: could not keep the desktop\'s look', e);
+        } finally {
+            over.forEach((actor, i) => (actor.opacity = opacities[i]));
+        }
+        if (!content)
+            return;
+        this._frozen = new Clutter.Actor({content, x, y, width, height, reactive: false});
+        background.insert_child_above(this._frozen, this._layer);
+        this._settleWhenCalm();
+    }
+
+    // The desktop as it looked fades over to how it looks now (or goes at once).
+    _thaw(fade = true) {
+        const frozen = this._frozen;
+        this._frozen = null;
+        if (!frozen)
+            return;
+        if (!fade) {
+            frozen.destroy();
+            return;
+        }
+        frozen.ease({opacity: 0, duration: LOOK_TIME, mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+            onStopped: () => frozen.destroy()});
+    }
+
+    // Once the shell is calm: the widgets as the settings have them now
+    // (flowing there), and the desktop's new look fading in.
+    _settleWhenCalm() {
         this._cancelCalm();
+        const settle = flow => {
+            if (this._loadPending) {
+                this._loadPending = false;
+                this._load(flow);
+            }
+            this._thaw();
+        };
         if (this._editor || !St.Settings.get().enable_animations) {
-            this._load();
+            settle(false);
             return;
         }
         const start = GLib.get_monotonic_time();
@@ -379,7 +461,7 @@ export class DesktopModule {
             if ((calm < CALM_TICKS || busy) && now - start < CALM_LONGEST * 1000)
                 return GLib.SOURCE_CONTINUE;
             this._calmId = 0;
-            this._load(true);
+            settle(true);
             return GLib.SOURCE_REMOVE;
         });
     }
