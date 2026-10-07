@@ -59,6 +59,9 @@ const POUR_TIME = 950;
 const GATHER_TIME = 560;
 const SPREAD_TIME = 720;
 const FLOW_STAGGER = 45;
+// Back from the overview (which has the wallpapers without them), the
+// widgets spread onto the desktop again, as fast as this.
+const BACK_TIME = 560;
 const CONTENT_TIME = 110;
 // Logical pixels: how near the liquid melts.
 const BLEND = 18;
@@ -166,6 +169,10 @@ export class DesktopModule {
             'changed::glass', () => this._syncLook(false),
             this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueArea(), this);
+        Main.overview.connectObject(
+            'shown', () => this._layer && (this._layer.opacity = 0),
+            'hidden', () => this._spreadBack(),
+            this);
         global.display.connectObject('workareas-changed', () => this._queueArea(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => this._queueArea(), this);
@@ -218,6 +225,7 @@ export class DesktopModule {
         this._laterId = 0;
         this._modules.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        Main.overview.disconnectObject(this);
         global.display.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         this._desktopSettings?.disconnectObject(this);
@@ -575,6 +583,23 @@ export class DesktopModule {
     }
 
     // A card again (where it goes), or gone.
+    // Back on the desktop from the overview: each widget spreads out of its
+    // middle, one a little after the other.
+    _spreadBack() {
+        if (!this._layer)
+            return;
+        const hidden = this._layer.opacity === 0;
+        this._layer.opacity = 255;
+        if (!hidden || this._editor || this._flowing || !St.Settings.get().enable_animations)
+            return;
+        const widgets = [...this._widgets.values()].filter(widget => widget.visible)
+            .sort((a, b) => a.y - b.y || a.x - b.x);
+        this._startFlow(widgets.map((widget, i) => ({
+            widget, kind: 'spread', to: [widget.x, widget.y, widget.width, widget.height],
+            delay: i * FLOW_STAGGER, duration: BACK_TIME,
+        })));
+    }
+
     _settle(step) {
         step.done = true;
         const {widget} = step;

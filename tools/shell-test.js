@@ -980,6 +980,21 @@ async function testDesktop(ext) {
     const [originX, originY] = desktop.origin;
     check(Math.abs(clockX - area.x - originX) <= 1 && Math.abs(clockY - area.y - originY) <= 1 && originX >= 24 && originY >= 24,
         `on the grid in the middle of the work area (${clockX}, ${clockY})`);
+    // Back from the overview, they spread onto the desktop again.
+    Main.overview.show();
+    await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    check(desktop._layer.opacity === 0, 'in the overview, the widgets wait out of sight');
+    Main.overview.hide();
+    await waitFor(() => !Main.overview.visible, 4000);
+    const spreading = desktop._flowing?.steps ?? [];
+    check(spreading.length === desktop.widgets.size && spreading.every(step => step.kind === 'spread') &&
+        desktop._layer.opacity === 255, `back from it, they spread onto the desktop (${spreading.length})`);
+    await Scripting.sleep(150);
+    await screenshotArea('40a-widgets-spreading-back', area.x, area.y, 960, 760);
+    await waitFor(() => !desktop._flowing, 3000);
+    check([...desktop.widgets.values()].every(widget => !widget.melted &&
+        widget.get_children().every(child => child.opacity === 255 || child.get_transition('opacity'))),
+    'and are cards again');
     const glass = layer.get_first_child();
     check(hasClass(glass, 'atelier-desktop-glass') && glass._rects.length === 3, 'over glass, under each of them');
     // (The work area changes as workspaces come and go.)
