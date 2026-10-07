@@ -196,7 +196,7 @@ export function testProfilesKeepTheirWidgets() {
     desktop.set_string('style', 'analogue');
     keepWidgets(store, desktop);
     const kept = store.get(a.id).widgets;
-    assertEqual(kept.layout.map(e => [e.kind, e.size, e.x]), [['clock', 'card', 3]], 'only known widgets');
+    assertEqual(kept.layout.map(e => [e.kind, e.size, e.x]), [['clock', 'card', 6]], 'only known widgets (on the finer grid)');
     assertEqual([kept.style, kept.glass], ['analogue', true]);
     assert(describeProfile(store.get(a.id)).some(p => p.label === 'Widgets' && p.value === '1 widget'));
 

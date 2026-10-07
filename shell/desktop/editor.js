@@ -18,7 +18,7 @@ import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUti
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {overflow} from '../../lib/liquid.js';
-import {CLOCK_FACES, KINDS, MARGIN, PITCH, UNIT, cellOrigin, cellsOf, pixelSize} from '../../lib/widgets.js';
+import {CLOCK_FACES, KINDS, UNIT, cellOrigin, cellsAt, cellsOf, pixelSize} from '../../lib/widgets.js';
 import {LiquidPaint} from '../core/liquid.js';
 
 const SNAP_TIME = 160;
@@ -51,9 +51,10 @@ const SPILL_BLEND = 20;
 // Faint squares where widgets can go.
 const GridHint = GObject.registerClass(
 class AtelierDesktopGrid extends St.DrawingArea {
-    _init(grid) {
+    _init(grid, origin) {
         super._init({style_class: 'atelier-desktop-grid'});
         this._grid = grid;
+        this._origin = origin;
     }
 
     vfunc_repaint() {
@@ -63,10 +64,10 @@ class AtelierDesktopGrid extends St.DrawingArea {
         cr.setSourceRGBA(color.red / 255, color.green / 255, color.blue / 255, color.alpha / 255);
         const [columns, rows] = this._grid;
         const size = UNIT * scale;
-        const r = 10 * scale;
+        const r = 8 * scale;
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < columns; x++) {
-                const [px, py] = cellOrigin(x, y).map(v => v * scale);
+                const [px, py] = cellOrigin(x, y, this._origin).map(v => v * scale);
                 cr.newSubPath();
                 cr.arc(px + size - r, py + r, r, -Math.PI / 2, 0);
                 cr.arc(px + size - r, py + size - r, r, 0, Math.PI / 2);
@@ -139,7 +140,7 @@ export class DesktopEditor {
             height: global.stage.height,
         });
         Main.layoutManager.addTopChrome(this.actor);
-        this._hint = new GridHint(desktop.grid);
+        this._hint = new GridHint(desktop.grid, desktop.origin);
         this._hint.set_position(area.x, area.y);
         this._hint.set_size(area.width, area.height);
         this.actor.add_child(this._hint);
@@ -304,8 +305,7 @@ export class DesktopEditor {
         const [px, py] = [Math.round(x - card.width / 2), Math.round(y - card.height / 2)];
         drag.preview.set_position(px, py);
         const area = desktop.area;
-        drag.target = desktop.spotForNew(drag.kind, ((px - area.x) / scale - MARGIN) / PITCH,
-            ((py - area.y) / scale - MARGIN) / PITCH);
+        drag.target = desktop.spotForNew(drag.kind, ...cellsAt((px - area.x) / scale, (py - area.y) / scale, desktop.origin));
         // (Over the gallery: going back there.)
         const [, galleryY] = this._gallery.get_transformed_position();
         if (y > galleryY - 8 * scale)
@@ -492,7 +492,7 @@ export class DesktopEditor {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const [x, y] = [Math.round(drag.x + dx), Math.round(drag.y + dy)];
         widget.set_position(x, y);
-        drag.target = this._desktop.spotFor(widget.entry.id, (x / scale - MARGIN) / PITCH, (y / scale - MARGIN) / PITCH);
+        drag.target = this._desktop.spotFor(widget.entry.id, ...cellsAt(x / scale, y / scale, this._desktop.origin));
         this._showGhost({...widget.entry, ...drag.target});
     }
 
@@ -553,7 +553,7 @@ export class DesktopEditor {
     _land({widget, target, x, y}) {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const moved = target && this._desktop.moveWidget(widget.entry.id, target.x, target.y);
-        const [toX, toY] = moved ? cellOrigin(target.x, target.y).map(v => v * scale) : [x, y];
+        const [toX, toY] = moved ? cellOrigin(target.x, target.y, this._desktop.origin).map(v => v * scale) : [x, y];
         widget.ease({x: toX, y: toY, duration: SNAP_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
@@ -591,7 +591,7 @@ export class DesktopEditor {
         this._ghostKey = key;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const area = this._desktop.area;
-        const [px, py] = cellOrigin(x, y);
+        const [px, py] = cellOrigin(x, y, this._desktop.origin);
         const [width, height] = pixelSize(size);
         const rect = {x: area.x + px * scale, y: area.y + py * scale, width: width * scale, height: height * scale};
         if (this._ghostShown) {

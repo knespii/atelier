@@ -20,7 +20,7 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 import {clamp01, gather, pour, spread} from '../../lib/liquid.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
-    CLOCK_FACES, KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
+    CLOCK_FACES, KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {LiquidPaint} from '../core/liquid.js';
@@ -121,6 +121,11 @@ export class DesktopModule {
     /** @returns {number[]} [columns, rows] of the grid */
     get grid() {
         return this._grid;
+    }
+
+    /** @returns {number[]} [px, py] of the grid's corner in the work area, logical pixels */
+    get origin() {
+        return this._origin;
     }
 
     /** @returns {boolean} whether the widgets are being edited */
@@ -342,6 +347,7 @@ export class DesktopModule {
         this._area = {x: area.x, y: area.y, width: area.width, height: area.height};
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         this._grid = gridSize(area.width / scale, area.height / scale);
+        this._origin = gridOrigin(area.width / scale, area.height / scale);
         if (!this._editor)
             this._layer.set_position(area.x, area.y);
         this._layer.set_size(area.width, area.height);
@@ -667,7 +673,7 @@ export class DesktopModule {
             if (!widget)
                 continue;
             widget.entry = {...widget.entry, x: entry.x, y: entry.y};
-            const [x, y] = cellOrigin(entry.x, entry.y).map(v => v * scale);
+            const [x, y] = cellOrigin(entry.x, entry.y, this._origin).map(v => v * scale);
             const delay = order * FLOW_STAGGER;
             const to = [x, y, widget.width, widget.height];
             const {was} = widget;

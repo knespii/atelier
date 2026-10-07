@@ -977,8 +977,9 @@ async function testDesktop(ext) {
     const clock = desktop.widgets.get('clock');
     const [clockX, clockY] = clock.get_transformed_position();
     const area = desktop.area;
-    check(Math.abs(clockX - area.x - 24) <= 1 && Math.abs(clockY - area.y - 24) <= 1,
-        `on the grid of the work area (${clockX}, ${clockY})`);
+    const [originX, originY] = desktop.origin;
+    check(Math.abs(clockX - area.x - originX) <= 1 && Math.abs(clockY - area.y - originY) <= 1 && originX >= 24 && originY >= 24,
+        `on the grid in the middle of the work area (${clockX}, ${clockY})`);
     const glass = layer.get_first_child();
     check(hasClass(glass, 'atelier-desktop-glass') && glass._rects.length === 3, 'over glass, under each of them');
     // (The work area changes as workspaces come and go.)
@@ -1053,24 +1054,29 @@ async function testDesktop(ext) {
     const galleryButton = label => desktop._editor._gallery.get_children()
         .find(button => findActor(button, a => a instanceof St.Label && a.text === label));
     const cellCenter = (x, y, size) => {
-        const [px, py] = [area.x + 24 + x * 96, area.y + 24 + y * 96];
+        const [px, py] = [area.x + desktop.origin[0] + x * 48, area.y + desktop.origin[1] + y * 48];
         const [w, h] = size === 'card' ? [372, 180] : [180, 180];
         return [px + w / 2, py + h / 2];
     };
+    // The grid in the middle of the screen, an even number of cells: a card
+    // fits right in the middle.
+    const middle = cellCenter((desktop.grid[0] - 8) / 2, 0, 'card')[0];
+    check(Math.abs(middle - (area.x + area.width / 2)) <= 0.5 && desktop.grid[0] % 2 === 0,
+        `a card can be right in the middle (${middle})`);
     const weatherButton = galleryButton('Weather');
     await clickAt(...centerOf(weatherButton));
     await Scripting.sleep(300);
     check(!desktop.widgets.has('weather'), 'a click in the gallery adds nothing');
     let [gx, gy] = centerOf(weatherButton);
     await pointerDown(gx, gy);
-    const [tx, ty] = cellCenter(10, 2, 'square');
+    const [tx, ty] = cellCenter(20, 4, 'square');
     await pointerAlong(gx, gy, tx, ty);
     await Scripting.sleep(300);
     const dripping = desktop._editor._drag?.preview;
     check(Boolean(dripping?.mapped) && desktop._editor._ghost.visible, 'dragged out, it drips out of it, its shadow on the cells');
     await pointerUp();
     await Scripting.sleep(400);
-    check(desktop.widgets.get('weather')?.entry.x === 10 && desktop.widgets.get('weather').entry.y === 2 &&
+    check(desktop.widgets.get('weather')?.entry.x === 20 && desktop.widgets.get('weather').entry.y === 4 &&
         !dripping.get_parent(), `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
     // The clock: a click lets its faces flow out of the gallery; one dragged
     // out is a clock of that face.
@@ -1094,13 +1100,13 @@ async function testDesktop(ext) {
     const watchItem = spill.get_children().find(item => item.accessible_name === 'Watch');
     [gx, gy] = centerOf(watchItem);
     await pointerDown(gx, gy);
-    const [cx2, cy2] = cellCenter(14, 5, 'square');
+    const [cx2, cy2] = cellCenter(28, 10, 'square');
     await pointerAlong(gx, gy, cx2, cy2);
     await Scripting.sleep(300);
     await pointerUp();
     await Scripting.sleep(400);
     const watch = [...desktop.widgets.values()].find(w => w.entry.kind === 'clock' && w.entry.face === 'watch');
-    check(watch?.entry.x === 14 && watch.entry.y === 5 && Boolean(watch._face), 'a face dragged out is a clock with that face');
+    check(watch?.entry.x === 28 && watch.entry.y === 10 && Boolean(watch._face), 'a face dragged out is a clock with that face');
     desktop.removeWidget(watch?.entry.id);
     const weather = desktop.widgets.get('weather');
     await Scripting.sleep(200);
@@ -1113,18 +1119,18 @@ async function testDesktop(ext) {
     // Dragged three cells to the right: a shadow on the grid shows where it
     // lands, and it snaps there.
     const ghost = desktop._editor._ghost;
-    const cellLeft = n => area.x + 24 + n * 96;
+    const cellLeft = n => area.x + desktop.origin[0] + n * 48;
     const saved = () => JSON.parse(settings.get_string('widgets')).find(e => e.id === 'weather');
     const before = {...weather.entry};
     const [wx, wy] = centerOf(weather);
     await pointerDown(wx, wy);
-    await pointerAlong(wx, wy, wx + 3 * 96 + 30, wy + 10);
+    await pointerAlong(wx, wy, wx + 6 * 48 + 10, wy + 10);
     await Scripting.sleep(300);
-    check(ghost.visible && Math.abs(ghost.get_transformed_position()[0] - cellLeft(before.x + 3)) <= 1 &&
+    check(ghost.visible && Math.abs(ghost.get_transformed_position()[0] - cellLeft(before.x + 6)) <= 1 &&
         ghost.width === weather.width, 'dragged, a shadow on the cells where it lands');
     await screenshot('47-desktop-dragging');
     await pointerUp();
-    check(weather.entry.x === before.x + 3 && saved()?.x === before.x + 3 && saved().size === 'card' && !ghost.visible,
+    check(weather.entry.x === before.x + 6 && saved()?.x === before.x + 6 && saved().size === 'card' && !ghost.visible,
         `let go, it snaps there and stays (${before.x} → ${saved()?.x})`);
 
     // Over another widget: beside it, where the shadow shows.
@@ -1148,7 +1154,7 @@ async function testDesktop(ext) {
 
     // Stretched by its corner, it follows the pointer and shows the size
     // nearest to how big it is; let go, it takes that size.
-    const [square, card] = [2 * 96 - 12, 4 * 96 - 12];
+    const [square, card] = [4 * 48 - 12, 8 * 48 - 12];
     let [hx, hy] = centerOf(weather._editHandle);
     await pointerDown(hx, hy);
     await pointerAlong(hx, hy, hx - 150, hy);
@@ -1759,10 +1765,10 @@ async function testTwoMonitors(ext) {
     const desktopSettings = ext.stateObj._settings.get_child('desktop');
     const grid = [...desktop.grid];
     desktopSettings.set_string('widgets', JSON.stringify([
-        {id: 'clock', kind: 'clock', size: 'square', x: 0, y: 0, grid},
-        {id: 'calendar', kind: 'calendar', size: 'large', x: 0, y: 2, grid},
-        {id: 'weather', kind: 'weather', size: 'square', x: grid[0] - 2, y: 0, grid},
-        {id: 'photo', kind: 'photo', size: 'square', x: grid[0] - 2, y: grid[1] - 2, grid},
+        {id: 'clock', kind: 'clock', size: 'square', x: 0, y: 0, grid, fine: true},
+        {id: 'calendar', kind: 'calendar', size: 'large', x: 0, y: 4, grid, fine: true},
+        {id: 'weather', kind: 'weather', size: 'square', x: grid[0] - 4, y: 0, grid, fine: true},
+        {id: 'photo', kind: 'photo', size: 'square', x: grid[0] - 4, y: grid[1] - 4, grid, fine: true},
     ]));
     await Scripting.sleep(400);
     const cells = () => JSON.stringify(Object.fromEntries([...desktop.widgets.values()]
@@ -1774,7 +1780,7 @@ async function testTwoMonitors(ext) {
     await wallpapersSettled();
     await Scripting.sleep(400);
     const [columns, rows] = desktop.grid;
-    const near = JSON.stringify({clock: [0, 0], calendar: [0, 2], weather: [columns - 2, 0], photo: [columns - 2, rows - 2]});
+    const near = JSON.stringify({clock: [0, 0], calendar: [0, 4], weather: [columns - 4, 0], photo: [columns - 4, rows - 4]});
     check(cells() === near, `the widgets near the same edges on it (${cells()})`);
     check(desktopSettings.get_string('widgets') === layout, 'where they were placed is kept');
     await screenshotArea('63-monitors-smaller-main', 0, 0, 1280, 1024);
