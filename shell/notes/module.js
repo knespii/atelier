@@ -180,7 +180,13 @@ export class NotesModule {
                 else if (action === 'archive')
                     store.update(note.id, {...fields, archived: !note.archived});
             } else if (store && !note && action === 'keep' && !form.empty) {
-                store.create(fields);
+                // A new one: the sheet runs off to the edge it is pinned to,
+                // and its paper spreads out of it there.
+                const edges = this._edges;
+                const created = edges ? edges.arriving(() => store.create(fields)) : store.create(fields);
+                sheet.connect('arrived', () => edges?.emerge(created.id));
+                sheet.close(edges?.landing(created.id) ?? null).then(() => edges?.emerge(created.id));
+                return;
             }
             sheet.close();
         };

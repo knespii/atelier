@@ -159,7 +159,9 @@ Blur my Shell blurs the bar, turn that off.)
   of it under the pointer, with a button in its corner that puts it into the
   archive. A new note (*New Note* in the desktop's menu, or the control
   centre's Notes tab) drips from the island onto a sheet to write on, and so
-  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it. *Remind
+  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it – a new
+  one runs off to its edge in a drop, and its paper spreads out of the edge
+  there. *Remind
   me* on the sheet gives a note a reminder – a day and a time, shown on its
   paper – and at that time a notification comes, with *Open* and *In 10 min*
   (one due while the computer was off or locked comes as soon as it is back).

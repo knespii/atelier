@@ -1253,12 +1253,38 @@ async function testNotes(ext) {
     form._colors.find(dot => dot._color === 'mint').emit('clicked', 1);
     await Scripting.sleep(300);
     await screenshot('50-note-sheet');
-    await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_Return);
+    // Saved, a new note's sheet runs off to the edge it is pinned to, in a
+    // drop, and its paper spreads out of the edge there. (Slowed down to
+    // look at; pictures on the way.)
+    const motion = St.Settings.get();
+    let leftmost = Infinity;
+    let waited = false;
+    let spread = false;
+    motion.slow_down_factor = 8;
+    try {
+        await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_Return);
+        for (let n = 1; n <= 14; n++) {
+            await Scripting.sleep(600);
+            const drop = islandModule._liquid?._drop;
+            if (drop && drop[2] > 0)
+                leftmost = Math.min(leftmost, drop[0]);
+            const saved = notes.store.all().find(n => n.title === 'Groceries');
+            const arriving = saved && notes._edges._tabs.get(saved.id);
+            waited ||= Boolean(arriving?.waiting) && Math.abs(arriving.translation_x + arriving.size[0]) < 1;
+            spread ||= Boolean(arriving) && !arriving.waiting && arriving.scale_y < 1;
+            if (n % 2 === 0)
+                await screenshotArea(`50b-note-to-edge-${n / 2}`, 0, 0, 1100, 760);
+        }
+    } finally {
+        motion.slow_down_factor = 1;
+    }
     check(await waitFor(() => notes.store.all().length === count + 1, 2000), 'Ctrl+Enter saves it');
     const note = notes.store.all().find(n => n.title === 'Groceries');
     const id = note?.id;
     check(note?.color === 'mint' && note.text.includes('- [ ] milk'), 'as written, on its paper');
-    check(await waitFor(() => islandModule._sheet === null, 3000), 'the sheet goes back into the island');
+    check(leftmost < 120 && waited && spread,
+        `the sheet runs off to the note's edge in a drop (${Math.round(leftmost)}), and its paper spreads out of it`);
+    check(await waitFor(() => islandModule._sheet === null, 3000), 'and the sheet is gone');
 
     // Among the papers in the Notes tab, its checkboxes tick off.
     notes.open();

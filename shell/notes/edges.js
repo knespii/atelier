@@ -2,7 +2,8 @@
 // square papers, all of one size whatever is on them, of which a strip
 // peeks out of the edge; one slides out while the pointer rests on it, and
 // a click opens it in the island – or, on the button in its corner, puts it
-// into the archive. They lie over the windows, or – if so set – on the
+// into the archive. A new one spreads out of the edge where the drop of its
+// sheet ran into it. They lie over the windows, or – if so set – on the
 // desktop only, under them; on the main monitor only.
 
 import Clutter from 'gi://Clutter';
@@ -19,6 +20,11 @@ const PEEK = 18; // logical pixels of a paper that show at the edge
 const TOP = 56; // where the first paper is
 const GAP = 12;
 const SLIDE_TIME = 180;
+// A new paper spreading out of the edge, once its drop has run into it:
+// from a sliver as tall as the drop to its strip.
+const SPREAD_TIME = 480;
+const SLIVER = 4;
+const DROP_HEIGHT = 64;
 const LINES = 7;
 
 const EdgeTab = GObject.registerClass({
@@ -78,14 +84,19 @@ const EdgeTab = GObject.registerClass({
         this._content.setNote(note.id);
     }
 
+    /** @returns {number[]} [width, height], laid out or not yet */
+    get size() {
+        return [this.width || this.get_preferred_width(-1)[1], this.height || this.get_preferred_height(-1)[1]];
+    }
+
     // Hidden but for its strip, or out while the pointer rests on it.
     _hiddenOffset() {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        return (this.width - PEEK * scale) * (this.side === 'left' ? -1 : 1);
+        return (this.size[0] - PEEK * scale) * (this.side === 'left' ? -1 : 1);
     }
 
     _slide() {
-        if (this.leaving)
+        if (this.leaving || this.waiting)
             return;
         this.get_parent()?.set_child_above_sibling(this, null);
         // (Its button takes clicks once the paper is out.)
@@ -107,10 +118,40 @@ const EdgeTab = GObject.registerClass({
         if (this.leaving)
             return;
         this.remove_transition('translation-x');
-        this.translation_x = this._hiddenOffset();
+        // (Waiting for its drop: all of it in the edge.)
+        this.translation_x = this.waiting ? this.size[0] * (this.side === 'left' ? -1 : 1) : this._hiddenOffset();
         this._archive.remove_transition('opacity');
         this._archive.opacity = 0;
         this._archive.reactive = false;
+    }
+
+    /** All of it in the edge, until emerge(). */
+    hold() {
+        this.waiting = true;
+        this.rest();
+    }
+
+    /**
+     * Out of the edge, its strip only (as when the pointer isn't on it):
+     * spreading along the edge from where its drop ran into it, a little too
+     * far and back.
+     */
+    emerge() {
+        if (!this.waiting)
+            return;
+        this.waiting = false;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [width, height] = this.size;
+        this.remove_transition('translation-x');
+        this.translation_x = (width - SLIVER * scale) * (this.side === 'left' ? -1 : 1);
+        this.set_pivot_point(0.5, 0.5);
+        this.scale_y = Math.min(1, DROP_HEIGHT * scale / height);
+        this.ease({
+            translation_x: this.hover ? 0 : this._hiddenOffset(),
+            scale_y: 1,
+            duration: SPREAD_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_BACK,
+        });
     }
 
     /**
@@ -200,6 +241,8 @@ export class EdgeTabs {
             // (Still a note when it is gone: in the Notes tab's archive.)
             tab.connect('archive', () => tab.leave(() => this._store.update(note.id, {archived: true})));
             this._sheet.add_child(tab);
+            if (this._arriving)
+                tab.hold();
             // (Over the windows, it takes the clicks the sheet doesn't.)
             if (!this._onDesktop)
                 Main.layoutManager.trackChrome(tab, {affectsInputRegion: true, trackFullscreen: false});
@@ -208,6 +251,41 @@ export class EdgeTabs {
             tab.connect('notify::width', () => this._queuePlace());
         }
         this._place();
+    }
+
+    /**
+     * A new note whose paper arrives: it waits in the edge until emerge().
+     *
+     * @param {Function} create - makes the note, and returns it
+     * @returns {object} the note
+     */
+    arriving(create) {
+        this._arriving = true;
+        try {
+            return create();
+        } finally {
+            this._arriving = false;
+        }
+    }
+
+    /**
+     * @param {string} id - of a note pinned to an edge
+     * @returns {object|null} {x, y, side}: where its paper comes out of the
+     *   edge, on the stage (the middle of its side)
+     */
+    landing(id) {
+        const tab = this._tabs.get(id);
+        if (!tab || !this._sheet)
+            return null;
+        const [sheetX, sheetY] = this._sheet.get_transformed_position();
+        const [width, height] = tab.size;
+        const x = sheetX + tab.x + (tab.side === 'left' ? 0 : width);
+        return {x, y: sheetY + tab.y + height / 2, side: tab.side};
+    }
+
+    /** @param {string} id - its paper comes out of the edge */
+    emerge(id) {
+        this._tabs.get(id)?.emerge();
     }
 
     /** Show them anew (a new day: "Tomorrow" is today now). */
