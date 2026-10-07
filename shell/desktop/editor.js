@@ -286,8 +286,9 @@ export class DesktopEditor {
             const card = drag.preview.widget;
             card.set_pivot_point(0.5, 0.5);
             card.set({scale_x: DRIP_SCALE, scale_y: DRIP_SCALE, opacity: 0});
-            card.ease({scale_x: 1, scale_y: 1, opacity: 255, duration: DRIP_TIME,
-                mode: Clutter.AnimationMode.EASE_OUT_BACK});
+            card.ease({scale_x: 1, scale_y: 1, duration: DRIP_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+            // (Not opacity: past its end it would wrap round to nothing.)
+            card.ease({opacity: 255, duration: DRIP_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
             card.add_style_pseudo_class('dragged');
         }
         const card = drag.preview.widget;
@@ -389,7 +390,9 @@ export class DesktopEditor {
         spill.set_position(Math.round(x), Math.round(by - height - 16 * scale));
         spill.set_pivot_point((bx + this._clockButton.width / 2 - x) / width, 1);
         spill.set({scale_x: 0.15, scale_y: 0.15, opacity: 0});
-        spill.ease({scale_x: 1, scale_y: 1, opacity: 255, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+        spill.ease({scale_x: 1, scale_y: 1, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+        // (Not opacity: past its end it would wrap round to nothing.)
+        spill.ease({opacity: 255, duration: SPILL_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
     _onMotion(event) {

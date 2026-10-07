@@ -479,8 +479,10 @@ export class DesktopModule {
                 widget.set_position(x, y);
                 widget.set_pivot_point(0.5, 0.5);
                 widget.set({scale_x: 0.55, scale_y: 0.55, opacity: 0});
-                widget.ease({scale_x: 1, scale_y: 1, opacity: 255, delay, duration: FLOW_TIME,
+                widget.ease({scale_x: 1, scale_y: 1, delay, duration: FLOW_TIME,
                     mode: Clutter.AnimationMode.EASE_OUT_BACK, onStopped: () => this.syncGlass()});
+                // (Not opacity: past its end it would wrap round to nothing.)
+                widget.ease({opacity: 255, delay, duration: FLOW_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
                 order++;
             } else if (this._flow && (widget.x !== x || widget.y !== y)) {
                 // Flowing to its new place.

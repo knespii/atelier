@@ -1074,9 +1074,19 @@ async function testDesktop(ext) {
         !dripping.get_parent(), `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
     // The clock: a click spills its faces; one dragged out is a clock of that face.
     await clickAt(...centerOf(galleryButton('Clock')));
-    await Scripting.sleep(600);
+    // (Spilling, it only ever grows clearer: an opacity past its end once
+    // wrapped round to nothing, and it flickered.)
+    let clearer = true;
+    for (let n = 0, last = 0; n < 30; n++) {
+        const opacity = desktop._editor._spill?.opacity ?? 0;
+        clearer &&= opacity >= last;
+        last = opacity;
+        await Scripting.sleep(20);
+    }
+    await Scripting.sleep(200);
     const spill = desktop._editor._spill;
-    check(spill?.get_n_children() === 4 && spill.opacity === 255, 'a click on the clock spills its faces');
+    check(spill?.get_n_children() === 4 && spill.opacity === 255 && clearer,
+        'a click on the clock spills its faces, without a flicker');
     await screenshot('41b-clock-faces-spilled');
     const watchItem = spill.get_children().find(item => item.accessible_name === 'Watch');
     [gx, gy] = centerOf(watchItem);
