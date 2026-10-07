@@ -1662,13 +1662,11 @@
 
 .atelier-widget-face {
   color: rgba(255, 255, 255, 0.85);
-  -atelier-face-color: rgba(255, 255, 255, 0.06);
   -atelier-hand-color: -st-accent-color;
 }
 
 .atelier-desktop-analogue .atelier-widget-face {
   color: #2a251f;
-  -atelier-face-color: #fffdf8;
   -atelier-hand-color: #c0392b;
 }
 
@@ -2023,6 +2021,28 @@
 
 .atelier-widget-gallery-icon {
   icon-size: 22px;
+}
+
+/* The clock's faces, spilled over the gallery */
+.atelier-widget-spill {
+  padding: 12px;
+  spacing: 6px;
+  border-radius: 28px;
+  background-color: rgba(16, 16, 20, 0.94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.atelier-widget-spill-item {
+  padding: 8px;
+  spacing: 6px;
+  border-radius: 20px;
+  color: #ffffff;
+  font-size: 9pt;
+  font-weight: bold;
+}
+
+.atelier-widget-spill-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .atelier-widget-gallery-done {

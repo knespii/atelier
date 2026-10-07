@@ -152,7 +152,8 @@ Blur my Shell blurs the bar, turn that off.)
   and choose *Edit Widgets*: drag one and a shadow on the grid shows where it
   lands;
   stretch one by its corner and it snaps to the nearest of its sizes (a click
-  on the corner gives the next one); the gallery at the bottom adds more.
+  on the corner gives the next one); drag more out of the gallery at the
+  bottom – a click on its clock spills the clock's faces, to drag one out.
   Switching workspaces, they slide along with the wallpaper.
 - **Notes**: square papers in seven colors with a title, text and checkboxes
   (a line starting with `- [ ]`: <kbd>Enter</kbd> on one starts the next line

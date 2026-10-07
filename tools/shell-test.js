@@ -1048,7 +1048,47 @@ async function testDesktop(ext) {
     desktop.edit();
     await Scripting.sleep(400);
     check(desktop.editing && layer.get_parent() === desktop._editor.actor, 'editing, they come up over everything');
-    check(desktop.addWidget('weather') && desktop.widgets.get('weather')?.mapped, 'the gallery adds a widget');
+    // The gallery: a click adds nothing (a shake: drag me); dragged out, a
+    // widget drips out of it and lands where its shadow is.
+    const galleryButton = label => desktop._editor._gallery.get_children()
+        .find(button => findActor(button, a => a instanceof St.Label && a.text === label));
+    const cellCenter = (x, y, size) => {
+        const [px, py] = [area.x + 24 + x * 96, area.y + 24 + y * 96];
+        const [w, h] = size === 'card' ? [372, 180] : [180, 180];
+        return [px + w / 2, py + h / 2];
+    };
+    const weatherButton = galleryButton('Weather');
+    await clickAt(...centerOf(weatherButton));
+    await Scripting.sleep(300);
+    check(!desktop.widgets.has('weather'), 'a click in the gallery adds nothing');
+    let [gx, gy] = centerOf(weatherButton);
+    await pointerDown(gx, gy);
+    const [tx, ty] = cellCenter(10, 2, 'square');
+    await pointerAlong(gx, gy, tx, ty);
+    await Scripting.sleep(300);
+    const dripping = desktop._editor._drag?.preview;
+    check(Boolean(dripping?.mapped) && desktop._editor._ghost.visible, 'dragged out, it drips out of it, its shadow on the cells');
+    await pointerUp();
+    await Scripting.sleep(400);
+    check(desktop.widgets.get('weather')?.entry.x === 10 && desktop.widgets.get('weather').entry.y === 2 &&
+        !dripping.get_parent(), `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
+    // The clock: a click spills its faces; one dragged out is a clock of that face.
+    await clickAt(...centerOf(galleryButton('Clock')));
+    await Scripting.sleep(600);
+    const spill = desktop._editor._spill;
+    check(spill?.get_n_children() === 4 && spill.opacity === 255, 'a click on the clock spills its faces');
+    await screenshot('41b-clock-faces-spilled');
+    const watchItem = spill.get_children().find(item => item.accessible_name === 'Watch');
+    [gx, gy] = centerOf(watchItem);
+    await pointerDown(gx, gy);
+    const [cx2, cy2] = cellCenter(14, 5, 'square');
+    await pointerAlong(gx, gy, cx2, cy2);
+    await Scripting.sleep(300);
+    await pointerUp();
+    await Scripting.sleep(400);
+    const watch = [...desktop.widgets.values()].find(w => w.entry.kind === 'clock' && w.entry.face === 'watch');
+    check(watch?.entry.x === 14 && watch.entry.y === 5 && Boolean(watch._face), 'a face dragged out is a clock with that face');
+    desktop.removeWidget(watch?.entry.id);
     const weather = desktop.widgets.get('weather');
     await Scripting.sleep(200);
     check(Boolean(weather._editHandle?.mapped), 'it has a handle on its corner');

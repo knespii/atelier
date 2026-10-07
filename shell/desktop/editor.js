@@ -2,9 +2,10 @@
 // dimmed screen with the grid they snap to: drag one to move it, or the
 // handle on its corner to stretch it – it takes the size it comes in that
 // is nearest (a click on the handle gives it the next one). While dragging,
-// a shadow on the grid shows where it lands. Its button removes it, and the
-// gallery at the bottom adds more. Done (or Esc) puts them back under the
-// windows.
+// a shadow on the grid shows where it lands. Its button removes it. More
+// are dragged out of the gallery at the bottom (a click on the clock spills
+// its faces over it, to drag out one of them). Done (or Esc) puts them back
+// under the windows.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -15,7 +16,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {KINDS, MARGIN, PITCH, UNIT, cellOrigin, cellsOf, pixelSize} from '../../lib/widgets.js';
+import {CLOCK_FACES, KINDS, MARGIN, PITCH, UNIT, cellOrigin, cellsOf, pixelSize} from '../../lib/widgets.js';
 
 const SNAP_TIME = 160;
 const GHOST_TIME = 120;
@@ -29,6 +30,14 @@ const MAX_GIVE = 24;
 const RADIUS = 22;
 const OVERHANG = 8;
 const ARC_GAP = 4;
+// Out of the gallery: a widget drips out (from this much of its size), and
+// one let go of nowhere goes back.
+const DRIP_SCALE = 0.5;
+const DRIP_TIME = 260;
+// The clock's faces spilled over the gallery, each this big.
+const SPILL_TIME = 380;
+const SPILL_STAGGER = 40;
+const SAMPLE = 84;
 
 // Faint squares where widgets can go.
 const GridHint = GObject.registerClass(
@@ -144,18 +153,22 @@ export class DesktopEditor {
                 x_align: Clutter.ActorAlign.CENTER,
             }));
             box.add_child(new St.Label({text: name, x_align: Clutter.ActorAlign.CENTER}));
-            const button = new St.Button({style_class: 'atelier-widget-gallery-button', can_focus: true, child: box});
-            button.connect('clicked', () => {
-                if (!desktop.addWidget(kind))
-                    this._shake(button);
-            });
+            // (Not a button: a button keeps the pointer to itself until
+            // let go of, and this is dragged.)
+            const button = new St.Bin({style_class: 'atelier-widget-gallery-button', reactive: true,
+                track_hover: true, accessible_name: name, child: box});
+            // Dragged out, not clicked in.
+            button.connect('button-press-event', (_, event) => this._onGalleryPress(kind, {}, button, event));
             this._gallery.add_child(button);
+            if (kind === 'clock')
+                this._clockButton = button;
         }
         const done = new St.Button({style_class: 'atelier-widget-gallery-done', label: 'Done', can_focus: true,
             y_align: Clutter.ActorAlign.CENTER});
         done.connect('clicked', () => desktop.stopEditing());
         this._gallery.add_child(done);
         this.actor.add_child(this._gallery);
+        this._spill = null;
         const monitor = Main.layoutManager.primaryMonitor;
         this._gallery.connect('notify::width', () => {
             this._gallery.set_position(
@@ -251,6 +264,134 @@ export class DesktopEditor {
         return Clutter.EVENT_STOP;
     }
 
+    // Pressed in the gallery: dragged, a widget drips out of it; clicked,
+    // the clock spills its faces (the others give a little shake: drag me).
+    _onGalleryPress(kind, options, source, event) {
+        if (event.get_button() !== Clutter.BUTTON_PRIMARY || this._drag)
+            return Clutter.EVENT_STOP;
+        const [x, y] = event.get_coords();
+        this._drag = {fresh: true, kind, options, source, pointer: [x, y], moved: false, preview: null, target: null};
+        this._dragGrab = global.stage.grab(this.actor);
+        return Clutter.EVENT_STOP;
+    }
+
+    _moveFresh(drag, x, y) {
+        const desktop = this._desktop;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        if (!drag.preview) {
+            drag.preview = desktop.makeWidget(drag.kind, drag.options);
+            if (!drag.preview)
+                return;
+            this.actor.add_child(drag.preview);
+            const card = drag.preview.widget;
+            card.set_pivot_point(0.5, 0.5);
+            card.set({scale_x: DRIP_SCALE, scale_y: DRIP_SCALE, opacity: 0});
+            card.ease({scale_x: 1, scale_y: 1, opacity: 255, duration: DRIP_TIME,
+                mode: Clutter.AnimationMode.EASE_OUT_BACK});
+            card.add_style_pseudo_class('dragged');
+        }
+        const card = drag.preview.widget;
+        const [px, py] = [Math.round(x - card.width / 2), Math.round(y - card.height / 2)];
+        drag.preview.set_position(px, py);
+        const area = desktop.area;
+        drag.target = desktop.spotForNew(drag.kind, ((px - area.x) / scale - MARGIN) / PITCH,
+            ((py - area.y) / scale - MARGIN) / PITCH);
+        // (Over the gallery: going back there.)
+        const [, galleryY] = this._gallery.get_transformed_position();
+        if (y > galleryY - 8 * scale)
+            drag.target = null;
+        if (drag.target)
+            this._showGhost({...drag.target, size: card.entry.size});
+        else
+            this._hideGhost();
+    }
+
+    // Let go of: where the shadow is, the widget lands there; nowhere, back
+    // into the gallery. Clicked: the clock's faces, or a shake.
+    _dropFresh(drag) {
+        this._drag = null;
+        this._dragGrab?.dismiss();
+        this._dragGrab = null;
+        this._hideGhost();
+        this._syncCursor();
+        const {preview, target, source} = drag;
+        if (!drag.moved || !preview) {
+            if (drag.kind === 'clock' && source === this._clockButton)
+                this._toggleSpill();
+            else if (!drag.moved)
+                this._shake(source);
+            preview?.destroy();
+            return;
+        }
+        const [px, py] = preview.get_transformed_position();
+        const widget = target ? this._desktop.addWidget(drag.kind, drag.options, target) : null;
+        if (widget) {
+            const area = this._desktop.area;
+            const [toX, toY] = [widget.x, widget.y];
+            widget.set_position(px - area.x, py - area.y);
+            widget.ease({x: toX, y: toY, duration: SNAP_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            preview.destroy();
+            return;
+        }
+        // Back where it came from, and gone.
+        const [sx, sy] = source.get_transformed_position();
+        const card = preview.widget;
+        card.ease({scale_x: DRIP_SCALE, scale_y: DRIP_SCALE, opacity: 0, duration: DRIP_TIME,
+            mode: Clutter.AnimationMode.EASE_IN_QUAD});
+        preview.ease({
+            x: Math.round(sx + source.width / 2 - card.width / 2),
+            y: Math.round(sy + source.height / 2 - card.height / 2),
+            duration: DRIP_TIME,
+            mode: Clutter.AnimationMode.EASE_IN_QUAD,
+            onStopped: () => preview.destroy(),
+        });
+        // (No room for it anywhere: say so.)
+        if (!this._desktop.spotForNew(drag.kind, 0, 0))
+            this._shake(source);
+    }
+
+    // The clock's faces, spilled over the gallery from the clock, a little
+    // too far and back: each as it looks, to drag out.
+    _toggleSpill() {
+        if (this._spill) {
+            const spill = this._spill;
+            this._spill = null;
+            spill.ease({scale_x: 0.2, scale_y: 0.2, opacity: 0, duration: SPILL_TIME / 2,
+                mode: Clutter.AnimationMode.EASE_IN_QUAD, onStopped: () => spill.destroy()});
+            return;
+        }
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const spill = new St.BoxLayout({style_class: 'atelier-widget-spill'});
+        this._spill = spill;
+        CLOCK_FACES.filter(([id]) => id !== 'auto').forEach(([face, name], i) => {
+            const item = new St.BoxLayout({style_class: 'atelier-widget-spill-item', orientation: Clutter.Orientation.VERTICAL,
+                reactive: true, track_hover: true, accessible_name: name});
+            const sample = this._desktop.makeWidget('clock', {face});
+            const holder = new St.Widget({width: SAMPLE * scale, height: SAMPLE * scale, x_align: Clutter.ActorAlign.CENTER});
+            const [w] = pixelSize('square');
+            sample.widget.set_scale(SAMPLE / w, SAMPLE / w);
+            holder.add_child(sample);
+            item.add_child(holder);
+            item.add_child(new St.Label({text: name, x_align: Clutter.ActorAlign.CENTER}));
+            item.connect('button-press-event', (_, event) => this._onGalleryPress('clock', {face}, item, event));
+            item.opacity = 0;
+            item.ease({opacity: 255, delay: i * SPILL_STAGGER, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            spill.add_child(item);
+        });
+        this.actor.add_child(spill);
+        // Over the clock in the gallery, spreading from it.
+        const [bx, by] = this._clockButton.get_transformed_position();
+        const [, width] = spill.get_preferred_width(-1);
+        const [, height] = spill.get_preferred_height(width);
+        const monitor = Main.layoutManager.primaryMonitor;
+        const x = Math.max(monitor.x + 12 * scale, Math.min(bx + this._clockButton.width / 2 - width / 2,
+            monitor.x + monitor.width - width - 12 * scale));
+        spill.set_position(Math.round(x), Math.round(by - height - 16 * scale));
+        spill.set_pivot_point((bx + this._clockButton.width / 2 - x) / width, 1);
+        spill.set({scale_x: 0.15, scale_y: 0.15, opacity: 0});
+        spill.ease({scale_x: 1, scale_y: 1, opacity: 255, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+    }
+
     _onMotion(event) {
         const drag = this._drag;
         if (!drag)
@@ -261,7 +402,10 @@ export class DesktopEditor {
         if (!drag.moved && Math.hypot(dx, dy) < CLICK_DISTANCE * scale)
             return Clutter.EVENT_STOP;
         drag.moved = true;
-        if (drag.stretch)
+        if (drag.fresh) {
+            this._moveFresh(drag, x, y);
+            this._syncCursor();
+        } else if (drag.stretch)
             this._stretch(drag, dx, dy);
         else
             this._move(drag, dx, dy);
@@ -306,6 +450,10 @@ export class DesktopEditor {
         if (!this._drag || event.get_button() !== Clutter.BUTTON_PRIMARY)
             return Clutter.EVENT_PROPAGATE;
         const drag = this._drag;
+        if (drag.fresh) {
+            this._dropFresh(drag);
+            return Clutter.EVENT_STOP;
+        }
         this._endDrag();
         if (drag.stretch)
             this._settle(drag);
@@ -408,7 +556,9 @@ export class DesktopEditor {
     _syncCursor() {
         const widgets = [...this._desktop.widgets.values()];
         let cursor = Meta.Cursor.DEFAULT;
-        if (this._drag)
+        if (this._drag?.fresh)
+            cursor = this._drag.moved ? Meta.Cursor.GRABBING : Meta.Cursor.DEFAULT;
+        else if (this._drag)
             cursor = this._drag.stretch ? Meta.Cursor.SE_RESIZE : Meta.Cursor.GRABBING;
         else if (widgets.some(widget => widget._editHandle?.hover))
             cursor = Meta.Cursor.SE_RESIZE;
@@ -437,6 +587,13 @@ export class DesktopEditor {
 
     /** Put the widgets back under the windows. */
     destroy() {
+        // Out of the gallery mid-way: never mind.
+        if (this._drag?.fresh) {
+            this._drag.preview?.destroy();
+            this._drag = null;
+            this._dragGrab?.dismiss();
+            this._dragGrab = null;
+        }
         // Let go of mid-way: as it was.
         if (this._drag) {
             const {widget, stretch, x, y, size} = this._drag;

@@ -558,16 +558,64 @@ export class DesktopModule {
      * @param {string} kind
      * @returns {boolean} whether there was room
      */
-    addWidget(kind) {
+    /**
+     * Put a widget of a kind on the desktop.
+     *
+     * @param {string} kind
+     * @param {object} [options] - its own, e.g. {face} for a clock
+     * @param {object|null} [at] - {x, y}: these cells, if it fits there
+     * @returns {DesktopWidget|null} the widget, or null when there is no room
+     */
+    addWidget(kind, options = {}, at = null) {
         const layout = this._shownLayout();
-        const entry = {id: newId(layout, kind), kind, size: KINDS[kind].sizes[0]};
-        const spot = findSpot(layout, entry, this._grid);
+        const entry = {id: newId(layout, kind), kind, size: KINDS[kind].sizes[0], ...options};
+        const spot = at && fits(layout, {...entry, ...at}, this._grid) ? at : findSpot(layout, entry, this._grid);
         if (!spot)
-            return false;
+            return null;
         this._keep({...entry, ...spot});
-        this._createWidget({...entry, ...spot});
+        if (Object.keys(options).length > 0) {
+            this._layout = this._layout.map(e => (e.id === entry.id ? {...e, ...options} : e));
+            this._save();
+        }
+        const widget = this._createWidget({...entry, ...spot});
         this._place();
-        return true;
+        return widget;
+    }
+
+    /**
+     * A widget of a kind that is not on the desktop (one being dragged out
+     * of the gallery, say), in the desktop's look.
+     *
+     * @param {string} kind
+     * @param {object} [options]
+     * @returns {St.Widget|null} the widget, in a box with the look's styles
+     */
+    makeWidget(kind, options = {}) {
+        const Kind = this.kinds.get(kind);
+        if (!Kind)
+            return null;
+        const look = new St.Widget({style_class: this._layer.get_style_class_name()});
+        const widget = new Kind({id: `new-${kind}`, kind, size: KINDS[kind].sizes[0], x: 0, y: 0, ...options},
+            this._context);
+        widget.reactive = false;
+        look.add_child(widget);
+        look.widget = widget;
+        return look;
+    }
+
+    /**
+     * Where a new widget of a kind would land.
+     *
+     * @param {string} kind
+     * @param {number} fx - its top left corner, in cells of the grid (not whole ones)
+     * @param {number} fy
+     * @returns {object|null} {x, y}: the free cells nearest to that, if any
+     */
+    spotForNew(kind, fx, fy) {
+        const layout = this._shownLayout();
+        const entry = {id: '', kind, size: KINDS[kind].sizes[0]};
+        const spot = nearestSpot(layout, entry, this._grid, fx, fy);
+        return Number.isInteger(spot.x) && fits(layout, {...entry, ...spot}, this._grid) ? spot : null;
     }
 
     /** @param {string} id */

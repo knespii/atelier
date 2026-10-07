@@ -36,17 +36,13 @@ class AtelierClockFace extends St.DrawingArea {
         const node = this.get_theme_node();
         const ink = node.get_foreground_color();
         const [, hand] = node.lookup_color('-atelier-hand-color', false);
-        const [, face] = node.lookup_color('-atelier-face-color', false);
         const paint = (color, alpha = 1) =>
             cr.setSourceRGBA(color.red / 255, color.green / 255, color.blue / 255, color.alpha / 255 * alpha);
         const size = Math.min(width, height);
         const r = size / 2 - 1;
         const design = this._design;
+        // (Right on the card: no dial of its own.)
         cr.translate(width / 2, height / 2);
-
-        cr.arc(0, 0, r, 0, 2 * Math.PI);
-        paint(face);
-        cr.fill();
 
         paint(ink);
         cr.setLineCap(1); // round
