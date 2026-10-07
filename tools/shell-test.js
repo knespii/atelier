@@ -1215,7 +1215,10 @@ async function testDesktop(ext) {
         {id: 'date', kind: 'date', size: 'square', x: 2, y: 0},
         {id: 'weather', kind: 'weather', size: 'square', x: 0, y: 2},
     ]));
-    await Scripting.sleep(150);
+    // (Once the shell draws smoothly: a moment later.)
+    check(desktop.widgets.has('calendar'), 'not at once, while the shell may still be busy');
+    await waitFor(() => desktop.widgets.has('weather'), 4000);
+    await Scripting.sleep(100);
     const flowWeather = desktop.widgets.get('weather');
     check(flowClock.get_transition('x') !== null && flowClock.x < clockX0 + 6 * 96 &&
         flowWeather?.get_transition('scale-x') !== null && flowWeather.scale_x < 1 &&

@@ -51,6 +51,14 @@ const RADIUS = 22;
 // little after the other.
 const FLOW_TIME = 520;
 const FLOW_STAGGER = 45;
+// A profile switches its themes and palette with the widgets, and the
+// shell stalls a while restyling itself: the widgets flow once it has drawn
+// smoothly for a while (frames at most this far apart, this many in a row),
+// or after all at most this late.
+const CALM_GAP = 90;
+const CALM_TICKS = 6;
+const CALM_TICK = 50;
+const CALM_LONGEST = 3000;
 
 export class DesktopModule {
     /**
@@ -128,7 +136,7 @@ export class DesktopModule {
         this._glass = null;
 
         this._desktopSettings.connectObject(
-            'changed::widgets', () => !this._saving && this._load(true),
+            'changed::widgets', () => !this._saving && this._loadWhenCalm(),
             'changed::style', () => this._syncLook(true),
             'changed::glass', () => this._syncLook(false),
             this);
@@ -165,6 +173,7 @@ export class DesktopModule {
     }
 
     disable() {
+        this._cancelCalm();
         this.stopEditing();
         this._injections.clear();
         this._resetMenus();
@@ -343,6 +352,34 @@ export class DesktopModule {
     }
 
     // The widgets as the settings have them.
+    _loadWhenCalm() {
+        this._cancelCalm();
+        if (this._editor || !St.Settings.get().enable_animations) {
+            this._load();
+            return;
+        }
+        const start = GLib.get_monotonic_time();
+        let last = start;
+        let calm = 0;
+        this._calmId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CALM_TICK, () => {
+            const now = GLib.get_monotonic_time();
+            calm = now - last < CALM_GAP * 1000 ? calm + 1 : 0;
+            last = now;
+            const busy = this._modules.get('profiles')?._applier?.busy;
+            if ((calm < CALM_TICKS || busy) && now - start < CALM_LONGEST * 1000)
+                return GLib.SOURCE_CONTINUE;
+            this._calmId = 0;
+            this._load(true);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelCalm() {
+        if (this._calmId)
+            GLib.source_remove(this._calmId);
+        this._calmId = 0;
+    }
+
     /** @param {boolean} [flow] - animated, for another layout (not while editing) */
     _load(flow = false) {
         this._flow = flow && !this._editor && St.Settings.get().enable_animations;
@@ -447,8 +484,15 @@ export class DesktopModule {
                 order++;
             } else if (this._flow && (widget.x !== x || widget.y !== y)) {
                 // Flowing to its new place.
+                widget.goingTo = [x, y];
                 widget.ease({x, y, delay, duration: FLOW_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
                 order++;
+            } else if (widget.get_transition('x') || widget.get_transition('y')) {
+                // (Still flowing: on, to where it goes now, not a jump there.)
+                if (widget.goingTo?.[0] !== x || widget.goingTo?.[1] !== y) {
+                    widget.goingTo = [x, y];
+                    widget.ease({x, y, duration: FLOW_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+                }
             } else {
                 widget.set_position(x, y);
             }
