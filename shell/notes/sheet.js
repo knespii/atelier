@@ -3,8 +3,10 @@
 // a checkbox – in one of the paper colors, the edge it is pinned to, and a
 // reminder if it should have one (a day and a time, when a notification
 // comes); one that is there already can be archived or deleted, too.
-// Ctrl+Enter saves it from anywhere on it. Enter on a line with a checkbox
-// starts the next one with a checkbox too (Shift+Enter: without).
+// Ctrl+Enter saves it from anywhere on it. A new one is written from its
+// title (Tab, or Enter, goes on to the text; Shift+Tab back), one there
+// already from the end of its text. Enter on a line with a checkbox starts
+// the next one with a checkbox too (Shift+Enter: without).
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -39,6 +41,7 @@ export const NoteSheet = GObject.registerClass({
      */
     _init(note = null) {
         super._init({style_class: 'atelier-note-sheet', orientation: Clutter.Orientation.VERTICAL});
+        this._new = note === null;
         // As new notes are: yellow, on the left edge.
         this._color = note?.color ?? 'yellow';
         this._pin = note ? note.pin : 'left';
@@ -48,7 +51,7 @@ export const NoteSheet = GObject.registerClass({
         this._paper = new St.BoxLayout({style_class: 'atelier-note-sheet-paper', orientation: Clutter.Orientation.VERTICAL});
         this._title = new St.Entry({style_class: 'atelier-note-title-entry', hint_text: 'Title', can_focus: true,
             text: note?.title ?? ''});
-        this._title.clutter_text.connect('activate', () => this._text.grab_key_focus());
+        this._title.clutter_text.connect('activate', () => this._writeText());
         this._paper.add_child(this._title);
         this._text = new St.Entry({style_class: 'atelier-note-text-entry', hint_text: 'Write something…',
             can_focus: true, x_expand: true, text: note?.text ?? ''});
@@ -282,13 +285,31 @@ export const NoteSheet = GObject.registerClass({
     }
 
     focus() {
+        if (this._new)
+            this._title.grab_key_focus();
+        else
+            this._writeText();
+    }
+
+    // At the end of what is written.
+    _writeText() {
         this._text.grab_key_focus();
-        // (At the end of what is written.)
         this._text.clutter_text.set_cursor_position(-1);
     }
 
     _onKey(entry, event) {
         const key = event.get_key_symbol();
+        // Tab: from the title on to the text; Shift+Tab: back.
+        if (key === Clutter.KEY_Tab || key === Clutter.KEY_KP_Tab || key === Clutter.KEY_ISO_Left_Tab) {
+            const back = key === Clutter.KEY_ISO_Left_Tab || (event.get_state() & Clutter.ModifierType.SHIFT_MASK) !== 0;
+            if (entry === this._title && !back)
+                this._writeText();
+            else if (entry === this._text && back)
+                this._title.grab_key_focus();
+            else
+                return Clutter.EVENT_PROPAGATE;
+            return Clutter.EVENT_STOP;
+        }
         if (key !== Clutter.KEY_Return && key !== Clutter.KEY_KP_Enter)
             return Clutter.EVENT_PROPAGATE;
         const state = event.get_state();

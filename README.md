@@ -158,8 +158,9 @@ Blur my Shell blurs the bar, turn that off.)
   left (or right) edge of the main monitor – a strip of each peeks out, all
   of it under the pointer, with a button in its corner that puts it into the
   archive. A new note (*New Note* in the desktop's menu, or the control
-  centre's Notes tab) drips from the island onto a sheet to write on, and so
-  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it – a new
+  centre's Notes tab) drips from the island onto a sheet to write on (its
+  title first, <kbd>Tab</kbd> on to its text), and so does a note you click;
+  <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it – a new
   one runs off to its edge in a drop, and its paper spreads out of the edge
   there. *Remind
   me* on the sheet gives a note a reminder – a day and a time, shown on its

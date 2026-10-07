@@ -1220,8 +1220,13 @@ async function testNotes(ext) {
     notes.open(null, {create: true});
     check(await waitFor(() => islandModule._sheet?.opened, 3000), 'a new note drips from the island onto a sheet');
     let form = islandModule._sheet.form;
-    check(global.stage.key_focus === form._text.clutter_text && notes.store.all().length === count,
-        'ready to write on, not saved yet');
+    check(global.stage.key_focus === form._title.clutter_text && notes.store.all().length === count,
+        'ready to write its title on, not saved yet');
+    await pressKey(Clutter.KEY_Tab);
+    check(global.stage.key_focus === form._text.clutter_text, 'Tab goes on to its text');
+    await pressKeys(Clutter.KEY_Shift_L, Clutter.KEY_ISO_Left_Tab);
+    check(global.stage.key_focus === form._title.clutter_text, 'Shift+Tab back to its title');
+    await pressKey(Clutter.KEY_Tab);
     // Enter on a line with a checkbox: the next line has one too; on an
     // empty one, it goes (the end of the list). Shift+Enter: a plain line.
     const written = form._text.clutter_text;
@@ -1306,6 +1311,7 @@ async function testNotes(ext) {
     form = islandModule._sheet.form;
     check(form._title.text === 'Groceries' && form._color === 'mint' && form._text.text.includes('- [x] milk') &&
         form._pin === 'left', 'the note as it is');
+    check(global.stage.key_focus === form._text.clutter_text, 'written on from its text, one there already');
     form._text.text = `${form._text.text}\neggs`;
     await screenshot('52-note-sheet-open');
     await pressKey(Clutter.KEY_Escape);
