@@ -5,6 +5,7 @@ import System from 'system';
 
 import * as claudeUsage from './claudeUsage.test.js';
 import * as gtkCss from './gtkCss.test.js';
+import * as liquid from './liquid.test.js';
 import * as migrate from './migrate.test.js';
 import * as notes from './notes.test.js';
 import * as notifications from './notifications.test.js';
@@ -17,7 +18,7 @@ import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
 import * as widgets from './widgets.test.js';
 
-const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack};
+const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid};
 
 let total = 0;
 let failures = 0;

@@ -3,8 +3,8 @@
 // handle on its corner to stretch it – it takes the size it comes in that
 // is nearest (a click on the handle gives it the next one). While dragging,
 // a shadow on the grid shows where it lands. Its button removes it. More
-// are dragged out of the gallery at the bottom (a click on the clock spills
-// its faces over it, to drag out one of them). Done (or Esc) puts them back
+// are dragged out of the gallery at the bottom (a click on the clock lets
+// its faces flow out of it, to drag out one of them). Done (or Esc) puts them back
 // under the windows.
 
 import Cairo from 'cairo';
@@ -14,9 +14,12 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {overflow} from '../../lib/liquid.js';
 import {CLOCK_FACES, KINDS, MARGIN, PITCH, UNIT, cellOrigin, cellsOf, pixelSize} from '../../lib/widgets.js';
+import {LiquidPaint} from '../core/liquid.js';
 
 const SNAP_TIME = 160;
 const GHOST_TIME = 120;
@@ -34,10 +37,16 @@ const ARC_GAP = 4;
 // one let go of nowhere goes back.
 const DRIP_SCALE = 0.5;
 const DRIP_TIME = 260;
-// The clock's faces spilled over the gallery, each this big.
-const SPILL_TIME = 380;
+// The clock's faces flowing out of the gallery (and back), each this big
+// once there. Logical pixels: the drop the gallery swells into, and how
+// near the liquid melts.
+const SPILL_TIME = 680;
+const SPILL_BACK_TIME = 460;
 const SPILL_STAGGER = 40;
+const SPILL_FACES_TIME = 160;
 const SAMPLE = 84;
+const SPILL_DROP = 16;
+const SPILL_BLEND = 20;
 
 // Faint squares where widgets can go.
 const GridHint = GObject.registerClass(
@@ -351,20 +360,20 @@ export class DesktopEditor {
             this._shake(source);
     }
 
-    // The clock's faces, spilled over the gallery from the clock, a little
-    // too far and back: each as it looks, to drag out.
+    // The clock's faces, out of the gallery: it swells at the clock into a
+    // drop, which rises on a neck, lets go and spreads into a panel above
+    // it, where the faces come up – each as it looks, to drag out. Clicked
+    // again, they go, and the panel flows back into the gallery.
     _toggleSpill() {
         if (this._spill) {
-            const spill = this._spill;
+            this._flowSpill(this._spill, false);
+            this._spillBack = this._spill;
             this._spill = null;
-            spill.ease({scale_x: 0.2, scale_y: 0.2, opacity: 0, duration: SPILL_TIME / 2,
-                mode: Clutter.AnimationMode.EASE_IN_QUAD, onStopped: () => spill.destroy()});
             return;
         }
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const spill = new St.BoxLayout({style_class: 'atelier-widget-spill'});
-        this._spill = spill;
-        CLOCK_FACES.filter(([id]) => id !== 'auto').forEach(([face, name], i) => {
+        const panel = new St.BoxLayout({style_class: 'atelier-widget-spill'});
+        CLOCK_FACES.filter(([id]) => id !== 'auto').forEach(([face, name]) => {
             const item = new St.BoxLayout({style_class: 'atelier-widget-spill-item', orientation: Clutter.Orientation.VERTICAL,
                 reactive: true, track_hover: true, accessible_name: name});
             const sample = this._desktop.makeWidget('clock', {face});
@@ -376,23 +385,85 @@ export class DesktopEditor {
             item.add_child(new St.Label({text: name, x_align: Clutter.ActorAlign.CENTER}));
             item.connect('button-press-event', (_, event) => this._onGalleryPress('clock', {face}, item, event));
             item.opacity = 0;
-            item.ease({opacity: 255, delay: i * SPILL_STAGGER, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-            spill.add_child(item);
+            panel.add_child(item);
         });
-        this.actor.add_child(spill);
-        // Over the clock in the gallery, spreading from it.
+        this.actor.add_child(panel);
+        // Above the clock in the gallery, on the screen.
         const [bx, by] = this._clockButton.get_transformed_position();
-        const [, width] = spill.get_preferred_width(-1);
-        const [, height] = spill.get_preferred_height(width);
+        const [, width] = panel.get_preferred_width(-1);
+        const [, height] = panel.get_preferred_height(width);
         const monitor = Main.layoutManager.primaryMonitor;
-        const x = Math.max(monitor.x + 12 * scale, Math.min(bx + this._clockButton.width / 2 - width / 2,
-            monitor.x + monitor.width - width - 12 * scale));
-        spill.set_position(Math.round(x), Math.round(by - height - 16 * scale));
-        spill.set_pivot_point((bx + this._clockButton.width / 2 - x) / width, 1);
-        spill.set({scale_x: 0.15, scale_y: 0.15, opacity: 0});
-        spill.ease({scale_x: 1, scale_y: 1, duration: SPILL_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
-        // (Not opacity: past its end it would wrap round to nothing.)
-        spill.ease({opacity: 255, duration: SPILL_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        const originX = bx + this._clockButton.width / 2;
+        const x = Math.max(monitor.x + 12 * scale, Math.min(originX - width / 2, monitor.x + monitor.width - width - 12 * scale));
+        const y = by - height - 26 * scale;
+        panel.set_position(Math.round(x), Math.round(y));
+        // The liquid, under the gallery, of its look.
+        const liquid = new LiquidPaint();
+        this.actor.insert_child_below(liquid, this._gallery);
+        liquid.set_position(monitor.x, monitor.y);
+        liquid.set_size(monitor.width, monitor.height);
+        liquid.setLook(this._gallery);
+        // (Where it is: it isn't laid out yet.)
+        const rect = [Math.round(x), Math.round(y), Math.ceil(width), Math.ceil(height)];
+        this._spill = {panel, liquid, rect, originX, progress: 0, timeline: null};
+        this._flowSpill(this._spill, true);
+    }
+
+    // The liquid on its way out of the gallery (or back into it), from
+    // where it is.
+    _flowSpill(spill, out) {
+        const {panel, liquid} = spill;
+        spill.timeline?.stop();
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [mx, my] = liquid.get_position();
+        const rect = actor => {
+            const [ax, ay] = actor.get_transformed_position();
+            return [ax - mx, ay - my, actor.width, actor.height];
+        };
+        const radius = actor => actor.get_theme_node().get_border_radius(St.Corner.TOPLEFT);
+        const bar = rect(this._gallery);
+        const shape = [[spill.rect[0] - mx, spill.rect[1] - my, spill.rect[2], spill.rect[3]], radius(panel)];
+        const look = {drop: SPILL_DROP * scale, blend: SPILL_BLEND * scale};
+        const frame = t => {
+            spill.progress = t;
+            liquid.setShapes(overflow(bar, radius(this._gallery), ...shape, spill.originX - mx, t, look),
+                [...bar, radius(this._gallery)]);
+        };
+        const faces = panel.get_children();
+        faces.forEach(face => face.remove_transition('opacity'));
+        // The faces come up once it has spread – and go before it flows back.
+        if (out) {
+            faces.forEach((face, i) => face.ease({opacity: 255, delay: SPILL_TIME * 0.7 + i * SPILL_STAGGER,
+                duration: SPILL_FACES_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD}));
+        } else {
+            panel.reactive = false;
+            faces.forEach(face => {
+                face.reactive = false;
+                face.ease({opacity: 0, duration: SPILL_FACES_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            });
+        }
+        const length = out ? SPILL_TIME : SPILL_BACK_TIME;
+        const from = spill.progress;
+        const timeline = new Clutter.Timeline({
+            actor: liquid,
+            duration: Math.max(1, adjustAnimationTime(length * (out ? 1 - from : from))),
+            delay: out ? 0 : adjustAnimationTime(SPILL_FACES_TIME / 2),
+        });
+        spill.timeline = timeline;
+        timeline.connect('new-frame', () => {
+            const t = timeline.get_progress();
+            frame(out ? from + (1 - from) * t : from * (1 - t));
+        });
+        timeline.connect('completed', () => {
+            spill.timeline = null;
+            frame(out ? 1 : 0);
+            if (!out) {
+                panel.destroy();
+                liquid.destroy();
+            }
+        });
+        frame(from);
+        timeline.start();
     }
 
     _onMotion(event) {
@@ -590,6 +661,8 @@ export class DesktopEditor {
 
     /** Put the widgets back under the windows. */
     destroy() {
+        this._spill?.timeline?.stop();
+        this._spillBack?.timeline?.stop();
         // Out of the gallery mid-way: never mind.
         if (this._drag?.fresh) {
             this._drag.preview?.destroy();

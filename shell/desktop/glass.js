@@ -1,7 +1,7 @@
 // Glass under the widgets: one blurred copy of the wallpaper for the whole
 // desktop, shown only where the widgets are – rounded rectangles that may
 // move every frame (while a widget is dragged) without blurring anything
-// again.
+// again – and where liquid flows (cards pouring to other places).
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -13,6 +13,7 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {syncTextureFrame} from '../core/glass.js';
+import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
 const MAX_RECTS = 32;
 const BLUR_RADIUS = 40; // logical pixels
@@ -24,6 +25,7 @@ uniform vec2 size;
 uniform float radius;
 uniform float count;
 uniform vec4 rects[${MAX_RECTS}];
+${LIQUID_DECLARATIONS}
 `;
 
 const CODE = `
@@ -37,6 +39,8 @@ for (int i = 0; i < ${MAX_RECTS}; i++) {
     float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
     cover = max(cover, clamp(0.5 - d, 0.0, 1.0));
 }
+if (liquidBoxCount + liquidCapsuleCount > 0.0)
+    cover = max(cover, clamp(0.5 - atelier_liquid(p), 0.0, 1.0));
 cogl_color_out *= cover;
 `;
 
@@ -49,6 +53,7 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this._radius = this.get_uniform_location('radius');
         this._count = this.get_uniform_location('count');
         this._rects = this.get_uniform_location('rects');
+        this._liquid = liquidUniforms(this);
     }
 
     vfunc_build_pipeline() {
@@ -64,8 +69,9 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
      * @param {number[]} size - [width, height] of the actor
      * @param {number[][]} rects - [x, y, width, height] in it
      * @param {number} radius - of their corners
+     * @param {object} liquid - {boxes, capsules} (lib/liquid.js)
      */
-    setRects(size, rects, radius) {
+    setRects(size, rects, radius, liquid) {
         const values = new Array(MAX_RECTS * 4).fill(0);
         rects.slice(0, MAX_RECTS).forEach((rect, i) => values.splice(i * 4, 4, ...rect));
         this.set_uniform_float(this._origin, 2, [0, 0]);
@@ -73,7 +79,7 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._radius, 1, [radius]);
         this.set_uniform_float(this._count, 1, [Math.min(rects.length, MAX_RECTS)]);
         this.set_uniform_float(this._rects, 4, values);
-        this.queue_repaint();
+        setLiquid(this, this._liquid, liquid);
     }
 });
 
@@ -92,6 +98,7 @@ class AtelierDesktopGlass extends St.Widget {
         this.add_effect_with_name('atelier-desktop-glass-mask', this._mask);
         this._rects = [];
         this._radius = 0;
+        this._liquid = {};
         this.connect('destroy', () => {
             this._bgManager?.destroy();
             this._bgManager = null;
@@ -143,14 +150,16 @@ class AtelierDesktopGlass extends St.Widget {
      *
      * @param {number[][]} rects - [x, y, width, height] in the layer
      * @param {number} radius - of their corners
+     * @param {object} [liquid] - {boxes, capsules} (lib/liquid.js), in the layer
      */
-    setRects(rects, radius) {
+    setRects(rects, radius, liquid = {}) {
         this._rects = rects;
         this._radius = radius;
+        this._liquid = liquid;
         this._apply();
     }
 
     _apply() {
-        this._mask.setRects([this.width, this.height], this._rects, this._radius);
+        this._mask.setRects([this.width, this.height], this._rects, this._radius, this._liquid);
     }
 });

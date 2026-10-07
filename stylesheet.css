@@ -1603,6 +1603,12 @@
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.26);
 }
 
+/* Turned liquid (flowing to another layout): the liquid is its card */
+.atelier-desktop .atelier-widget.atelier-widget-melted {
+  background-color: transparent;
+  box-shadow: none;
+}
+
 .atelier-widget-title {
   font-size: 13pt;
   font-weight: 800;
@@ -2023,13 +2029,11 @@
   icon-size: 22px;
 }
 
-/* The clock's faces, spilled over the gallery */
+/* The clock's faces, flowed out of the gallery: on liquid of its look */
 .atelier-widget-spill {
   padding: 12px;
   spacing: 6px;
   border-radius: 28px;
-  background-color: rgba(16, 16, 20, 0.94);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
 .atelier-widget-spill-item {

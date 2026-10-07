@@ -1072,21 +1072,24 @@ async function testDesktop(ext) {
     await Scripting.sleep(400);
     check(desktop.widgets.get('weather')?.entry.x === 10 && desktop.widgets.get('weather').entry.y === 2 &&
         !dripping.get_parent(), `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
-    // The clock: a click spills its faces; one dragged out is a clock of that face.
+    // The clock: a click lets its faces flow out of the gallery; one dragged
+    // out is a clock of that face.
     await clickAt(...centerOf(galleryButton('Clock')));
-    // (Spilling, it only ever grows clearer: an opacity past its end once
-    // wrapped round to nothing, and it flickered.)
-    let clearer = true;
-    for (let n = 0, last = 0; n < 30; n++) {
-        const opacity = desktop._editor._spill?.opacity ?? 0;
-        clearer &&= opacity >= last;
-        last = opacity;
-        await Scripting.sleep(20);
+    // (Flowing out, it only ever goes on: no springing back.)
+    let onwards = true;
+    for (let n = 0, last = 0; n < 12; n++) {
+        const progress = desktop._editor._spill?.progress ?? 0;
+        onwards &&= progress >= last;
+        last = progress;
+        if (n % 2 === 0)
+            await screenshotArea(`41a-clock-faces-flowing-${n}`, 300, 700, 800, 380);
+        await Scripting.sleep(40);
     }
-    await Scripting.sleep(200);
-    const spill = desktop._editor._spill;
-    check(spill?.get_n_children() === 4 && spill.opacity === 255 && clearer,
-        'a click on the clock spills its faces, without a flicker');
+    await Scripting.sleep(500);
+    const spill = desktop._editor._spill?.panel;
+    check(spill?.get_n_children() === 4 && desktop._editor._spill.progress === 1 && onwards &&
+        spill.get_children().every(item => item.opacity === 255),
+    'a click on the clock lets its faces flow out of the gallery');
     await screenshot('41b-clock-faces-spilled');
     const watchItem = spill.get_children().find(item => item.accessible_name === 'Watch');
     [gx, gy] = centerOf(watchItem);
@@ -1288,8 +1291,9 @@ async function testDesktop(ext) {
     await Scripting.sleep(400);
     check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
 
-    // Another layout (another profile's): the clock flows to its new place,
-    // the weather drips in, the calendar shrinks away.
+    // Another layout (another profile's): the clock pours over to its new
+    // place, the weather spreads out of its middle, the calendar draws into
+    // its own.
     const flowClock = desktop.widgets.get('clock');
     const flowCalendar = desktop.widgets.get('calendar');
     const clockX0 = flowClock.x;
@@ -1301,15 +1305,17 @@ async function testDesktop(ext) {
     // (Once the shell draws smoothly: a moment later.)
     check(desktop.widgets.has('calendar'), 'not at once, while the shell may still be busy');
     await waitFor(() => desktop.widgets.has('weather'), 4000);
-    await Scripting.sleep(100);
     const flowWeather = desktop.widgets.get('weather');
-    check(flowClock.get_transition('x') !== null && flowClock.x < clockX0 + 6 * 96 &&
-        flowWeather?.get_transition('scale-x') !== null && flowWeather.scale_x < 1 &&
-        flowCalendar.opacity < 255 && !desktop.widgets.has('calendar'),
-    'another layout: they flow to their places, new ones drip in, the others shrink away');
+    const kinds = () => desktop._flowing?.steps.map(step => `${step.widget.entry.kind} ${step.kind}`).sort().join(', ');
+    check(kinds() === 'calendar gather, clock pour, weather spread' && flowClock.melted && flowWeather?.melted &&
+        desktop._liquid?.visible && flowCalendar.get_parent() === desktop._layer && !desktop.widgets.has('calendar'),
+    `another layout: they turn liquid, pour to their places, spread out or draw in (${kinds()})`);
+    for (const at of [150, 300, 450, 600])
+        await screenshotArea(`63-widgets-pouring-${at}`, area.x, area.y, 960, 520).then(() => Scripting.sleep(10));
     await Scripting.sleep(1200);
-    check(Math.abs(flowClock.x - (clockX0 + 6 * 96)) < 1 && flowWeather.scale_x === 1 && flowWeather.opacity === 255,
-        `and settle there (${flowClock.x})`);
+    check(Math.abs(flowClock.x - (clockX0 + 6 * 96)) < 1 && !flowClock.melted && !flowWeather.melted &&
+        flowWeather.get_children().every(child => child.opacity === 255) && !desktop._flowing && !desktop._liquid.visible,
+    `and settle there, cards again (${flowClock.x})`);
     check(desktop._layer.get_children().every(child => child !== flowCalendar), 'the calendar is gone');
     settings.reset('widgets');
     await Scripting.sleep(1200);

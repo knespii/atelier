@@ -9,17 +9,20 @@ import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as BackgroundMenu from 'resource:///org/gnome/shell/ui/backgroundMenu.js';
 import * as BoxPointer from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAnimation.js';
 
+import {clamp01, gather, pour, spread} from '../../lib/liquid.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
     CLOCK_FACES, KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
+import {LiquidPaint} from '../core/liquid.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
 import {CalendarWidget} from './kinds/calendar.js';
@@ -46,11 +49,18 @@ const WIDGETS = {
 
 // Corners of the cards, logical pixels (as in the stylesheet).
 const RADIUS = 22;
-// Another layout from the settings (another profile's, say): widgets flow
-// to their new places, new ones drip in, those gone shrink away – one a
-// little after the other.
-const FLOW_TIME = 520;
+// Another layout from the settings (another profile's, say): the cards
+// turn liquid – each pours over to its new place, those gone draw into
+// their middles, new ones spread out of theirs – one a little after the
+// other. What they show fades out first, and back in once they are cards
+// again.
+const POUR_TIME = 950;
+const GATHER_TIME = 560;
+const SPREAD_TIME = 720;
 const FLOW_STAGGER = 45;
+const CONTENT_TIME = 110;
+// Logical pixels: how near the liquid melts.
+const BLEND = 18;
 // A profile switches its themes and palette with the widgets, and the
 // shell stalls a while restyling itself: the widgets flow once it has drawn
 // smoothly for a while (frames at most this far apart, this many in a row),
@@ -174,6 +184,7 @@ export class DesktopModule {
 
     disable() {
         this._cancelCalm();
+        this._finishFlow();
         this.stopEditing();
         this._injections.clear();
         this._resetMenus();
@@ -187,12 +198,10 @@ export class DesktopModule {
         this._desktopSettings?.disconnectObject(this);
         this._widgets.forEach(widget => this._dropWidget(widget));
         this._widgets.clear();
-        const leaving = [...this._leaving ?? []];
-        this._leaving = null;
-        leaving.forEach(widget => this._dropWidget(widget));
         this._layer?.destroy();
         this._layer = null;
         this._glass = null;
+        this._liquid = null;
         for (const source of Object.values(this.sources ?? {}))
             source.destroy();
         this.sources = null;
@@ -224,6 +233,7 @@ export class DesktopModule {
         if (this._editor || !this._layer)
             return;
         this._closeMenus();
+        this._finishFlow();
         this._editor = new DesktopEditor(this);
     }
 
@@ -382,15 +392,20 @@ export class DesktopModule {
 
     /** @param {boolean} [flow] - animated, for another layout (not while editing) */
     _load(flow = false) {
+        // (One still flowing is there at once.)
+        this._finishFlow();
         this._flow = flow && !this._editor && St.Settings.get().enable_animations;
+        this._gone = [];
         this._layout = parseLayout(this._desktopSettings.get_string('widgets'));
         const ids = new Set(this._layout.map(entry => entry.id));
         for (const [id, widget] of this._widgets) {
+            // (Where it is, as it is: where it pours from.)
+            widget.was = this._flow ? [widget.x, widget.y, widget.width, widget.height] : null;
             const entry = this._layout.find(e => e.id === id);
             if (!ids.has(id) || entry.kind !== widget.entry.kind) {
                 this._widgets.delete(id);
                 if (this._flow)
-                    this._shrinkAway(widget);
+                    this._gone.push(widget);
                 else
                     this._dropWidget(widget);
             }
@@ -400,7 +415,7 @@ export class DesktopModule {
             if (!widget) {
                 const created = this._createWidget(entry);
                 if (created)
-                    created.fresh = this._flow;
+                    created.was = null;
             }
             else if (widget.entry.size !== entry.size)
                 widget.resize(entry.size);
@@ -409,27 +424,122 @@ export class DesktopModule {
         }
         this._place();
         this._flow = false;
+        this._gone = [];
     }
 
-    _shrinkAway(widget) {
-        this._leaving ??= new Set();
-        this._leaving.add(widget);
-        widget.reactive = false;
-        widget.set_pivot_point(0.5, 0.5);
-        widget.ease({
-            scale_x: 0.6,
-            scale_y: 0.6,
-            opacity: 0,
-            duration: FLOW_TIME * 0.6,
-            mode: Clutter.AnimationMode.EASE_IN_QUAD,
-            onStopped: () => {
-                // (Gone with the layer already, as Atelier went.)
-                if (!this._leaving?.delete(widget))
-                    return;
-                this._dropWidget(widget);
-                this.syncGlass();
-            },
-        });
+    // The cards flowing, liquid, from where they were to where they are
+    // now (or out of the way): steps of {widget, kind, from, to, delay,
+    // duration} – kind pour, gather or spread.
+    _startFlow(steps) {
+        if (steps.length === 0)
+            return;
+        if (!this._liquid) {
+            this._liquid = new LiquidPaint();
+            this._layer.add_child(this._liquid);
+        }
+        // Over the glass, under the cards.
+        this._layer.set_child_above_sibling(this._liquid, this._glass);
+        this._liquid.set_size(this._layer.width, this._layer.height);
+        this._liquid.show();
+        // (The look of a card as it is drawn, before it melts.)
+        this._liquid.setLook(steps.find(step => step.kind !== 'spread')?.widget ?? steps[0].widget);
+        for (const step of steps)
+            this._melt(step.widget, true, step.kind !== 'spread');
+        const length = Math.max(...steps.map(step => step.delay + step.duration));
+        const timeline = new Clutter.Timeline({actor: this._layer, duration: Math.max(1, adjustAnimationTime(length))});
+        this._flowing = {steps, timeline, length};
+        timeline.connect('new-frame', () => this._flowFrame());
+        timeline.connect('completed', () => this._finishFlow());
+        this._flowFrame();
+        timeline.start();
+    }
+
+    _flowFrame() {
+        const {steps, timeline, length} = this._flowing;
+        const elapsed = timeline.get_elapsed_time() * length / timeline.duration;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const look = {radius: RADIUS * scale, blend: BLEND * scale};
+        const shapes = {boxes: [], capsules: []};
+        for (const step of steps) {
+            if (step.done)
+                continue;
+            const t = clamp01((elapsed - step.delay) / step.duration);
+            if (t > 0 && !step.started) {
+                step.started = true;
+                if (step.kind !== 'spread')
+                    this._fadeContent(step.widget, 0);
+            }
+            // (Its card goes there now: what it shows is gone.)
+            if (step.kind === 'pour' && t >= 0.12)
+                step.widget.set_position(step.to[0], step.to[1]);
+            if (t >= 1) {
+                this._settle(step);
+                continue;
+            }
+            const shape = step.kind === 'pour' ? pour(step.from, step.to, t, look)
+                : step.kind === 'gather' ? gather(step.from, t, look) : spread(step.to, t, look);
+            shapes.boxes.push(...shape.boxes);
+            shapes.capsules.push(...shape.capsules);
+        }
+        this._liquidShapes = shapes;
+        this._liquid.setShapes(shapes);
+        this.syncGlass();
+    }
+
+    // A card again (where it goes), or gone.
+    _settle(step) {
+        step.done = true;
+        const {widget} = step;
+        if (step.kind === 'gather') {
+            this._dropWidget(widget);
+            return;
+        }
+        widget.set_position(step.to[0], step.to[1]);
+        this._melt(widget, false, false);
+        this._fadeContent(widget, 255, CONTENT_TIME * 2);
+    }
+
+    _finishFlow() {
+        if (!this._flowing)
+            return;
+        const {steps, timeline} = this._flowing;
+        this._flowing = null;
+        timeline.stop();
+        steps.filter(step => !step.done).forEach(step => this._settle(step));
+        this._liquidShapes = null;
+        if (this._liquid) {
+            this._liquid.setShapes({});
+            this._liquid.hide();
+        }
+        this.syncGlass();
+    }
+
+    /**
+     * @param {DesktopWidget} widget
+     * @param {boolean} melted - its card drawn by the liquid (its own
+     *   background and shadow gone, at once)
+     * @param {boolean} [showing] - what it shows (if not, gone at once)
+     */
+    _melt(widget, melted, showing = true) {
+        widget.melted = melted;
+        widget.reactive = !melted;
+        widget.set_style('transition-duration: 0ms;');
+        if (melted)
+            widget.add_style_class_name('atelier-widget-melted');
+        else
+            widget.remove_style_class_name('atelier-widget-melted');
+        // (Styled now, then back to its usual transitions.)
+        widget.get_theme_node();
+        widget.set_style(null);
+        if (!showing)
+            widget.get_children().forEach(child => (child.opacity = 0));
+    }
+
+    _fadeContent(widget, opacity, duration = CONTENT_TIME) {
+        for (const child of widget.get_children()) {
+            child.remove_transition('opacity');
+            child.ease({opacity, duration, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        }
     }
 
     _createWidget(entry) {
@@ -463,8 +573,12 @@ export class DesktopModule {
     _place() {
         if (!this._grid)
             return;
+        // (Placed anew while flowing: there at once.)
+        if (!this._flow)
+            this._finishFlow();
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const shown = fitLayout(this._layout, this._grid);
+        const steps = [];
         let order = 0;
         for (const entry of shown) {
             const widget = this._widgets.get(entry.id);
@@ -473,31 +587,24 @@ export class DesktopModule {
             widget.entry = {...widget.entry, x: entry.x, y: entry.y};
             const [x, y] = cellOrigin(entry.x, entry.y).map(v => v * scale);
             const delay = order * FLOW_STAGGER;
-            if (this._flow && widget.fresh) {
-                // Dripping in: from a smaller drop, a little too big and back.
-                widget.fresh = false;
+            const to = [x, y, widget.width, widget.height];
+            const {was} = widget;
+            widget.was = null;
+            if (this._flow && !was) {
                 widget.set_position(x, y);
-                widget.set_pivot_point(0.5, 0.5);
-                widget.set({scale_x: 0.55, scale_y: 0.55, opacity: 0});
-                widget.ease({scale_x: 1, scale_y: 1, delay, duration: FLOW_TIME,
-                    mode: Clutter.AnimationMode.EASE_OUT_BACK, onStopped: () => this.syncGlass()});
-                // (Not opacity: past its end it would wrap round to nothing.)
-                widget.ease({opacity: 255, delay, duration: FLOW_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+                steps.push({widget, kind: 'spread', to, delay, duration: SPREAD_TIME});
                 order++;
-            } else if (this._flow && (widget.x !== x || widget.y !== y)) {
-                // Flowing to its new place.
-                widget.goingTo = [x, y];
-                widget.ease({x, y, delay, duration: FLOW_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+            } else if (this._flow && to.some((v, i) => Math.abs(v - was[i]) >= 1)) {
+                steps.push({widget, kind: 'pour', from: was, to, delay, duration: POUR_TIME});
                 order++;
-            } else if (widget.get_transition('x') || widget.get_transition('y')) {
-                // (Still flowing: on, to where it goes now, not a jump there.)
-                if (widget.goingTo?.[0] !== x || widget.goingTo?.[1] !== y) {
-                    widget.goingTo = [x, y];
-                    widget.ease({x, y, duration: FLOW_TIME / 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-                }
             } else {
                 widget.set_position(x, y);
             }
+        }
+        if (this._flow) {
+            // (Those gone first, out of the way.)
+            const gone = this._gone.map(widget => ({widget, kind: 'gather', from: widget.was, delay: 0, duration: GATHER_TIME}));
+            this._startFlow([...gone, ...steps]);
         }
         this.syncGlass();
     }
@@ -508,13 +615,13 @@ export class DesktopModule {
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         // (As big as they are drawn, growing in or shrinking away.)
-        const rects = [...this._widgets.values(), ...this._leaving ?? []]
-            .filter(widget => widget.visible && widget.opacity > 0)
+        const rects = [...this._widgets.values()]
+            .filter(widget => widget.visible && widget.opacity > 0 && !widget.melted)
             .map(widget => {
                 const [w, h] = [widget.width * widget.scale_x, widget.height * widget.scale_y];
                 return [widget.x + (widget.width - w) / 2, widget.y + (widget.height - h) / 2, w, h];
             });
-        this._glass.setRects(rects, RADIUS * scale);
+        this._glass.setRects(rects, RADIUS * scale, this._liquidShapes ?? {});
     }
 
     _refresh(kind) {
