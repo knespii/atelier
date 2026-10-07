@@ -1804,6 +1804,52 @@
   spacing: 8px;
 }
 
+/* Slack */
+
+/* (Not .atelier-widget-slack: that is the card itself.) */
+.atelier-widget-slack-row,
+.atelier-widget-slack-summary,
+.atelier-widget-slack-senders {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+}
+
+.atelier-widget-slack-row {
+  spacing: 18px;
+}
+
+.atelier-widget-slack-summary {
+  spacing: 2px;
+}
+
+.atelier-widget-slack-senders {
+  spacing: 7px;
+}
+
+.atelier-widget-slack-icon {
+  icon-size: 22px;
+  margin-bottom: 4px;
+}
+
+.atelier-widget-slack-count {
+  font-size: 28pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-slack-times {
+  font-size: 9pt;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.atelier-desktop-analogue .atelier-widget-slack-times {
+  color: rgba(42, 37, 31, 0.6);
+}
+
 /* Photo */
 
 .atelier-widget-photo:picture {

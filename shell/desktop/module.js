@@ -26,9 +26,11 @@ import {CalendarWidget} from './kinds/calendar.js';
 import {ClaudeWidget} from './kinds/claude.js';
 import {GithubWidget} from './kinds/github.js';
 import {PhotoWidget} from './kinds/photo.js';
+import {SlackWidget} from './kinds/slack.js';
 import {ClockWidget, DateWidget} from './kinds/time.js';
 import {WeatherWidget} from './kinds/weather.js';
 import {GithubSource} from './sources/github.js';
+import {SlackSource} from './sources/slack.js';
 import {TasksSource} from './sources/tasks.js';
 
 const WIDGETS = {
@@ -39,6 +41,7 @@ const WIDGETS = {
     github: GithubWidget,
     claude: ClaudeWidget,
     photo: PhotoWidget,
+    slack: SlackWidget,
 };
 
 // Corners of the cards, logical pixels (as in the stylesheet).
@@ -104,7 +107,7 @@ export class DesktopModule {
 
     enable() {
         this._desktopSettings = this._settings.get_child('desktop');
-        this.sources = {github: new GithubSource(this._desktopSettings), tasks: new TasksSource()};
+        this.sources = {github: new GithubSource(this._desktopSettings), tasks: new TasksSource(), slack: new SlackSource()};
         this._context = {
             settings: this._desktopSettings,
             sources: this.sources,

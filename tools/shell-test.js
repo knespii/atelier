@@ -1116,6 +1116,57 @@ async function testDesktop(ext) {
     check(claude?._output.text === '1.5k', `the Claude widget shows this block (${claude?._output.text})`);
     await screenshotArea('42-desktop-widgets', 0, 0, global.stage.width, 760);
 
+    // Slack: its messages since it was last looked at, counted from its
+    // notifications (also with Do Not Disturb on), and who wrote them –
+    // never what they say. (The tests never start Slack.)
+    const slack = desktop.sources.slack;
+    const banners = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
+    banners.set_boolean('show-banners', false);
+    desktop.addWidget('slack');
+    const slackWidget = desktop.widgets.get('slack');
+    check(slackWidget?._count?.text === '0' && slackWidget._caption.text === 'All caught up',
+        `the Slack widget: nothing new (${slackWidget?._count?.text})`);
+    const fromSlack = appSource('Slack', 'slack_slack', 'chat-message-new-symbolic');
+    await notify(fromSlack, 'Alice Smith', 'see you at 5');
+    const fromDesign = await notify(fromSlack, '#design', 'Bob: new mockups');
+    check(await waitFor(() => slack.unread === 2, 2000) && slackWidget._count.text === '2' &&
+        slack.senders.map(sender => sender.name).join() === '#design,Alice Smith',
+    `it counts Slack's notifications, who wrote them the latest first (${slack.unread}: ${slack.senders.map(sender => sender.name)})`);
+    check(!JSON.stringify(slack.senders).includes('mockups') && !slackWidget._latest.text.includes('mockups'),
+        'never what they say');
+    fromDesign.set({body: 'Bob: and the logo'});
+    check(await waitFor(() => slack.unread === 3, 2000) && slack.senders[0].count === 2,
+        'a notification Slack updates with a new message counts again');
+    const fromCalendar = appSource('Calendar', 'org.gnome.Calendar', 'x-office-calendar-symbolic');
+    await notify(fromCalendar, 'Yoga', 'In 15 minutes');
+    await Scripting.sleep(300);
+    check(slack.unread === 3, 'other apps\' notifications do not count');
+    await screenshotArea('42a-desktop-slack-square', ...slackWidget.get_transformed_position().map(v => Math.round(v) - 12),
+        Math.round(slackWidget.width) + 24, Math.round(slackWidget.height) + 24);
+    desktop.resizeWidget('slack');
+    await Scripting.sleep(300);
+    check(slackWidget.entry.size === 'card' && slackWidget._list?.get_n_children() === 2,
+        'as a card, it lists who wrote');
+    // (A kind's own boxes must not be styled by the card's class.)
+    const padding = widget => widget.get_theme_node().get_padding(St.Side.LEFT);
+    check(padding(slackWidget) > 0 && padding(claude) > 0 && padding(claude) === padding(gh),
+        `the Slack and Claude cards keep their padding (${padding(slackWidget)}, ${padding(claude)})`);
+    await screenshotArea('42b-desktop-slack', ...slackWidget.get_transformed_position().map(v => Math.round(v) - 12),
+        Math.round(slackWidget.width) + 24, Math.round(slackWidget.height) + 24);
+    // Slack looked at: nothing unread; nothing counts while it has the focus.
+    slack.slackFocused = () => true;
+    global.display.notify('focus-window');
+    check(slack.unread === 0 && slackWidget._count.text === '0' && slackWidget._list.get_n_children() === 1,
+        'Slack getting the focus means they were seen');
+    await notify(fromSlack, 'Alice Smith', 'one more');
+    await Scripting.sleep(300);
+    check(slack.unread === 0, 'and while it has it, nothing counts');
+    delete slack.slackFocused;
+    fromSlack.destroy();
+    fromCalendar.destroy();
+    banners.set_boolean('show-banners', true);
+    desktop.removeWidget('slack');
+
     // Analogue: paper, and a clock with hands.
     settings.set_string('style', 'analogue');
     await Scripting.sleep(500);

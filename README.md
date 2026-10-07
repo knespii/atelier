@@ -143,9 +143,12 @@ Blur my Shell blurs the bar, turn that off.)
 - **Widgets** lie on the wallpaper, under the windows: a clock, the date, the
   month with today's events and your Google Tasks (from GNOME Online
   Accounts), the weather, anyone's GitHub contributions (from GitHub's public
-  page, no account needed), Claude Code's block and a photo – as *Modern*
-  cards, on glass, or on *Analogue* paper. Right-click the desktop and choose
-  *Edit Widgets*: drag one and a shadow on the grid shows where it lands;
+  page, no account needed), Claude Code's block, a photo, and how many Slack
+  messages came since you last looked at Slack and who wrote them (counted
+  from its notifications; what they say is never shown or kept) – as
+  *Modern* cards, on glass, or on *Analogue* paper. Right-click the desktop
+  and choose *Edit Widgets*: drag one and a shadow on the grid shows where it
+  lands;
   stretch one by its corner and it snaps to the nearest of its sizes (a click
   on the corner gives the next one); the gallery at the bottom adds more.
   Switching workspaces, they slide along with the wallpaper.
