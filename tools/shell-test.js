@@ -1204,6 +1204,29 @@ async function testDesktop(ext) {
     ['style', 'widgets', 'github-user', 'photo'].forEach(key => settings.reset(key));
     await Scripting.sleep(400);
     check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
+
+    // Another layout (another profile's): the clock flows to its new place,
+    // the weather drips in, the calendar shrinks away.
+    const flowClock = desktop.widgets.get('clock');
+    const flowCalendar = desktop.widgets.get('calendar');
+    const clockX0 = flowClock.x;
+    settings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'square', x: 6, y: 0},
+        {id: 'date', kind: 'date', size: 'square', x: 2, y: 0},
+        {id: 'weather', kind: 'weather', size: 'square', x: 0, y: 2},
+    ]));
+    await Scripting.sleep(150);
+    const flowWeather = desktop.widgets.get('weather');
+    check(flowClock.get_transition('x') !== null && flowClock.x < clockX0 + 6 * 96 &&
+        flowWeather?.get_transition('scale-x') !== null && flowWeather.scale_x < 1 &&
+        flowCalendar.opacity < 255 && !desktop.widgets.has('calendar'),
+    'another layout: they flow to their places, new ones drip in, the others shrink away');
+    await Scripting.sleep(1200);
+    check(Math.abs(flowClock.x - (clockX0 + 6 * 96)) < 1 && flowWeather.scale_x === 1 && flowWeather.opacity === 255,
+        `and settle there (${flowClock.x})`);
+    check(desktop._layer.get_children().every(child => child !== flowCalendar), 'the calendar is gone');
+    settings.reset('widgets');
+    await Scripting.sleep(1200);
 }
 
 async function testNotes(ext) {

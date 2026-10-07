@@ -46,6 +46,11 @@ const WIDGETS = {
 
 // Corners of the cards, logical pixels (as in the stylesheet).
 const RADIUS = 22;
+// Another layout from the settings (another profile's, say): widgets flow
+// to their new places, new ones drip in, those gone shrink away – one a
+// little after the other.
+const FLOW_TIME = 520;
+const FLOW_STAGGER = 45;
 
 export class DesktopModule {
     /**
@@ -123,7 +128,7 @@ export class DesktopModule {
         this._glass = null;
 
         this._desktopSettings.connectObject(
-            'changed::widgets', () => !this._saving && this._load(),
+            'changed::widgets', () => !this._saving && this._load(true),
             'changed::style', () => this._syncLook(true),
             'changed::glass', () => this._syncLook(false),
             this);
@@ -173,6 +178,9 @@ export class DesktopModule {
         this._desktopSettings?.disconnectObject(this);
         this._widgets.forEach(widget => this._dropWidget(widget));
         this._widgets.clear();
+        const leaving = [...this._leaving ?? []];
+        this._leaving = null;
+        leaving.forEach(widget => this._dropWidget(widget));
         this._layer?.destroy();
         this._layer = null;
         this._glass = null;
@@ -335,26 +343,56 @@ export class DesktopModule {
     }
 
     // The widgets as the settings have them.
-    _load() {
+    /** @param {boolean} [flow] - animated, for another layout (not while editing) */
+    _load(flow = false) {
+        this._flow = flow && !this._editor && St.Settings.get().enable_animations;
         this._layout = parseLayout(this._desktopSettings.get_string('widgets'));
         const ids = new Set(this._layout.map(entry => entry.id));
         for (const [id, widget] of this._widgets) {
             const entry = this._layout.find(e => e.id === id);
             if (!ids.has(id) || entry.kind !== widget.entry.kind) {
-                this._dropWidget(widget);
                 this._widgets.delete(id);
+                if (this._flow)
+                    this._shrinkAway(widget);
+                else
+                    this._dropWidget(widget);
             }
         }
         for (const entry of this._layout) {
             const widget = this._widgets.get(entry.id);
-            if (!widget)
-                this._createWidget(entry);
+            if (!widget) {
+                const created = this._createWidget(entry);
+                if (created)
+                    created.fresh = this._flow;
+            }
             else if (widget.entry.size !== entry.size)
                 widget.resize(entry.size);
             else
                 widget.entry = {...widget.entry, ...entry};
         }
         this._place();
+        this._flow = false;
+    }
+
+    _shrinkAway(widget) {
+        this._leaving ??= new Set();
+        this._leaving.add(widget);
+        widget.reactive = false;
+        widget.set_pivot_point(0.5, 0.5);
+        widget.ease({
+            scale_x: 0.6,
+            scale_y: 0.6,
+            opacity: 0,
+            duration: FLOW_TIME * 0.6,
+            mode: Clutter.AnimationMode.EASE_IN_QUAD,
+            onStopped: () => {
+                // (Gone with the layer already, as Atelier went.)
+                if (!this._leaving?.delete(widget))
+                    return;
+                this._dropWidget(widget);
+                this.syncGlass();
+            },
+        });
     }
 
     _createWidget(entry) {
@@ -366,6 +404,8 @@ export class DesktopModule {
             'menu-request', () => this._showWidgetMenu(widget),
             // (The glass under it follows it as it moves or is stretched.)
             'notify::allocation', () => this.syncGlass(),
+            'notify::scale-x', () => this.syncGlass(),
+            'notify::opacity', () => this.syncGlass(),
             this);
         this._layer.add_child(widget);
         this._widgets.set(entry.id, widget);
@@ -388,13 +428,30 @@ export class DesktopModule {
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const shown = fitLayout(this._layout, this._grid);
+        let order = 0;
         for (const entry of shown) {
             const widget = this._widgets.get(entry.id);
             if (!widget)
                 continue;
             widget.entry = {...widget.entry, x: entry.x, y: entry.y};
-            const [x, y] = cellOrigin(entry.x, entry.y);
-            widget.set_position(x * scale, y * scale);
+            const [x, y] = cellOrigin(entry.x, entry.y).map(v => v * scale);
+            const delay = order * FLOW_STAGGER;
+            if (this._flow && widget.fresh) {
+                // Dripping in: from a smaller drop, a little too big and back.
+                widget.fresh = false;
+                widget.set_position(x, y);
+                widget.set_pivot_point(0.5, 0.5);
+                widget.set({scale_x: 0.55, scale_y: 0.55, opacity: 0});
+                widget.ease({scale_x: 1, scale_y: 1, opacity: 255, delay, duration: FLOW_TIME,
+                    mode: Clutter.AnimationMode.EASE_OUT_BACK, onStopped: () => this.syncGlass()});
+                order++;
+            } else if (this._flow && (widget.x !== x || widget.y !== y)) {
+                // Flowing to its new place.
+                widget.ease({x, y, delay, duration: FLOW_TIME, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+                order++;
+            } else {
+                widget.set_position(x, y);
+            }
         }
         this.syncGlass();
     }
@@ -404,9 +461,13 @@ export class DesktopModule {
         if (!this._glass)
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const rects = [...this._widgets.values()]
-            .filter(widget => widget.visible)
-            .map(widget => [widget.x, widget.y, widget.width, widget.height]);
+        // (As big as they are drawn, growing in or shrinking away.)
+        const rects = [...this._widgets.values(), ...this._leaving ?? []]
+            .filter(widget => widget.visible && widget.opacity > 0)
+            .map(widget => {
+                const [w, h] = [widget.width * widget.scale_x, widget.height * widget.scale_y];
+                return [widget.x + (widget.width - w) / 2, widget.y + (widget.height - h) / 2, w, h];
+            });
         this._glass.setRects(rects, RADIUS * scale);
     }
 
