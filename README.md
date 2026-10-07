@@ -150,13 +150,14 @@ Blur my Shell blurs the bar, turn that off.)
   on the corner gives the next one); the gallery at the bottom adds more.
   Switching workspaces, they slide along with the wallpaper.
 - **Notes**: square papers in seven colors with a title, text and checkboxes
-  (a line starting with `- [ ]`), pinned to the left (or right) edge of the
-  main monitor – a strip of each peeks out, all of it under the pointer, with
-  a button in its corner that puts it into the archive. A new note (*New Note*
-  in the desktop's menu, or the control centre's Notes tab) drips from the
-  island onto a sheet to write on, and so does a note you click;
-  <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it. The Notes tab has them all, and
-  an archive. They are the same whatever the profile.
+  (a line starting with `- [ ]`: <kbd>Enter</kbd> on one starts the next line
+  with one too, *Checkbox* puts one on every line selected), pinned to the
+  left (or right) edge of the main monitor – a strip of each peeks out, all
+  of it under the pointer, with a button in its corner that puts it into the
+  archive. A new note (*New Note* in the desktop's menu, or the control
+  centre's Notes tab) drips from the island onto a sheet to write on, and so
+  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it. The Notes
+  tab has them all, and an archive. They are the same whatever the profile.
 - **Dock**: the pinned apps and those with windows on the workspace, at the
   bottom of the screen; it moves out of the way of windows, and the bottom
   edge brings it back. Dynamic Music Pill sits at its end. It stays off while

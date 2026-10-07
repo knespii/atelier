@@ -2,17 +2,22 @@
 // a paper to write on – its title and its text, a line starting with "- [ ]"
 // a checkbox – in one of the paper colors, and the edge it is pinned to; one
 // that is there already can be archived or deleted, too. Ctrl+Enter saves
-// it from anywhere on it.
+// it from anywhere on it. Enter on a line with a checkbox starts the next
+// one with a checkbox too (Shift+Enter: without).
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {COLORS, toggleLine} from '../../lib/notes.js';
+import {COLORS, boxLines, continueList, toggleLine} from '../../lib/notes.js';
 import {paperStyle} from './card.js';
 
 const PINS = [['left', 'Left'], ['right', 'Right'], [null, 'None']];
+
+// ClutterText counts characters, JavaScript UTF-16 units (an emoji is two).
+const indexOf = (value, chars) => (chars < 0 ? value.length : [...value].slice(0, chars).join('').length);
+const charsTo = (value, index) => [...value.slice(0, index)].length;
 
 export const NoteSheet = GObject.registerClass({
     Signals: {
@@ -61,7 +66,7 @@ export const NoteSheet = GObject.registerClass({
             child: page,
         }));
         for (const entry of [this._title, this._text]) {
-            entry.clutter_text.connect('key-press-event', (_, event) => this._onKey(event));
+            entry.clutter_text.connect('key-press-event', (_, event) => this._onKey(entry, event));
             entry.clutter_text.connect('text-changed', () => this._sync());
         }
         this.add_child(this._paper);
@@ -148,27 +153,47 @@ export const NoteSheet = GObject.registerClass({
         this._text.clutter_text.set_cursor_position(-1);
     }
 
-    _onKey(event) {
+    _onKey(entry, event) {
         const key = event.get_key_symbol();
-        const control = (event.get_state() & Clutter.ModifierType.CONTROL_MASK) !== 0;
-        if (control && (key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter)) {
+        if (key !== Clutter.KEY_Return && key !== Clutter.KEY_KP_Enter)
+            return Clutter.EVENT_PROPAGATE;
+        const state = event.get_state();
+        if (state & Clutter.ModifierType.CONTROL_MASK) {
             if (!this.empty)
                 this.emit('save');
             return Clutter.EVENT_STOP;
         }
-        return Clutter.EVENT_PROPAGATE;
+        if (entry !== this._text || state & Clutter.ModifierType.SHIFT_MASK)
+            return Clutter.EVENT_PROPAGATE;
+        // In a list of checkboxes, the next line gets one too. (Over a
+        // selection, Enter replaces it as ever.)
+        const text = this._text.clutter_text;
+        const value = this._text.text;
+        const cursor = indexOf(value, text.get_cursor_position());
+        const after = cursor === indexOf(value, text.get_selection_bound()) ? continueList(value, cursor) : null;
+        if (!after)
+            return Clutter.EVENT_PROPAGATE;
+        this._text.text = after.text;
+        const place = charsTo(after.text, after.position);
+        text.set_selection(place, place);
+        return Clutter.EVENT_STOP;
     }
 
-    // A checkbox at the line the cursor is on (or off it).
+    // A checkbox at the line the cursor is on (or off it) – or, with lines
+    // selected, on all of them (or off, when they all have one).
     _toggleCheckbox() {
         const text = this._text.clutter_text;
-        const position = text.get_cursor_position();
-        const before = position < 0 ? this._text.text : this._text.text.slice(0, position);
-        const line = before.split('\n').length - 1;
-        const updated = toggleLine(this._text.text, line);
+        const value = this._text.text;
+        const cursor = indexOf(value, text.get_cursor_position());
+        const bound = indexOf(value, text.get_selection_bound());
+        const lineAt = index => value.slice(0, index).split('\n').length - 1;
+        const [first, last] = [lineAt(Math.min(cursor, bound)), lineAt(Math.max(cursor, bound))];
+        const updated = first === last ? toggleLine(value, first) : boxLines(value, first, last);
         this._text.text = updated;
         this._text.grab_key_focus();
-        text.set_cursor_position(Math.min(updated.length, updated.split('\n').slice(0, line + 1).join('\n').length));
+        // (At the end of the last line of them.)
+        const end = charsTo(updated, updated.split('\n').slice(0, last + 1).join('\n').length);
+        text.set_selection(end, end);
     }
 
     _sync() {

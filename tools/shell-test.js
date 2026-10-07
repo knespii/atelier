@@ -1171,6 +1171,31 @@ async function testNotes(ext) {
     let form = islandModule._sheet.form;
     check(global.stage.key_focus === form._text.clutter_text && notes.store.all().length === count,
         'ready to write on, not saved yet');
+    // Enter on a line with a checkbox: the next line has one too; on an
+    // empty one, it goes (the end of the list). Shift+Enter: a plain line.
+    const written = form._text.clutter_text;
+    const write = text => [...text].forEach(char => written.insert_unichar(char));
+    form._text.text = '- [ ] milk';
+    written.set_selection(-1, -1);
+    await pressKey(Clutter.KEY_Return);
+    write('bread');
+    await pressKey(Clutter.KEY_Return);
+    check(form._text.text === '- [ ] milk\n- [ ] bread\n- [ ] ',
+        `Enter in a list of checkboxes starts the next one with a checkbox (${JSON.stringify(form._text.text)})`);
+    await pressKey(Clutter.KEY_Return);
+    check(form._text.text === '- [ ] milk\n- [ ] bread\n', 'and on an empty one ends the list');
+    write('- [ ] eggs');
+    await pressKeys(Clutter.KEY_Shift_L, Clutter.KEY_Return);
+    check(form._text.text === '- [ ] milk\n- [ ] bread\n- [ ] eggs\n', 'Shift+Enter is a plain line break');
+    // Checkbox over a few lines selected: on all of them.
+    form._text.text = 'milk\nbread\n\neggs';
+    written.set_selection(0, -1);
+    const findButton = (root, label) => root.get_children().reduce((found, child) =>
+        found ?? (child instanceof St.Button && child.label === label ? child : findButton(child, label)), null);
+    findButton(form, 'Checkbox')?.emit('clicked', 1);
+    check(form._text.text === '- [ ] milk\n- [ ] bread\n\n- [ ] eggs',
+        `Checkbox puts one on every line selected (${JSON.stringify(form._text.text)})`);
+
     form._title.text = 'Groceries';
     form._text.text = 'Saturday\n- [ ] milk\n- [x] bread';
     form._colors.find(dot => dot._color === 'mint').emit('clicked', 1);
