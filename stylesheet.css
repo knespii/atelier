@@ -1086,6 +1086,15 @@
   background-color: #000000;
 }
 
+/* What another profile (its palette, light or dark, glass or not) shows
+   otherwise fades over. (Not the island: it has its own way of moving.) */
+.atelier-solid-fill,
+.atelier-glass-tint,
+.atelier-widget,
+.atelier-dock {
+  transition-duration: 700ms;
+}
+
 /* Glass: the blurred wallpaper, a little darker */
 
 .atelier-glass {

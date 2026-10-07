@@ -1167,9 +1167,21 @@ async function testDesktop(ext) {
     banners.set_boolean('show-banners', true);
     desktop.removeWidget('slack');
 
-    // Analogue: paper, and a clock with hands.
+    // Analogue: paper, and a clock with hands – the cards fading from
+    // glass to paper.
+    const dateCard = desktop.widgets.get('date');
+    const [cardX, cardY] = dateCard.get_transformed_position().map(Math.round);
+    const patch = [cardX + 8, cardY + dateCard.height - 20, 16, 12];
+    await screenshotArea('43a-card-before', ...patch);
     settings.set_string('style', 'analogue');
-    await Scripting.sleep(500);
+    await Scripting.sleep(200);
+    await screenshotArea('43b-card-fading', ...patch);
+    await Scripting.sleep(900);
+    await screenshotArea('43c-card-after', ...patch);
+    const brightness = name => averageColor(name, 0, 0, 16, 12).reduce((a, b) => a + b) / 3;
+    const [glassy, fading, paper] = ['43a-card-before', '43b-card-fading', '43c-card-after'].map(brightness);
+    check(fading > glassy + 10 && fading < paper - 10,
+        `a card's look fades over (${Math.round(glassy)} → ${Math.round(fading)} → ${Math.round(paper)})`);
     check(desktop.widgets.get('clock')._face && !hasClass(layer.get_first_child(), 'atelier-desktop-glass'),
         'analogue: paper and a clock face');
     await screenshotArea('43-desktop-analogue', 0, 0, global.stage.width, 760);
