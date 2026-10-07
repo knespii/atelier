@@ -1490,7 +1490,7 @@
 .atelier-widget-weather-now,
 .atelier-widget-forecast,
 .atelier-widget-forecast-hour,
-.atelier-widget-claude,
+.atelier-widget-claude-row,
 .atelier-widget-claude-numbers,
 .atelier-widget-claude-line,
 .atelier-widget-controls,
@@ -1775,7 +1775,8 @@
 
 /* Claude Code */
 
-.atelier-widget-claude {
+/* (Not .atelier-widget-claude: that is the card itself.) */
+.atelier-widget-claude-row {
   spacing: 16px;
 }
 

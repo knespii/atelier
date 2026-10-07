@@ -47,7 +47,7 @@ const left = ms => {
 export const ClaudeWidget = GObject.registerClass(
 class AtelierClaudeWidget extends DesktopWidget {
     build(box, size) {
-        const row = new St.BoxLayout({style_class: 'atelier-widget-claude', x_expand: true, y_expand: true});
+        const row = new St.BoxLayout({style_class: 'atelier-widget-claude-row', x_expand: true, y_expand: true});
         box.add_child(row);
         const dial = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER,
             x_expand: size === 'square'});
