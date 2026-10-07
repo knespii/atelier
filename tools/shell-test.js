@@ -1253,9 +1253,24 @@ async function testNotes(ext) {
     await pointerTo(5, tab.get_transformed_position()[1] + tab.height / 2);
     await Scripting.sleep(500);
     check(Math.abs(tab.get_transformed_position()[0]) < 1, 'and all of it on hover');
+    const [buttonX, buttonY] = tab._archive.get_transformed_position();
+    const [paperX, paperY] = tab.get_transformed_position();
+    check(tab._archive.reactive && tab._archive.opacity === 255 &&
+        buttonX + tab._archive.width > paperX + tab.width - 40 && buttonY < paperY + 40,
+    `out, it has a button for the archive in its top corner (${buttonX - paperX}, ${buttonY - paperY})`);
     await screenshotArea('52-note-edge', 0, 0, 600, global.stage.height);
     await restPointer();
     await Scripting.sleep(400);
+    check(!tab._archive.reactive && tab._archive.opacity === 0,
+        'back at the edge, the button is gone: a click on the strip opens the note');
+    // The button puts the note into the archive, without opening it.
+    await pointerTo(5, small.get_transformed_position()[1] + small.height / 2);
+    check(await waitFor(() => small._archive.reactive, 1000), 'out, the next one has its button too');
+    await clickAt(...centerOf(small._archive));
+    check(await waitFor(() => notes.store.get(one.id)?.archived && !notes._edges._tabs.has(one.id), 2000) &&
+        islandModule._sheet === null, 'a click on it puts the note into the archive; it leaves the edge, unopened');
+    await restPointer();
+    await Scripting.sleep(300);
     notes.store.remove(one.id);
     check(!desktop.kinds.has('note'), 'no note widgets on the desktop');
 

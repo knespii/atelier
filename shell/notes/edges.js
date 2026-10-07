@@ -1,8 +1,9 @@
 // Notes pinned to the screen's edges, like sticky notes stuck to its side:
 // square papers, all of one size whatever is on them, of which a strip
 // peeks out of the edge; one slides out while the pointer rests on it, and
-// a click opens it in the island. They lie over the windows, or – if so
-// set – on the desktop only, under them; on the main monitor only.
+// a click opens it in the island – or, on the button in its corner, puts it
+// into the archive. They lie over the windows, or – if so set – on the
+// desktop only, under them; on the main monitor only.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -20,8 +21,9 @@ const GAP = 12;
 const SLIDE_TIME = 180;
 const LINES = 7;
 
-const EdgeTab = GObject.registerClass(
-class AtelierNoteTab extends St.Button {
+const EdgeTab = GObject.registerClass({
+    Signals: {'archive': {}},
+}, class AtelierNoteTab extends St.Button {
     _init(store, note, side) {
         super._init({
             style_class: `atelier-note-tab atelier-note-tab-${side}`,
@@ -41,7 +43,26 @@ class AtelierNoteTab extends St.Button {
             clip_to_allocation: true,
         });
         page.add_child(this._content);
-        this.child = page;
+        // Into the archive: a button in its top corner, there while it is
+        // out (in the strip, a click would hit it unseen).
+        this._archive = new St.Button({
+            style_class: 'atelier-note-tab-archive',
+            accessible_name: 'Archive',
+            can_focus: false,
+            reactive: false,
+            opacity: 0,
+            // (A bin lays a child out by its alignment only if it expands.)
+            x_expand: true,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.START,
+            child: new St.Icon({icon_name: 'package-x-generic-symbolic'}),
+        });
+        this._archive.connect('clicked', () => this.emit('archive'));
+        const paper = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true, y_expand: true});
+        paper.add_child(page);
+        paper.add_child(this._archive);
+        this.child = paper;
         this.sync(note);
         this.connect('notify::hover', () => this._slide());
     }
@@ -63,17 +84,50 @@ class AtelierNoteTab extends St.Button {
     }
 
     _slide() {
+        if (this.leaving)
+            return;
         this.get_parent()?.set_child_above_sibling(this, null);
+        // (Its button takes clicks once the paper is out.)
+        this._archive.reactive = false;
         this.ease({
             translation_x: this.hover ? 0 : this._hiddenOffset(),
+            duration: SLIDE_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => (this._archive.reactive = this.hover && !this.leaving),
+        });
+        this._archive.ease({
+            opacity: this.hover ? 255 : 0,
             duration: SLIDE_TIME,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
     }
 
     rest() {
+        if (this.leaving)
+            return;
         this.remove_transition('translation-x');
         this.translation_x = this._hiddenOffset();
+        this._archive.remove_transition('opacity');
+        this._archive.opacity = 0;
+        this._archive.reactive = false;
+    }
+
+    /**
+     * Into the edge, all of it, and gone.
+     *
+     * @param {Function} done - called once it is
+     */
+    leave(done) {
+        this.leaving = true;
+        this.reactive = false;
+        this._archive.reactive = false;
+        this.ease({
+            translation_x: this.width * (this.side === 'left' ? -1 : 1),
+            opacity: 0,
+            duration: SLIDE_TIME,
+            mode: Clutter.AnimationMode.EASE_IN_QUAD,
+            onStopped: () => done(),
+        });
     }
 });
 
@@ -142,6 +196,8 @@ export class EdgeTabs {
                 continue;
             const tab = new EdgeTab(this._store, note, note.pin);
             tab.connect('clicked', () => this._open(note.id));
+            // (Still a note when it is gone: in the Notes tab's archive.)
+            tab.connect('archive', () => tab.leave(() => this._store.update(note.id, {archived: true})));
             this._sheet.add_child(tab);
             // (Over the windows, it takes the clicks the sheet doesn't.)
             if (!this._onDesktop)
