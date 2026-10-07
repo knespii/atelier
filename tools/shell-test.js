@@ -1014,6 +1014,27 @@ async function testDesktop(ext) {
     switcher._finishWorkspaceSwitch(switcher._switchData);
     await Scripting.sleep(200);
 
+    // The clock's faces, chosen in its menu, all in its square.
+    const faceClock = desktop.widgets.get('clock');
+    desktop._showWidgetMenu(faceClock);
+    await Scripting.sleep(300);
+    check(faceClock._faces?.length === 5 && faceClock._faces[0]._ornament === PopupMenu.Ornament.CHECK,
+        'the clock\'s menu has its faces, Automatic chosen');
+    faceClock._menu.close();
+    for (const face of ['watch', 'numerals', 'minimal', 'digital']) {
+        desktop.setWidgetOption('clock', 'face', face);
+        await Scripting.sleep(300);
+        await screenshotArea(`40-clock-${face}`, ...faceClock.get_transformed_position().map(v => Math.round(v) - 8),
+            Math.round(faceClock.width) + 16, Math.round(faceClock.height) + 16);
+        const hands = face !== 'digital';
+        check(Boolean(faceClock._face) === hands && Boolean(faceClock._time) === !hands &&
+            faceClock.width === desktop.widgets.get('date').width &&
+            JSON.parse(settings.get_string('widgets')).find(e => e.id === 'clock').face === face,
+        `the ${face} face, in its square, kept with it`);
+    }
+    desktop.setWidgetOption('clock', 'face', 'auto');
+    await Scripting.sleep(200);
+
     // The desktop's menu edits them.
     const background = Main.layoutManager._bgManagers[0].backgroundActor;
     background._backgroundMenu.open();

@@ -17,7 +17,7 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 
 import {keepWidgets} from '../../lib/profiles.js';
 import {
-    KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
+    CLOCK_FACES, KINDS, cellOrigin, findSpot, fitLayout, fits, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {DesktopEditor} from './editor.js';
@@ -613,6 +613,24 @@ export class DesktopModule {
     }
 
     /**
+     * Set one of a widget's options (the clock's face, say): kept with it,
+     * and it is built anew.
+     *
+     * @param {string} id
+     * @param {string} key
+     * @param {*} value
+     */
+    setWidgetOption(id, key, value) {
+        const widget = this._widgets.get(id);
+        if (!widget)
+            return;
+        this._layout = this._layout.map(entry => (entry.id === id ? {...entry, [key]: value} : entry));
+        widget.entry = {...widget.entry, [key]: value};
+        this._save();
+        widget.resize(widget.entry.size);
+    }
+
+    /**
      * Give a widget one of the sizes it comes in, where it is.
      *
      * @param {string} id
@@ -687,6 +705,15 @@ export class DesktopModule {
             menu.addAction('Edit Widgets', () => this.edit());
             if (KINDS[widget.entry.kind].sizes.length > 1)
                 menu.addAction('Change Size', () => this.resizeWidget(widget.entry.id));
+            if (widget.entry.kind === 'clock') {
+                const faces = new PopupMenu.PopupSubMenuMenuItem('Clock Face');
+                widget._faces = CLOCK_FACES.map(([id, name]) => {
+                    const item = faces.menu.addAction(name, () => this.setWidgetOption(widget.entry.id, 'face', id));
+                    item._face = id;
+                    return item;
+                });
+                menu.addMenuItem(faces);
+            }
             menu.addAction('Remove', () => this.removeWidget(widget.entry.id));
             Main.uiGroup.add_child(menu.actor);
             menu.actor.hide();
@@ -694,6 +721,10 @@ export class DesktopModule {
             manager.addMenu(menu);
             widget._menu = menu;
             widget._menuManager = manager;
+        }
+        for (const item of widget._faces ?? []) {
+            item.setOrnament(item._face === (widget.entry.face ?? 'auto')
+                ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NO_DOT);
         }
         widget._menu.open(BoxPointer.PopupAnimation.FULL);
     }

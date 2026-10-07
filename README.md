@@ -146,7 +146,9 @@ Blur my Shell blurs the bar, turn that off.)
   page, no account needed), Claude Code's block, a photo, and how many Slack
   messages came since you last looked at Slack and who wrote them (counted
   from its notifications; what they say is never shown or kept) – as
-  *Modern* cards, on glass, or on *Analogue* paper. Right-click the desktop
+  *Modern* cards, on glass, or on *Analogue* paper; the clock's menu
+  (right-click it) chooses its face – digital, a watch with a second hand,
+  numerals or minimal hands. Right-click the desktop
   and choose *Edit Widgets*: drag one and a shadow on the grid shows where it
   lands;
   stretch one by its corner and it snaps to the nearest of its sizes (a click
