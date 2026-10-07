@@ -173,20 +173,29 @@ export class NotesModule {
             const store = this.store;
             const fields = form.fields;
             if (store && note && store.get(note.id)) {
-                if (action === 'delete' || (action === 'keep' && form.empty))
+                if (action === 'delete' || (action === 'keep' && form.empty)) {
                     store.remove(note.id);
-                else if (action === 'keep')
+                } else if (action === 'keep' && fields.pin && fields.pin !== note.pin && this._edges) {
+                    // Pinned to another edge: the sheet runs off there, as a
+                    // new one's does (its paper leaves the edge it was on).
+                    const edges = this._edges;
+                    edges.arriving(() => store.update(note.id, fields));
+                    this._runOff(sheet, edges, note.id);
+                    return;
+                } else if (action === 'keep') {
                     store.update(note.id, fields);
-                else if (action === 'archive')
+                } else if (action === 'archive') {
                     store.update(note.id, {...fields, archived: !note.archived});
+                }
             } else if (store && !note && action === 'keep' && !form.empty) {
                 // A new one: the sheet runs off to the edge it is pinned to,
                 // and its paper spreads out of it there.
                 const edges = this._edges;
                 const created = edges ? edges.arriving(() => store.create(fields)) : store.create(fields);
-                sheet.connect('arrived', () => edges?.emerge(created.id));
-                sheet.close(edges?.landing(created.id) ?? null).then(() => edges?.emerge(created.id));
-                return;
+                if (edges) {
+                    this._runOff(sheet, edges, created.id);
+                    return;
+                }
             }
             sheet.close();
         };
@@ -250,6 +259,14 @@ export class NotesModule {
         notification.addAction('In 10 min', () =>
             running?.store?.update(id, {remind: Date.now() + SNOOZE}, {touch: false}));
         reminders.addNotification(notification);
+    }
+
+    // The sheet runs off to where the note's paper comes out of its edge,
+    // and the paper spreads out there as the drop gets to it (or back into
+    // the island, for a note on no edge).
+    _runOff(sheet, edges, id) {
+        sheet.connect('arrived', () => edges.emerge(id));
+        sheet.close(edges.landing(id)).then(() => edges.emerge(id));
     }
 
     _openTab() {

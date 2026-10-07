@@ -20,6 +20,8 @@ const PEEK = 18; // logical pixels of a paper that show at the edge
 const TOP = 56; // where the first paper is
 const GAP = 12;
 const SLIDE_TIME = 180;
+// The papers below one that went move up (or down) into place.
+const MOVE_TIME = 260;
 // A new paper spreading out of the edge, once its drop has run into it:
 // from a sliver as tall as the drop to its strip.
 const SPREAD_TIME = 480;
@@ -71,6 +73,7 @@ const EdgeTab = GObject.registerClass({
         this.child = paper;
         this.sync(note);
         this.connect('notify::hover', () => this._slide());
+        this.connect('destroy', () => (this.gone = true));
     }
 
     sync(note, again = false) {
@@ -227,8 +230,13 @@ export class EdgeTabs {
         for (const [id, tab] of this._tabs) {
             const note = pinned.find(n => n.id === id);
             if (!note || note.pin !== tab.side) {
-                tab.destroy();
+                // Into its edge and away (at once if it went there already,
+                // put into the archive by its button).
                 this._tabs.delete(id);
+                if (tab.leaving)
+                    tab.destroy();
+                else
+                    tab.leave(() => !tab.gone && tab.destroy());
             } else {
                 tab.sync(note);
             }
@@ -330,8 +338,16 @@ export class EdgeTabs {
             const room = area.height - (TOP + GAP) * scale - size;
             const step = Math.min(size + GAP * scale, tabs.length > 1 ? room / (tabs.length - 1) : Infinity);
             tabs.forEach((tab, i) => {
-                const x = side === 'left' ? 0 : area.width - tab.width;
-                tab.set_position(Math.round(x), Math.round(TOP * scale + i * step));
+                const x = Math.round(side === 'left' ? 0 : area.width - tab.size[0]);
+                const y = Math.round(TOP * scale + i * step);
+                // (One placed already moves to its new place.)
+                if (tab.placed && tab.y !== y) {
+                    tab.x = x;
+                    tab.ease({y, duration: MOVE_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+                } else {
+                    tab.set_position(x, y);
+                }
+                tab.placed = true;
                 if (!tab.hover)
                     tab.rest();
             });

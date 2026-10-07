@@ -1485,6 +1485,39 @@ async function testNotes(ext) {
     check(Math.abs(notes.store.get(reminded.id).remind - Date.now() - 10 * 60 * 1000) < 5000, 'In 10 min puts it off');
     await waitFor(() => island.page === null, 12000);
     reminderSource()?.destroy();
+
+    // Pinned to the other edge on its sheet: the sheet runs off there as a
+    // new one's does, and its paper spreads out of that edge; the paper it
+    // had goes into its own. (Slowed down to look at.)
+    notes.edit(reminded.id);
+    await waitFor(() => islandModule._sheet?.opened, 3000);
+    const leftPaper = notes._edges._tabs.get(reminded.id);
+    islandModule._sheet.form._pins.find(segment => segment._value === 'right').emit('clicked', 1);
+    let rightmost = -Infinity;
+    let leftWent = false;
+    let rightWaited = false;
+    motion.slow_down_factor = 8;
+    try {
+        await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_Return);
+        for (let n = 1; n <= 14; n++) {
+            await Scripting.sleep(600);
+            const drop = islandModule._liquid?._drop;
+            if (drop && drop[2] > 0)
+                rightmost = Math.max(rightmost, drop[0]);
+            leftWent ||= Boolean(leftPaper?.leaving) && notes._edges._tabs.get(reminded.id) !== leftPaper;
+            const rightPaper = notes._edges._tabs.get(reminded.id);
+            rightWaited ||= rightPaper?.side === 'right' && rightPaper.waiting;
+        }
+    } finally {
+        motion.slow_down_factor = 1;
+    }
+    const moved = notes._edges._tabs.get(reminded.id);
+    const [movedX] = moved?.get_transformed_position() ?? [NaN];
+    check(notes.store.get(reminded.id).pin === 'right' && rightmost > global.stage.width - 120 && leftWent && rightWaited,
+        `to the other edge: the sheet runs off there (${Math.round(rightmost)}), its paper leaves the old one`);
+    check(await waitFor(() => islandModule._sheet === null, 3000) && moved?.side === 'right' &&
+        Math.abs(movedX - (global.stage.width - 18)) < 2 && leftPaper.gone,
+    `and its paper is out of the right edge, a strip of it (${Math.round(movedX)})`);
     notes.store.remove(reminded.id);
 
     notes.store.remove(id);
