@@ -67,12 +67,13 @@ const EdgeTab = GObject.registerClass({
         this.connect('notify::hover', () => this._slide());
     }
 
-    sync(note) {
+    sync(note, again = false) {
         // (Writing another note, as every key changes the notes, leaves
         // this one as it is.)
-        if (note.title === this._title && note.text === this._text && note.color === this._color)
+        if (!again && note.title === this._title && note.text === this._text && note.color === this._color &&
+            note.remind === this._remind)
             return;
-        [this._title, this._text, this._color] = [note.title, note.text, note.color];
+        [this._title, this._text, this._color, this._remind] = [note.title, note.text, note.color, note.remind];
         this.style = paperStyle(note.color);
         this._content.setNote(note.id);
     }
@@ -207,6 +208,16 @@ export class EdgeTabs {
             tab.connect('notify::width', () => this._queuePlace());
         }
         this._place();
+    }
+
+    /** Show them anew (a new day: "Tomorrow" is today now). */
+    refresh() {
+        const pinned = this._store.pinned();
+        for (const [id, tab] of this._tabs) {
+            const note = pinned.find(n => n.id === id);
+            if (note)
+                tab.sync(note, true);
+        }
     }
 
     _queuePlace() {

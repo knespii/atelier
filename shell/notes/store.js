@@ -73,12 +73,15 @@ export class NotesStore extends EventEmitter {
     /**
      * @param {string} id
      * @param {object} changes - e.g. {title}, {text}, {color}, {archived}, {pin}
+     * @param {object} [options]
+     * @param {boolean} [options.touch] - whether it counts as changed (the
+     *   latest changed come first); not for a reminder that came, say
      */
-    update(id, changes) {
+    update(id, changes, {touch = true} = {}) {
         const note = this.get(id);
         if (!note || Object.entries(changes).every(([key, value]) => note[key] === value))
             return;
-        Object.assign(note, changes, {modified: Date.now()});
+        Object.assign(note, changes, touch ? {modified: Date.now()} : {});
         this._changed();
     }
 

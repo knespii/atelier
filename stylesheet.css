@@ -1290,6 +1290,75 @@
   padding: 8px 10px;
 }
 
+/* A note's reminder: "Remind me", or a day and a time (of one height) */
+.atelier-note-sheet-reminder {
+  min-height: 34px;
+}
+
+.atelier-note-sheet-reminder-controls {
+  spacing: 6px;
+}
+
+.atelier-note-sheet-remind {
+  padding: 6px 4px;
+}
+
+.atelier-note-sheet-remind-label {
+  spacing: 8px;
+}
+
+.atelier-note-sheet-remind-label StIcon {
+  icon-size: 16px;
+}
+
+.atelier-note-sheet-reminder-icon {
+  icon-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-right: 2px;
+}
+
+.atelier-note-sheet-reminder-step {
+  padding: 6px 8px;
+}
+
+.atelier-note-sheet-reminder-day {
+  min-width: 104px;
+  font-size: 10pt;
+  font-weight: bold;
+  text-align: center;
+}
+
+.atelier-note-sheet-reminder-time {
+  width: 72px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 10pt;
+  font-weight: bold;
+  box-shadow: none;
+}
+
+.atelier-note-sheet-reminder-time:focus {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.atelier-note-sheet-reminder-time:error {
+  background-color: rgba(224, 27, 36, 0.35);
+}
+
+/* On the paper: when it reminds of itself */
+.atelier-note-reminder {
+  spacing: 4px;
+  font-size: 8.5pt;
+  font-weight: bold;
+}
+
+.atelier-note-reminder StIcon {
+  icon-size: 11px;
+}
+
 .atelier-sheet-icon StIcon {
   icon-size: 16px;
 }

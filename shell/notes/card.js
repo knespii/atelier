@@ -1,13 +1,16 @@
-// A note as a little paper: its title and lines, the checkboxes among
-// them ready to be ticked off. Shown in the island's list of notes, on the
-// desktop and in the tabs on the screen's edges.
+// A note as a little paper: its title, when it reminds of itself, and its
+// lines, the checkboxes among them ready to be ticked off. Shown in the
+// island's list of notes, on the desktop and in the tabs on the screen's
+// edges.
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {COLORS, displayTitle, lines, toggleLine} from '../../lib/notes.js';
+import {formatDateWithCFormatString, formatTime} from 'resource:///org/gnome/shell/misc/dateUtils.js';
+
+import {COLORS, dayOffset, displayTitle, lines, toggleLine} from '../../lib/notes.js';
 
 /**
  * @param {string} color - a name from COLORS
@@ -16,6 +19,30 @@ import {COLORS, displayTitle, lines, toggleLine} from '../../lib/notes.js';
 export function paperStyle(color) {
     const {paper, ink} = COLORS[color] ?? COLORS.yellow;
     return `background-color: ${paper}; color: ${ink};`;
+}
+
+/**
+ * @param {number} days - from today
+ * @param {number} time - a moment of that day, in milliseconds
+ * @returns {string} "Today", "Tomorrow" or the date, e.g. "Fri 10 Oct"
+ */
+export function dayText(days, time) {
+    if (days === 0)
+        return 'Today';
+    if (days === 1)
+        return 'Tomorrow';
+    return formatDateWithCFormatString(new Date(time), '%a %-d %b');
+}
+
+/**
+ * @param {number} time - of a reminder, in milliseconds
+ * @returns {string} when, shortly: "15:00", "Tomorrow 9:00", "Fri 10 Oct 9:00"
+ *   (the time as the clock has it, 24-hour or not)
+ */
+export function reminderText(time) {
+    const clock = formatTime(new Date(time), {timeOnly: true}).trim();
+    const days = dayOffset(time, new Date());
+    return days === 0 ? clock : `${dayText(days, time)} ${clock}`;
 }
 
 export const NoteContent = GObject.registerClass(
@@ -57,6 +84,17 @@ class AtelierNoteContent extends St.BoxLayout {
         if (!note)
             return;
         this.add_child(this._fit(new St.Label({style_class: 'atelier-note-title', text: displayTitle(note)})));
+        if (note.remind !== null) {
+            // (In the paper's ink, a little lighter: St has no opacity in CSS.)
+            const reminder = new St.BoxLayout({
+                style_class: 'atelier-note-reminder',
+                x_align: Clutter.ActorAlign.START,
+                opacity: 190,
+            });
+            reminder.add_child(new St.Icon({icon_name: 'alarm-symbolic', y_align: Clutter.ActorAlign.CENTER}));
+            reminder.add_child(new St.Label({text: reminderText(note.remind), y_align: Clutter.ActorAlign.CENTER}));
+            this.add_child(reminder);
+        }
         // The text without its first line when that one is the title.
         const all = lines(note.text).map((line, index) => ({...line, index}));
         const body = note.title.trim() ? all : all.slice(all.findIndex(line => line.text.trim()) + 1);

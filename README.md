@@ -159,8 +159,12 @@ Blur my Shell blurs the bar, turn that off.)
   of it under the pointer, with a button in its corner that puts it into the
   archive. A new note (*New Note* in the desktop's menu, or the control
   centre's Notes tab) drips from the island onto a sheet to write on, and so
-  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it. The Notes
-  tab has them all, and an archive. They are the same whatever the profile.
+  does a note you click; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves it. *Remind
+  me* on the sheet gives a note a reminder – a day and a time, shown on its
+  paper – and at that time a notification comes, with *Open* and *In 10 min*
+  (one due while the computer was off or locked comes as soon as it is back).
+  The Notes tab has them all, and an archive. They are the same whatever the
+  profile.
 - **Dock**: the pinned apps and those with windows on the workspace, at the
   bottom of the screen; it moves out of the way of windows, and the bottom
   edge brings it back. Dynamic Music Pill sits at its end. It stays off while

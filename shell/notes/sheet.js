@@ -1,19 +1,26 @@
 // The form on the sheet that drips from the island for a note, new or not:
 // a paper to write on – its title and its text, a line starting with "- [ ]"
-// a checkbox – in one of the paper colors, and the edge it is pinned to; one
-// that is there already can be archived or deleted, too. Ctrl+Enter saves
-// it from anywhere on it. Enter on a line with a checkbox starts the next
-// one with a checkbox too (Shift+Enter: without).
+// a checkbox – in one of the paper colors, the edge it is pinned to, and a
+// reminder if it should have one (a day and a time, when a notification
+// comes); one that is there already can be archived or deleted, too.
+// Ctrl+Enter saves it from anywhere on it. Enter on a line with a checkbox
+// starts the next one with a checkbox too (Shift+Enter: without).
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
-import {COLORS, boxLines, continueList, toggleLine} from '../../lib/notes.js';
-import {paperStyle} from './card.js';
+import {
+    COLORS, boxLines, continueList, dayOffset, defaultReminder, parseClock, reminderAt, toggleLine,
+} from '../../lib/notes.js';
+import {dayText, paperStyle} from './card.js';
 
 const PINS = [['left', 'Left'], ['right', 'Right'], [null, 'None']];
+// A reminder's time goes up or down by this much (Up, Down, scrolling).
+const STEP = 15 * 60 * 1000;
+
+const clockText = ([hours, minutes]) => `${hours}:${String(minutes).padStart(2, '0')}`;
 
 // ClutterText counts characters, JavaScript UTF-16 units (an emoji is two).
 const indexOf = (value, chars) => (chars < 0 ? value.length : [...value].slice(0, chars).join('').length);
@@ -106,6 +113,68 @@ export const NoteSheet = GObject.registerClass({
         row.add_child(pins);
         this.add_child(row);
 
+        // When it reminds of itself, if it does: a day (a day earlier or
+        // later) and a time. (The row is always there: the sheet doesn't
+        // grow out of its panel.)
+        this._noteRemind = note?.remind ?? null;
+        this._reminding = false;
+        this._days = 0;
+        this._clock = null;
+        const reminder = new St.BoxLayout({style_class: 'atelier-sheet-row atelier-note-sheet-reminder'});
+        const remindLabel = new St.BoxLayout({style_class: 'atelier-note-sheet-remind-label'});
+        remindLabel.add_child(new St.Icon({icon_name: 'alarm-symbolic', y_align: Clutter.ActorAlign.CENTER}));
+        remindLabel.add_child(new St.Label({text: 'Remind me', y_align: Clutter.ActorAlign.CENTER}));
+        this._remindButton = new St.Button({
+            style_class: 'atelier-sheet-button atelier-sheet-flat atelier-note-sheet-remind',
+            can_focus: true,
+            child: remindLabel,
+        });
+        this._remindButton.connect('clicked', () => this._startReminder());
+        reminder.add_child(this._remindButton);
+        this._reminder = new St.BoxLayout({style_class: 'atelier-note-sheet-reminder-controls', visible: false, x_expand: true});
+        reminder.add_child(this._reminder);
+        this._reminder.add_child(new St.Icon({
+            style_class: 'atelier-note-sheet-reminder-icon',
+            icon_name: 'alarm-symbolic',
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        const step = (icon, name, action) => {
+            const b = new St.Button({
+                style_class: 'atelier-sheet-button atelier-sheet-icon atelier-note-sheet-reminder-step',
+                accessible_name: name,
+                can_focus: true,
+                child: new St.Icon({icon_name: icon}),
+            });
+            b.connect('clicked', action);
+            return b;
+        };
+        this._earlier = step('go-previous-symbolic', 'A day earlier', () => this._setReminder(this._days - 1, this._clock));
+        this._reminder.add_child(this._earlier);
+        this._day = new St.Label({style_class: 'atelier-note-sheet-reminder-day', y_align: Clutter.ActorAlign.CENTER});
+        this._reminder.add_child(this._day);
+        this._reminder.add_child(step('go-next-symbolic', 'A day later', () => this._setReminder(this._days + 1, this._clock)));
+        this._time = new St.Entry({
+            style_class: 'atelier-note-sheet-reminder-time',
+            hint_text: '9:00',
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._time.clutter_text.connect('text-changed', () => {
+            this._clock = parseClock(this._time.text);
+            this._sync();
+        });
+        this._time.clutter_text.connect('key-press-event', (_, event) => this._onTimeKey(event));
+        this._time.connect('scroll-event', (_, event) => {
+            const direction = event.get_scroll_direction();
+            if (direction === Clutter.ScrollDirection.UP || direction === Clutter.ScrollDirection.DOWN)
+                this._moveReminder(direction === Clutter.ScrollDirection.UP ? STEP : -STEP);
+            return Clutter.EVENT_STOP;
+        });
+        this._reminder.add_child(this._time);
+        this._reminder.add_child(new St.Widget({x_expand: true}));
+        this._reminder.add_child(step('window-close-symbolic', 'No reminder', () => this._dropReminder()));
+        this.add_child(reminder);
+
         const buttons = new St.BoxLayout({style_class: 'atelier-sheet-buttons'});
         const button = (label, action, style = '') => {
             const b = new St.Button({style_class: `atelier-sheet-button ${style}`, label, can_focus: true});
@@ -134,12 +203,77 @@ export const NoteSheet = GObject.registerClass({
         button('Cancel', () => this.emit('cancel'));
         this._save = button('Save', () => this.emit('save'), 'atelier-sheet-primary');
         this.add_child(buttons);
+        if (this._noteRemind !== null) {
+            const date = new Date(this._noteRemind);
+            this._setReminder(dayOffset(this._noteRemind, new Date()), [date.getHours(), date.getMinutes()]);
+        }
         this._sync();
     }
 
-    /** @returns {object} {title, text, color, pin} as written */
+    /** @returns {object} {title, text, color, pin, remind} as written */
     get fields() {
-        return {title: this._title.text, text: this._text.text, color: this._color, pin: this._pin};
+        // (A reminder half written stays as it was.)
+        const remind = !this._reminding ? null : this._reminderValid() ? this._remindAt() : this._noteRemind;
+        return {title: this._title.text, text: this._text.text, color: this._color, pin: this._pin, remind};
+    }
+
+    /** @returns {number|null} when the reminder set is, in milliseconds */
+    _remindAt() {
+        return this._clock ? reminderAt(this._days, ...this._clock, new Date()) : null;
+    }
+
+    /** @returns {boolean} whether there is no reminder, or one to come */
+    _reminderValid() {
+        return !this._reminding || (this._clock !== null && this._remindAt() > Date.now());
+    }
+
+    _setReminder(days, clock) {
+        this._days = Math.max(0, days);
+        this._reminding = true;
+        if (clock)
+            this._time.text = clockText(clock);
+        this._sync();
+    }
+
+    // At the next full hour, or tomorrow morning: the time ready to be
+    // written over.
+    _startReminder() {
+        const time = defaultReminder(new Date());
+        const date = new Date(time);
+        this._setReminder(dayOffset(time, new Date()), [date.getHours(), date.getMinutes()]);
+        this._time.grab_key_focus();
+        this._time.clutter_text.set_selection(0, -1);
+    }
+
+    _dropReminder() {
+        this._reminding = false;
+        this._sync();
+        this._remindButton.grab_key_focus();
+    }
+
+    /** @param {number} ms - later (or, less than 0, earlier) */
+    _moveReminder(ms) {
+        const now = new Date();
+        const time = (this._remindAt() ?? defaultReminder(now)) + ms;
+        if (time <= now.getTime())
+            return;
+        const date = new Date(time);
+        this._setReminder(dayOffset(time, now), [date.getHours(), date.getMinutes()]);
+    }
+
+    _onTimeKey(event) {
+        const key = event.get_key_symbol();
+        if (key === Clutter.KEY_Up || key === Clutter.KEY_Down) {
+            this._moveReminder(key === Clutter.KEY_Up ? STEP : -STEP);
+            return Clutter.EVENT_STOP;
+        }
+        if ((key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) &&
+            event.get_state() & Clutter.ModifierType.CONTROL_MASK) {
+            if (!this.empty && this._reminderValid())
+                this.emit('save');
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
     }
 
     /** @returns {boolean} whether nothing is written on it */
@@ -159,7 +293,7 @@ export const NoteSheet = GObject.registerClass({
             return Clutter.EVENT_PROPAGATE;
         const state = event.get_state();
         if (state & Clutter.ModifierType.CONTROL_MASK) {
-            if (!this.empty)
+            if (!this.empty && this._reminderValid())
                 this.emit('save');
             return Clutter.EVENT_STOP;
         }
@@ -213,6 +347,17 @@ export const NoteSheet = GObject.registerClass({
             else
                 segment.remove_style_pseudo_class('checked');
         }
-        this._save.reactive = !this.empty;
+        // The reminder: its day, and whether its time is one to come.
+        this._remindButton.visible = !this._reminding;
+        this._reminder.visible = this._reminding;
+        if (this._reminding) {
+            this._day.text = dayText(this._days, reminderAt(this._days, 12, 0, new Date()));
+            this._earlier.reactive = this._days > 0;
+            if (this._reminderValid())
+                this._time.remove_style_pseudo_class('error');
+            else
+                this._time.add_style_pseudo_class('error');
+        }
+        this._save.reactive = !this.empty && this._reminderValid();
     }
 });

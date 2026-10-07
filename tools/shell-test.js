@@ -1241,8 +1241,9 @@ async function testNotes(ext) {
     // Checkbox over a few lines selected: on all of them.
     form._text.text = 'milk\nbread\n\neggs';
     written.set_selection(0, -1);
-    const findButton = (root, label) => root.get_children().reduce((found, child) =>
-        found ?? (child instanceof St.Button && child.label === label ? child : findButton(child, label)), null);
+    const findButton = (root, label, name = null) => root.get_children().reduce((found, child) =>
+        found ?? (child instanceof St.Button && (name ? child.accessible_name === name : child.label === label)
+            ? child : findButton(child, label, name)), null);
     findButton(form, 'Checkbox')?.emit('clicked', 1);
     check(form._text.text === '- [ ] milk\n- [ ] bread\n\n- [ ] eggs',
         `Checkbox puts one on every line selected (${JSON.stringify(form._text.text)})`);
@@ -1401,6 +1402,59 @@ async function testNotes(ext) {
     await waitFor(() => islandModule._sheet?.opened, 3000);
     button(islandModule._sheet.form, 'Delete')?.emit('clicked', 1);
     check(await waitFor(() => islandModule._sheet === null && !notes.store.get(scrap.id), 3000), 'deleted from a sheet, it is gone');
+
+    // A reminder: "Remind me" on the sheet sets one (at the next full hour,
+    // or tomorrow morning); a day later at 9:00 here. The sheet stays as
+    // big as it was, inside its panel.
+    notes.open(null, {create: true});
+    await waitFor(() => islandModule._sheet?.opened, 3000);
+    form = islandModule._sheet.form;
+    form._title.text = 'Call the print shop';
+    const sheetHeight = form.height;
+    form._remindButton.emit('clicked', 1);
+    await Scripting.sleep(100);
+    check(form._reminder.visible && !form._remindButton.visible && form.fields.remind > Date.now(),
+        `Remind me sets a reminder to come (${form._day.text} ${form._time.text})`);
+    check(form.height === sheetHeight, `the sheet doesn't grow with it (${sheetHeight} → ${form.height})`);
+    findButton(form, null, 'No reminder')?.emit('clicked', 1);
+    check(form.fields.remind === null && form._remindButton.visible, 'and its × takes it away');
+    form._remindButton.emit('clicked', 1);
+    form._time.text = '25:00';
+    check(!form._save.reactive && form._time.has_style_pseudo_class('error'), 'not a time: it can\'t be saved so');
+    form._time.text = '9:00';
+    const today = form._days;
+    findButton(form, null, 'A day later')?.emit('clicked', 1);
+    const expected = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() + today + 1, 9, 0).getTime();
+    check(form._save.reactive && form.fields.remind === expected, `a day later at 9:00 (${form._day.text})`);
+    await Scripting.sleep(200);
+    await screenshot('53-note-reminder');
+    await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_Return);
+    const remembered = () => notes.store.all().find(n => n.title === 'Call the print shop');
+    check(await waitFor(() => remembered()?.remind === expected && islandModule._sheet === null, 3000),
+        'saved with the note');
+    const reminded = remembered();
+    const remindedPaper = notes._edges._tabs.get(reminded.id);
+    check(findActor(remindedPaper, actor => hasClass(actor, 'atelier-note-reminder')), 'its paper shows when it reminds');
+    await pointerTo(5, remindedPaper.get_transformed_position()[1] + remindedPaper.height / 2);
+    await Scripting.sleep(500);
+    await screenshotArea('54-note-reminder-paper', 0, 0, 600, global.stage.height);
+    await restPointer();
+    // Due: a notification at once (sounding, with Open and In 10 min), and
+    // the reminder gone – without counting as a change to the note.
+    const modified = reminded.modified;
+    notes.store.update(reminded.id, {remind: Date.now() - 1000}, {touch: false});
+    const reminderSource = () => Main.messageTray.getSources().find(source => source.title === 'Notes');
+    const sent = () => reminderSource()?.notifications.find(n => n.title === 'Call the print shop');
+    check(await waitFor(() => Boolean(sent()), 2000) && notes.store.get(reminded.id).remind === null &&
+        notes.store.get(reminded.id).modified === modified, 'due, it comes as a notification, and goes from the note');
+    check(sent().actions.map(action => action.label).join() === 'Open,In 10 min' &&
+        sent().sound !== null, 'with Open and In 10 min, and a sound');
+    sent().actions[1].activate();
+    check(Math.abs(notes.store.get(reminded.id).remind - Date.now() - 10 * 60 * 1000) < 5000, 'In 10 min puts it off');
+    await waitFor(() => island.page === null, 12000);
+    reminderSource()?.destroy();
+    notes.store.remove(reminded.id);
+
     notes.store.remove(id);
     notes.store.destroy(); // writes now
     const file = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_data_dir(), 'atelier', 'notes.json']));

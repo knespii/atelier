@@ -2,17 +2,32 @@
 // sticky notes – the same whatever the profile. One is written on a sheet
 // that drips from the island: a new one (from the desktop's menu, or the
 // Notes tab), or one clicked on (its paper on the edge, or in the Notes tab,
-// the island's place for all of them, which a shortcut opens).
+// the island's place for all of them, which a shortcut opens). A note with
+// a reminder brings a notification at its time.
 
+import GnomeDesktop from 'gi://GnomeDesktop';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
+import {displayTitle, dueReminders, lines} from '../../lib/notes.js';
 import {EdgeTabs} from './edges.js';
 import {NoteSheet} from './sheet.js';
 import {NotesStore} from './store.js';
 import {NotesView} from './view.js';
+
+// How long a reminder put off waits ("In 10 min").
+const SNOOZE = 10 * 60 * 1000;
+// Lines of a note under its title, in its reminder.
+const REMINDER_LINES = 3;
+
+// The reminders come from one source of notifications, which stays while
+// Atelier is down for the lock screen: what it showed stays in GNOME's
+// list. Their buttons reach the notes module running then.
+let reminders = null;
+let running = null;
 
 export class NotesModule {
     /**
@@ -45,9 +60,28 @@ export class NotesModule {
         this._joinDesktop();
         Main.wm.addKeybinding('atelier-open-notes', this._notesSettings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this.open());
+
+        // Reminders: looked at every minute (GNOME's wall clock, which ticks
+        // after a suspend and as the clock is set, too) and as the notes
+        // change. Those that came while Atelier was down come now.
+        running = this;
+        this._day = new Date().toDateString();
+        this._wallClock = new GnomeDesktop.WallClock({time_only: true});
+        this._wallClock.connectObject('notify::clock', () => this._tick(), this);
+        this.store.connectObject('changed', () => this._remind(), this);
+        this._remind();
     }
 
     disable() {
+        this._wallClock?.disconnectObject(this);
+        this._wallClock?.run_dispose();
+        this._wallClock = null;
+        this.store?.disconnectObject(this);
+        if (running === this)
+            running = null;
+        // Turned off, not just down for the lock screen: its reminders go.
+        if (!Main.sessionMode.isLocked)
+            reminders?.destroy();
         Main.wm.removeKeybinding('atelier-open-notes');
         this._modules.disconnectObject(this);
         this._notesSettings?.disconnectObject(this);
@@ -155,6 +189,61 @@ export class NotesModule {
         form.connect('archive', () => finish('archive'));
         form.connect('delete', () => finish('delete'));
         sheet.connect('dismissed', () => finish('keep'));
+    }
+
+    _tick() {
+        // A new day: "Tomorrow" on the papers is today now.
+        const day = new Date().toDateString();
+        if (day !== this._day) {
+            this._day = day;
+            this._edges?.refresh();
+            this.view?.showGrid();
+        }
+        this._remind();
+    }
+
+    // The reminders that are due: each a notification, and the note's
+    // reminder gone (without counting as a change to it).
+    _remind() {
+        if (!this.store || this._reminding)
+            return;
+        this._reminding = true;
+        try {
+            for (const note of dueReminders(this.store.all(), Date.now())) {
+                this.store.update(note.id, {remind: null}, {touch: false});
+                this._notify(note);
+            }
+        } finally {
+            this._reminding = false;
+        }
+    }
+
+    _notify(note) {
+        if (!reminders) {
+            reminders = new MessageTray.Source({title: 'Notes', iconName: 'alarm-symbolic'});
+            reminders.connect('destroy', () => (reminders = null));
+            Main.messageTray.add(reminders);
+        }
+        // Its lines under the title (the first one, when it is the title).
+        const title = displayTitle(note);
+        const all = lines(note.text).filter(line => line.text.trim());
+        const body = (!note.title.trim() && all[0]?.text.trim() === title ? all.slice(1) : all)
+            .slice(0, REMINDER_LINES)
+            .map(line => (line.checkbox ? `${line.checked ? '☑' : '☐'} ${line.text}` : line.text))
+            .join('\n');
+        const notification = new MessageTray.Notification({
+            source: reminders,
+            title,
+            body,
+            urgency: MessageTray.Urgency.HIGH,
+            sound: new MessageTray.Sound(null, 'alarm-clock-elapsed'),
+        });
+        const id = note.id;
+        notification.connect('activated', () => running?.edit(id));
+        notification.addAction('Open', () => running?.edit(id));
+        notification.addAction('In 10 min', () =>
+            running?.store?.update(id, {remind: Date.now() + SNOOZE}, {touch: false}));
+        reminders.addNotification(notification);
     }
 
     _openTab() {
