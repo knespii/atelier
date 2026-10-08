@@ -368,6 +368,17 @@ async function magnification(t) {
     `under the pointer an icon grows, those beside it less, moving apart (${scales.map(s => s.toFixed(2)).join(' ')})`);
     check(dock.container.width === width && dock.container.height === height, 'the dock keeps its size');
     await t.screenshotArea('60-dock-magnified', 0, global.stage.height - 200, global.stage.width, 200);
+    // The apps changing under the pointer (one opened), it fades back
+    // rather than snaps.
+    dock._redisplay();
+    await t.sleep(40);
+    const fading = middle.child.scale_x;
+    check(fading > 1.01 && fading < scales[index], `the apps changing, it fades back rather than snaps (${fading.toFixed(2)})`);
+    await t.sleep(400);
+    check(items.every(item => item.child.scale_x === 1), 'faded back');
+    await t.pointerTo(cx, cy);
+    await t.sleep(400);
+    check(middle.child.scale_x > 1.25, 'moving on the dock again, it swells again');
     await t.restPointer();
     await t.sleep(600);
     check(items.every(item => item.child.scale_x === 1 && item.child.translation_x === 0), 'away, they are as they were');

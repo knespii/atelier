@@ -43,7 +43,9 @@ export class DockMagnifier {
             'leave-event', (_, event) => this._onLeave(event),
             this);
         settings.connectObject(...KEYS.flatMap(key => [`changed::${key}`, () => this.rest()]), this);
-        dock.connectObject('redisplayed', () => this.rest(true), 'placed', () => this.rest(true), this);
+        // The apps changed (one opened – clicked, or by a shortcut – one
+        // focused): fading back from where they are now, not snapping.
+        dock.connectObject('redisplayed', () => this.rest(), 'placed', () => this.rest(), this);
     }
 
     get _enabled() {
