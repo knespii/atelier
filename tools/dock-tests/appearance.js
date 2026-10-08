@@ -188,5 +188,94 @@ export async function shell(t) {
 }
 
 export async function prefs(t) {
-    void t;
+    const {page, settings, check, sleep, Adw, Gio, GLib} = t;
+    const rows = page.rows;
+
+    // The opacities of the mode chosen, a colour with either opacity.
+    const shown = keys => keys.filter(key => rows.get(key)?.visible);
+    const OPACITIES = ['background-opacity', 'customize-alphas', 'min-alpha', 'max-alpha', 'custom-background-color',
+        'background-color'];
+    check(shown(OPACITIES).length === 0, 'as the profile: no opacities, no colour');
+    rows.get('transparency-mode').selected = 1;
+    await sleep(50);
+    check(settings.get_string('transparency-mode') === 'FIXED' &&
+        shown(OPACITIES).join() === 'background-opacity,custom-background-color,background-color',
+    `fixed: its opacity and the colour (${shown(OPACITIES).join(', ')})`);
+    rows.get('background-opacity').value = 30;
+    await sleep(50);
+    check(Math.abs(settings.get_double('background-opacity') - 0.3) < 0.001, 'the opacity in percent');
+    settings.set_string('transparency-mode', 'DYNAMIC');
+    await sleep(50);
+    check(shown(OPACITIES).join() ===
+        'customize-alphas,min-alpha,max-alpha,custom-background-color,background-color',
+    `more opaque near windows: the two opacities and the colour (${shown(OPACITIES).join(', ')})`);
+    check(!rows.get('min-alpha').sensitive && !rows.get('background-color').sensitive,
+        'greyed out until they are the user\'s own');
+    rows.get('customize-alphas').active = true;
+    rows.get('custom-background-color').active = true;
+    check(rows.get('max-alpha').sensitive && rows.get('background-color').sensitive, 'and then not');
+    for (const key of ['custom-theme-shrink', 'force-straight-corner']) {
+        rows.get(key).active = true;
+        check(settings.get_boolean(key), `${key} is saved`);
+    }
+    KEYS.forEach(key => settings.reset(key));
+    await sleep(50);
+    check(shown(OPACITIES).length === 0 && rows.get('transparency-mode').selected === 0, 'and back as the profile');
+
+    // Dash to Dock's settings, from its installed schema (in memory here,
+    // as all of the preferences' settings), brought over.
+    const row = t.findDescendant(page, w => w instanceof Adw.ActionRow && w.title === 'Import from Dash to Dock…');
+    // (check() says nothing back here.)
+    check(row !== null, 'the status has a row that imports Dash to Dock\'s settings');
+    if (!row)
+        return;
+    const dir = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions',
+        'dash-to-dock@micxgx.gmail.com', 'schemas']);
+    if (!GLib.file_test(GLib.build_filenamev([dir, 'gschemas.compiled']), GLib.FileTest.EXISTS)) {
+        print(`SKIP  Dash to Dock isn't installed in ${dir}`);
+        return;
+    }
+    const schema = Gio.SettingsSchemaSource.new_from_directory(dir, Gio.SettingsSchemaSource.get_default(), false)
+        .lookup('org.gnome.shell.extensions.dash-to-dock', false);
+    const dashToDock = new Gio.Settings({settings_schema: schema});
+    const openSource = row.openSource;
+    row.openSource = () => null;
+    row.syncSource();
+    check(!row.sensitive && row.subtitle.includes('isn\'t installed'), 'without Dash to Dock it greys out, and says why');
+    row.openSource = () => dashToDock;
+    row.syncSource();
+    check(row.sensitive, 'with it, it can be pressed');
+
+    dashToDock.set_enum('dock-position', 3); // LEFT
+    dashToDock.set_string('click-action', 'focus-minimize-or-previews');
+    dashToDock.set_double('pressure-threshold', 40);
+    dashToDock.set_int('dash-max-icon-size', 40);
+    settings.set_boolean('enabled', false);
+    row.emit('activated');
+    await sleep(300);
+    const dialog = t.window.visible_dialog;
+    check(dialog instanceof Adw.AlertDialog, 'it asks first');
+    check(settings.get_string('dock-position') === 'BOTTOM', 'and nothing changes until it is answered');
+    dialog?.emit('response', 'import');
+    dialog?.force_close();
+    await sleep(300);
+    check(settings.get_string('dock-position') === 'LEFT' &&
+        settings.get_string('click-action') === 'focus-minimize-or-appspread' &&
+        settings.get_double('pressure-threshold') === 40 && settings.get_int('icon-size') === 40,
+    `Dash to Dock's settings brought over (${settings.get_string('dock-position')}, ` +
+        `${settings.get_string('click-action')}, ${settings.get_double('pressure-threshold')}, ` +
+        `${settings.get_int('icon-size')})`);
+    check(!settings.get_boolean('enabled'), 'whether the dock is on stays as it was');
+    check(dashToDock.get_string('dock-position') === 'LEFT' &&
+        dashToDock.get_string('click-action') === 'focus-minimize-or-previews' &&
+        dashToDock.list_keys().every(key => key === 'dock-position' || key === 'click-action' ||
+            key === 'pressure-threshold' || key === 'dash-max-icon-size' || dashToDock.get_user_value(key) === null),
+    'Dash to Dock\'s own are left as they are');
+
+    row.openSource = openSource;
+    row.syncSource();
+    ['dock-position', 'click-action', 'pressure-threshold', 'dash-max-icon-size']
+        .forEach(key => dashToDock.reset(key));
+    settings.settings_schema.list_keys().forEach(key => settings.reset(key));
+    await sleep(50);
 }
