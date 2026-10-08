@@ -31,7 +31,7 @@ app.run([]);
 `;
 
 // Opens test windows and closes every one of them in the end.
-class TestWindows {
+export class TestWindows {
     constructor(t) {
         this._t = t;
         this._procs = [];

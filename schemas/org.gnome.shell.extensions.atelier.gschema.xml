@@ -106,6 +106,7 @@
     <child name="desktop" schema="org.gnome.shell.extensions.atelier.desktop"/>
     <child name="notes" schema="org.gnome.shell.extensions.atelier.notes"/>
     <child name="dock" schema="org.gnome.shell.extensions.atelier.dock"/>
+    <child name="windows" schema="org.gnome.shell.extensions.atelier.windows"/>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -353,6 +354,15 @@
       <default>''</default>
       <summary>Picture of the photo widget</summary>
       <description>A picture, or a folder whose pictures take turns every hour.</description>
+    </key>
+  </schema>
+
+  <schema id="org.gnome.shell.extensions.atelier.windows"
+          path="/org/gnome/shell/extensions/atelier/windows/">
+    <key name="enabled" type="b">
+      <default>true</default>
+      <summary>Windows as liquid</summary>
+      <description>A window opened from the dock comes out of its icon in a drop that spreads into it; opened otherwise, it spreads out of its middle; closing, it draws into it. Dialogs keep GNOME's animations.</description>
     </key>
   </schema>
 

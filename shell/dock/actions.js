@@ -12,6 +12,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {pickAction, plan} from '../../lib/dockActions.js';
+import {noteLaunch} from '../core/launchOrigins.js';
 import {appWindows, windowOptions} from './windows.js';
 
 // How long a round through an app's windows lasts.
@@ -63,12 +64,20 @@ export function activateApp(icon, button, modifiers, ctx) {
         Main.overview.hide();
 }
 
+// The window about to open comes out of this icon.
+function noteDockLaunch(icon, ctx) {
+    const [x, y] = icon.get_transformed_position();
+    const [width, height] = icon.get_transformed_size();
+    noteLaunch(icon.app.get_id(), {x, y, width, height}, ctx.side);
+}
+
 // Does a step; says whether it leaves the overview to itself.
 function runStep(step, icon, windows, ctx) {
     const app = icon.app;
     switch (step.kind) {
     case 'launch':
         icon.animateLaunch();
+        noteDockLaunch(icon, ctx);
         // Running elsewhere: a window here, if it can have more.
         if (app.state === Shell.AppState.RUNNING && app.can_open_new_window())
             app.open_new_window(-1);
@@ -77,6 +86,7 @@ function runStep(step, icon, windows, ctx) {
         break;
     case 'new-window':
         icon.animateLaunch();
+        noteDockLaunch(icon, ctx);
         app.open_new_window(-1);
         break;
     case 'activate':

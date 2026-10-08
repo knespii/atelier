@@ -192,10 +192,64 @@ class AtelierLiquidPaint extends St.Widget {
     }
 
     /**
+     * A look given as it is.
+     *
+     * @param {number[]} color - [red, green, blue, alpha], 0–1
+     * @param {number[]} [shadow] - its shadow's colour, the same way
+     * @param {number[]} [shape] - the shadow's [x offset, y offset, blur], pixels
+     */
+    setColors(color, shadow = [0, 0, 0, 0], shape = [0, 0, 0]) {
+        this._paint.setLook(color, shadow, shape);
+    }
+
+    /**
      * @param {object} shapes - {boxes, capsules} (lib/liquid.js)
      * @param {number[]|null} [hole] - [x, y, width, height, radius] left out
      */
     setShapes(shapes, hole = null) {
         setLiquid(this._paint, this._paint.uniforms, shapes, hole);
+    }
+});
+
+// Only what lies within the shapes shows of an actor (a window, as it
+// spreads out of a drop, say).
+const MASK_DECLARATIONS = `
+uniform vec2 origin;
+uniform vec2 size;
+${LIQUID_DECLARATIONS}
+`;
+
+const MASK_CODE = `
+vec2 p = origin + cogl_tex_coord_in[0].xy * size;
+cogl_color_out *= clamp(0.5 - atelier_liquid(p), 0.0, 1.0);
+`;
+
+/**
+ * An actor seen through liquid: add it to the actor, and give it the shapes
+ * (in the actor's own pixels) with setShapes() every frame.
+ */
+export const LiquidMaskEffect = GObject.registerClass(
+class AtelierLiquidMaskEffect extends Shell.GLSLEffect {
+    _init(params) {
+        super._init(params);
+        this._origin = this.get_uniform_location('origin');
+        this._size = this.get_uniform_location('size');
+        this.uniforms = liquidUniforms(this);
+        this.setShapes({});
+    }
+
+    vfunc_build_pipeline() {
+        // (After the texture lookup; premultiplied, so all four channels.)
+        this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, MASK_DECLARATIONS, MASK_CODE, false);
+    }
+
+    vfunc_paint_target(node, paintContext) {
+        syncTextureFrame(this, this._origin, this._size);
+        super.vfunc_paint_target(node, paintContext);
+    }
+
+    /** @param {object} shapes - {boxes, capsules} (lib/liquid.js) */
+    setShapes(shapes) {
+        setLiquid(this, this.uniforms, shapes);
     }
 });

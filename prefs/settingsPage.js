@@ -29,6 +29,7 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
 
         this.add(this._buildSwitcherGroup());
         this.add(this._buildTransitionGroup());
+        this.add(this._buildWindowsGroup());
 
         this._healthGroup = new Adw.PreferencesGroup({
             title: 'Theme Check',
@@ -61,6 +62,19 @@ class AtelierSettingsPage extends Adw.PreferencesPage {
             ['atelier-previous-profile', 'Apply the previous profile'],
         ].map(([key, title]) => new ShortcutRow({settings: this._settings, key, title}));
         this._shortcutRows.forEach(row => group.add(row));
+        return group;
+    }
+
+    _buildWindowsGroup() {
+        const group = new Adw.PreferencesGroup({title: 'Windows'});
+        const liquid = new Adw.SwitchRow({
+            title: 'Windows as liquid',
+            subtitle: 'Out of the dock in a drop from the app\'s icon, otherwise out of their middle; ' +
+                'closing, into it',
+        });
+        this._windowsSettings = this._settings.get_child('windows');
+        this._windowsSettings.bind('enabled', liquid, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(liquid);
         return group;
     }
 

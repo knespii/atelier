@@ -27,6 +27,7 @@ import * as dockBehaviour from './dock-tests/behaviour.js';
 import * as dockCore from './dock-tests/core.js';
 import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
+import * as dockWindows from './dock-tests/windows.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
@@ -1884,7 +1885,7 @@ async function testDock(ext) {
     if (!check(module !== null && module.dock !== null, 'the dock is there (Dash to Dock is off here)'))
         return;
     const t = dockTestContext(ext);
-    for (const suite of [dockCore, dockHiding, dockBehaviour, dockBadges, dockLaunchers, dockAppearance])
+    for (const suite of [dockCore, dockHiding, dockBehaviour, dockBadges, dockLaunchers, dockAppearance, dockWindows])
         await suite.shell(t);
 }
 
