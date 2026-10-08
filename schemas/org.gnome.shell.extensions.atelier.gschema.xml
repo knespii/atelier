@@ -44,6 +44,58 @@
     <value nick="monochrome" value="2"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.DockPosition">
+    <value nick="TOP" value="0"/>
+    <value nick="RIGHT" value="1"/>
+    <value nick="BOTTOM" value="2"/>
+    <value nick="LEFT" value="3"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.DockIntellihideMode">
+    <value nick="ALL_WINDOWS" value="0"/>
+    <value nick="FOCUS_APPLICATION_WINDOWS" value="1"/>
+    <value nick="MAXIMIZED_WINDOWS" value="2"/>
+    <value nick="ALWAYS_ON_TOP" value="3"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.DockClickAction">
+    <value nick="skip" value="0"/>
+    <value nick="minimize" value="1"/>
+    <value nick="launch" value="2"/>
+    <value nick="cycle-windows" value="3"/>
+    <value nick="minimize-or-overview" value="4"/>
+    <value nick="appspread" value="5"/>
+    <value nick="minimize-or-appspread" value="6"/>
+    <value nick="focus-or-appspread" value="7"/>
+    <value nick="focus-minimize-or-appspread" value="8"/>
+    <value nick="quit" value="9"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.DockScrollAction">
+    <value nick="do-nothing" value="0"/>
+    <value nick="cycle-windows" value="1"/>
+    <value nick="switch-workspace" value="2"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.DockTransparency">
+    <value nick="DEFAULT" value="0"/>
+    <value nick="FIXED" value="1"/>
+    <value nick="DYNAMIC" value="2"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.atelier.DockIndicator">
+    <value nick="DEFAULT" value="0"/>
+    <value nick="DOT" value="1"/>
+    <value nick="DOTS" value="2"/>
+    <value nick="SQUARES" value="3"/>
+    <value nick="DASHES" value="4"/>
+    <value nick="SEGMENTED" value="5"/>
+    <value nick="SOLID" value="6"/>
+    <value nick="CILIORA" value="7"/>
+    <value nick="METRO" value="8"/>
+    <value nick="BINARY" value="9"/>
+  </enum>
+
   <schema id="org.gnome.shell.extensions.atelier"
           path="/org/gnome/shell/extensions/atelier/">
     <child name="palette" schema="org.gnome.shell.extensions.atelier.palette"/>
@@ -321,17 +373,434 @@
     <key name="enabled" type="b">
       <default>true</default>
       <summary>Atelier's dock</summary>
-      <description>Pinned apps and those with windows on the workspace, at the bottom of the screen, with room for Dynamic Music Pill. It stays off while Dash to Dock is on.</description>
+      <description>Pinned apps and those with windows on the workspace, at an edge of the screen, with room for Dynamic Music Pill. It stays off while Dash to Dock is on.</description>
     </key>
     <key name="intellihide" type="b">
       <default>true</default>
       <summary>Out of the way of windows</summary>
-      <description>The dock moves away when a window of the focused app covers it, and comes back when the pointer reaches the bottom edge.</description>
+      <description>The dock moves away when windows cover it (which ones: intellihide-mode), and comes back when the pointer reaches its edge.</description>
     </key>
     <key name="icon-size" type="i">
-      <range min="32" max="64"/>
+      <range min="16" max="64"/>
       <default>48</default>
       <summary>Size of the dock's icons, logical pixels</summary>
+      <description>The biggest they get: smaller when the apps don't all fit in the dock's length, unless icon-size-fixed is on.</description>
+    </key>
+    <key name="dock-position" enum="org.gnome.shell.extensions.atelier.DockPosition">
+      <default>'BOTTOM'</default>
+      <summary>Edge of the screen the dock is at</summary>
+    </key>
+    <key name="preferred-monitor-by-connector" type="s">
+      <default>'primary'</default>
+      <summary>Monitor of the dock</summary>
+      <description>The connector of the monitor (as 'DP-1'), or 'primary' for the main one. A monitor that isn't plugged in means the main one.</description>
+    </key>
+    <key name="multi-monitor" type="b">
+      <default>false</default>
+      <summary>A dock on every monitor</summary>
+      <description>The others have the same apps; Dynamic Music Pill stays in the main one.</description>
+    </key>
+    <key name="dock-fixed" type="b">
+      <default>false</default>
+      <summary>Always visible</summary>
+      <description>The dock never moves away, and maximized windows end where it begins.</description>
+    </key>
+    <key name="extend-height" type="b">
+      <default>false</default>
+      <summary>Panel mode</summary>
+      <description>The dock stretches along the whole edge of the screen, touching it.</description>
+    </key>
+    <key name="always-center-icons" type="b">
+      <default>false</default>
+      <summary>Icons in the middle in panel mode</summary>
+      <description>The icons stay in the middle of the edge rather than at its start.</description>
+    </key>
+    <key name="height-fraction" type="d">
+      <range min="0.1" max="1.0"/>
+      <default>0.90</default>
+      <summary>Maximum length of the dock</summary>
+      <description>As a fraction of the edge it is at.</description>
+    </key>
+    <key name="icon-size-fixed" type="b">
+      <default>false</default>
+      <summary>Icons keep their size</summary>
+      <description>When the apps don't all fit, the dock scrolls instead of making its icons smaller.</description>
+    </key>
+    <key name="scroll-to-focused-application" type="b">
+      <default>true</default>
+      <summary>Scroll to the focused app</summary>
+      <description>When the dock scrolls (icon-size-fixed), the focused app is scrolled into view.</description>
+    </key>
+    <key name="show-favorites" type="b">
+      <default>true</default>
+      <summary>Show the pinned apps</summary>
+    </key>
+    <key name="show-running" type="b">
+      <default>true</default>
+      <summary>Show the running apps</summary>
+      <description>Apps with windows that aren't pinned.</description>
+    </key>
+    <key name="autohide" type="b">
+      <default>false</default>
+      <summary>Hide when the pointer leaves</summary>
+      <description>The dock goes when the pointer leaves it, and comes back when the pointer reaches its edge.</description>
+    </key>
+    <key name="require-pressure-to-show" type="b">
+      <default>false</default>
+      <summary>Push against the edge to show</summary>
+      <description>The pointer has to push against the edge of the screen for the dock to come back.</description>
+    </key>
+    <key name="pressure-threshold" type="d">
+      <range min="0" max="1000"/>
+      <default>100</default>
+      <summary>How hard to push</summary>
+      <description>Pixels the pointer has to move against the edge.</description>
+    </key>
+    <key name="intellihide-mode" enum="org.gnome.shell.extensions.atelier.DockIntellihideMode">
+      <default>'FOCUS_APPLICATION_WINDOWS'</default>
+      <summary>Which windows move the dock away</summary>
+      <description>Any window, those of the focused app, maximized ones, or only those kept on top.</description>
+    </key>
+    <key name="manualhide" type="b">
+      <default>false</default>
+      <summary>Hidden until called</summary>
+      <description>The dock stays away until it is called (with the keyboard shortcut).</description>
+    </key>
+    <key name="animation-time" type="d">
+      <range min="0" max="2"/>
+      <default>0.2</default>
+      <summary>Time the dock takes to move, seconds</summary>
+    </key>
+    <key name="show-delay" type="d">
+      <range min="0" max="2"/>
+      <default>0.25</default>
+      <summary>Time before the dock comes back, seconds</summary>
+    </key>
+    <key name="hide-delay" type="d">
+      <range min="0" max="2"/>
+      <default>0.2</default>
+      <summary>Time before the dock moves away, seconds</summary>
+    </key>
+    <key name="autohide-in-fullscreen" type="b">
+      <default>false</default>
+      <summary>In fullscreen too</summary>
+      <description>The dock can be brought back over a window that fills the screen.</description>
+    </key>
+    <key name="show-dock-urgent-notify" type="b">
+      <default>true</default>
+      <summary>Show the dock for urgent windows</summary>
+      <description>The dock comes back while a window asks for attention.</description>
+    </key>
+    <key name="click-action" enum="org.gnome.shell.extensions.atelier.DockClickAction">
+      <default>'cycle-windows'</default>
+      <summary>What a click on an app does</summary>
+    </key>
+    <key name="shift-click-action" enum="org.gnome.shell.extensions.atelier.DockClickAction">
+      <default>'minimize'</default>
+      <summary>What a click on an app with Shift held does</summary>
+    </key>
+    <key name="middle-click-action" enum="org.gnome.shell.extensions.atelier.DockClickAction">
+      <default>'launch'</default>
+      <summary>What a middle click on an app does</summary>
+    </key>
+    <key name="shift-middle-click-action" enum="org.gnome.shell.extensions.atelier.DockClickAction">
+      <default>'launch'</default>
+      <summary>What a middle click on an app with Shift held does</summary>
+    </key>
+    <key name="scroll-action" enum="org.gnome.shell.extensions.atelier.DockScrollAction">
+      <default>'do-nothing'</default>
+      <summary>What scrolling on an app does</summary>
+    </key>
+    <key name="scroll-switch-workspace" type="b">
+      <default>true</default>
+      <summary>Scrolling on the dock switches workspace</summary>
+    </key>
+    <key name="activate-single-window" type="b">
+      <default>true</default>
+      <summary>A click brings up only the latest window</summary>
+      <description>Clicked, an app brings up its latest window rather than all of them.</description>
+    </key>
+    <key name="isolate-workspaces" type="b">
+      <default>true</default>
+      <summary>Only windows on the current workspace</summary>
+      <description>Apps count as running, and are switched through, with windows on the current workspace only.</description>
+    </key>
+    <key name="isolate-monitors" type="b">
+      <default>false</default>
+      <summary>Only windows on the dock's monitor</summary>
+    </key>
+    <key name="workspace-agnostic-urgent-windows" type="b">
+      <default>true</default>
+      <summary>Urgent windows from every workspace</summary>
+      <description>A window asking for attention counts wherever it is.</description>
+    </key>
+    <key name="running-indicator-style" enum="org.gnome.shell.extensions.atelier.DockIndicator">
+      <default>'DEFAULT'</default>
+      <summary>How running apps are marked</summary>
+    </key>
+    <key name="running-indicator-dominant-color" type="b">
+      <default>false</default>
+      <summary>Marks in the app's own colour</summary>
+    </key>
+    <key name="custom-theme-customize-running-dots" type="b">
+      <default>false</default>
+      <summary>Marks in colours of their own</summary>
+    </key>
+    <key name="custom-theme-running-dots-color" type="s">
+      <default>'#ffffff'</default>
+      <summary>Colour of the marks</summary>
+    </key>
+    <key name="custom-theme-running-dots-border-color" type="s">
+      <default>'#ffffff'</default>
+      <summary>Colour of the marks' border</summary>
+    </key>
+    <key name="custom-theme-running-dots-border-width" type="i">
+      <range min="0" max="3"/>
+      <default>0</default>
+      <summary>Width of the marks' border, pixels</summary>
+    </key>
+    <key name="show-icons-notifications-counter" type="b">
+      <default>true</default>
+      <summary>Count of notifications on the icons</summary>
+    </key>
+    <key name="application-counter-overrides-notifications" type="b">
+      <default>true</default>
+      <summary>The app's own count first</summary>
+      <description>A count the app gives (over Unity's launcher API) shows instead of the notifications'.</description>
+    </key>
+    <key name="show-icons-emblems" type="b">
+      <default>true</default>
+      <summary>Badges and progress on the icons</summary>
+    </key>
+    <key name="dance-urgent-applications" type="b">
+      <default>true</default>
+      <summary>Wiggle urgent apps</summary>
+      <description>An app whose window asks for attention wiggles.</description>
+    </key>
+    <key name="hide-tooltip" type="b">
+      <default>false</default>
+      <summary>Hide the apps' names</summary>
+      <description>No name shows while the pointer rests on an app.</description>
+    </key>
+    <key name="show-show-apps-button" type="b">
+      <default>false</default>
+      <summary>Show Applications button</summary>
+    </key>
+    <key name="show-apps-at-top" type="b">
+      <default>false</default>
+      <summary>Show Applications at the start</summary>
+      <description>At the start of the dock rather than at its end.</description>
+    </key>
+    <key name="show-apps-always-in-the-edge" type="b">
+      <default>true</default>
+      <summary>Show Applications at the edge in panel mode</summary>
+      <description>In panel mode it stays at the end of the edge, away from the icons.</description>
+    </key>
+    <key name="show-trash" type="b">
+      <default>false</default>
+      <summary>Trash in the dock</summary>
+    </key>
+    <key name="show-mounts" type="b">
+      <default>false</default>
+      <summary>Drives in the dock</summary>
+    </key>
+    <key name="show-mounts-only-mounted" type="b">
+      <default>true</default>
+      <summary>Only mounted drives</summary>
+    </key>
+    <key name="show-mounts-network" type="b">
+      <default>false</default>
+      <summary>Network drives too</summary>
+    </key>
+    <key name="isolate-locations" type="b">
+      <default>true</default>
+      <summary>File manager windows as their own icons</summary>
+      <description>A file manager window showing the trash or a drive goes with its icon rather than with the file manager.</description>
+    </key>
+    <key name="hot-keys" type="b">
+      <default>false</default>
+      <summary>Super+number opens the apps</summary>
+      <description>Super with 1 to 0 opens (or switches to) the dock's apps in order, in place of GNOME's own shortcuts.</description>
+    </key>
+    <key name="hotkeys-overlay" type="b">
+      <default>true</default>
+      <summary>Show the numbers</summary>
+      <description>While Super is held, the apps show their numbers.</description>
+    </key>
+    <key name="hotkeys-show-dock" type="b">
+      <default>true</default>
+      <summary>Show the dock with the numbers</summary>
+    </key>
+    <key name="shortcut" type="as">
+      <default>['&lt;Super&gt;q']</default>
+      <summary>Shortcut to show the dock</summary>
+    </key>
+    <key name="shortcut-timeout" type="d">
+      <range min="0" max="10"/>
+      <default>2.0</default>
+      <summary>How long the shortcut shows the dock, seconds</summary>
+    </key>
+    <key name="app-hotkey-1" type="as">
+      <default>['&lt;Super&gt;1']</default>
+      <summary>Open app 1 in the dock</summary>
+    </key>
+    <key name="app-hotkey-2" type="as">
+      <default>['&lt;Super&gt;2']</default>
+      <summary>Open app 2 in the dock</summary>
+    </key>
+    <key name="app-hotkey-3" type="as">
+      <default>['&lt;Super&gt;3']</default>
+      <summary>Open app 3 in the dock</summary>
+    </key>
+    <key name="app-hotkey-4" type="as">
+      <default>['&lt;Super&gt;4']</default>
+      <summary>Open app 4 in the dock</summary>
+    </key>
+    <key name="app-hotkey-5" type="as">
+      <default>['&lt;Super&gt;5']</default>
+      <summary>Open app 5 in the dock</summary>
+    </key>
+    <key name="app-hotkey-6" type="as">
+      <default>['&lt;Super&gt;6']</default>
+      <summary>Open app 6 in the dock</summary>
+    </key>
+    <key name="app-hotkey-7" type="as">
+      <default>['&lt;Super&gt;7']</default>
+      <summary>Open app 7 in the dock</summary>
+    </key>
+    <key name="app-hotkey-8" type="as">
+      <default>['&lt;Super&gt;8']</default>
+      <summary>Open app 8 in the dock</summary>
+    </key>
+    <key name="app-hotkey-9" type="as">
+      <default>['&lt;Super&gt;9']</default>
+      <summary>Open app 9 in the dock</summary>
+    </key>
+    <key name="app-hotkey-10" type="as">
+      <default>['&lt;Super&gt;0']</default>
+      <summary>Open app 10 in the dock</summary>
+    </key>
+    <key name="app-shift-hotkey-1" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;1']</default>
+      <summary>Open app 1 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-2" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;2']</default>
+      <summary>Open app 2 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-3" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;3']</default>
+      <summary>Open app 3 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-4" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;4']</default>
+      <summary>Open app 4 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-5" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;5']</default>
+      <summary>Open app 5 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-6" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;6']</default>
+      <summary>Open app 6 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-7" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;7']</default>
+      <summary>Open app 7 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-8" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;8']</default>
+      <summary>Open app 8 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-9" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;9']</default>
+      <summary>Open app 9 in the dock, Shift held</summary>
+    </key>
+    <key name="app-shift-hotkey-10" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;0']</default>
+      <summary>Open app 10 in the dock, Shift held</summary>
+    </key>
+    <key name="app-ctrl-hotkey-1" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;1']</default>
+      <summary>Open a new window of app 1 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-2" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;2']</default>
+      <summary>Open a new window of app 2 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-3" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;3']</default>
+      <summary>Open a new window of app 3 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-4" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;4']</default>
+      <summary>Open a new window of app 4 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-5" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;5']</default>
+      <summary>Open a new window of app 5 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-6" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;6']</default>
+      <summary>Open a new window of app 6 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-7" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;7']</default>
+      <summary>Open a new window of app 7 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-8" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;8']</default>
+      <summary>Open a new window of app 8 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-9" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;9']</default>
+      <summary>Open a new window of app 9 in the dock</summary>
+    </key>
+    <key name="app-ctrl-hotkey-10" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;0']</default>
+      <summary>Open a new window of app 10 in the dock</summary>
+    </key>
+    <key name="transparency-mode" enum="org.gnome.shell.extensions.atelier.DockTransparency">
+      <default>'DEFAULT'</default>
+      <summary>How see-through the dock's background is</summary>
+      <description>As the theme has it, fixed, or more opaque when a window is near.</description>
+    </key>
+    <key name="background-opacity" type="d">
+      <range min="0" max="1"/>
+      <default>0.8</default>
+      <summary>Opacity of the dock's background</summary>
+    </key>
+    <key name="customize-alphas" type="b">
+      <default>false</default>
+      <summary>Opacity of its own near windows</summary>
+      <description>With transparency-mode DYNAMIC, min-alpha away from windows and max-alpha near them.</description>
+    </key>
+    <key name="min-alpha" type="d">
+      <range min="0" max="1"/>
+      <default>0.2</default>
+      <summary>Opacity away from windows</summary>
+    </key>
+    <key name="max-alpha" type="d">
+      <range min="0" max="1"/>
+      <default>0.8</default>
+      <summary>Opacity near windows</summary>
+    </key>
+    <key name="custom-background-color" type="b">
+      <default>false</default>
+      <summary>Background in a colour of its own</summary>
+    </key>
+    <key name="background-color" type="s">
+      <default>'#121216'</default>
+      <summary>Colour of the dock's background</summary>
+    </key>
+    <key name="custom-theme-shrink" type="b">
+      <default>false</default>
+      <summary>Compact dock</summary>
+      <description>Less room around the icons.</description>
+    </key>
+    <key name="force-straight-corner" type="b">
+      <default>false</default>
+      <summary>Square corners</summary>
     </key>
   </schema>
 </schemalist>
