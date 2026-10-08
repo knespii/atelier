@@ -8,6 +8,9 @@
 #                               (the same session on two monitors, with the
 #                               checks for that; results in
 #                               tests/output/shell-two-monitors)
+#        tools/shell-test.sh dock
+#                               (only the dock's checks, on one monitor;
+#                               results in tests/output/shell)
 set -eu
 
 SUITE="${1:-main}"

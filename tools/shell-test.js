@@ -22,7 +22,8 @@ import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
-// 'main', or 'two-monitors': the session on two monitors
+// 'main', 'two-monitors' (the session on two monitors) or 'dock' (only
+// the dock's checks)
 const SUITE = GLib.getenv('ATELIER_TEST_SUITE') ?? 'main';
 
 export const METRICS = {};
@@ -1844,11 +1845,11 @@ async function testDock(ext) {
     // there (going, it would uncover the edge under the pointer and come
     // back, on and on), and goes once the pointer leaves.
     await pointerTo(dockX + dock.actor.width / 2, monitor.y + monitor.height - 1);
-    dock._reveal();
+    dock.reveal();
     await Scripting.sleep(2000);
-    check(dock._revealed, 'brought back by the edge, it stays while the pointer rests there');
+    check(dock.hider.revealed, 'brought back by the edge, it stays while the pointer rests there');
     await restPointer();
-    check(await waitFor(() => !dock._revealed, 3000), 'and goes once the pointer leaves');
+    check(await waitFor(() => !dock.hider.revealed, 3000), 'and goes once the pointer leaves');
 
     // Dynamic Music Pill finds it where it finds Dash to Dock's row.
     const handle = Main.panel.statusArea['dash-to-dock'];
@@ -2430,8 +2431,8 @@ function testQuitWithWorkQueued(ext) {
     bar?._queuePlace();
     dock?._queueRedisplay();
     dock?._queuePlace();
-    dock?._queueCheck();
-    check(island?._laterId && bar?._laterId && dock?._laterId && dock._placeId && dock._timeouts.has('check'),
+    dock?.intellihide.queueCheck();
+    check(island?._laterId && bar?._laterId && ['redisplay', 'place', 'check'].every(name => dock?.timers.has(name)),
         'layout, places and a check still to come as the shell quits');
 }
 
@@ -2477,6 +2478,16 @@ export async function run() {
         check(original?.wallpaper?.startsWith(`${GLib.get_user_data_dir()}/atelier/wallpapers/`),
             `original wallpaper copied into the library (${original?.wallpaper})`);
         check(Main.panel.statusArea[UUID] !== undefined, 'indicator in the top bar');
+        // Only the dock's checks (tools/shell-test.sh dock), on one monitor.
+        if (SUITE === 'dock') {
+            await testDock(ext);
+            // (Pinning an app says so, and the shell must not quit with a
+            // notification up: in the whole suite, it is gone by then.)
+            Main.messageTray.getSources().forEach(source => [...source.notifications].forEach(n => n.destroy()));
+            await Scripting.sleep(1000);
+            testQuitWithWorkQueued(ext);
+            return;
+        }
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
             testQuitWithWorkQueued(ext);
