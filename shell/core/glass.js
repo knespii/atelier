@@ -2,10 +2,11 @@
 // GNOME's lock screen – a static blur, which costs nothing while it stays.
 // For a while, it may be live glass instead: of what is under it now, the
 // windows too, blurred again whenever that changes.
-// A surface is the blurred wallpaper of the top of its monitor, masked to a
-// rounded rectangle that can move and change size every frame (the island
-// growing) without blurring anything again – and to a drop beside it, which
-// melts into it where they meet (the island dripping).
+// A surface is the blurred wallpaper of the top of its monitor (or of
+// another edge, for a dock), masked to a rounded rectangle that can move and
+// change size every frame (the island growing) without blurring anything
+// again – and to a drop beside it, which melts into it where they meet (the
+// island dripping).
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -200,14 +201,17 @@ class AtelierGlassSurface extends St.Widget {
     /**
      * @param {object} [params]
      * @param {number} [params.monitorIndex] - defaults to the primary monitor
-     * @param {number} [params.reach] - how far down the monitor shapes may
-     *   go, as a fraction of its height
-     * @param {boolean} [params.fromBottom] - the reach is up from the bottom
-     *   edge instead (for a dock)
+     * @param {number} [params.reach] - how far from its edge the monitor
+     *   shapes may go, as a fraction of its height (of its width at the
+     *   left or the right)
+     * @param {string} [params.side] - the monitor's edge the surface is
+     *   at: 'TOP' (the default), 'BOTTOM', 'LEFT' or 'RIGHT' (for a dock)
+     * @param {boolean} [params.fromBottom] - the same as side 'BOTTOM'
      * @param {boolean} [params.solid] - black instead of glass: the same
      *   shapes, changing every frame without anything being laid out anew
      */
-    _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, solid = false} = {}) {
+    _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
+        solid = false} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -215,7 +219,7 @@ class AtelierGlassSurface extends St.Widget {
         Shell.util_set_hidden_from_pick(this, true);
         this._monitorIndex = monitorIndex;
         this._reach = reach;
-        this._fromBottom = fromBottom;
+        this._side = side ?? (fromBottom ? 'BOTTOM' : 'TOP');
         this._solid = solid;
         this._shape = null;
         this._drop = null;
@@ -248,14 +252,20 @@ class AtelierGlassSurface extends St.Widget {
         const monitor = Main.layoutManager.monitors[this._monitorIndex];
         if (!monitor)
             return;
-        // The surface covers the top (or the bottom) of its monitor; the
-        // wallpaper lines up with the desktop.
-        const height = Math.ceil(monitor.height * this._reach);
-        const offset = this._fromBottom ? monitor.height - height : 0;
-        this.set_position(monitor.x, monitor.y + offset);
-        this.set_size(monitor.width, height);
-        this._tint.set_size(monitor.width, height);
-        this._wallpaper.set_position(0, -offset);
+        // The surface covers the top of its monitor (or the bottom, or a
+        // side); the wallpaper lines up with the desktop.
+        let [width, height, offsetX, offsetY] = [monitor.width, monitor.height, 0, 0];
+        if (this._side === 'LEFT' || this._side === 'RIGHT') {
+            width = Math.ceil(monitor.width * this._reach);
+            offsetX = this._side === 'RIGHT' ? monitor.width - width : 0;
+        } else {
+            height = Math.ceil(monitor.height * this._reach);
+            offsetY = this._side === 'BOTTOM' ? monitor.height - height : 0;
+        }
+        this.set_position(monitor.x + offsetX, monitor.y + offsetY);
+        this.set_size(width, height);
+        this._tint.set_size(width, height);
+        this._wallpaper.set_position(-offsetX, -offsetY);
         if (this._solid) {
             if (this._shape)
                 this.setShape(...this._shape);
