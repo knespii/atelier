@@ -134,6 +134,24 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
             this._glass.active = this._desktop.get_boolean('glass');
         }));
         widgets.add(this._glass);
+        // How much of their background the cards keep, in per cent.
+        this._opacity = new Adw.SpinRow({
+            title: 'Card background',
+            subtitle: 'Less, and the wallpaper (or the glass) shows through the cards',
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 100, step_increment: 5, page_increment: 20}),
+        });
+        this._opacity.value = Math.round(this._desktop.get_double('card-opacity') * 100);
+        this._opacity.connect('notify::value', () => {
+            const value = this._opacity.value / 100;
+            if (Math.abs(this._desktop.get_double('card-opacity') - value) < 0.001)
+                return;
+            this._desktop.set_double('card-opacity', value);
+            keepWidgets(this._profiles, this._desktop);
+        });
+        this._ids.push(this._desktop.connect('changed::card-opacity', () => {
+            this._opacity.value = Math.round(this._desktop.get_double('card-opacity') * 100);
+        }));
+        widgets.add(this._opacity);
         const syncStyle = () => {
             const style = this._desktop.get_string('style');
             this._style.setSelected(style);

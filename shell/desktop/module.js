@@ -20,7 +20,7 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 import {clamp01, gather, pour, spread} from '../../lib/liquid.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
-    CLOCK_FACES, KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
+    CLOCK_FACES, KINDS, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {LiquidPaint} from '../core/liquid.js';
@@ -171,6 +171,7 @@ export class DesktopModule {
             },
             'changed::style', () => this._syncLook(true),
             'changed::glass', () => this._syncLook(false),
+            'changed::card-opacity', () => this._syncLook(false),
             this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueArea(), this);
         Main.overview.connectObject(
@@ -387,6 +388,9 @@ export class DesktopModule {
             this._glass.destroy();
             this._glass = null;
         }
+        // (As see-through as the settings have them: inline, over the look.)
+        this._cardStyle = cardStyle(glass ? 'glassy' : style, this._desktopSettings.get_double('card-opacity'));
+        this._widgets.forEach(widget => !widget.melted && widget.set_style(this._cardStyle || null));
         if (rebuild)
             this._widgets.forEach(widget => widget.resize(widget.entry.size));
         this.syncGlass();
@@ -644,14 +648,17 @@ export class DesktopModule {
     _melt(widget, melted, showing = true) {
         widget.melted = melted;
         widget.reactive = !melted;
-        widget.set_style('transition-duration: 0ms;');
+        // (Melted, the liquid is its card: none of its own see-through
+        // background either.)
+        const card = melted ? '' : this._cardStyle ?? '';
+        widget.set_style(`${card} transition-duration: 0ms;`);
         if (melted)
             widget.add_style_class_name('atelier-widget-melted');
         else
             widget.remove_style_class_name('atelier-widget-melted');
         // (Styled now, then back to its usual transitions.)
         widget.get_theme_node();
-        widget.set_style(null);
+        widget.set_style(card || null);
         if (!showing)
             widget.get_children().forEach(child => (child.opacity = 0));
     }
@@ -675,6 +682,7 @@ export class DesktopModule {
             'notify::scale-x', () => this.syncGlass(),
             'notify::opacity', () => this.syncGlass(),
             this);
+        widget.set_style(this._cardStyle || null);
         this._layer.add_child(widget);
         this._widgets.set(entry.id, widget);
         this._editor?.adopt(widget);

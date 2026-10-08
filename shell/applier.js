@@ -256,6 +256,8 @@ export class Applier {
             setIfChanged(desktop, 'style', plan.widgets.style);
             if (desktop.get_boolean('glass') !== plan.widgets.glass)
                 desktop.set_boolean('glass', plan.widgets.glass);
+            if (desktop.get_double('card-opacity') !== plan.widgets.opacity)
+                desktop.set_double('card-opacity', plan.widgets.opacity);
         }
     }
 

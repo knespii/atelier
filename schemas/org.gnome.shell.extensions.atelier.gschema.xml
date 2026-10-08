@@ -338,6 +338,12 @@
       <summary>Modern widgets of glass</summary>
       <description>The blurred wallpaper under the Modern widgets, rather than solid cards.</description>
     </key>
+    <key name="card-opacity" type="d">
+      <range min="0" max="1"/>
+      <default>1.0</default>
+      <summary>How much of their background the cards keep</summary>
+      <description>1 is the look as it is; less, and the wallpaper (or the glass) shows through the cards, their shadow fading with them.</description>
+    </key>
     <key name="github-user" type="s">
       <default>''</default>
       <summary>GitHub user of the GitHub widget</summary>

@@ -260,6 +260,9 @@ async function runSelftest(window) {
     desktop._style.setSelected('analogue');
     check(desktopSettings.get_string('style') === 'analogue' && !desktop._glass.sensitive,
         'the Analogue look is saved, glass is for Modern only');
+    desktop._opacity.value = 40;
+    check(Math.abs(desktopSettings.get_double('card-opacity') - 0.4) < 0.001, 'how see-through the cards are is saved');
+    desktopSettings.reset('card-opacity');
     desktop._github.text = 'not a user!';
     check(desktopSettings.get_string('github-user') === '' && desktop._github.has_css_class('error'),
         'a GitHub name that can\'t be is refused');
