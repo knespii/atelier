@@ -202,7 +202,8 @@ export async function prefs(t) {
     const shown = keys => keys.filter(key => rows.get(key)?.visible);
     const OPACITIES = ['background-opacity', 'customize-alphas', 'min-alpha', 'max-alpha', 'custom-background-color',
         'background-color'];
-    check(shown(OPACITIES).length === 0, 'as the profile: no opacities, no colour');
+    const waiting = () => shown(OPACITIES).join() === 'background-opacity' && !rows.get('background-opacity').sensitive;
+    check(waiting(), 'as the profile: no colour, the opacity there but waiting for Fixed');
     rows.get('transparency-mode').selected = 1;
     await sleep(50);
     check(settings.get_string('transparency-mode') === 'FIXED' &&
@@ -227,7 +228,7 @@ export async function prefs(t) {
     }
     KEYS.forEach(key => settings.reset(key));
     await sleep(50);
-    check(shown(OPACITIES).length === 0 && rows.get('transparency-mode').selected === 0, 'and back as the profile');
+    check(waiting() && rows.get('transparency-mode').selected === 0, 'and back as the profile');
 
     // Dash to Dock's settings, from its installed schema (in memory here,
     // as all of the preferences' settings), brought over.
