@@ -2,20 +2,24 @@
 // magnification-spread): as the pointer moves along the dock, the icon
 // under it grows away from the edge and those beside it less and less,
 // moving apart (lib/dockMagnify.js). Only how the icons are drawn
-// changes – the dock keeps its size, nothing is laid out again. When the
-// pointer leaves, they ease back.
+// changes – the dock keeps its size, nothing is laid out again. Coming
+// onto the dock the magnification swells from nothing, and leaving it
+// fades back, the icons with the pointer all the while.
 
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 import {isHorizontal} from '../../lib/dockGeometry.js';
 import {magnify} from '../../lib/dockMagnify.js';
 
 const KEYS = ['magnification', 'magnification-scale', 'magnification-spread'];
-// Growing as the pointer comes onto the dock, and back to rest as it
-// leaves, milliseconds; in between the icons follow it at once.
-const ENTER_TIME = 90;
-const REST_TIME = 140;
+// How long the magnification takes to swell as the pointer comes onto the
+// dock (and to fade as it leaves), milliseconds.
+const SWELL_TIME = 260;
+// (Gently out of rest, gently into full: no jolt either way.)
+const smooth = t => t * t * (3 - 2 * t);
 // Where an icon grows from: the edge the dock is at.
 const PIVOTS = {BOTTOM: [0.5, 1], TOP: [0.5, 0], LEFT: [0, 0.5], RIGHT: [1, 0.5]};
 
@@ -28,7 +32,12 @@ export class DockMagnifier {
         this._dock = dock;
         this._settings = settings;
         this._active = false;
+        this._pointer = null; // along the dock, as last seen there
+        this._strength = 0; // how much of the magnification there is, 0–1
         const container = dock.container;
+        this._swell = new Clutter.Timeline({actor: container, duration: Math.max(1, adjustAnimationTime(SWELL_TIME))});
+        this._swell.connect('new-frame', () => this._onSwell());
+        this._swell.connect('completed', () => this._onSwell(true));
         container.connectObject(
             'motion-event', (_, event) => this._onMotion(event),
             'leave-event', (_, event) => this._onLeave(event),
@@ -70,8 +79,39 @@ export class DockMagnifier {
         if (!this._enabled)
             return Clutter.EVENT_PROPAGATE;
         const [x, y] = event.get_coords();
-        this._apply(isHorizontal(this._dock.side) ? x : y);
+        this._pointer = isHorizontal(this._dock.side) ? x : y;
+        // (Coming onto it, or back before it faded: swelling again from
+        // where it is.)
+        if (!this._active || this._swell.direction === Clutter.TimelineDirection.BACKWARD)
+            this._swellTo(true);
+        this._active = true;
+        this._apply(this._pointer);
         return Clutter.EVENT_PROPAGATE;
+    }
+
+    // Swelling (or fading) from where it is now.
+    _swellTo(full) {
+        const swell = this._swell;
+        const elapsed = swell.is_playing() ? swell.get_elapsed_time() : null;
+        swell.stop();
+        swell.direction = full ? Clutter.TimelineDirection.FORWARD : Clutter.TimelineDirection.BACKWARD;
+        // (The part done already counts: on from there, either way.)
+        const done = elapsed ?? (full ? 0 : swell.duration);
+        swell.rewind();
+        swell.advance(Math.round(done));
+        swell.start();
+    }
+
+    _onSwell(completed = false) {
+        const progress = this._swell.get_progress();
+        this._strength = smooth(progress);
+        if (completed && this._swell.direction === Clutter.TimelineDirection.BACKWARD) {
+            this._strength = 0;
+            this._reset();
+            return;
+        }
+        if (this._pointer !== null)
+            this._apply(this._pointer);
     }
 
     // Still on the dock (or on a grown icon over its edge), or gone.
@@ -93,30 +133,31 @@ export class DockMagnifier {
             centers: icons.map(([, center]) => center),
             size,
             pointer,
-            scale: this._settings.get_double('magnification-scale'),
+            scale: 1 + (this._settings.get_double('magnification-scale') - 1) * this._strength,
             spread: this._settings.get_double('magnification-spread'),
             // (Into the room around the icons inside the dock, a little.)
             give: this._dock.container.get_theme_node().get_padding(horizontal ? St.Side.LEFT : St.Side.TOP),
         });
         const [px, py] = PIVOTS[this._dock.side];
-        const entering = !this._active;
+        // Right with the pointer: no easing of their own, no lag behind it.
         icons.forEach(([actor, , item], i) => {
             this._liftLabel(item, scales[i]);
             actor.set_pivot_point(px, py);
-            const values = {
+            actor.set({
                 scale_x: scales[i],
                 scale_y: scales[i],
                 translation_x: horizontal ? offsets[i] : 0,
                 translation_y: horizontal ? 0 : offsets[i],
-            };
-            // Coming onto the dock (or still growing), briefly eased; then
-            // right with the pointer, no lag behind it.
-            if (entering || actor.get_transition('scale-x'))
-                actor.ease({...values, duration: entering ? ENTER_TIME : 40, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-            else
-                actor.set(values);
+            });
         });
-        this._active = true;
+    }
+
+    // As at rest, exactly.
+    _reset() {
+        for (const [actor, , item] of this._icons()) {
+            this._liftLabel(item, 1);
+            actor.set({scale_x: 1, scale_y: 1, translation_x: 0, translation_y: 0});
+        }
     }
 
     /** @param {boolean} [now] - at once (they were laid out anew) */
@@ -124,18 +165,19 @@ export class DockMagnifier {
         if (!this._active)
             return;
         this._active = false;
-        for (const [actor, , item] of this._icons()) {
-            this._liftLabel(item, 1);
-            actor.remove_all_transitions();
-            actor.ease({
-                scale_x: 1, scale_y: 1, translation_x: 0, translation_y: 0,
-                duration: now ? 0 : REST_TIME,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
+        if (now) {
+            this._swell.stop();
+            this._strength = 0;
+            this._pointer = null;
+            this._reset();
+            return;
         }
+        // Fading back, the icons where the pointer last was.
+        this._swellTo(false);
     }
 
     destroy() {
+        this._swell.stop();
         this._dock.container?.disconnectObject(this);
         this._settings.disconnectObject(this);
         this._dock.disconnectObject(this);

@@ -355,8 +355,11 @@ async function magnification(t) {
     const middle = items[Math.floor(items.length / 2)];
     const [width, height] = [dock.container.width, dock.container.height];
     const [cx, cy] = t.centerOf(middle);
-    await t.pointerTo(cx - 20, cy);
     await t.pointerTo(cx, cy);
+    await t.sleep(70);
+    const swelling = middle.child.scale_x;
+    check(swelling > 1.01 && swelling < 1.29, `coming onto the dock, it swells rather than jumps (${swelling.toFixed(2)})`);
+    await t.pointerTo(cx + 1, cy);
     await t.sleep(400);
     const scales = items.map(item => item.child.scale_x);
     const index = items.indexOf(middle);
