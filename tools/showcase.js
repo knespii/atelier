@@ -291,10 +291,12 @@ const takes = [];
  * @param {string} name - of its folder
  * @param {number[]|null} area - of the stage, or all of it
  * @param {Function} action - what happens; waits as shown with wait()
+ * @param {number} [slower] - this many times slower still (more frames,
+ *   for a moment played back slower than it happened)
  */
-async function take(name, area, action) {
+async function take(name, area, action, slower = 1) {
     // (4K pictures take longer: slower still.)
-    const factor = area ? 10 : 16;
+    const factor = (area ? 10 : 16) * slower;
     await rest();
     await sleep(500);
     setSlowMotion(factor);
@@ -561,6 +563,9 @@ async function takeIsland({island}) {
 // Another profile, whose widgets are elsewhere: once its look is in, they
 // pour over there, liquid; a new one spreads out of its middle.
 async function takePour({atelier, desktop}) {
+    // (From Dune, as the switcher leaves it, when recorded on its own.)
+    if (atelier._store.activeId !== 'dune')
+        await switchTo(atelier, 'dune');
     await take('pour', null, async t => {
         await wait(250);
         t.mark('switch');
@@ -573,7 +578,7 @@ async function takePour({atelier, desktop}) {
         await waitFor(() => !desktop._flowing && !desktop._frozen, 10000);
         await wait(700);
         t.mark('end');
-    });
+    }, 2);
 }
 
 // A new note drips from the island; written on and saved, it runs off to
