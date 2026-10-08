@@ -28,6 +28,7 @@ import {DockHider} from './hider.js';
 import {DockItem} from './icon.js';
 import {Intellihide} from './intellihide.js';
 import {createShowAppsItem} from './showApps.js';
+import {DockMagnifier} from './magnifier.js';
 import {DockTheming} from './theming.js';
 import {Timers} from './timers.js';
 import {appWindows, windowOptions} from './windows.js';
@@ -142,6 +143,7 @@ export class Dock extends EventEmitter {
         this.intellihide = new Intellihide(this, settings, services.windows);
         this.hider = new DockHider(this, settings);
         this.theming = new DockTheming(this, settings, {glass});
+        this.magnifier = new DockMagnifier(this, settings);
 
         AppFavorites.getAppFavorites().connectObject('changed', () => this._queueRedisplay(), this);
         Shell.AppSystem.get_default().connectObject('app-state-changed', () => this._queueRedisplay(), this);
@@ -581,6 +583,7 @@ export class Dock extends EventEmitter {
         this._timers.destroy();
         if (this._main)
             this._services.musicPill.detach(this._box, child => this._isOwn(child));
+        this.magnifier.destroy();
         this.hider.destroy();
         this.intellihide.destroy();
         this.theming.destroy();

@@ -51,6 +51,14 @@ export function build(page, {settings, binder}) {
     syncMode();
     binder.connect(settings, 'changed::transparency-mode', syncMode);
 
+    binder.bindSwitch(group, settings, 'magnification', 'Magnification',
+        'The icons under the pointer grow; the dock keeps its size');
+    const scale = binder.bindSpin(group, settings, 'magnification-scale', 'How big', 'Percent of an icon at rest',
+        {lower: 100, upper: 200, step: 10, scale: 100});
+    const spread = binder.bindSpin(group, settings, 'magnification-spread', 'How far', 'Icons from the pointer',
+        {lower: 1, upper: 5, step: 0.5, digits: 1});
+    for (const row of [scale, spread])
+        binder.bindSensitive(row, settings, 'magnification');
     binder.bindSwitch(group, settings, 'custom-theme-shrink', 'Compact', 'Less room around the icons');
     binder.bindSwitch(group, settings, 'force-straight-corner', 'Square corners', 'Always square in panel mode');
     return group;

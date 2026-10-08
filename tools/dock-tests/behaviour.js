@@ -12,7 +12,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['click-action', 'scroll-action', 'scroll-switch-workspace', 'hot-keys', 'hotkeys-overlay',
-    'hotkeys-show-dock', 'shortcut-timeout', 'shortcut'];
+    'hotkeys-show-dock', 'shortcut-timeout', 'shortcut', 'magnification'];
 
 const APP_ID = 'org.atelier.DockTest';
 const OTHER_ID = 'org.atelier.DockOther';
@@ -221,6 +221,8 @@ async function clicks(t, windows) {
         await t.sleep(400);
 
         settings.set_string('scroll-action', 'do-nothing');
+        // (Between apps where they are at rest: not magnified into it.)
+        settings.set_boolean('magnification', false);
         const {scrollDock} = await import('../../shell/dock/actions.js');
         const dock = t.module.dock;
         dock.force(true);

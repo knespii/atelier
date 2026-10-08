@@ -8,7 +8,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['dock-position', 'dock-fixed', 'height-fraction', 'icon-size-fixed', 'extend-height',
-    'multi-monitor', 'preferred-monitor-by-connector', 'show-in-overview'];
+    'multi-monitor', 'preferred-monitor-by-connector', 'show-in-overview', 'magnification'];
 
 // Those the dock is built anew for (shell/dock/module.js).
 const REBUILD_KEYS = ['dock-position', 'multi-monitor', 'preferred-monitor-by-connector', 'dock-fixed',
@@ -113,6 +113,7 @@ export async function shell(t) {
     Main.messageTray.getSources().forEach(source => [...source.notifications].forEach(n => n.destroy()));
     try {
         await inOverview(t, monitor);
+        await magnification(t);
         await sides(t, monitor);
         await fixed(t, monitor);
         await fitting(t, installed);
@@ -343,4 +344,34 @@ async function inOverview(t, monitor) {
     Main.overview.hide();
     await t.waitFor(() => !Main.overview.visible, 4000);
     await setDock(t, {'show-in-overview': null});
+}
+
+// Along the dock, the icon under the pointer grows, those beside it less,
+// the others move apart; the dock keeps its size; away, they ease back.
+async function magnification(t) {
+    const {check} = t;
+    const dock = t.module.dock;
+    const items = dock.orderedItems.filter(item => item.visible);
+    const middle = items[Math.floor(items.length / 2)];
+    const [width, height] = [dock.container.width, dock.container.height];
+    const [cx, cy] = t.centerOf(middle);
+    await t.pointerTo(cx - 20, cy);
+    await t.pointerTo(cx, cy);
+    await t.sleep(400);
+    const scales = items.map(item => item.child.scale_x);
+    const index = items.indexOf(middle);
+    check(scales[index] > 1.4 && scales[index - 1] > 1 && scales[index - 1] < scales[index] &&
+        items[index - 1].child.translation_x < 0 && items[index + 1].child.translation_x > 0,
+    `under the pointer an icon grows, those beside it less, moving apart (${scales.map(s => s.toFixed(2)).join(' ')})`);
+    check(dock.container.width === width && dock.container.height === height, 'the dock keeps its size');
+    await t.screenshotArea('60-dock-magnified', 0, global.stage.height - 200, global.stage.width, 200);
+    await t.restPointer();
+    await t.sleep(600);
+    check(items.every(item => item.child.scale_x === 1 && item.child.translation_x === 0), 'away, they are as they were');
+    await setDock(t, {'magnification': false});
+    await t.pointerTo(cx, cy);
+    await t.sleep(400);
+    check(middle.child.scale_x === 1, 'off: no magnification');
+    await t.restPointer();
+    await setDock(t, {'magnification': null});
 }

@@ -406,6 +406,23 @@
       <summary>A dock on every monitor</summary>
       <description>The others have the same apps; Dynamic Music Pill stays in the main one.</description>
     </key>
+    <key name="magnification" type="b">
+      <default>true</default>
+      <summary>Magnify the icons under the pointer</summary>
+      <description>As the pointer moves along the dock, the icon under it grows (those beside it less and less) and the others move apart; the dock keeps its size.</description>
+    </key>
+    <key name="magnification-scale" type="d">
+      <range min="1" max="2"/>
+      <default>1.5</default>
+      <summary>How big the icon under the pointer gets</summary>
+      <description>1.5 is half again as big.</description>
+    </key>
+    <key name="magnification-spread" type="d">
+      <range min="1" max="5"/>
+      <default>2.5</default>
+      <summary>How far the magnification reaches</summary>
+      <description>In icons, from the pointer.</description>
+    </key>
     <key name="show-in-overview" type="b">
       <default>true</default>
       <summary>In the overview, in place of GNOME's dash</summary>
