@@ -2210,7 +2210,23 @@ async function testWallpapersTab(atelier) {
     switcher.setMode('profiles');
     check(switcher.mode === 'profiles' && switcher._cards.length === atelier._store.getAll().length + 1,
         'Tab back to profiles (and the "new profile" card)');
+    // Crossing over: the highlight pours from one tab to the other, the
+    // cards left go off to the side as the new ones come in.
+    await Scripting.sleep(120);
+    const leaving = switcher._viewport.get_children().filter(child => child !== switcher._strip);
+    check(switcher._pour.visible && leaving.length === 1 && leaving[0].opacity < 255 &&
+        switcher._cards.some(card => card.translation_x !== 0),
+    'crossing over, the highlight pours, the cards go and come');
+    await screenshot('09-switcher-crossing');
+    check(await waitFor(() => !switcher._pour.visible && switcher._viewport.get_n_children() === 1 &&
+        switcher._cards.every(card => card.translation_x === 0), 2000) &&
+        switcher._tabs.profiles.style === null, 'then all as it was, on the other tab');
     switcher.setMode('wallpapers');
+    // (Crossing back at once: the crossing before is done with.)
+    switcher.setMode('profiles');
+    switcher.setMode('wallpapers');
+    check(switcher._viewport.get_n_children() === 2 && switcher._cards.length === 2, 'crossing over and over, nothing piles up');
+    await Scripting.sleep(800);
     const pills = switcher._items.findIndex(item => item.id.endsWith('pills.jxl'));
     const picture = switcher._items[pills].id;
     switcher._activate(pills);

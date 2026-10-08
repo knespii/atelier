@@ -1,6 +1,10 @@
 // The switcher's content: tabs (profiles / wallpaper folder), a strip of
 // thumbnails and a footer. It doesn't place or grab anything itself; a host
 // shows it, either the island or, without it, a popup (switcher.js).
+//
+// From one tab to the other (Tab, or a click), the highlight pours over to
+// the other tab, and the cards go off to the side as the other tab's come
+// in from the other, one after another from the one picked out.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -11,9 +15,13 @@ import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
+
+import {pour} from '../lib/liquid.js';
 import {describeProfile, effectiveWallpaper} from '../lib/profiles.js';
 import {isSlideshow, prettyName} from '../lib/paths.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
+import {LiquidPaint} from './core/liquid.js';
 
 export const MODES = ['profiles', 'wallpapers'];
 
@@ -30,6 +38,18 @@ const PRELOAD_DELAY = 120;
 const SCROLL_TIME = 260;
 const UNSELECTED_SCALE = 0.92;
 const UNSELECTED_OPACITY = 190;
+// From one tab to the other, milliseconds: the highlight pouring over, the
+// cards going and coming (each a little after the one before it).
+const POUR_TIME = 420;
+const CARDS_OUT_TIME = 220;
+const CARDS_IN_TIME = 340;
+const CARDS_IN_DELAY = 90;
+const CARDS_STAGGER = 35;
+// Logical pixels: how far the cards go and come from, how near the
+// highlight melts. Its colour, as the stylesheet has a tab checked.
+const CARDS_SHIFT = 90;
+const POUR_BLEND = 10;
+const TAB_COLOR = [1, 1, 1, 0.14];
 
 /**
  * @param {string} path
@@ -167,7 +187,13 @@ export const SwitcherContent = GObject.registerClass({
         // need the styles of a widget that isn't on the stage yet.
         this._viewportWidth = 0;
 
-        const tabs = new St.BoxLayout({style_class: 'atelier-tabs', x_align: Clutter.ActorAlign.CENTER});
+        // (The tabs over their highlight, as it pours from one to the other.)
+        const tabsArea = new St.Widget({layout_manager: new Clutter.BinLayout(), x_align: Clutter.ActorAlign.CENTER});
+        this._pour = new LiquidPaint({visible: false, x_expand: true, y_expand: true});
+        this._pour.setColors(TAB_COLOR);
+        tabsArea.add_child(this._pour);
+        const tabs = new St.BoxLayout({style_class: 'atelier-tabs'});
+        tabsArea.add_child(tabs);
         this._tabs = {};
         for (const [key, label] of [['profiles', 'Profiles'], ['wallpapers', 'Wallpapers']]) {
             const tab = new St.Button({style_class: 'atelier-tab', label, can_focus: false});
@@ -175,7 +201,8 @@ export const SwitcherContent = GObject.registerClass({
             tabs.add_child(tab);
             this._tabs[key] = tab;
         }
-        this.add_child(tabs);
+        this.add_child(tabsArea);
+        this._transition = null;
 
         this._viewport = new St.Widget({style_class: 'atelier-viewport', clip_to_allocation: true});
         this.add_child(this._viewport);
@@ -291,10 +318,86 @@ export const SwitcherContent = GObject.registerClass({
     setMode(mode) {
         if (this._destroyed || !MODES.includes(mode) || mode === this._mode)
             return;
+        const from = this._mode;
+        this._finishTransition();
+        // (The cards of the tab left, going off to its side.)
+        const leaving = this._cards.length > 0 && this.mapped ? this._strip : null;
+        if (leaving) {
+            this._strip = new St.BoxLayout({style_class: 'atelier-strip', y: leaving.y});
+            this._viewport.add_child(this._strip);
+            this._cards = [];
+        }
         this._mode = mode;
         this._syncTabs();
         this._rebuild();
+        if (leaving)
+            this._crossOver(from, mode, leaving);
         this.emit('mode-changed', mode);
+    }
+
+    // From one tab to another: the highlight pours over, the cards left go
+    // off to the side away from the tab now chosen, its own coming in from
+    // that side, the one picked out first.
+    _crossOver(from, to, leaving) {
+        const scale = this._scale;
+        const animate = St.Settings.get().enable_animations;
+        const toward = MODES.indexOf(to) > MODES.indexOf(from) ? 1 : -1;
+        const shift = CARDS_SHIFT * scale * toward;
+        const time = ms => (animate ? adjustAnimationTime(ms) : 0);
+        const done = () => {
+            leaving.destroy();
+            this._pour.hide();
+            Object.values(this._tabs).forEach(tab => (tab.style = null));
+        };
+        leaving.ease({
+            translation_x: leaving.translation_x - shift,
+            opacity: 0,
+            duration: time(CARDS_OUT_TIME),
+            mode: Clutter.AnimationMode.EASE_IN_CUBIC,
+        });
+        this._cards.forEach((card, i) => {
+            const opacity = card.opacity;
+            card.translation_x = shift;
+            card.opacity = 0;
+            card.ease({
+                translation_x: 0,
+                opacity,
+                // (Once those left have mostly gone.)
+                delay: time(CARDS_IN_DELAY + CARDS_STAGGER * Math.min(Math.abs(i - this._selected), 6)),
+                duration: time(CARDS_IN_TIME),
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            });
+        });
+        // The highlight, by itself while it pours (the tabs see through).
+        const rect = tab => [tab.x, tab.y, tab.width, tab.height];
+        const [a, b] = [rect(this._tabs[from]), rect(this._tabs[to])];
+        const look = {radius: Math.min(a[3], b[3]) / 2, blend: POUR_BLEND * scale};
+        Object.values(this._tabs).forEach(tab => (tab.style = 'background-color: transparent;'));
+        this._pour.show();
+        const timeline = new Clutter.Timeline({actor: this, duration: Math.max(1, time(POUR_TIME))});
+        timeline.connect('new-frame', () => this._pour.setShapes(pour(a, b, timeline.get_progress(), look)));
+        timeline.connect('completed', () => {
+            this._transition = null;
+            done();
+        });
+        this._transition = {timeline, done};
+        this._pour.setShapes(pour(a, b, 0, look));
+        timeline.start();
+    }
+
+    // What is still going from one tab to another, done at once.
+    _finishTransition() {
+        const transition = this._transition;
+        this._transition = null;
+        if (!transition)
+            return;
+        transition.timeline.stop();
+        transition.done();
+        this._cards.forEach(card => {
+            card.remove_transition('translation-x');
+            card.translation_x = 0;
+        });
+        this._select(this._selected, false);
     }
 
     /** @param {string} activeId */
@@ -348,6 +451,8 @@ export const SwitcherContent = GObject.registerClass({
 
     _onDestroy() {
         this._destroyed = true;
+        this._transition?.timeline.stop();
+        this._transition = null;
         if (this._preloadId)
             GLib.source_remove(this._preloadId);
         this._preloadId = 0;
