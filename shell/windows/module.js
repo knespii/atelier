@@ -26,9 +26,11 @@ import {
 import {takeLaunch} from '../core/launchOrigins.js';
 import {LiquidMaskEffect, LiquidPaint} from '../core/liquid.js';
 
-// Milliseconds: out of the dock, out of the middle, closing.
+// Milliseconds: out of the dock, out of the middle, back into the dock,
+// into the middle.
 const FROM_DOCK_TIME = 720;
 const FROM_MIDDLE_TIME = 380;
+const TO_DOCK_TIME = 600;
 const CLOSING_TIME = 300;
 // Logical pixels: the drop, how near the liquid melts, a window's corners.
 const DROP = 14;
@@ -44,7 +46,9 @@ const OVERVIEW_WAIT = 1500;
 const rectOf = r => ({x: r.x, y: r.y, width: r.width, height: r.height});
 
 export class WindowAnimationsModule {
-    constructor() {
+    /** @param {object} [context] - {modules}: the dock's icons are asked for */
+    constructor(context = {}) {
+        this._modules = context.modules ?? null;
         this._running = new Set(); // what plays: {stop()}
     }
 
@@ -57,7 +61,10 @@ export class WindowAnimationsModule {
             return module._takeOver(actor, animate) ? false : animate;
         });
         global.display.connectObject('window-created', (_, window) => this._watch(window, true), this);
-        global.window_manager.connectObject('map', (_, actor) => this._onMapped(actor), this);
+        global.window_manager.connectObject(
+            'map', (_, actor) => this._onMapped(actor),
+            'unminimize', (_, actor) => this._onUnminimized(actor),
+            this);
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window, false);
     }
@@ -99,7 +106,27 @@ export class WindowAnimationsModule {
                 window._atelierClosing.stop();
             return animate;
         }
+        if (!animate)
+            return false;
+        // Put out of sight (into its icon, there being one), and back.
+        if (window.minimized && actor.visible && this._dockIcon(window)) {
+            window._atelierMinimized = Boolean(this._goAway(window, actor));
+            return window._atelierMinimized;
+        }
+        if (!window.minimized && window._atelierMinimized) {
+            window._atelierMinimized = false;
+            actor._atelierUnminimize = true;
+            return true;
+        }
         return false;
+    }
+
+    // Back from its icon, as it came out of the dock.
+    _onUnminimized(actor) {
+        if (!actor._atelierUnminimize)
+            return;
+        actor._atelierUnminimize = false;
+        this._open(actor, this._dockIcon(actor.meta_window));
     }
 
     _onMapped(actor) {
@@ -137,13 +164,7 @@ export class WindowAnimationsModule {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const mask = new LiquidMaskEffect();
         actor.add_effect_with_name('atelier-window-liquid', mask);
-        let overlay = null;
-        if (launch) {
-            overlay = new LiquidPaint();
-            overlay.setColors(DROP_COLOR, DROP_SHADOW, DROP_SHADOW_SHAPE);
-            overlay.set_size(global.stage.width, global.stage.height);
-            Main.layoutManager.uiGroup.insert_child_above(overlay, global.window_group);
-        }
+        let overlay = launch ? this._overlay() : null;
         const frame = () => rectOf(window.get_frame_rect());
         const bounds = () => ({x: actor.x, y: actor.y, width: actor.width, height: actor.height});
         const look = {drop: DROP * scale, blend: BLEND * scale, radius: RADIUS * scale};
@@ -192,32 +213,88 @@ export class WindowAnimationsModule {
         start();
     }
 
-    // A picture of the window as it was, drawing into its middle.
-    _onClosing(window) {
-        window.disconnectObject(this);
-        const actor = window.get_compositor_private();
-        if (!actor || !actor.visible || window.minimized || !St.Settings.get().enable_animations ||
-            Main.overview.visible || !window.showing_on_its_workspace())
-            return;
+    // The app's icon in the dock, where a window of it goes (and comes out
+    // of again): {rect, side}, or null when the dock hasn't one for it.
+    _dockIcon(window) {
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        const dock = this._modules?.get('dock')?.dock;
+        const item = app ? dock?.items.get(app.get_id()) : null;
+        const icon = item?.child;
+        if (!icon?.mapped)
+            return null;
+        // (Where it is when the dock is shown, if it is away now.)
+        const [x, y] = icon.get_transformed_position();
+        const [width, height] = icon.get_transformed_size();
+        const container = dock.container;
+        return {
+            rect: {x: x - container.translation_x, y: y - container.translation_y, width, height},
+            side: dock.side,
+        };
+    }
+
+    // A picture of the window as it is now, over it: {picture, mask, frame,
+    // bounds} on the stage, or null.
+    _picture(window, actor) {
         let content;
         try {
             content = actor.paint_to_content(null);
         } catch {
-            return;
+            return null;
         }
         if (!content)
-            return;
+            return null;
         const buffer = window.get_buffer_rect();
         const picture = new Clutter.Actor({content, x: buffer.x, y: buffer.y, width: buffer.width, height: buffer.height});
         Shell.util_set_hidden_from_pick(picture, true);
         global.window_group.insert_child_above(picture, actor);
         const mask = new LiquidMaskEffect();
         picture.add_effect_with_name('atelier-window-liquid', mask);
-        const frame = window.get_frame_rect();
-        const local = {x: frame.x - buffer.x, y: frame.y - buffer.y, width: frame.width, height: frame.height};
-        const radius = RADIUS * St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        window._atelierClosing = this._play(picture, CLOSING_TIME,
-            t => mask.setShapes(windowClosing(local, radius, t)),
-            () => picture.destroy());
+        return {picture, mask, frame: rectOf(window.get_frame_rect()), bounds: rectOf(buffer)};
+    }
+
+    // Going away – closed, or put out of sight – as it came, backwards: into
+    // a drop that flies back into its icon in the dock; or, without one,
+    // drawing into its middle.
+    _goAway(window, actor) {
+        const shot = this._picture(window, actor);
+        if (!shot)
+            return null;
+        const {picture, mask, frame, bounds} = shot;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const look = {drop: DROP * scale, blend: BLEND * scale, radius: RADIUS * scale};
+        const icon = this._dockIcon(window);
+        if (!icon) {
+            const local = {x: frame.x - bounds.x, y: frame.y - bounds.y, width: frame.width, height: frame.height};
+            return this._play(picture, CLOSING_TIME,
+                t => mask.setShapes(windowClosing(local, look.radius, t)),
+                () => picture.destroy());
+        }
+        const overlay = this._overlay();
+        const params = {icon: icon.rect, side: icon.side, frame, actor: bounds, ...look};
+        return this._play(picture, TO_DOCK_TIME, t => {
+            overlay.setShapes(dropFromDock(params, 1 - t));
+            mask.setShapes(windowFromDock(params, 1 - t));
+        }, () => {
+            overlay.destroy();
+            picture.destroy();
+        });
+    }
+
+    // The drop's layer, over the windows.
+    _overlay() {
+        const overlay = new LiquidPaint();
+        overlay.setColors(DROP_COLOR, DROP_SHADOW, DROP_SHADOW_SHAPE);
+        overlay.set_size(global.stage.width, global.stage.height);
+        Main.layoutManager.uiGroup.insert_child_above(overlay, global.window_group);
+        return overlay;
+    }
+
+    _onClosing(window) {
+        window.disconnectObject(this);
+        const actor = window.get_compositor_private();
+        if (!actor || !actor.visible || window.minimized || !St.Settings.get().enable_animations ||
+            Main.overview.visible || !window.showing_on_its_workspace())
+            return;
+        window._atelierClosing = this._goAway(window, actor);
     }
 }

@@ -46,7 +46,7 @@ export default class AtelierExtension extends Extension {
             {settings: this._settings.get_child('notes'), key: 'enabled'});
         this.modules.register('dock', ctx => new DockModule(ctx),
             {settings: this._settings.get_child('dock'), key: 'enabled'});
-        this.modules.register('windows', () => new WindowAnimationsModule(),
+        this.modules.register('windows', ctx => new WindowAnimationsModule(ctx),
             {settings: this._settings.get_child('windows'), key: 'enabled'});
 
         // BG Changer's data has to be taken over before anything reads the

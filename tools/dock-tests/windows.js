@@ -45,15 +45,35 @@ export async function shell(t) {
         check(await t.waitFor(() => overlays(t).length === 0 && !maskOf(second?.get_compositor_private()), 3000),
             'and the window it spreads into, then as it is');
 
-        // Closing: a picture of it draws into its middle, and is gone.
-        const before = global.window_group.get_n_children();
+        // Its app has an icon in the dock: put out of sight, it goes back
+        // into it in a drop – and comes out of it again.
+        const picture = () => global.window_group.get_children().find(child =>
+            child.get_effect?.('atelier-window-liquid') && !child.meta_window) ?? null;
+        await t.waitFor(() => dock.items.has(app.get_id()), 3000);
+        second.minimize();
+        check(await t.waitFor(() => picture() && overlays(t).length === 1, 2000) && second.minimized,
+            'put out of sight, it goes back into its icon in a drop');
+        check(await t.waitFor(() => !picture() && overlays(t).length === 0, 3000), 'and is gone');
+        second.unminimize();
+        check(await t.waitFor(() => maskOf(second.get_compositor_private()) && overlays(t).length === 1, 2000),
+            'brought back, out of its icon again');
+        check(await t.waitFor(() => !maskOf(second.get_compositor_private()) && overlays(t).length === 0, 3000),
+            'then as it is');
+
+        // Closing, into its icon too; a window of an app without one draws
+        // into its middle.
         second.delete(global.get_current_time());
-        check(await t.waitFor(() => global.window_group.get_children().some(child =>
-            child.get_effect?.('atelier-window-liquid') && !child.meta_window), 2000),
-        'closing, it draws into its middle');
-        check(await t.waitFor(() => global.window_group.get_n_children() < before, 3000),
-            'and is gone');
+        check(await t.waitFor(() => picture() && overlays(t).length === 1, 2000), 'closing, into its icon');
+        check(await t.waitFor(() => !picture() && overlays(t).length === 0, 3000), 'and is gone');
+        // (Running apps not in the dock: it has no icon for this one.)
+        t.settings.set_boolean('show-running', false);
+        await t.waitFor(() => !t.module.dock.items.has(app.get_id()), 2000);
+        first.delete(global.get_current_time());
+        check(await t.waitFor(() => picture(), 2000) && overlays(t).length === 0, 'without one, into its middle');
+        check(await t.waitFor(() => !picture(), 3000), 'and gone too');
+        t.settings.reset('show-running');
     } finally {
+        t.settings.reset('show-running');
         await windows.closeAll();
         t.Main.messageTray.getSources().forEach(source => [...source.notifications].forEach(n => n.destroy()));
         await t.sleep(300);
