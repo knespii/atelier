@@ -13,3 +13,4 @@ tests/output/
 
 # Launch video work (tools/showcase.sh frames, renders)
 brag-output/
+brag-output-*/

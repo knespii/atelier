@@ -86,18 +86,21 @@ cat > "$ROOT/data/atelier/notes.json" <<EOF
  {"id":"note-ideas","title":"Ideas","text":"Moodboard for the new posters\nPrint the photos from the trip","color":"mint","created":$NOW,"modified":$NOW,"archived":false,"pin":"left"}]
 EOF
 
+# The widgets at the left, as most profiles have them; Candy has them at
+# the right, with a watch and Slack (they flow there as it is switched to).
+WIDGETS='[{"id":"clock","kind":"clock","size":"square","x":0,"y":0,"fine":true},{"id":"date","kind":"date","size":"square","x":4,"y":0,"fine":true},{"id":"calendar","kind":"calendar","size":"large","x":0,"y":4,"fine":true},{"id":"weather","kind":"weather","size":"card","x":0,"y":12,"fine":true},{"id":"github","kind":"github","size":"card","x":0,"y":16,"fine":true}]'
+CANDY_WIDGETS='[{"id":"clock","kind":"clock","size":"square","x":30,"y":0,"face":"watch","fine":true},{"id":"date","kind":"date","size":"square","x":34,"y":0,"fine":true},{"id":"calendar","kind":"calendar","size":"large","x":30,"y":4,"fine":true},{"id":"weather","kind":"weather","size":"card","x":30,"y":12,"fine":true},{"id":"slack","kind":"slack","size":"square","x":26,"y":0,"fine":true},{"id":"github","kind":"github","size":"card","x":30,"y":16,"fine":true}]'
 profile() {
-    # id, name, wallpaper, color scheme, accent
-    printf '{"id":"%s","name":"%s","wallpaper":"%s","colorScheme":"%s","accentColor":"%s","iconTheme":"Adwaita","cursorTheme":"Adwaita"}' \
-        "$1" "$2" "$BG/$3" "$4" "$5"
+    # id, name, wallpaper, color scheme, accent, widgets
+    printf '{"id":"%s","name":"%s","wallpaper":"%s","colorScheme":"%s","accentColor":"%s","iconTheme":"Adwaita","cursorTheme":"Adwaita","widgets":{"layout":%s,"style":"modern","glass":true}}' \
+        "$1" "$2" "$BG/$3" "$4" "$5" "${6:-$WIDGETS}"
 }
 PROFILES="[$(profile midnight Midnight sheet-d.jxl prefer-dark auto),\
 $(profile lagoon Lagoon glass-chip-l.jxl prefer-light auto),\
 $(profile ember Ember amber-d.jxl prefer-dark auto),\
 $(profile dune Dune fold-l.jxl prefer-light auto),\
 $(profile berry Berry swoosh-d.jxl prefer-dark auto),\
-$(profile candy Candy pills-d.jxl prefer-dark auto)]"
-WIDGETS='[{"id":"clock","kind":"clock","size":"square","x":0,"y":0},{"id":"date","kind":"date","size":"square","x":2,"y":0},{"id":"calendar","kind":"calendar","size":"large","x":0,"y":2},{"id":"weather","kind":"weather","size":"card","x":0,"y":6},{"id":"github","kind":"github","size":"card","x":0,"y":8}]'
+$(profile candy Candy pills-d.jxl prefer-dark auto "$CANDY_WIDGETS")]"
 
 cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]

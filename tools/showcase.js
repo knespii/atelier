@@ -463,6 +463,14 @@ async function fillIn(ext) {
     tasks._set('ready');
     const github = desktop.sources.github;
     github._fetch = async () => github.apply('octocat', contributions());
+    // Slack: a few messages since it was last looked at (who, never what).
+    const slack = desktop.sources.slack;
+    slack.unread = 3;
+    slack.senders = [
+        {name: 'Mia', count: 2, time: Date.now() - 4 * 60000},
+        {name: '#design', count: 1, time: Date.now() - 16 * 60000},
+    ];
+    slack.emit('changed');
     ext.stateObj._settings.get_child('desktop').set_string('github-user', 'octocat');
     // Built anew, the widgets take it all.
     desktop.reload();
@@ -550,9 +558,29 @@ async function takeIsland({island}) {
     });
 }
 
-// A new note drips from the island; written on and saved, it goes back.
+// Another profile, whose widgets are elsewhere: once its look is in, they
+// pour over there, liquid; a new one spreads out of its middle.
+async function takePour({atelier, desktop}) {
+    await take('pour', null, async t => {
+        await wait(250);
+        t.mark('switch');
+        const done = atelier._switchTo(atelier._store.get('candy'));
+        await waitFor(() => atelier._applier.busy || reveal(), 4000);
+        t.mark('reveal');
+        await done;
+        await waitFor(() => desktop._flowing, 10000);
+        t.mark('flow');
+        await waitFor(() => !desktop._flowing && !desktop._frozen, 10000);
+        await wait(700);
+        t.mark('end');
+    });
+}
+
+// A new note drips from the island; written on and saved, it runs off to
+// the edge in a drop, and its paper spreads out of the edge there – all of
+// it under the pointer.
 async function takeNote({notes, islandModule}) {
-    await take('note', [320, 0, 1280, 720], async t => {
+    await take('note', null, async t => {
         await wait(300);
         t.mark('open');
         notes.open(null, {create: true});
@@ -564,7 +592,7 @@ async function takeNote({notes, islandModule}) {
         t.mark('type');
         await type('Print shop', 16);
         await wait(150);
-        await keys(Clutter.KEY_Return);
+        await keys(Clutter.KEY_Tab);
         await type('Posters, A2 – 20 copies', 18);
         await wait(450);
         t.mark('color');
@@ -572,43 +600,46 @@ async function takeNote({notes, islandModule}) {
         await wait(700);
         t.mark('save');
         await keys(Clutter.KEY_Control_L, Clutter.KEY_Return);
-        await waitFor(() => islandModule._sheet === null, 4000);
-        await wait(700);
+        await waitFor(() => islandModule._sheet === null, 6000);
+        t.mark('arrived');
+        await wait(500);
+        const tab = [...notes._edges._tabs.values()].at(-1);
+        if (tab) {
+            const [, tabY] = tab.get_transformed_position();
+            t.mark('hover');
+            await glide(8, tabY + tab.height / 2, 450);
+        }
+        await wait(1100);
         t.mark('end');
     });
 }
 
-// Editing the widgets: one dragged, a shadow on the cells where it lands;
-// stretched by its corner, it snaps to the nearest size.
-async function takeWidgets({desktop}) {
-    await take('widgets', [0, 180, 1280, 720], async t => {
+// Editing the widgets: a click on the clock in the gallery lets its faces
+// flow out of it; one dragged out is a clock with that face.
+async function takeFaces({desktop}) {
+    await take('faces', [320, 360, 1280, 720], async t => {
         await wait(200);
         t.mark('edit');
         desktop.edit();
         await wait(900);
-        const weather = desktop.widgets.get('weather');
-        const [wx, wy] = centerOf(weather);
-        t.mark('grab');
-        await glide(wx, wy, 600);
-        await wait(150);
-        await press();
-        t.mark('drag');
-        await glide(wx + 5 * 96 + 18, wy - 3 * 96 + 10, 1300);
-        await wait(450);
-        await release();
-        t.mark('dropped');
-        await wait(500);
-        const [hx, hy] = centerOf(weather._editHandle);
-        await glide(hx, hy, 500);
+        const editor = desktop._editor;
+        t.mark('click');
+        await clickAt(...centerOf(editor._clockButton), 650);
+        await waitFor(() => editor._spill?.progress === 1, 4000);
+        t.mark('spilled');
+        await wait(550);
+        const watch = editor._spill.panel.get_children().find(item => item.accessible_name === 'Watch');
+        const [sx, sy] = centerOf(watch);
+        await glide(sx, sy, 550);
         await wait(120);
         await press();
-        t.mark('stretch');
-        await glide(hx - 175, hy + 6, 900);
+        t.mark('drag');
+        await glide(600, 640, 1100);
         await wait(400);
         await release();
-        t.mark('snapped');
-        await wait(700);
-        await glide(1150, 640, 500);
+        t.mark('dropped');
+        await wait(1000);
+        await glide(1200, 760, 450);
         t.mark('done');
         desktop.stopEditing();
         await wait(900);
@@ -618,7 +649,7 @@ async function takeWidgets({desktop}) {
 
 // The pictures for the README.
 async function stills(ctx) {
-    const {ext, atelier, island, islandModule, notes, desktop} = ctx;
+    const {ext, atelier, island, islandModule, notes} = ctx;
 
     await switchTo(atelier, 'midnight');
     await rest();
@@ -686,13 +717,9 @@ async function stills(ctx) {
     atelier._switcher._select(profiles.findIndex(p => p.id === 'ember'));
     await sleep(700);
     await still('switcher', islandArea(330, 1500));
-    atelier._switcher._activate(profiles.findIndex(p => p.id === 'ember'));
-    await waitFor(reveal, 4000);
-    await sleep(atelier._settings.get_uint('transition-duration') * 0.45);
-    await still('switching');
-    await waitFor(() => !atelier._applier.busy && !reveal(), 12000);
-    await sleep(1500);
-    await still('desktop-ember');
+    await keys(Clutter.KEY_Escape);
+    await waitFor(() => island.page === null, 4000);
+    await sleep(800);
 
     atelier.toggleSwitcher();
     await sleep(900);
@@ -716,33 +743,11 @@ async function stills(ctx) {
     await keys(Clutter.KEY_Escape);
     await waitFor(() => islandModule._sheet === null, 4000);
     await sleep(800);
-    const tab = notes._edges._tabs.get('note-groceries');
-    if (tab) {
-        const [, tabY] = tab.get_transformed_position();
-        await glide(6, tabY + tab.height / 2, 300);
-        await sleep(1200);
-        await still('notes-edge', [0, 0, 1000, 700]);
-        await rest();
-        await sleep(800);
-    }
 
-    // The widgets: edited, and on paper.
+    // The widgets on paper.
     await switchTo(atelier, 'lagoon');
     await rest();
     await sleep(800);
-    desktop.edit();
-    await sleep(900);
-    const weather = desktop.widgets.get('weather');
-    const [wx, wy] = centerOf(weather);
-    await glide(wx, wy, 200);
-    await press();
-    await glide(wx + 5 * 96 + 18, wy - 3 * 96 + 10, 600);
-    await sleep(700);
-    await still('widgets-editing');
-    await keys(Clutter.KEY_Escape);
-    await release();
-    await waitFor(() => !desktop.editing, 3000);
-    await rest();
     const desktopSettings = ext.stateObj._settings.get_child('desktop');
     desktopSettings.set_string('style', 'analogue');
     await sleep(1500);
@@ -803,10 +808,10 @@ export async function run() {
         if (FRAMES) {
             const all = {
                 'switcher': () => takeSwitcher(ctx),
-                'next-berry': () => takeNext(ctx, 'next-berry', 'berry'),
+                'pour': () => takePour(ctx),
                 'island': () => takeIsland(ctx),
                 'note': () => takeNote(ctx),
-                'widgets': () => takeWidgets(ctx),
+                'faces': () => takeFaces(ctx),
                 'next-lagoon': () => takeNext(ctx, 'next-lagoon', 'lagoon'),
             };
             await rest();
