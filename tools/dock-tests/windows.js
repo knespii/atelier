@@ -15,6 +15,12 @@ export async function shell(t) {
     const module = ext.stateObj.modules.get('windows');
     if (!check(Boolean(module), 'windows as liquid: on'))
         return;
+    // Launching, no icon of GNOME's grows and fades where it was clicked.
+    const icon = t.module.dock.orderedItems[0]?.icon;
+    const before = t.Main.uiGroup.get_n_children();
+    icon?.animateLaunch();
+    check(Boolean(icon) && t.Main.uiGroup.get_n_children() === before, 'launching, no icon grows and fades: only the liquid');
+
     const windows = new TestWindows(t);
     try {
         // Opened otherwise: out of its middle, then as it is.

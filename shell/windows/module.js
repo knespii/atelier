@@ -18,6 +18,7 @@ import St from 'gi://St';
 
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as IconGrid from 'resource:///org/gnome/shell/ui/iconGrid.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
@@ -60,6 +61,10 @@ export class WindowAnimationsModule {
             const animate = original.call(this, actor, types);
             return module._takeOver(actor, animate) ? false : animate;
         });
+        // Only the liquid as an app opens: not GNOME's icon too, growing
+        // and fading where it was clicked (the dock's, the app grid's).
+        for (const name of ['animateZoomOut', 'animateZoomOutAtPos'])
+            this._injections.overrideMethod(IconGrid.BaseIcon.prototype, name, () => function () {});
         global.display.connectObject('window-created', (_, window) => this._watch(window, true), this);
         global.window_manager.connectObject(
             'map', (_, actor) => this._onMapped(actor),
