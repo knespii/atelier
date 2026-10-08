@@ -2426,6 +2426,39 @@
 /* ── end B2 ── */
 
 /* ── Dock: indicators and badges (B3) ── */
+
+/* The running marks of the other styles, drawn where the dot is: a
+   little off the icon's edge towards the dock's edge. */
+.atelier-dock .atelier-dock-indicator {
+  offset-y: 2px;
+}
+
+.atelier-dock-top .atelier-dock-indicator {
+  offset-y: -2px;
+}
+
+.atelier-dock-left .atelier-dock-indicator {
+  offset-x: -2px;
+  offset-y: 0;
+}
+
+.atelier-dock-right .atelier-dock-indicator {
+  offset-x: 2px;
+  offset-y: 0;
+}
+
+/* An app's count, in the icon's top end corner. */
+.atelier-dock-badge {
+  min-width: 1.3em;
+  padding: 0.05em 0.3em;
+  border-radius: 999px;
+  background-color: #e01b24;
+  color: #ffffff;
+  font-weight: bold;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 /* ── end B3 ── */
 
 /* ── Dock: extra icons (B4) ── */
