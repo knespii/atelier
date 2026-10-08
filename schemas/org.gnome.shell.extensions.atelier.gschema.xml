@@ -406,6 +406,11 @@
       <summary>A dock on every monitor</summary>
       <description>The others have the same apps; Dynamic Music Pill stays in the main one.</description>
     </key>
+    <key name="show-in-overview" type="b">
+      <default>true</default>
+      <summary>In the overview, in place of GNOME's dash</summary>
+      <description>The dock stays in the overview and GNOME's dash is hidden; the overview keeps clear of it. Off, the dock goes in the overview and the dash is there as usual.</description>
+    </key>
     <key name="dock-fixed" type="b">
       <default>false</default>
       <summary>Always visible</summary>

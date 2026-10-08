@@ -98,3 +98,10 @@ export function testWindowCoversNotThere() {
         [], 'on another monitor');
     assertEqual(covers(window(fullscreen), ctx({rect: null})), [], 'the dock not placed yet');
 }
+
+export function testShouldHideInOverview() {
+    assert(!shouldHide({overview: true, inOverview: true}), 'in place of the dash, it stays in the overview');
+    assert(!shouldHide({overview: true, inOverview: true, autohide: true, overlapped: true, intellihide: true}),
+        'whatever else would take it away');
+    assert(shouldHide({overview: true, inOverview: false}), 'otherwise it goes');
+}

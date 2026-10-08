@@ -8,7 +8,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['dock-position', 'dock-fixed', 'height-fraction', 'icon-size-fixed', 'extend-height',
-    'multi-monitor', 'preferred-monitor-by-connector'];
+    'multi-monitor', 'preferred-monitor-by-connector', 'show-in-overview'];
 
 // Those the dock is built anew for (shell/dock/module.js).
 const REBUILD_KEYS = ['dock-position', 'multi-monitor', 'preferred-monitor-by-connector', 'dock-fixed',
@@ -112,6 +112,7 @@ export async function shell(t) {
     // (Pinning said so in the island, over where the dock is at the top.)
     Main.messageTray.getSources().forEach(source => [...source.notifications].forEach(n => n.destroy()));
     try {
+        await inOverview(t, monitor);
         await sides(t, monitor);
         await fixed(t, monitor);
         await fitting(t, installed);
@@ -310,4 +311,32 @@ export async function prefs(t) {
         rows.get('enabled').get_ancestor(t.Adw.PreferencesGroup).sensitive,
     'the dock off, its options grey out (not the switch)');
     settings.reset('enabled');
+}
+
+// In the overview, in place of GNOME's dash: the dash hidden and taking no
+// room, the dock staying, the overview clear of it; off, as GNOME has it.
+async function inOverview(t, monitor) {
+    const {Main, check} = t;
+    const controls = Main.overview._overview._controls;
+    Main.overview.show();
+    await t.waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    await t.sleep(300);
+    const dock = t.module.dock;
+    const [, top] = dock.container.get_transformed_position();
+    check(!Main.overview.dash.visible && Main.overview.dash.get_preferred_height(-1)[1] === 0 &&
+        !dock.hidden && dock.container.opacity === 255 && top < monitor.y + monitor.height &&
+        controls.margin_bottom >= dock.staticRect.height,
+    `in the overview, the dock in place of GNOME's dash (room below: ${controls.margin_bottom})`);
+    await t.screenshot('60-dock-overview');
+    Main.overview.hide();
+    await t.waitFor(() => !Main.overview.visible, 4000);
+    await setDock(t, {'show-in-overview': false});
+    Main.overview.show();
+    await t.waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+    await t.sleep(300);
+    check(Main.overview.dash.visible && t.module.dock.hidden && controls.margin_bottom === 0,
+        'off: the dock goes in the overview, GNOME\'s dash is there');
+    Main.overview.hide();
+    await t.waitFor(() => !Main.overview.visible, 4000);
+    await setDock(t, {'show-in-overview': null});
 }

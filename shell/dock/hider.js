@@ -35,7 +35,7 @@ const URGENT_TIME = 3000;
 const BARRIER_HOLD = 100;
 
 // Settings it looks at again as they change.
-const SYNC_KEYS = ['autohide', 'manualhide', 'intellihide'];
+const SYNC_KEYS = ['autohide', 'manualhide', 'intellihide', 'show-in-overview'];
 const PRESSURE_KEYS = ['require-pressure-to-show', 'pressure-threshold', 'show-delay'];
 
 const seconds = (settings, key) => Math.round(settings.get_double(key) * 1000);
@@ -275,6 +275,7 @@ export class DockHider extends EventEmitter {
         const settings = this._settings;
         const away = shouldHide({
             overview: Main.overview.visible,
+            inOverview: settings.get_boolean('show-in-overview'),
             fixed: settings.get_boolean('dock-fixed'),
             manual: settings.get_boolean('manualhide'),
             autohide: settings.get_boolean('autohide'),

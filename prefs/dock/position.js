@@ -36,6 +36,8 @@ export function build(page, {settings, binder}) {
 
     binder.bindSwitch(group, settings, 'dock-fixed', 'Always visible',
         'It never moves away, and maximized windows end where it begins');
+    binder.bindSwitch(group, settings, 'show-in-overview', 'In the overview',
+        'In place of GNOME\'s dash there');
     binder.bindSpin(group, settings, 'height-fraction', 'Maximum length', 'Percent of the edge',
         {lower: 10, upper: 100, step: 5, scale: 100});
     binder.bindSpin(group, settings, 'icon-size', 'Icon size',

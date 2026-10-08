@@ -17,6 +17,7 @@ import {Dock} from './dock.js';
 import {DockHotkeys} from './hotkeys.js';
 import {Locations} from './locations.js';
 import {MusicPill} from './musicPill.js';
+import {OverviewDash} from './overviewDash.js';
 import {WindowWatcher} from './windowWatcher.js';
 
 const DASH_TO_DOCK = 'dash-to-dock@micxgx.gmail.com';
@@ -125,6 +126,7 @@ export class DockModule {
             locations: new Locations(settings),
             spread: new AppSpread(),
             musicPill: new MusicPill(),
+            overview: new OverviewDash(settings),
         };
         this.services.hotkeys = new DockHotkeys(this, settings);
         this.services.hotkeys.enable();
@@ -133,8 +135,8 @@ export class DockModule {
     _destroyServices() {
         if (!this.services)
             return;
-        const {hotkeys, musicPill, spread, locations, badges, windows} = this.services;
-        for (const service of [hotkeys, musicPill, spread, locations, badges, windows])
+        const {hotkeys, musicPill, spread, locations, badges, windows, overview} = this.services;
+        for (const service of [overview, hotkeys, musicPill, spread, locations, badges, windows])
             service.destroy();
         this.services = null;
     }
@@ -155,10 +157,12 @@ export class DockModule {
             main: i === 0,
             services: this.services,
         }));
+        this.services.overview.attach(this.dock);
     }
 
     _destroyDocks() {
         // (The main one gives Dynamic Music Pill back as it goes.)
+        this.services?.overview.attach(null);
         this.docks.forEach(dock => dock.destroy());
         this.docks = [];
     }
