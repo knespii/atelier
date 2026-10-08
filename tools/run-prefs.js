@@ -265,8 +265,8 @@ async function runSelftest(window) {
     // The dock.
     const dock = await section(window, 'dock');
     const dockSettings = store.settings.get_child('dock');
-    dock._size.value = 40;
-    dock._intellihide.active = false;
+    dock.rows.get('icon-size').value = 40;
+    dock.rows.get('intellihide').active = false;
     check(dockSettings.get_int('icon-size') === 40 && !dockSettings.get_boolean('intellihide'),
         'the dock\'s icon size and hiding are saved');
     ['icon-size', 'intellihide'].forEach(key => dockSettings.reset(key));
