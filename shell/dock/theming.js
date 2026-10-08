@@ -4,13 +4,14 @@
 // mode). The background is an inline style on the dock's shape
 // (lib/dockTheme.js); a change of it eases, as the stylesheet says.
 //
-// Over glass the colour is a wash on the blurred wallpaper: the glass
-// itself stays as it is.
+// Over glass the opacity is shared: the glass itself fades below 40 %,
+// a wash of the colour comes in above (lib/seeThrough.js).
 
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import {backgroundCss, dynamicAlpha, dynamicAlphas, windowNear} from '../../lib/dockTheme.js';
+import {glassShare} from '../../lib/seeThrough.js';
 
 // How close a window counts as near the dock, logical pixels.
 const REACH = 8;
@@ -72,9 +73,13 @@ export class DockTheming {
         } else {
             this.near = false;
         }
+        const opacity = settings.get_double('background-opacity');
+        // (As the profile has it, the glass is all there.)
+        const custom = mode === 'FIXED' || mode === 'DYNAMIC';
+        this._dock.glassOpacity = custom && this._glass ? glassShare(mode === 'FIXED' ? opacity : alpha).glass : 1;
         const style = backgroundCss({
             mode,
-            opacity: settings.get_double('background-opacity'),
+            opacity,
             alpha,
             color: settings.get_boolean('custom-background-color') ? settings.get_string('background-color') : null,
             glass: this._glass,

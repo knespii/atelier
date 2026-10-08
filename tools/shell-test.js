@@ -1287,24 +1287,27 @@ async function testDesktop(ext) {
     banners.set_boolean('show-banners', true);
     desktop.removeWidget('slack');
 
-    // The cards more see-through: their background (and shadow) only
-    // partly, the glass under them as it was.
+    // The cards more see-through: of glass, the tint over the blur goes
+    // first, then the glass itself – at nothing, the wallpaper is clear.
     const seeThrough = desktop.widgets.get('date');
     const alphaOf = card => card.get_theme_node().get_background_color().alpha;
     const fullAlpha = alphaOf(seeThrough);
-    settings.set_double('card-opacity', 0.3);
+    settings.set_double('card-opacity', 0.7);
     await Scripting.sleep(900);
-    const partAlpha = alphaOf(seeThrough);
-    check(Math.abs(partAlpha - fullAlpha * 0.3) <= 2 && desktop._glass !== null,
-        `the cards keep less of their background (${fullAlpha} → ${partAlpha})`);
+    check(Math.abs(alphaOf(seeThrough) - fullAlpha * 0.5) <= 2 && desktop._glass.opacity === 255,
+        `the cards keep less of their tint, all the glass (${fullAlpha} → ${alphaOf(seeThrough)})`);
+    settings.set_double('card-opacity', 0.2);
+    await Scripting.sleep(900);
+    check(alphaOf(seeThrough) === 0 && Math.abs(desktop._glass.opacity - 128) <= 2,
+        `then the glass fades (${desktop._glass.opacity})`);
     await screenshotArea('43-desktop-see-through', 0, 0, global.stage.width, 760);
     settings.set_double('card-opacity', 0);
     await Scripting.sleep(900);
-    check(alphaOf(seeThrough) === 0 && JSON.parse(settings.get_string('widgets')).length > 0,
-        'none of it: the glass alone');
+    check(alphaOf(seeThrough) === 0 && desktop._glass.opacity === 0, 'none of it: the wallpaper clear');
     settings.reset('card-opacity');
     await Scripting.sleep(900);
-    check(alphaOf(seeThrough) === fullAlpha && !seeThrough.get_style(), 'and back to the look as it is');
+    check(alphaOf(seeThrough) === fullAlpha && !seeThrough.get_style() && desktop._glass.opacity === 255,
+        'and back to the look as it is');
 
     // Analogue: paper, and a clock with hands – the cards fading from
     // glass to paper.

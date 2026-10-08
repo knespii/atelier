@@ -1,6 +1,7 @@
 import {
     DEFAULT_ALPHAS, backgroundCss, dynamicAlpha, dynamicAlphas, grownRect, parseColor, windowNear,
 } from '../lib/dockTheme.js';
+import {GLASS_FULL, glassShare} from '../lib/seeThrough.js';
 import {assert, assertEqual} from './util.js';
 
 export function testDefaultHasNoStyle() {
@@ -14,7 +15,8 @@ export function testDefaultHasNoStyle() {
 export function testFixed() {
     for (const glass of [false, true]) {
         assertEqual(backgroundCss({mode: 'FIXED', opacity: 0.3, alpha: 0.9, color: null, glass}),
-            'background-color: rgba(18, 18, 22, 0.3);', `the dock's dark at the opacity (glass ${glass})`);
+            `background-color: rgba(18, 18, 22, ${glass ? 0 : 0.3});`,
+            `the dock's dark at the opacity – of glass, only the glass this low (glass ${glass})`);
         assertEqual(backgroundCss({mode: 'FIXED', opacity: 0, color: '#3366ff', glass}),
             'background-color: rgba(51, 102, 255, 0);', `its own colour, none of it: just glass (glass ${glass})`);
     }
@@ -27,7 +29,8 @@ export function testFixed() {
 export function testDynamic() {
     for (const glass of [false, true]) {
         assertEqual(backgroundCss({mode: 'DYNAMIC', opacity: 0.3, alpha: 0.8, color: '#abc', glass}),
-            'background-color: rgba(170, 187, 204, 0.8);', `the opacity now, not the fixed one (glass ${glass})`);
+            `background-color: rgba(170, 187, 204, ${glass ? 0.67 : 0.8});`,
+            `the opacity now, not the fixed one – of glass, the wash's share of it (glass ${glass})`);
     }
     assertEqual(backgroundCss({mode: 'DYNAMIC', alpha: -1}), 'background-color: rgba(18, 18, 22, 0);', 'clamped');
 }
@@ -57,4 +60,11 @@ export function testWindowNear() {
     assert(!windowNear(dock, [{x: 1200, y: 800, width: 300, height: 200}], 8), 'nor one beside it');
     assert(!windowNear(dock, [], 8) && !windowNear(null, [{x: 0, y: 0, width: 10, height: 10}], 8),
         'no windows, or not placed yet');
+}
+
+export function testGlassShare() {
+    assertEqual(glassShare(1), {glass: 1, tint: 1}, 'solid');
+    assertEqual(glassShare(GLASS_FULL), {glass: 1, tint: 0}, 'just glass');
+    assertEqual(glassShare(0.2), {glass: 0.5, tint: 0}, 'the glass fading');
+    assertEqual(glassShare(0), {glass: 0, tint: 0}, 'clear');
 }

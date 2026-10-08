@@ -1,7 +1,7 @@
 import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
 import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
-    DEFAULT_LAYOUT, PITCH, UNIT, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize,
+    DEFAULT_LAYOUT, PITCH, UNIT, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize,
     nearestSpot, newId, nextSize, normalizeWidgets, parseLayout, pixelSize, placeAt, serializeLayout,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
@@ -183,7 +183,11 @@ export function testGoogleTasks() {
 export function testCardStyle() {
     assertEqual(cardStyle('modern', 1), '', 'the look as it is');
     assertEqual(cardStyle('glassy', 0.5),
-        'background-color: rgba(14, 14, 18, 0.19); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);');
+        'background-color: rgba(14, 14, 18, 0.063); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);',
+        'of glass, the tint goes first');
+    assert(cardStyle('glassy', 0.3).startsWith('background-color: rgba(14, 14, 18, 0);'), 'then only glass');
+    assertEqual([cardGlass(1), cardGlass(0.4), cardGlass(0.2), cardGlass(0)], [1, 1, 0.5, 0], 'and then the glass goes');
+    assert(cardStyle('modern', 0.5).includes('rgba(18, 18, 22, 0.47)'), 'solid cards: just less of it');
     assert(cardStyle('analogue', 0).includes('rgba(246, 241, 231, 0)'), 'none of the paper');
     assertEqual(cardStyle('modern', 7), '', 'never more than the look');
     assertEqual(normalizeWidgets({layout: []}).opacity, 1, 'kept before: as it is');

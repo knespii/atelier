@@ -137,7 +137,7 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         // How much of their background the cards keep, in per cent.
         this._opacity = new Adw.SpinRow({
             title: 'Card background',
-            subtitle: 'Less, and the wallpaper (or the glass) shows through the cards',
+            subtitle: 'Less, and the wallpaper shows through: of glass, the tint goes first, then the glass',
             adjustment: new Gtk.Adjustment({lower: 0, upper: 100, step_increment: 5, page_increment: 20}),
         });
         this._opacity.value = Math.round(this._desktop.get_double('card-opacity') * 100);

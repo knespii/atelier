@@ -161,19 +161,26 @@ export async function shell(t) {
             !dock.container.has_style_class_name('atelier-dock-straight') && dock.staticRect.height === height,
         'and back');
 
-        // Over glass: clear as the profile has it, a wash on the blur
-        // otherwise; the glass itself stays.
+        // Over glass: clear as the profile has it; otherwise the opacity
+        // is shared – below 40 % the glass itself fades, above it a wash
+        // comes in on it.
         await set(t, bar, {'surface': 'glass'});
         dock = t.module.dock;
         check(dock._glass && dock.container.has_style_class_name('atelier-dock-glassy') &&
             dock.container.get_style() === null && alphaOf(dock) === 0,
         'over glass, as the profile: clear, no style of its own');
-        await set(t, settings, {'transparency-mode': 'FIXED', 'background-opacity': 0.3});
-        check(near(alphaOf(dock), 0.3) && dock._glass.visible && dock._glass.opacity === 255,
-            `over glass, fixed at 30%: a wash of 0.3 on the glass, which stays (${alphaOf(dock).toFixed(2)})`);
+        await set(t, settings, {'transparency-mode': 'FIXED', 'background-opacity': 0.2});
+        check(await t.waitFor(() => alphaOf(dock) === 0 && Math.abs(dock._glass.opacity - 128) <= 2, 2000),
+            `over glass, fixed at 20%: no wash, half the glass (${dock._glass.opacity})`);
+        await set(t, settings, {'background-opacity': 0});
+        check(await t.waitFor(() => dock._glass.opacity === 0, 2000), 'at nothing: clear, no glass either');
+        await set(t, settings, {'background-opacity': 0.7});
+        check(await t.waitFor(() => near(alphaOf(dock), 0.5) && dock._glass.opacity === 255, 2000),
+            `fixed at 70%: all the glass and a wash of half the colour on it (${alphaOf(dock).toFixed(2)})`);
         await t.screenshotArea('69-dock-glass-fixed', 0, global.stage.height - 120, global.stage.width, 120);
         await set(t, settings, {'transparency-mode': 'DYNAMIC', 'background-opacity': null});
-        check(near(alphaOf(dock), 0.2), `over glass, more opaque near windows: 0.2 away (${alphaOf(dock).toFixed(2)})`);
+        check(await t.waitFor(() => alphaOf(dock) === 0 && Math.abs(dock._glass.opacity - 128) <= 2, 2000),
+            `over glass, more opaque near windows: half the glass away from them (${dock._glass.opacity})`);
         await set(t, settings, {'force-straight-corner': true});
         check(await t.waitFor(() => dock._glass._shape?.[4] === 0, 1000),
             `square corners over glass, the glass's too (${dock._glass._shape?.[4]})`);

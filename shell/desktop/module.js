@@ -20,7 +20,7 @@ import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAni
 import {clamp01, gather, pour, spread} from '../../lib/liquid.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
-    CLOCK_FACES, KINDS, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
+    CLOCK_FACES, KINDS, cardGlass, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {LiquidPaint} from '../core/liquid.js';
@@ -391,6 +391,11 @@ export class DesktopModule {
         // (As see-through as the settings have them: inline, over the look.)
         this._cardStyle = cardStyle(glass ? 'glassy' : style, this._desktopSettings.get_double('card-opacity'));
         this._widgets.forEach(widget => !widget.melted && widget.set_style(this._cardStyle || null));
+        if (this._glass) {
+            const opacity = Math.round(cardGlass(this._desktopSettings.get_double('card-opacity')) * 255);
+            if (this._glass.opacity !== opacity)
+                this._glass.ease({opacity, duration: 700, mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD});
+        }
         if (rebuild)
             this._widgets.forEach(widget => widget.resize(widget.entry.size));
         this.syncGlass();

@@ -468,6 +468,14 @@ export class Dock extends EventEmitter {
         return true;
     }
 
+    /** @param {number} value - how much of its glass shows, 0–1 (eased) */
+    set glassOpacity(value) {
+        const opacity = Math.round(Math.min(1, Math.max(0, value)) * 255);
+        if (!this._glass || this._glass.opacity === opacity && !this._glass.get_transition('opacity'))
+            return;
+        this._glass.ease({opacity, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+    }
+
     syncGlass() {
         if (!this._glass)
             return;

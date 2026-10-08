@@ -39,7 +39,10 @@ export function build(page, {settings, binder}) {
     // the profile has it, the background is the profile's).
     const syncMode = () => {
         const mode = settings.get_string('transparency-mode');
-        fixed.visible = mode === 'FIXED';
+        // (As the profile has it, there to see, waiting for Fixed.)
+        fixed.visible = mode !== 'DYNAMIC';
+        fixed.sensitive = mode === 'FIXED';
+        fixed.subtitle = mode === 'FIXED' ? 'Percent: none, and the dock is clear' : 'Choose Fixed above to set it';
         for (const row of [customize, min, max])
             row.visible = mode === 'DYNAMIC';
         for (const row of [ownColor, color])
