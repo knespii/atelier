@@ -222,7 +222,9 @@ export class DesktopModule {
         this._finishFlow();
         this._thaw(false);
         this._modules.get('profiles')?.applier?.beforeWrite.delete(this._freezeLook);
-        this.stopEditing();
+        this.stopEditing(true);
+        this._closing?.destroy();
+        this._closing = null;
         this._injections.clear();
         this._resetMenus();
         if (this._laterId)
@@ -266,21 +268,65 @@ export class DesktopModule {
         group._background.add_child(copy);
     }
 
-    /** Edit the widgets: they come up over the windows. */
+    /**
+     * Edit the widgets: the windows go out of the way (minimized, as one
+     * would) and the widgets come up, on their grid.
+     */
     edit() {
         if (this._editor || !this._layer)
             return;
         this._closeMenus();
         this._finishFlow();
+        this._shelve();
         this._editor = new DesktopEditor(this);
     }
 
-    stopEditing() {
+    /** @param {boolean} [now] - gone at once, not drawing back */
+    stopEditing(now = false) {
         if (!this._editor)
             return;
         const editor = this._editor;
         this._editor = null;
-        editor.destroy();
+        if (now) {
+            editor.destroy();
+        } else {
+            this._closing?.destroy();
+            this._closing = editor;
+            editor.close();
+        }
+        this._unshelve();
+    }
+
+    // The windows on this workspace minimized, to be back once the
+    // editing is done – the one that had the focus on top, with it.
+    _shelve() {
+        const workspace = global.workspace_manager.get_active_workspace();
+        const windows = workspace.list_windows().filter(window =>
+            window.get_window_type() === Meta.WindowType.NORMAL && !window.minimized &&
+            !window.skip_taskbar && window.can_minimize());
+        this._shelved = {windows: global.display.sort_windows_by_stacking(windows), focus: global.display.focus_window};
+        for (const window of this._shelved.windows) {
+            window.connectObject('unmanaging', () => {
+                const shelved = this._shelved;
+                if (shelved)
+                    shelved.windows = shelved.windows.filter(w => w !== window);
+            }, this);
+            window.minimize();
+        }
+    }
+
+    _unshelve() {
+        const shelved = this._shelved;
+        this._shelved = null;
+        if (!shelved)
+            return;
+        for (const window of shelved.windows) {
+            window.disconnectObject(this);
+            if (window.minimized)
+                window.unminimize();
+        }
+        if (shelved.focus && shelved.windows.includes(shelved.focus))
+            shelved.focus.activate(global.get_current_time());
     }
 
     // The menu of the desktop (one per wallpaper actor) gets Atelier's items.

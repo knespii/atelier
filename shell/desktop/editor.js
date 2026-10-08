@@ -6,6 +6,10 @@
 // are dragged out of the gallery at the bottom (a click on the clock lets
 // its faces flow out of it, to drag out one of them). Done (or Esc) puts them back
 // under the windows.
+//
+// Coming up, the screen dims, the grid's cells swell out of drops from the
+// middle outwards and the gallery spreads out of its own; going, all of it
+// draws back the same way.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -17,7 +21,7 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {overflow} from '../../lib/liquid.js';
+import {gather, overflow, spread} from '../../lib/liquid.js';
 import {CLOCK_FACES, KINDS, UNIT, cellOrigin, cellsAt, cellsOf, pixelSize} from '../../lib/widgets.js';
 import {LiquidPaint} from '../core/liquid.js';
 
@@ -47,6 +51,17 @@ const SPILL_FACES_TIME = 160;
 const SAMPLE = 84;
 const SPILL_DROP = 16;
 const SPILL_BLEND = 20;
+// Coming up and going, milliseconds; of that, how much the cells farthest
+// from the middle wait behind those in it.
+const APPEAR_TIME = 560;
+const VANISH_TIME = 380;
+const RIPPLE = 0.45;
+// Logical pixels: the gallery's corners (as in the stylesheet).
+const GALLERY_RADIUS = 28;
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = t => Math.min(1, Math.max(0, t));
+const easeOut = t => 1 - (1 - t) ** 3;
 
 // Faint squares where widgets can go.
 const GridHint = GObject.registerClass(
@@ -55,6 +70,17 @@ class AtelierDesktopGrid extends St.DrawingArea {
         super._init({style_class: 'atelier-desktop-grid'});
         this._grid = grid;
         this._origin = origin;
+        this._progress = 1;
+    }
+
+    /** How far the cells have come, 0 (none) to 1 (all), the middle first. */
+    set progress(value) {
+        this._progress = value;
+        this.queue_repaint();
+    }
+
+    get progress() {
+        return this._progress;
     }
 
     vfunc_repaint() {
@@ -64,15 +90,25 @@ class AtelierDesktopGrid extends St.DrawingArea {
         cr.setSourceRGBA(color.red / 255, color.green / 255, color.blue / 255, color.alpha / 255);
         const [columns, rows] = this._grid;
         const size = UNIT * scale;
-        const r = 8 * scale;
+        const [width, height] = this.get_surface_size();
+        const far = Math.hypot(width, height) / 2 || 1;
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < columns; x++) {
                 const [px, py] = cellOrigin(x, y, this._origin).map(v => v * scale);
+                const [cx, cy] = [px + size / 2, py + size / 2];
+                // A drop first, swelling into its cell; the farther from
+                // the middle, the later.
+                const delay = RIPPLE * Math.hypot(cx - width / 2, cy - height / 2) / far;
+                const grown = easeOut(clamp01((this._progress - delay) / (1 - RIPPLE)));
+                if (grown <= 0)
+                    continue;
+                const half = size / 2 * lerp(0.2, 1, grown);
+                const r = Math.min(half, lerp(half, 8 * scale, grown ** 2));
                 cr.newSubPath();
-                cr.arc(px + size - r, py + r, r, -Math.PI / 2, 0);
-                cr.arc(px + size - r, py + size - r, r, 0, Math.PI / 2);
-                cr.arc(px + r, py + size - r, r, Math.PI / 2, Math.PI);
-                cr.arc(px + r, py + r, r, Math.PI, 1.5 * Math.PI);
+                cr.arc(cx + half - r, cy - half + r, r, -Math.PI / 2, 0);
+                cr.arc(cx + half - r, cy + half - r, r, 0, Math.PI / 2);
+                cr.arc(cx - half + r, cy + half - r, r, Math.PI / 2, Math.PI);
+                cr.arc(cx - half + r, cy - half + r, r, Math.PI, 1.5 * Math.PI);
                 cr.closePath();
             }
         }
@@ -140,6 +176,10 @@ export class DesktopEditor {
             height: global.stage.height,
         });
         Main.layoutManager.addTopChrome(this.actor);
+        // The screen dimmed (by itself: it fades in and out).
+        this._dim = new St.Widget({style_class: 'atelier-desktop-editor-dim',
+            width: global.stage.width, height: global.stage.height});
+        this.actor.add_child(this._dim);
         this._hint = new GridHint(desktop.grid, desktop.origin);
         this._hint.set_position(area.x, area.y);
         this._hint.set_size(area.width, area.height);
@@ -200,6 +240,94 @@ export class DesktopEditor {
 
         this._grab = Main.pushModal(this.actor, {actionMode: Shell.ActionMode.POPUP});
         done.grab_key_focus();
+        this._appear();
+    }
+
+    // Plays over a duration: step(t) every frame, then done(). (At once
+    // without animations.)
+    _play(duration, step, done) {
+        this._transition?.stop();
+        if (!St.Settings.get().enable_animations) {
+            step(1);
+            done();
+            return;
+        }
+        const timeline = new Clutter.Timeline({actor: this.actor, duration: adjustAnimationTime(duration)});
+        let over = false;
+        const finish = () => {
+            if (over)
+                return;
+            over = true;
+            this._transition = null;
+            done();
+        };
+        timeline.connect('new-frame', () => step(timeline.get_progress()));
+        timeline.connect('completed', () => {
+            step(1);
+            finish();
+        });
+        this._transition = {stop: () => {
+            timeline.stop();
+            step(1);
+            finish();
+        }};
+        step(0);
+        timeline.start();
+    }
+
+    // The gallery's liquid, under it while it is away: over the dim.
+    _galleryLiquid() {
+        const paint = new LiquidPaint({width: global.stage.width, height: global.stage.height});
+        this.actor.insert_child_below(paint, this._gallery);
+        paint.setLook(this._gallery);
+        return paint;
+    }
+
+    _galleryRect() {
+        const [x, y] = this._gallery.get_transformed_position();
+        return [x, y, this._gallery.width, this._gallery.height];
+    }
+
+    // Coming up: the dim fading in, the cells swelling out of drops from
+    // the middle outwards, the gallery spreading out of a drop in its
+    // middle (what is on it showing once it is there).
+    _appear() {
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        let paint = null;
+        this._gallery.opacity = 0;
+        this._play(APPEAR_TIME, t => {
+            this._dim.opacity = Math.round(255 * easeOut(clamp01(t / 0.6)));
+            this._hint.progress = t;
+            if (this._gallery.width > 0 && t < 1) {
+                paint ??= this._galleryLiquid();
+                paint.setShapes(spread(this._galleryRect(), clamp01(t / 0.8), {radius: GALLERY_RADIUS * scale}));
+            }
+            this._gallery.opacity = Math.round(255 * clamp01((t - 0.7) / 0.3));
+        }, () => {
+            paint?.destroy();
+            this._gallery.opacity = 255;
+        });
+    }
+
+    /**
+     * Going: the widgets go back under the windows at once; the rest draws
+     * back – the gallery into a drop, the cells into drops, outside in –
+     * and is gone.
+     */
+    close() {
+        this._release();
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        this.actor.reactive = false;
+        const rect = this._galleryRect();
+        const paint = this._gallery.width > 0 && this._gallery.mapped ? this._galleryLiquid() : null;
+        this._gallery.hide();
+        const dim = this._dim.opacity;
+        const grid = this._hint.progress;
+        this._play(VANISH_TIME, t => {
+            this._dim.opacity = Math.round(dim * (1 - easeOut(t)));
+            this._hint.progress = grid * (1 - t);
+            paint?.setShapes(gather(rect, clamp01(t / 0.8), {radius: GALLERY_RADIUS * scale}));
+        }, () => this._destroyActor());
     }
 
     /**
@@ -231,7 +359,7 @@ export class DesktopEditor {
             this);
     }
 
-    _release(widget) {
+    _releaseWidget(widget) {
         widget.editing = false;
         widget._editControls?.destroy();
         widget._editControls = null;
@@ -660,7 +788,18 @@ export class DesktopEditor {
     }
 
     /** Put the widgets back under the windows. */
+    /** Gone at once. */
     destroy() {
+        this._release();
+        this._transition?.stop();
+        this._destroyActor();
+    }
+
+    // The widgets back under the windows, the grab let go of.
+    _release() {
+        if (this._released)
+            return;
+        this._released = true;
         this._spill?.timeline?.stop();
         this._spillBack?.timeline?.stop();
         // Out of the gallery mid-way: never mind.
@@ -684,12 +823,15 @@ export class DesktopEditor {
         if (this._grab)
             Main.popModal(this._grab);
         this._grab = null;
-        this._desktop.widgets.forEach(widget => this._release(widget));
+        this._desktop.widgets.forEach(widget => this._releaseWidget(widget));
         global.display.set_cursor(Meta.Cursor.DEFAULT);
         const layer = this._desktop.layer;
         this.actor.remove_child(layer);
         this._desktop.restoreLayer();
-        this.actor.destroy();
+    }
+
+    _destroyActor() {
+        this.actor?.destroy();
         this.actor = null;
     }
 }

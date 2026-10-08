@@ -1088,8 +1088,14 @@ async function testDesktop(ext) {
     await Scripting.sleep(200);
 
     desktop.edit();
-    await Scripting.sleep(400);
-    check(desktop.editing && layer.get_parent() === desktop._editor.actor, 'editing, they come up over everything');
+    await Scripting.sleep(120);
+    const coming = desktop._editor;
+    check(coming._dim.opacity > 0 && coming._dim.opacity < 255 && coming._hint.progress > 0 &&
+        coming._hint.progress < 1 && coming._gallery.opacity < 255,
+    `editing, the screen dims, the cells and the gallery come out of drops (${coming._hint.progress.toFixed(2)})`);
+    await Scripting.sleep(600);
+    check(desktop.editing && layer.get_parent() === desktop._editor.actor && coming._dim.opacity === 255 &&
+        coming._hint.progress === 1 && coming._gallery.opacity === 255, 'editing, they come up over everything');
     // The gallery: a click adds nothing (a shake: drag me); dragged out, a
     // widget drips out of it and lands where its shadow is.
     const galleryButton = label => desktop._editor._gallery.get_children()
@@ -1219,9 +1225,14 @@ async function testDesktop(ext) {
     await pointerDown(hx, hy);
     await pointerAlong(hx, hy, hx - 190, hy);
     await pressKey(Clutter.KEY_Escape);
+    const going = desktop._closing;
+    check(Boolean(going?.actor) && !going.actor.reactive && going._hint.progress < 1 && going._dim.opacity < 255,
+        'the grid draws back into drops');
+    check(await waitFor(() => !going.actor, 1500), 'and is gone');
     await pointerUp();
     check(!desktop.editing && layer.get_parent() === Main.layoutManager._backgroundGroup &&
         weather.width === card && weather.entry.size === 'card' && saved()?.size === 'card', 'Esc puts them back');
+
 
     // GitHub: anyone's contributions (made up here; the tests stay offline).
     const github = desktop.sources.github;

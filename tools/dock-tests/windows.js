@@ -66,6 +66,19 @@ export async function shell(t) {
         check(await t.waitFor(() => !maskOf(second.get_compositor_private()) && overlays(t).length === 0, 3000),
             'then as it is');
 
+        // Editing the widgets, the windows go out of the way (minimized);
+        // done, they are back.
+        const desktop = ext.stateObj.modules.get('desktop');
+        if (desktop) {
+            desktop.edit();
+            check(desktop.editing && second.minimized, 'editing the widgets, the windows go out of the way');
+            await t.sleep(800);
+            desktop.stopEditing();
+            check(!second.minimized, 'done, they are back');
+            check(await t.waitFor(() => !desktop._closing?.actor && overlays(t).length === 0 &&
+                !maskOf(second.get_compositor_private()), 3000), 'and as they were');
+        }
+
         // Closing, into its icon too; a window of an app without one draws
         // into its middle.
         second.delete(global.get_current_time());
