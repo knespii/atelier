@@ -4,7 +4,13 @@
 import System from 'system';
 
 import * as claudeUsage from './claudeUsage.test.js';
+import * as dockActions from './dockActions.test.js';
 import * as dockGeometry from './dockGeometry.test.js';
+import * as dockImport from './dockImport.test.js';
+import * as dockIndicators from './dockIndicators.test.js';
+import * as dockLocations from './dockLocations.test.js';
+import * as dockTheme from './dockTheme.test.js';
+import * as dockVisibility from './dockVisibility.test.js';
 import * as gtkCss from './gtkCss.test.js';
 import * as liquid from './liquid.test.js';
 import * as migrate from './migrate.test.js';
@@ -20,7 +26,7 @@ import * as thumbnails from './thumbnails.test.js';
 import * as widgets from './widgets.test.js';
 
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid,
-    dockGeometry};
+    dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport};
 
 let total = 0;
 let failures = 0;

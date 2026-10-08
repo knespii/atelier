@@ -6,6 +6,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -19,6 +20,13 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
+
+import * as dockAppearance from './dock-tests/appearance.js';
+import * as dockBadges from './dock-tests/badges.js';
+import * as dockBehaviour from './dock-tests/behaviour.js';
+import * as dockCore from './dock-tests/core.js';
+import * as dockHiding from './dock-tests/hiding.js';
+import * as dockLaunchers from './dock-tests/launchers.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
@@ -1823,64 +1831,43 @@ async function testTwoMonitors(ext) {
     check(cells() === placed, `the bigger one the main one again, where they were on it (${cells()})`);
 }
 
+/**
+ * What the dock's checks in tools/dock-tests get.
+ *
+ * @param {object} ext - Atelier
+ * @returns {object} t: {ext, module (the DockModule: module.dock is the
+ *   main dock, module.docks all of them), settings (the dock's), check,
+ *   waitFor, sleep, pointerTo, clickAt, pointerDown, pointerUp,
+ *   pointerAlong, pressKey, pressKeys, restPointer, centerOf, findActor,
+ *   hasClass, screenshot, screenshotArea, averageColor, colorDistance,
+ *   Scripting, Main, St, Shell, Clutter, Meta, Gio, GLib, GObject,
+ *   AppFavorites, MessageTray, OUTPUT, SUITE}
+ */
+function dockTestContext(ext) {
+    return {
+        ext,
+        module: ext.stateObj.modules.get('dock'),
+        settings: ext.stateObj._settings.get_child('dock'),
+        check, waitFor, sleep: Scripting.sleep,
+        pointerTo, clickAt, pointerDown, pointerUp, pointerAlong, pressKey, pressKeys, restPointer,
+        centerOf, findActor, hasClass,
+        screenshot, screenshotArea, averageColor, colorDistance,
+        Scripting, Main, St, Shell, Clutter, Meta, Gio, GLib, GObject, AppFavorites, MessageTray,
+        OUTPUT, SUITE,
+    };
+}
+
 async function testDock(ext) {
     const module = ext.stateObj.modules.get('dock');
     if (!check(module !== null && module.dock !== null, 'the dock is there (Dash to Dock is off here)'))
         return;
-    const dock = module.dock;
-    await restPointer();
-    await Scripting.sleep(500);
-    const monitor = Main.layoutManager.primaryMonitor;
-    const [dockX, dockY] = dock.actor.get_transformed_position();
-    check(Math.abs(dockX + dock.actor.width / 2 - (monitor.x + monitor.width / 2)) <= 1 &&
-        dockY + dock.actor.height <= monitor.y + monitor.height && dockY > monitor.height - 150,
-    `at the bottom, in the middle (${dockX}, ${dockY})`);
-    const favorites = AppFavorites.getAppFavorites().getFavorites();
-    check(favorites.length > 0 && favorites.every(app => dock.items.get(app.get_id())?.mapped),
-        `with the pinned apps (${favorites.length})`);
-    check(!dock.hidden, 'shown while no window covers it');
-    await screenshotArea('60-dock', monitor.x, monitor.y + monitor.height - 140, monitor.width, 140);
+    const t = dockTestContext(ext);
+    for (const suite of [dockCore, dockHiding, dockBehaviour, dockBadges, dockLaunchers, dockAppearance])
+        await suite.shell(t);
+}
 
-    // Brought back by the bottom edge, it stays while the pointer rests
-    // there (going, it would uncover the edge under the pointer and come
-    // back, on and on), and goes once the pointer leaves.
-    await pointerTo(dockX + dock.actor.width / 2, monitor.y + monitor.height - 1);
-    dock.reveal();
-    await Scripting.sleep(2000);
-    check(dock.hider.revealed, 'brought back by the edge, it stays while the pointer rests there');
-    await restPointer();
-    check(await waitFor(() => !dock.hider.revealed, 3000), 'and goes once the pointer leaves');
-
-    // Dynamic Music Pill finds it where it finds Dash to Dock's row.
-    const handle = Main.panel.statusArea['dash-to-dock'];
-    check(handle?._box === dock.box && !Object.keys(Main.panel.statusArea).includes('dash-to-dock'),
-        'Dynamic Music Pill finds its row (hidden from the other items of the bar)');
-    const pill = new St.Widget({style_class: 'music-pill-container', width: 120, height: 40});
-    dock.box.add_child(pill);
-    dock._redisplay();
-    check(pill.get_parent() === dock.box && dock.box.get_last_child() === pill, 'the pill stays at its end');
-
-    // An app dropped on it is pinned.
-    const app = Shell.AppSystem.get_default().get_installed()
-        .map(info => Shell.AppSystem.get_default().lookup_app(info.get_id()))
-        .find(a => a && !AppFavorites.getAppFavorites().isFavorite(a.get_id()));
-    if (app) {
-        dock.acceptDrop({app}, null, 10000);
-        check(await waitFor(() => AppFavorites.getAppFavorites().isFavorite(app.get_id()) &&
-            dock.items.has(app.get_id()), 1000), `an app dropped on it is pinned (${app.get_name()})`);
-        AppFavorites.getAppFavorites().removeFavorite(app.get_id());
-        await Scripting.sleep(400);
-    }
-
-    // With Dash to Dock on, it goes (and gives the pill back).
-    Object.defineProperty(module, 'blocked', {get: () => true, configurable: true});
-    module._sync();
-    check(module.dock === null && Main.panel.statusArea['dash-to-dock'] === undefined &&
-        pill.get_parent() === null && !pill._destroyed, 'with Dash to Dock on, it goes and lets the pill go');
-    delete module.blocked;
-    module._sync();
-    check(module.dock !== null, 'and comes back without it');
-    pill.destroy();
+async function testDockOnTwoMonitors(ext) {
+    await dockCore.twoMonitors(dockTestContext(ext));
 }
 
 async function testClaude(ext) {
@@ -2419,9 +2406,10 @@ async function testQuitWithControlCentreOpen(ext) {
         'the control centre is open as the shell quits');
 }
 
-// The shell quits with the island's layout, the bar's and the dock's
-// places and the dock's check still to come: none of it may run once GNOME
-// has taken its UI down (tools/shell-test.sh checks the log).
+// The shell quits with the island's layout, the bar's place and the
+// dock's place, row and check still to come (in its Timers): none of it
+// may run once GNOME has taken its UI down (tools/shell-test.sh checks the
+// log).
 function testQuitWithWorkQueued(ext) {
     const modules = ext.stateObj.modules;
     const island = modules.get('island');
@@ -2490,6 +2478,7 @@ export async function run() {
         }
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
+            await testDockOnTwoMonitors(ext);
             testQuitWithWorkQueued(ext);
             return;
         }

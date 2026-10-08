@@ -132,7 +132,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 PATH="$ROOT/bin:$PATH" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
-    dbus-run-session -- timeout --kill-after=5 300 \
+    dbus-run-session -- timeout --kill-after=5 600 \
     gnome-shell --headless $MONITORS --no-x11 \
         --wayland-display=atelier-test-0 --force-animations \
         --automation-script="$REPO/tools/shell-test.js" \

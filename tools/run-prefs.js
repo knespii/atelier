@@ -15,6 +15,13 @@ import Gtk from 'gi://Gtk?version=4.0';
 import System from 'system';
 import {exportProfile} from '../lib/profileTransfer.js';
 
+import * as dockAppearance from './dock-tests/appearance.js';
+import * as dockBadges from './dock-tests/badges.js';
+import * as dockBehaviour from './dock-tests/behaviour.js';
+import * as dockCore from './dock-tests/core.js';
+import * as dockHiding from './dock-tests/hiding.js';
+import * as dockLaunchers from './dock-tests/launchers.js';
+
 for (const name of ['org.gnome.Shell.Extensions.src', 'gnome-shell-dbus-interfaces'])
     Gio.Resource.load(`/usr/share/gnome-shell/${name}.gresource`)._register();
 
@@ -262,14 +269,16 @@ async function runSelftest(window) {
         'notes can be turned off, and their options grey out');
     notesSettings.reset('enabled');
 
-    // The dock.
-    const dock = await section(window, 'dock');
-    const dockSettings = store.settings.get_child('dock');
-    dock.rows.get('icon-size').value = 40;
-    dock.rows.get('intellihide').active = false;
-    check(dockSettings.get_int('icon-size') === 40 && !dockSettings.get_boolean('intellihide'),
-        'the dock\'s icon size and hiding are saved');
-    ['icon-size', 'intellihide'].forEach(key => dockSettings.reset(key));
+    // The dock (tools/dock-tests). t: {window, page (the dock's page: its
+    // rows by key in page.rows), settings (the dock's), check, sleep,
+    // section, findDescendant, Adw, Gtk, Gio, GLib}.
+    const dockPage = await section(window, 'dock');
+    const t = {
+        window, page: dockPage, settings: store.settings.get_child('dock'), check, sleep, section,
+        findDescendant, Adw, Gtk, Gio, GLib,
+    };
+    for (const suite of [dockCore, dockHiding, dockBehaviour, dockBadges, dockLaunchers, dockAppearance])
+        await suite.prefs(t);
 }
 
 async function takeScreenshots(window) {
