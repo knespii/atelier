@@ -459,7 +459,7 @@
     <key name="intellihide-mode" enum="org.gnome.shell.extensions.atelier.DockIntellihideMode">
       <default>'FOCUS_APPLICATION_WINDOWS'</default>
       <summary>Which windows move the dock away</summary>
-      <description>Any window, those of the focused app, maximized ones, or only those kept on top.</description>
+      <description>Any window, those of the focused app, maximized (or full screen) ones, or only full screen ones: otherwise the dock stays on top.</description>
     </key>
     <key name="manualhide" type="b">
       <default>false</default>
@@ -625,7 +625,7 @@
     <key name="hotkeys-overlay" type="b">
       <default>true</default>
       <summary>Show the numbers</summary>
-      <description>While Super is held, the apps show their numbers.</description>
+      <description>For a moment after Super and a number (or the shortcut), the apps show their numbers.</description>
     </key>
     <key name="hotkeys-show-dock" type="b">
       <default>true</default>

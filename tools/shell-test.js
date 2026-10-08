@@ -2418,7 +2418,7 @@ function testQuitWithWorkQueued(ext) {
     island?._queueLayout();
     bar?._queuePlace();
     dock?._queueRedisplay();
-    dock?._queuePlace();
+    dock?.queuePlace();
     dock?.intellihide.queueCheck();
     check(island?._laterId && bar?._laterId && ['redisplay', 'place', 'check'].every(name => dock?.timers.has(name)),
         'layout, places and a check still to come as the shell quits');

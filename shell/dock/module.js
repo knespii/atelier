@@ -6,6 +6,8 @@
 // once Dash to Dock is turned off.
 
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
+import Meta from 'gi://Meta';
+
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {pickMonitors} from '../../lib/dockGeometry.js';
@@ -55,13 +57,14 @@ export class DockModule {
                 this._sync();
         }, this);
         this._dockSettings.connectObject(
-            ...REBUILD_KEYS.flatMap(key => [`changed::${key}`, () => this._rebuild()]), this);
-        this._barSettings.connectObject('changed::surface', () => this._rebuild(), this);
-        Main.layoutManager.connectObject('monitors-changed', () => this._rebuild(), this);
+            ...REBUILD_KEYS.flatMap(key => [`changed::${key}`, () => this._queueRebuild()]), this);
+        this._barSettings.connectObject('changed::surface', () => this._queueRebuild(), this);
+        Main.layoutManager.connectObject('monitors-changed', () => this._queueRebuild(), this);
         this._sync();
     }
 
     disable() {
+        this._cancelRebuild();
         Main.extensionManager.disconnectObject(this);
         this._dockSettings?.disconnectObject(this);
         this._barSettings?.disconnectObject(this);
@@ -80,8 +83,27 @@ export class DockModule {
     }
 
     _rebuild() {
+        this._cancelRebuild();
         this._destroyDocks();
         this._sync();
+    }
+
+    // Built anew once for all that changed together (an import changes
+    // many settings at once), before the next frame.
+    _queueRebuild() {
+        if (this._rebuildId)
+            return;
+        this._rebuildId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._rebuildId = 0;
+            this._rebuild();
+            return false;
+        });
+    }
+
+    _cancelRebuild() {
+        if (this._rebuildId)
+            global.compositor.get_laters().remove(this._rebuildId);
+        this._rebuildId = 0;
     }
 
     // The monitor chosen by its connector, or the main one.

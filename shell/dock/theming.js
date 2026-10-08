@@ -55,7 +55,7 @@ export class DockTheming {
         if (this._syncClasses()) {
             // Its padding and corners changed: measured and placed again,
             // the glass with its new corners.
-            this._dock._queuePlace();
+            this._dock.queuePlace();
             this._dock.syncGlass();
         }
         const settings = this._settings;

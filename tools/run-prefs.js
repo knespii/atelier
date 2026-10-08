@@ -98,9 +98,16 @@ async function render(window, name) {
     // The window may be between frames without a renderer for a moment.
     for (let i = 0; i < 20 && !window.get_renderer(); i++)
         await sleep(100);
-    const snapshot = new Gtk.Snapshot();
-    new Gtk.WidgetPaintable({widget: window}).snapshot(snapshot, window.get_width(), window.get_height());
-    const texture = window.get_renderer().render_texture(snapshot.to_node(), null);
+    // (Under load, the first snapshot of a page can come back empty: again.)
+    let node = null;
+    for (let i = 0; i < 20 && !node; i++) {
+        const snapshot = new Gtk.Snapshot();
+        new Gtk.WidgetPaintable({widget: window}).snapshot(snapshot, window.get_width(), window.get_height());
+        node = snapshot.to_node();
+        if (!node)
+            await sleep(100);
+    }
+    const texture = window.get_renderer().render_texture(node, null);
     texture.save_to_png(GLib.build_filenamev([screenshotDir, `${name}.png`]));
     print(`saved ${name}.png`);
 }

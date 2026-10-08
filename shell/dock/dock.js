@@ -150,15 +150,15 @@ export class Dock extends EventEmitter {
             'changed', () => this._scrollToFocused(),
             this);
         services.locations.connectObject('changed', () => this._queueRedisplay(), this);
-        global.display.connectObject('workareas-changed', () => this._queuePlace(), this);
+        global.display.connectObject('workareas-changed', () => this.queuePlace(), this);
         settings.connectObject(
             ...REDISPLAY_KEYS.flatMap(key => [`changed::${key}`, () => this._queueRedisplay()]),
-            'changed::height-fraction', () => this._queuePlace(),
+            'changed::height-fraction', () => this.queuePlace(),
             'changed::always-center-icons', () => this._syncAlignment(),
             this);
         // (Placed again after the row is laid out, not while it is.)
-        this._box.connect('notify::width', () => this._queuePlace());
-        this._box.connect('notify::height', () => this._queuePlace());
+        this._box.connect('notify::width', () => this.queuePlace());
+        this._box.connect('notify::height', () => this.queuePlace());
 
         this._redisplay();
         this._place();
@@ -374,7 +374,8 @@ export class Dock extends EventEmitter {
             apps.y_align = this._extend ? align : Clutter.ActorAlign.FILL;
     }
 
-    _queuePlace() {
+    /** Placed anew before the next frame (its size or look changed, say). */
+    queuePlace() {
         this._timers.later('place', () => this._place());
     }
 
@@ -401,7 +402,7 @@ export class Dock extends EventEmitter {
         const max = maxLength(area, this._side, this._settings.get_double('height-fraction'), this._extend);
         if (this._fitIcons(max)) {
             // (Placed once the icons have their new size.)
-            this._queuePlace();
+            this.queuePlace();
             return;
         }
         // As long as it would be, then no longer than it may.
