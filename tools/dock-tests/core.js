@@ -323,10 +323,14 @@ async function inOverview(t, monitor) {
     await t.sleep(300);
     const dock = t.module.dock;
     const [, top] = dock.container.get_transformed_position();
-    check(!Main.overview.dash.visible && Main.overview.dash.get_preferred_height(-1)[1] === 0 &&
-        !dock.hidden && dock.container.opacity === 255 && top < monitor.y + monitor.height &&
-        controls.margin_bottom >= dock.staticRect.height,
-    `in the overview, the dock in place of GNOME's dash (room below: ${controls.margin_bottom})`);
+    const workspaces = controls._workspacesDisplay;
+    const [, wsY] = workspaces.get_transformed_position();
+    const wsBottom = wsY + workspaces.height;
+    const room = t.module.services.overview.room;
+    check(!Main.overview.dash.visible && !dock.hidden && dock.container.opacity === 255 &&
+        top < monitor.y + monitor.height && room.size >= dock.staticRect.height && wsBottom <= top &&
+        controls.margin_bottom === 0,
+    `in the overview, the dock in place of GNOME's dash, the workspaces clear of it (${Math.round(wsBottom)} ≤ ${Math.round(top)})`);
     await t.screenshot('60-dock-overview');
     Main.overview.hide();
     await t.waitFor(() => !Main.overview.visible, 4000);
@@ -334,7 +338,7 @@ async function inOverview(t, monitor) {
     Main.overview.show();
     await t.waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
     await t.sleep(300);
-    check(Main.overview.dash.visible && t.module.dock.hidden && controls.margin_bottom === 0,
+    check(Main.overview.dash.visible && t.module.dock.hidden && t.module.services.overview.room.size === 0,
         'off: the dock goes in the overview, GNOME\'s dash is there');
     Main.overview.hide();
     await t.waitFor(() => !Main.overview.visible, 4000);
