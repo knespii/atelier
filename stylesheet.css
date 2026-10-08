@@ -2413,6 +2413,16 @@
 /* ── end B1 ── */
 
 /* ── Dock: clicking and the keyboard (B2) ── */
+
+/* The numbers of Super+1 to Super+0 in the corner of the apps' icons
+   (their size is set as they come, from the icon's) */
+.atelier-dock-number {
+  color: white;
+  background-color: rgba(0, 0, 0, 0.8);
+  font-weight: bold;
+  text-align: center;
+}
+
 /* ── end B2 ── */
 
 /* ── Dock: indicators and badges (B3) ── */
