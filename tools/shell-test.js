@@ -1048,6 +1048,22 @@ async function testDesktop(ext) {
             JSON.parse(settings.get_string('widgets')).find(e => e.id === 'clock').face === face,
         `the ${face} face, in its square, kept with it`);
     }
+    // Stretched to a card, the time beside the face: all of it.
+    desktop.setWidgetOption('clock', 'face', 'watch');
+    const roomy = desktop.spotForNew('github', 0, 0);
+    desktop.moveWidget('clock', roomy.x, roomy.y);
+    check(desktop.setWidgetSize('clock', 'card'), 'the clock stretched to a card');
+    await Scripting.sleep(300);
+    const beside = faceClock._time;
+    const [besideX] = faceClock._suffix?.get_transformed_position() ?? [Infinity];
+    check(Boolean(faceClock._face) && Boolean(beside) && !beside.clutter_text.get_layout().is_ellipsized() &&
+        besideX + faceClock._suffix.width <= faceClock.get_transformed_position()[0] + faceClock.width,
+    `stretched, the time beside the face shows whole (${beside?.text})`);
+    await screenshotArea('40-clock-watch-card', ...faceClock.get_transformed_position().map(v => Math.round(v) - 8),
+        Math.round(faceClock.width) + 16, Math.round(faceClock.height) + 16);
+    desktop.setWidgetSize('clock', 'square');
+    desktop.moveWidget('clock', 0, 0);
+    desktop._place();
     desktop.setWidgetOption('clock', 'face', 'auto');
     await Scripting.sleep(200);
 

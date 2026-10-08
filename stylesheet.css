@@ -1656,6 +1656,10 @@
   font-size: 46pt;
 }
 
+.atelier-widget-card .atelier-widget-time.atelier-widget-time-beside {
+  font-size: 28pt;
+}
+
 .atelier-widget-time-suffix {
   font-size: 12pt;
   font-weight: 800;

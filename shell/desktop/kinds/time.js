@@ -146,6 +146,9 @@ class AtelierClockWidget extends DesktopWidget {
             const time = new St.BoxLayout({x_align: hands ? Clutter.ActorAlign.START : Clutter.ActorAlign.CENTER});
             text.add_child(time);
             this._time = label('atelier-widget-time');
+            // (Beside a face, smaller: all of it fits.)
+            if (hands)
+                this._time.add_style_class_name('atelier-widget-time-beside');
             this._suffix = label('atelier-widget-time-suffix', '', {y_align: Clutter.ActorAlign.END});
             time.add_child(this._time);
             time.add_child(this._suffix);
