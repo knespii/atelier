@@ -413,13 +413,13 @@
     </key>
     <key name="magnification-scale" type="d">
       <range min="1" max="2"/>
-      <default>1.5</default>
+      <default>1.3</default>
       <summary>How big the icon under the pointer gets</summary>
-      <description>1.5 is half again as big.</description>
+      <description>1.3 is a third bigger again; 2 twice as big.</description>
     </key>
     <key name="magnification-spread" type="d">
       <range min="1" max="5"/>
-      <default>2.5</default>
+      <default>2.0</default>
       <summary>How far the magnification reaches</summary>
       <description>In icons, from the pointer.</description>
     </key>

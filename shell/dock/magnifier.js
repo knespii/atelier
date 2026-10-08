@@ -12,9 +12,10 @@ import {isHorizontal} from '../../lib/dockGeometry.js';
 import {magnify} from '../../lib/dockMagnify.js';
 
 const KEYS = ['magnification', 'magnification-scale', 'magnification-spread'];
-// Following the pointer, and back to rest, milliseconds.
-const FOLLOW_TIME = 70;
-const REST_TIME = 180;
+// Growing as the pointer comes onto the dock, and back to rest as it
+// leaves, milliseconds; in between the icons follow it at once.
+const ENTER_TIME = 90;
+const REST_TIME = 140;
 // Where an icon grows from: the edge the dock is at.
 const PIVOTS = {BOTTOM: [0.5, 1], TOP: [0.5, 0], LEFT: [0, 0.5], RIGHT: [1, 0.5]};
 
@@ -69,7 +70,7 @@ export class DockMagnifier {
         if (!this._enabled)
             return Clutter.EVENT_PROPAGATE;
         const [x, y] = event.get_coords();
-        this._apply(isHorizontal(this._dock.side) ? x : y, FOLLOW_TIME);
+        this._apply(isHorizontal(this._dock.side) ? x : y);
         return Clutter.EVENT_PROPAGATE;
     }
 
@@ -81,7 +82,7 @@ export class DockMagnifier {
         return Clutter.EVENT_PROPAGATE;
     }
 
-    _apply(pointer, duration) {
+    _apply(pointer) {
         const icons = this._icons();
         if (icons.length === 0)
             return;
@@ -98,17 +99,22 @@ export class DockMagnifier {
             give: this._dock.container.get_theme_node().get_padding(horizontal ? St.Side.LEFT : St.Side.TOP),
         });
         const [px, py] = PIVOTS[this._dock.side];
+        const entering = !this._active;
         icons.forEach(([actor, , item], i) => {
             this._liftLabel(item, scales[i]);
             actor.set_pivot_point(px, py);
-            actor.ease({
+            const values = {
                 scale_x: scales[i],
                 scale_y: scales[i],
                 translation_x: horizontal ? offsets[i] : 0,
                 translation_y: horizontal ? 0 : offsets[i],
-                duration,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
+            };
+            // Coming onto the dock (or still growing), briefly eased; then
+            // right with the pointer, no lag behind it.
+            if (entering || actor.get_transition('scale-x'))
+                actor.ease({...values, duration: entering ? ENTER_TIME : 40, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            else
+                actor.set(values);
         });
         this._active = true;
     }

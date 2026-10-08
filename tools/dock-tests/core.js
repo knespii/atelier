@@ -360,7 +360,7 @@ async function magnification(t) {
     await t.sleep(400);
     const scales = items.map(item => item.child.scale_x);
     const index = items.indexOf(middle);
-    check(scales[index] > 1.4 && scales[index - 1] > 1 && scales[index - 1] < scales[index] &&
+    check(scales[index] > 1.25 && scales[index - 1] > 1 && scales[index - 1] < scales[index] &&
         items[index - 1].child.translation_x < 0 && items[index + 1].child.translation_x > 0,
     `under the pointer an icon grows, those beside it less, moving apart (${scales.map(s => s.toFixed(2)).join(' ')})`);
     check(dock.container.width === width && dock.container.height === height, 'the dock keeps its size');
