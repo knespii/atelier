@@ -1324,7 +1324,7 @@ async function testDesktop(ext) {
     const flowCalendar = desktop.widgets.get('calendar');
     const clockX0 = flowClock.x;
     settings.set_string('widgets', JSON.stringify([
-        {id: 'clock', kind: 'clock', size: 'square', x: 6, y: 0},
+        {id: 'clock', kind: 'clock', size: 'square', x: 6, y: 0, face: 'watch'},
         {id: 'date', kind: 'date', size: 'square', x: 2, y: 0},
         {id: 'weather', kind: 'weather', size: 'square', x: 0, y: 2},
     ]));
@@ -1342,6 +1342,7 @@ async function testDesktop(ext) {
     check(Math.abs(flowClock.x - (clockX0 + 6 * 96)) < 1 && !flowClock.melted && !flowWeather.melted &&
         flowWeather.get_children().every(child => child.opacity === 255) && !desktop._flowing && !desktop._liquid.visible,
     `and settle there, cards again (${flowClock.x})`);
+    check(Boolean(flowClock._face) && flowClock.entry.face === 'watch', 'with the face the other layout gives the clock');
     check(desktop._layer.get_children().every(child => child !== flowCalendar), 'the calendar is gone');
     settings.reset('widgets');
     await Scripting.sleep(1200);

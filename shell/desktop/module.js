@@ -78,6 +78,10 @@ const CALM_LONGEST = 3000;
 // over to the new look once the shell is calm.
 const LOOK_TIME = 700;
 
+// What a widget shows, of its entry in the layout (not where it is).
+const PLACE_KEYS = ['x', 'y', 'grid', 'places', 'fine'];
+const options = entry => JSON.stringify(Object.entries(entry).filter(([key]) => !PLACE_KEYS.includes(key)).sort());
+
 export class DesktopModule {
     /**
      * @param {object} context
@@ -513,10 +517,14 @@ export class DesktopModule {
                 if (created)
                     created.was = null;
             }
-            else if (widget.entry.size !== entry.size)
-                widget.resize(entry.size);
-            else
-                widget.entry = {...widget.entry, ...entry};
+            else {
+                // (Another size, or other options – a clock's face, say:
+                // drawn anew.)
+                const redraw = widget.entry.size !== entry.size || options(widget.entry) !== options(entry);
+                widget.entry = {...entry};
+                if (redraw)
+                    widget.resize(entry.size);
+            }
         }
         this._place();
         this._flow = false;
