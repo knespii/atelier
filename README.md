@@ -4,8 +4,8 @@
   <a href="docs/media/atelier.mp4"><img src="docs/media/atelier-preview.webp" width="880"
     alt="One key: the notch grows into the profile switcher, Dune is picked, and its wallpaper comes in under the widgets, which take its colors"></a>
   <br>
-  <a href="docs/media/atelier.mp4"><b>▶ Watch the 21-second tour</b></a> (with sound): profiles, the island, notes that
-  drip out of it, widgets
+  <a href="docs/media/atelier.mp4"><b>▶ Watch the 24-second tour</b></a> (with sound): profiles, widgets that pour
+  between them, the island, notes that drip out of it
 </p>
 
 A GNOME Shell 48 extension that styles the whole desktop as one piece.
@@ -35,7 +35,8 @@ the control centre, and new notes drip out of it. On the desktop there are
 - **Profiles stay as you saved them.** A wallpaper picked for a while, or
   anything changed in GNOME Settings, leaves them alone; switching to a
   profile brings its look back. The widgets are the exception: what you change
-  on the desktop is kept in the profile in use.
+  on the desktop is kept in the profile in use – and switching, they pour over
+  to where the next profile keeps them.
 - **A new profile**: pick the **+** card at the end of the Profiles tab. The
   island drips a sheet with what the desktop has now – the wallpaper, style,
   themes, palette and widgets – to name it and choose light or dark and the
@@ -49,19 +50,17 @@ profile called **Original**, so there is always a way back.
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/switcher.jpg" alt="The switcher grown out of the island, with the profiles as cards"></td>
-    <td width="50%"><img src="docs/screenshots/switching.jpg" alt="A new wallpaper revealed by a growing circle, the island saying the profile's name"></td>
+    <td width="50%"><img src="docs/screenshots/new-profile.jpg" alt="A sheet dripped from the island to name a new profile and choose its style"></td>
   </tr>
   <tr>
     <td align="center"><sub>The switcher grows out of the island</sub></td>
-    <td align="center"><sub>Enter: the next look comes in under the widgets</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/new-profile.jpg" alt="A sheet dripped from the island to name a new profile and choose its style"></td>
-    <td width="50%"><img src="docs/screenshots/desktop-ember.jpg" alt="The desktop in another profile, the widgets in its colors"></td>
-  </tr>
-  <tr>
     <td align="center"><sub>A new profile, on a sheet that drips from the island</sub></td>
-    <td align="center"><sub>Another profile: the widgets and the glass take its colors</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/media/clip-widgets-pour.webp" alt="Another profile comes in, and the widgets pour across the screen in streams to its places at the right"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><sub>Another profile: its look comes in, and the widgets pour over to its places</sub></td>
   </tr>
 </table>
 
@@ -178,20 +177,20 @@ Blur my Shell blurs the bar, turn that off.)
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/widgets-editing.jpg" alt="Editing the widgets: one dragged, a shadow on the cells where it lands"></td>
+    <td width="50%"><img src="docs/media/clip-clock-faces.webp" alt="Editing the widgets: a click on the clock in the gallery, its faces flow out, and the watch is dragged onto the desktop"></td>
     <td width="50%"><img src="docs/screenshots/widgets-analogue.jpg" alt="The widgets on paper, with a clock face"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Edit Widgets: drag, stretch, snap</sub></td>
+    <td align="center"><sub>Edit Widgets: the clock's faces flow out of the gallery</sub></td>
     <td align="center"><sub>Analogue: paper and a clock face</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/note.jpg" alt="A note on a sheet that dripped from the island"></td>
-    <td width="50%"><img src="docs/screenshots/notes-edge.jpg" alt="A note pinned to the left edge, all of it showing under the pointer"></td>
+    <td width="50%"><img src="docs/media/clip-note.webp" alt="A new note drips from the island, is written on, and runs off to the left edge, where its paper spreads out"></td>
   </tr>
   <tr>
     <td align="center"><sub>A note, written on a sheet from the island</sub></td>
-    <td align="center"><sub>Pinned to the edge</sub></td>
+    <td align="center"><sub>Saved, it runs off to the edge</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/control-centre-notes.jpg" alt="The control centre's Notes tab with the papers"></td>
