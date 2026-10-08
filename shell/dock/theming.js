@@ -30,8 +30,8 @@ export class DockTheming {
         this._dock = dock;
         this._settings = settings;
         this._glass = glass;
-        this._style = null;
-        this.near = false;
+        this._style = null; // the inline style put on last
+        this.near = false; // a window is near (only looked at under DYNAMIC)
 
         settings.connectObject(...KEYS.flatMap(key => [`changed::${key}`, () => this.sync()]), this);
         // (Only DYNAMIC looks at the windows.)
