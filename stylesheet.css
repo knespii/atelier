@@ -2422,4 +2422,34 @@
 /* ── end B4 ── */
 
 /* ── Dock: appearance (B5) ── */
+
+/* Its background's opacity and colour are an inline style
+   (shell/dock/theming.js); more opaque near windows and less away from
+   them, it eases quicker than a change of profile does. */
+.atelier-dock.atelier-dock-dynamic {
+  transition-duration: 300ms;
+}
+
+/* Compact: less room around the icons, smaller corners. */
+.atelier-dock.atelier-dock-shrink {
+  padding: 2px 4px;
+  border-radius: 18px;
+}
+
+.atelier-dock.atelier-dock-shrink.atelier-dock-left,
+.atelier-dock.atelier-dock-shrink.atelier-dock-right {
+  padding: 4px 2px;
+}
+
+.atelier-dock-shrink .dash-item-container > StButton,
+.atelier-dock-shrink .overview-tile {
+  padding: 2px;
+  border-radius: 14px;
+}
+
+/* Square corners (always in panel mode). */
+.atelier-dock.atelier-dock-straight {
+  border-radius: 0;
+}
+
 /* ── end B5 ── */
