@@ -2313,7 +2313,9 @@
   icon-size: 14px;
 }
 
-/* The dock */
+/* The dock: a row at the top or the bottom of the screen
+   (.atelier-dock-top, -bottom), a column at the left or the right
+   (-left, -right), along all of the edge in panel mode (-extended). */
 
 .atelier-dock {
   padding: 6px 8px;
@@ -2322,9 +2324,28 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
+.atelier-dock.atelier-dock-left,
+.atelier-dock.atelier-dock-right {
+  padding: 8px 6px;
+}
+
+.atelier-dock.atelier-dock-extended {
+  border-radius: 0;
+}
+
 .atelier-dock.atelier-dock-glassy {
   background-color: transparent;
   box-shadow: none;
+}
+
+/* What holds the apps and the slots at its ends: nothing of its own. */
+.atelier-dock-content,
+.atelier-dock-slot,
+.atelier-dock-scroll {
+  spacing: 0;
+  padding: 0;
+  border-width: 0;
+  background-color: transparent;
 }
 
 .atelier-dock-box {
@@ -2350,6 +2371,7 @@
   background-color: rgba(255, 255, 255, 0.12);
 }
 
+/* The running dot, at the icon's edge towards the dock's edge. */
 .atelier-dock .app-grid-running-dot {
   width: 5px;
   height: 5px;
@@ -2359,9 +2381,45 @@
   background-color: #ffffff;
 }
 
+.atelier-dock-top .app-grid-running-dot {
+  offset-y: -2px;
+}
+
+.atelier-dock-left .app-grid-running-dot {
+  offset-x: -2px;
+  offset-y: 0;
+}
+
+.atelier-dock-right .app-grid-running-dot {
+  offset-x: 2px;
+  offset-y: 0;
+}
+
 .atelier-dock-separator {
   width: 1px;
   height: 32px;
   margin: 0 6px;
   background-color: rgba(255, 255, 255, 0.18);
 }
+
+.atelier-dock-left .atelier-dock-separator,
+.atelier-dock-right .atelier-dock-separator {
+  width: 32px;
+  height: 1px;
+  margin: 6px 0;
+}
+
+/* ── Dock: hiding (B1) ── */
+/* ── end B1 ── */
+
+/* ── Dock: clicking and the keyboard (B2) ── */
+/* ── end B2 ── */
+
+/* ── Dock: indicators and badges (B3) ── */
+/* ── end B3 ── */
+
+/* ── Dock: extra icons (B4) ── */
+/* ── end B4 ── */
+
+/* ── Dock: appearance (B5) ── */
+/* ── end B5 ── */
