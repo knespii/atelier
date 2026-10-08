@@ -2419,6 +2419,25 @@
 /* ── end B3 ── */
 
 /* ── Dock: extra icons (B4) ── */
+/* Show Applications: as the apps' icons, the grid icon white. */
+.atelier-dock .atelier-dock-show-apps .show-apps {
+  padding: 4px;
+  margin: 0;
+  border-radius: 16px;
+  background-color: transparent;
+  box-shadow: none;
+  border: none;
+}
+
+.atelier-dock .atelier-dock-show-apps .show-apps:hover,
+.atelier-dock .atelier-dock-show-apps .show-apps:focus,
+.atelier-dock .atelier-dock-show-apps .show-apps:checked {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-dock .atelier-dock-show-apps .show-apps-icon {
+  color: #ffffff;
+}
 /* ── end B4 ── */
 
 /* ── Dock: appearance (B5) ── */
