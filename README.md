@@ -16,7 +16,7 @@ want, GTK apps and GNOME Terminal. In the middle of the top bar, an **island**
 takes the place of GNOME's clock: it grows into a glance, the notifications and
 the control centre, and new notes drip out of it. On the desktop there are
 **widgets** on glass, **notes** pinned to the edge of the screen and a
-**dock**. It started as *BG Changer*.
+**dock**.
 
 ![The desktop with Atelier: the island as a notch of glass, widgets on the left, two notes on the edge, the dock](docs/screenshots/desktop.jpg)
 
@@ -233,8 +233,15 @@ Optional, in Settings → Appearance:
 
 ## Install
 
+Atelier is made for **GNOME Shell 48** (shell extensions are tied to the
+version of GNOME they were made for). It needs `git`, `make`,
+`glib-compile-schemas` (on Debian and Ubuntu in `libglib2.0-bin`, on Fedora in
+`glib2`) and `gnome-extensions` (comes with GNOME Shell).
+
 ```sh
-make install          # symlinks this folder into ~/.local/share/gnome-shell/extensions/atelier@local
+git clone https://github.com/knespii/atelier.git
+cd atelier
+make install          # links this folder into ~/.local/share/gnome-shell/extensions/atelier@local
 ```
 
 On Wayland GNOME Shell only notices new extensions after you log out and back
@@ -247,16 +254,11 @@ gnome-extensions enable atelier@local
 Shell themes are applied through the **User Themes** extension, which has to
 be enabled as well.
 
-### Coming from BG Changer
-
-Atelier takes over BG Changer's data the first time it starts: looks become
-profiles, the shortcuts and transition settings carry over, and the wallpaper
-copies move to `~/.local/share/atelier`. Disable BG Changer and remove its link
-before logging in with Atelier:
+To update, pull and build the settings schema again, then log out and back in:
 
 ```sh
-gnome-extensions disable bg-changer@local
-rm ~/.local/share/gnome-shell/extensions/bg-changer@local
+git pull
+make
 ```
 
 ## Themes: why they used to break the desktop
@@ -299,7 +301,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell (with BG Changer data to take over) and checks the island, notifications, the control centre, the bar, widgets, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell and checks the island, notifications, the control centre, the bar, widgets, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make showcase` | Takes the pictures in `docs/screenshots` in a headless GNOME Shell on a 4K monitor at scale 2, with a few profiles of GNOME's own wallpapers (the settings pictures come from `make prefs-screenshots`); `ATELIER_SHOWCASE_FRAMES=<folder> tools/showcase.sh` also records a few moments in slow motion, frame by frame, for a video |
@@ -310,7 +312,7 @@ directories under `tests/output`, so they never touch the running desktop.
 
 Layout:
 
-- `extension.js` – takes over BG Changer's data and starts the modules
+- `extension.js` – starts the modules
 - `shell/` – runs inside GNOME Shell: `core/` (module manager, generated
   styles, glass, GTK and terminal colors), the profiles module (switcher,
   transition, applying and saving profiles), the palette module,
@@ -320,7 +322,7 @@ Layout:
   `claude/` (Claude Code's numbers), `desktop/` (the widgets), `notes/` and
   `dock/`
 - `prefs.js`, `prefs/` – the settings app (GTK 4 / libadwaita)
-- `lib/` – shared by both: profiles, palette, migration, theme discovery,
+- `lib/` – shared by both: profiles, palette, theme discovery,
   thumbnails, GTK stylesheets, terminal profile, widgets' layout, notes
 - `tools/` – development harnesses
 - `docs/` – the pictures and the video in this README
@@ -336,3 +338,10 @@ Switch off *Color GTK apps* and *Color GNOME Terminal* first (or use Reset
 Appearance) to remove Atelier's GTK styles and terminal profile. The copied
 wallpapers and the notes stay in `~/.local/share/atelier` until you delete
 that folder.
+
+## License
+
+Atelier is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 2 of the License, or (at your option) any later
+version – see [LICENSE](LICENSE).

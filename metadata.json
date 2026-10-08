@@ -6,5 +6,6 @@
     "48"
   ],
   "settings-schema": "org.gnome.shell.extensions.atelier",
-  "version-name": "0.2.0"
+  "version-name": "0.2.0",
+  "url": "https://github.com/knespii/atelier"
 }
