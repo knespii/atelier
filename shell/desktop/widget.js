@@ -4,6 +4,7 @@
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GioUnix from 'gi://GioUnix';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
@@ -167,7 +168,7 @@ export function label(styleClass, text = '', params = {}) {
  */
 export function launchApp(...ids) {
     for (const id of ids) {
-        const app = Gio.DesktopAppInfo.new(id);
+        const app = GioUnix.DesktopAppInfo.new(id);
         if (app) {
             app.launch([], global.create_app_launch_context(0, -1));
             return true;

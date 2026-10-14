@@ -6,6 +6,7 @@
 import Adw from 'gi://Adw';
 import Cairo from 'cairo';
 import Gio from 'gi://Gio';
+import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
@@ -110,7 +111,7 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
             visible: false,
         });
         this._desktopIcons.add_prefix(new Gtk.Image({icon_name: 'dialog-information-symbolic'}));
-        const extensionsApp = Gio.DesktopAppInfo.new(EXTENSIONS_APP);
+        const extensionsApp = GioUnix.DesktopAppInfo.new(EXTENSIONS_APP);
         if (extensionsApp) {
             const open = new Gtk.Button({label: 'Open Extensions', valign: Gtk.Align.CENTER});
             open.connect('clicked', () => {
