@@ -174,6 +174,18 @@ async function runSelftest(window) {
     check(imported?.name === 'Renamed' && imported.id !== renamed.id && store.getAll().length === count + 1 &&
         page._rows.some(card => card.profileId === imported.id), 'an exported profile can be imported');
 
+    // Toasts go to Atelier's own overlay (prefs.js replaces the window's
+    // content, and with it the window's overlay); after the ones before it.
+    const {toast} = await import('../prefs/widgets.js');
+    toast(page, 'Selftest toast');
+    const overlay = window.atelierView.toastOverlay;
+    let shown = null;
+    for (let i = 0; i < 60 && !shown; i++) {
+        await sleep(250);
+        shown = findDescendant(overlay, w => w instanceof Gtk.Label && w.label === 'Selftest toast');
+    }
+    check(shown, 'a toast shows over the settings');
+
     // Sidebar search narrows the sections.
     const view = window.atelierView;
     view._search.text = 'terminal';
@@ -230,6 +242,14 @@ async function runSelftest(window) {
     bar._style.setSelected('grouped');
     bar._surface.setSelected('glass');
     bar._shape.setSelected('notch');
+    const sideLabels = [];
+    findDescendant(bar._sides, w => {
+        if (w instanceof Gtk.Label)
+            sideLabels.push(w);
+        return false;
+    });
+    check(sideLabels.length === 2 && !sideLabels.some(label => label.get_layout().is_ellipsized()),
+        'the sides\' toggles are not cut short');
     bar._sides.active_name = 'capsules';
     check(barSettings.get_string('style') === 'grouped' && barSettings.get_string('surface') === 'glass' &&
         barSettings.get_string('island-shape') === 'notch' && barSettings.get_string('sides') === 'capsules',

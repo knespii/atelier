@@ -4,6 +4,7 @@ import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {ACCENT_COLORS} from '../lib/profiles.js';
@@ -144,6 +145,40 @@ export function toast(widget, title) {
     const window = widget.get_root();
     // Titles carry profile names and error messages: no markup.
     window?.add_toast?.(new Adw.Toast({title, timeout: 3, use_markup: false}));
+}
+
+/**
+ * Lays out a widget's one child at its natural width, never narrower.
+ */
+const NaturalWidthLayout = GObject.registerClass(
+class AtelierNaturalWidthLayout extends Gtk.LayoutManager {
+    vfunc_measure(widget, orientation, forSize) {
+        const child = widget.get_first_child();
+        if (!child?.should_layout())
+            return [0, 0, -1, -1];
+        const [min, nat, minBaseline, natBaseline] = child.measure(orientation, forSize);
+        return orientation === Gtk.Orientation.HORIZONTAL
+            ? [nat, nat, -1, -1]
+            : [min, nat, minBaseline, natBaseline];
+    }
+
+    vfunc_allocate(widget, width, height, baseline) {
+        const child = widget.get_first_child();
+        if (child?.should_layout())
+            child.allocate(width, height, baseline, null);
+    }
+});
+
+/**
+ * A widget kept at its natural width. An Adw.ToggleGroup next to a row's
+ * long subtitle otherwise gives way and cuts its labels short ("On the
+ * wall…") in a wider font, such as Adwaita Sans (Ubuntu's).
+ *
+ * @param {Gtk.Widget} child
+ * @returns {Gtk.Widget}
+ */
+export function naturalWidth(child) {
+    return new Adw.Bin({child, layout_manager: new NaturalWidthLayout()});
 }
 
 /**
