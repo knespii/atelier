@@ -1069,6 +1069,15 @@ async function testDesktop(ext) {
         return;
     const settings = ext.stateObj._settings.get_child('desktop');
     const layer = desktop.layer;
+    // (Run on its own, this part may be the first to move the pointer: out
+    // of the top left corner, where it starts on GNOME 50 – which opens
+    // the overview, closed again then – to the middle, away from the dock.)
+    await pointerTo(global.stage.width / 2, global.stage.height / 2);
+    if (Main.overview.visible) {
+        await waitFor(() => !Main.overview.animationInProgress, 4000);
+        Main.overview.hide();
+        await waitFor(() => !Main.overview.visible, 4000);
+    }
     check(layer.get_parent() === Main.layoutManager._backgroundGroup,
         'the widgets lie on the wallpaper, under the windows');
     check(['clock', 'date', 'calendar'].every(id => desktop.widgets.get(id)?.mapped), 'a clock, the date and the calendar');

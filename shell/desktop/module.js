@@ -203,12 +203,22 @@ export class DesktopModule {
             });
         // Switching workspaces, GNOME slides copies of their wallpapers (and
         // desktop windows) over the desktop: the widgets go on them too, or
-        // they would be gone until the switch is over.
-        if (WorkspaceAnimation.WorkspaceGroup?.prototype._createDesktopWindows) {
-            this._injections.overrideMethod(WorkspaceAnimation.WorkspaceGroup.prototype, '_createDesktopWindows',
+        // they would be gone until the switch is over – on the wallpaper,
+        // under the desktop windows, as on the desktop itself. (On GNOME 50
+        // a wallpaper and its desktop windows are an actor of their own, a
+        // WorkspaceBackground; on 48 they went into the workspace's group,
+        // the desktop windows after the wallpaper.)
+        if (WorkspaceAnimation.WorkspaceBackground) {
+            this._injections.overrideMethod(WorkspaceAnimation.WorkspaceBackground.prototype, '_createBackground',
                 original => function (...args) {
                     original.call(this, ...args);
-                    desktop._joinWorkspaceSwitch(this);
+                    desktop._joinWorkspaceSwitch(this._monitor, this);
+                });
+        } else if (WorkspaceAnimation.WorkspaceGroup?.prototype._createDesktopWindows) {
+            this._injections.overrideMethod(WorkspaceAnimation.WorkspaceGroup.prototype, '_createDesktopWindows',
+                original => function (...args) {
+                    desktop._joinWorkspaceSwitch(this._monitor, this._background);
+                    return original.call(this, ...args);
                 });
         }
 
@@ -257,15 +267,15 @@ export class DesktopModule {
     }
 
     // A copy of the widgets, where they are, on a wallpaper that slides
-    // while workspaces switch. (Only the main monitor has them.)
-    _joinWorkspaceSwitch(group) {
-        const monitor = group._monitor;
-        if (!this._layer || this._editor || !this._area || !group._background ||
+    // while workspaces switch: over what the wallpaper's actor has so far.
+    // (Only the main monitor has them.)
+    _joinWorkspaceSwitch(monitor, wallpaper) {
+        if (!this._layer || this._editor || !this._area || !wallpaper ||
             monitor?.index !== Main.layoutManager.primaryIndex)
             return;
         const copy = new Clutter.Clone({source: this._layer});
         copy.set_position(this._area.x - monitor.x, this._area.y - monitor.y);
-        group._background.add_child(copy);
+        wallpaper.add_child(copy);
     }
 
     /**
