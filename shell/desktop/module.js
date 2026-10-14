@@ -23,6 +23,7 @@ import {
     CLOCK_FACES, KINDS, cardGlass, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
+import {paintStage} from '../core/compat.js';
 import {LiquidPaint} from '../core/liquid.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
@@ -490,7 +491,7 @@ export class DesktopModule {
         const {x, y, width, height} = this._area;
         let content = null;
         try {
-            content = global.stage.paint_to_content(new Mtk.Rectangle({x, y, width, height}),
+            content = paintStage(new Mtk.Rectangle({x, y, width, height}),
                 this._layer.get_resource_scale(), Clutter.PaintFlag.NO_CURSORS);
         } catch (e) {
             console.warn('Atelier: could not keep the desktop\'s look', e);
