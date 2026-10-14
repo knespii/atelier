@@ -358,16 +358,22 @@ async function testIsland(ext, atelier) {
     check(dateMenu._messageList.get_parent()?.get_parent() === island.page, 'GNOME\'s notification list is there');
     await Scripting.sleep(500);
     await screenshotIsland('12-control-centre-notifications', 520);
+    // (GNOME shows the day's events with calendars to show them from: not
+    // without evolution-data-server, as in a container.)
+    const eventsShown = dateMenu._eventsItem.visible;
     island.page.setTab('calendar');
+    dateMenu._eventsItem.visible = true;
     await Scripting.sleep(500);
     check(dateMenu._calendar.mapped, 'and the calendar on its own tab');
     const [calendarX, calendarY] = dateMenu._calendar.get_transformed_position();
     const [eventsX] = dateMenu._eventsItem.get_transformed_position();
     check(eventsX >= calendarX + dateMenu._calendar.width && calendarY < 200 &&
-        dateMenu._calendar.layout_manager.column_homogeneous, 'the events beside the month, its days spread evenly');
+        dateMenu._calendar.layout_manager.column_homogeneous,
+    `the events beside the month, its days spread evenly (${eventsX} vs ${calendarX}+${dateMenu._calendar.width}, ${calendarY})`);
     check(island.page.contains(dateMenu._eventsItem) && !island.page.contains(dateMenu._clocksItem) &&
         !island.page.contains(dateMenu._weatherItem), 'without the world clocks and the weather');
     await screenshotIsland('12b-control-centre-calendar', 640);
+    dateMenu._eventsItem.visible = eventsShown;
     Main.panel.toggleCalendar();
     check(await waitFor(() => island.page?.tab === 'notifications', 1000), 'Super+V again goes to the notifications');
     Main.panel.toggleCalendar();
@@ -895,6 +901,11 @@ async function testBarStyles(ext) {
         rightStart() >= island.x + island.width && rightStart() - island.x - island.width < 24;
     const bounds = () => `${Math.round(leftEnd())} | ${island.x}–${island.x + island.width} | ${Math.round(rightStart())}`;
     const top = name => screenshotArea(name, 0, 0, global.stage.width, 44);
+    // A battery, which a compact bar keeps on the right. (Without UPower, as
+    // in a container, GNOME's battery tile is hidden.)
+    const powerToggle = Main.panel.statusArea.quickSettings._system._systemItem.powerToggle;
+    const batteryShown = powerToggle.visible;
+    powerToggle.visible = true;
     await restPointer();
 
     check(left.translation_x === 0 && right.translation_x === 0 && rightStart() > global.stage.width - 400,
@@ -1037,6 +1048,7 @@ async function testBarStyles(ext) {
         !island.has_style_class_name('atelier-island-glass') && left.translation_x === 0 &&
         right.translation_x === 0 && Main.panel.has_style_class_name('atelier-bar-clean'),
     'back to the spread bar on the wallpaper');
+    powerToggle.visible = batteryShown;
 }
 
 // A made-up GitHub page: a year with something every few days.

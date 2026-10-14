@@ -75,6 +75,18 @@ for f in gtk-3.0/gtk.css gtk-4.0/gtk.css gtk-4.0/gtk-dark.css gtk-4.0/assets/che
     echo "/* $f */" > "$ROOT/data/themes/Modern/$f"
 done
 
+# Adwaita-dark, which a profile names, comes with gnome-themes-extra, which
+# not every system has (Ubuntu 26.04 doesn't); GTK has no such theme built in.
+if [ ! -f /usr/share/themes/Adwaita-dark/gtk-3.0/gtk.css ]; then
+    mkdir -p "$ROOT/data/themes/Adwaita-dark/gtk-3.0"
+    echo "/* Adwaita-dark */" > "$ROOT/data/themes/Adwaita-dark/gtk-3.0/gtk.css"
+fi
+
+# Without GDM (in a container), the shell can't lock the screen and says so
+# in a notification at its first start, which the island would show over
+# the tests: it has been said already.
+touch "$ROOT/data/gnome-shell/lock-warning-shown"
+
 # BG Changer's library with the wallpaper currently on the desktop.
 LEGACY_WALLPAPER="$ROOT/data/bg-changer/wallpapers/1234abcd-amber.jxl"
 mkdir -p "$(dirname "$LEGACY_WALLPAPER")"
