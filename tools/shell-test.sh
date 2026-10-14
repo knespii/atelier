@@ -23,6 +23,13 @@ if [ "$SUITE" = two-monitors ]; then
     ROOT="$REPO/tests/output/shell-two-monitors"
     MONITORS="$MONITORS --virtual-monitor 1280x1024"
 fi
+# (Elsewhere when asked: out of a container, say, the repository read-only.)
+ROOT="${ATELIER_OUTPUT_ROOT:-$ROOT}"
+# Only a shell that still has X11 (48) is told to go without it.
+NO_X11=""
+if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
+    NO_X11="--no-x11"
+fi
 UUID="atelier@local"
 BG=/usr/share/backgrounds/gnome
 
@@ -133,7 +140,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 600 \
-    gnome-shell --headless $MONITORS --no-x11 \
+    gnome-shell --headless $MONITORS $NO_X11 \
         --wayland-display=atelier-test-0 --force-animations \
         --automation-script="$REPO/tools/shell-test.js" \
     > "$ROOT/shell.log" 2>&1 || status=$?

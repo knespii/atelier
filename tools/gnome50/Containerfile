@@ -1,0 +1,15 @@
+# A GNOME Shell 50 to test against, as Ubuntu 26.04 has it (with Ubuntu's
+# own extensions: Ubuntu Dock, Desktop Icons). Headless: nothing is shown.
+FROM docker.io/library/ubuntu:26.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gnome-shell gnome-shell-extensions gnome-shell-extension-prefs \
+        gnome-shell-extension-ubuntu-dock gnome-shell-extension-desktop-icons-ng \
+        gnome-backgrounds gnome-terminal gjs dbus dbus-x11 \
+        gir1.2-gweather-4.0 gir1.2-goa-1.0 gir1.2-gnomedesktop-4.0 gir1.2-soup-3.0 \
+        gir1.2-adw-1 gir1.2-gtk-4.0 libglib2.0-bin mesa-utils libgl1-mesa-dri \
+        fonts-cantarell adwaita-icon-theme coreutils procps make nodejs \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m tester
+USER tester
+WORKDIR /home/tester

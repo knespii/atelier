@@ -34,6 +34,20 @@ const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
 // 'main', 'two-monitors' (the session on two monitors) or 'dock' (only
 // the dock's checks)
 const SUITE = GLib.getenv('ATELIER_TEST_SUITE') ?? 'main';
+// Only some parts of the main suite, by name (ATELIER_TEST_ONLY=testDesktop,testNotes).
+const ONLY = GLib.getenv('ATELIER_TEST_ONLY')?.split(',').filter(Boolean) ?? null;
+
+// A part of the main suite: skipped when not asked for; one that throws
+// says so, and the rest still run.
+async function part(test, ...args) {
+    if (ONLY && !ONLY.includes(test.name))
+        return;
+    try {
+        await test(...args);
+    } catch (e) {
+        check(false, `exception in ${test.name}: ${e}\n${e.stack}`);
+    }
+}
 
 export const METRICS = {};
 
@@ -2533,28 +2547,28 @@ export async function run() {
             return;
         }
 
-        await testIsland(ext, atelier);
-        await testNotifications(ext, atelier);
-        await testControlCentre(ext);
-        await testOverviewBar();
-        await testBarStyles(ext);
-        await testFullscreen(ext);
-        await testClaude(ext);
-        await testDesktop(ext);
-        await testNotes(ext);
-        await testDock(ext);
-        await testSwitcherAndReveal(atelier);
-        await testPalette(ext, atelier);
-        await testShortcutsAndRequests(atelier);
-        await testFromOverview(atelier);
-        await testHostileShellTheme(atelier);
-        await testGtkStyles(ext, atelier);
-        await testTerminal(ext);
-        await testProfilesStayAsSaved(ext, atelier);
-        await testWallpapersTab(atelier);
-        await testNewProfile(ext, atelier);
-        await testDisableCleansUp(atelier);
-        await testSwitcherPopupGoesWithAtelier();
+        await part(testIsland, ext, atelier);
+        await part(testNotifications, ext, atelier);
+        await part(testControlCentre, ext);
+        await part(testOverviewBar);
+        await part(testBarStyles, ext);
+        await part(testFullscreen, ext);
+        await part(testClaude, ext);
+        await part(testDesktop, ext);
+        await part(testNotes, ext);
+        await part(testDock, ext);
+        await part(testSwitcherAndReveal, atelier);
+        await part(testPalette, ext, atelier);
+        await part(testShortcutsAndRequests, atelier);
+        await part(testFromOverview, atelier);
+        await part(testHostileShellTheme, atelier);
+        await part(testGtkStyles, ext, atelier);
+        await part(testTerminal, ext);
+        await part(testProfilesStayAsSaved, ext, atelier);
+        await part(testWallpapersTab, atelier);
+        await part(testNewProfile, ext, atelier);
+        await part(testDisableCleansUp, atelier);
+        await part(testSwitcherPopupGoesWithAtelier);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);

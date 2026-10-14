@@ -18,6 +18,12 @@ set -eu
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 ROOT="$REPO/tests/output/showcase"
+ROOT="${ATELIER_OUTPUT_ROOT:-$ROOT}"
+# Only a shell that still has X11 (48) is told to go without it.
+NO_X11=""
+if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
+    NO_X11="--no-x11"
+fi
 UUID="atelier@local"
 BG=/usr/share/backgrounds/gnome
 FRAMES="${ATELIER_SHOWCASE_FRAMES:-}"
@@ -143,7 +149,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_SHOWCASE_OUTPUT="$ROOT" \
     ATELIER_SHOWCASE_DOCS="$REPO/docs/screenshots" ATELIER_SHOWCASE_FRAMES="$FRAMES" \
     dbus-run-session -- timeout --kill-after=5 1800 \
-    gnome-shell --headless --virtual-monitor 3840x2160 --no-x11 \
+    gnome-shell --headless --virtual-monitor 3840x2160 $NO_X11 \
         --wayland-display=atelier-showcase-0 --force-animations \
         --automation-script="$REPO/tools/showcase.js" \
     > "$ROOT/shell.log" 2>&1 || status=$?

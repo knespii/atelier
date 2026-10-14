@@ -6,6 +6,12 @@ set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD/tests/output/prefs"
+ROOT="${ATELIER_OUTPUT_ROOT:-$ROOT}"
+# Only a shell that still has X11 (48) is told to go without it.
+NO_X11=""
+if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
+    NO_X11="--no-x11"
+fi
 SOCKET=atelier-prefs-0
 
 rm -rf "$ROOT"
@@ -36,9 +42,9 @@ chmod +x "$ROOT/bin/ibus-daemon"
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_DISPLAY -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
     XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 PATH="$ROOT/bin:$PATH" ATELIER_PREFS_OUTPUT="$ROOT" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
-    GSETTINGS_BACKEND=memory GDK_DEBUG=no-portals NO_AT_BRIDGE=1 ROOT="$ROOT" SOCKET="$SOCKET" \
+    GSETTINGS_BACKEND=memory GDK_DEBUG=no-portals NO_AT_BRIDGE=1 ROOT="$ROOT" SOCKET="$SOCKET" NO_X11="$NO_X11" \
     dbus-run-session -- sh -c '
-        gnome-shell --headless --virtual-monitor 1920x1200 --no-x11 \
+        gnome-shell --headless --virtual-monitor 1920x1200 $NO_X11 \
             --wayland-display="$SOCKET" > "$ROOT/shell.log" 2>&1 &
         shell=$!
         for _ in $(seq 100); do
