@@ -9,7 +9,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['show-trash', 'show-mounts', 'show-mounts-only-mounted', 'show-mounts-network', 'isolate-locations',
-    'show-show-apps-button', 'show-apps-at-top', 'show-apps-always-in-the-edge', 'extend-height'];
+    'show-show-apps-button', 'show-apps-at-top', 'show-apps-always-in-the-edge', 'show-apps-icon', 'extend-height'];
 
 const TRASH_ID = 'atelier-location:trash';
 
@@ -25,6 +25,8 @@ async function setDock(t, values) {
     for (const [key, value] of Object.entries(values)) {
         if (value === null)
             t.settings.reset(key);
+        else if (typeof value === 'string')
+            t.settings.set_string(key, value);
         else
             t.settings.set_boolean(key, value);
     }
@@ -163,8 +165,8 @@ async function drives(t, locations) {
     check(!locations._volumeMonitor, 'turned off, the volume monitor is let go of');
 }
 
-// The Show Applications button: at the end, at the start, at the edge in
-// panel mode; it opens the app grid.
+// The Show Applications button: the system's icon or GNOME's dots; at the
+// end, at the start, at the edge in panel mode; it opens the app grid.
 async function showApps(t) {
     const {check, Main} = t;
     await setDock(t, {'show-show-apps-button': true});
@@ -176,6 +178,16 @@ async function showApps(t) {
     const item = [...dock.items.values()][0];
     check(item && Math.abs(button.height - item.height) <= 2 && Math.abs(button.width - item.width) <= 2,
         `as big as the apps (${button.width}×${button.height}, an app ${item?.width}×${item?.height})`);
+    const mode = Main.sessionMode.currentMode;
+    check(button._iconActor?.icon_name === `view-app-grid-${mode}-symbolic` &&
+        button._iconActor.fallback_icon_name === 'view-app-grid-symbolic',
+    `the system's own icon (${button._iconActor?.icon_name}), GNOME's dots where it has none`);
+    await setDock(t, {'show-apps-icon': 'GRID'});
+    button = t.module.dock._showApps;
+    check(button?.mapped && button._iconActor?.icon_name === 'view-app-grid-symbolic', 'or always the dots');
+    await setDock(t, {'show-apps-icon': null});
+    dock = t.module.dock;
+    button = dock._showApps;
 
     await setDock(t, {'show-apps-at-top': true});
     check(own()[0] === button && button.get_parent() === dock.box, 'at the start of them');
@@ -240,6 +252,14 @@ export async function prefs(t) {
     settings.set_boolean('extend-height', true);
     await sleep(50);
     check(!withoutPanel && edge.sensitive, 'at the edge: only in panel mode');
+    rows.get('show-apps-at-top').selected = 1;
+    check(settings.get_boolean('show-apps-at-top'), 'Show Applications at the start is saved');
+    settings.reset('show-apps-at-top');
+    await sleep(50);
+    check(rows.get('show-apps-at-top').selected === 0, 'and at the end shown as it is');
+    rows.get('show-apps-icon').selected = 1;
+    check(settings.get_string('show-apps-icon') === 'GRID', 'the dots for its icon are saved');
+    settings.reset('show-apps-icon');
     ['show-show-apps-button', 'extend-height'].forEach(key => settings.reset(key));
 
     await sleep(50);

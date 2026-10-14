@@ -42,7 +42,7 @@ const SIDE_GLASS = 160;
 // Settings the dock lays its apps out again for.
 const REDISPLAY_KEYS = ['show-favorites', 'show-running', 'isolate-workspaces', 'isolate-monitors',
     'workspace-agnostic-urgent-windows', 'show-show-apps-button', 'show-apps-at-top',
-    'show-apps-always-in-the-edge'];
+    'show-apps-always-in-the-edge', 'show-apps-icon'];
 
 export class Dock extends EventEmitter {
     /**
@@ -322,6 +322,13 @@ export class Dock extends EventEmitter {
     // 'end' of the row, at the edge of the dock (in a slot), or none.
     _syncShowApps() {
         const wanted = this._settings.get_boolean('show-show-apps-button');
+        // (Another icon: the button made anew.)
+        const icon = this._settings.get_string('show-apps-icon');
+        if (this._showApps && this._showAppsIcon !== icon) {
+            this._showApps.destroy();
+            this._showApps = null;
+        }
+        this._showAppsIcon = icon;
         if (wanted && !this._showApps) {
             this._showApps = createShowAppsItem(this);
         } else if (!wanted && this._showApps) {

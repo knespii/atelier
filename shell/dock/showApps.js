@@ -1,5 +1,6 @@
-// The Show Applications button for the dock: GNOME's (the grid icon, and an
-// app dragged onto it is unpinned), the size of the dock's icons, with its
+// The Show Applications button for the dock: GNOME's (the grid icon – or
+// the system's own, Ubuntu's on Ubuntu, as its dock has it – and an app
+// dragged onto it is unpinned), the size of the dock's icons, with its
 // name beside it as theirs. It opens the app grid, and closes it when it is
 // open; it looks pressed while the grid is shown.
 
@@ -43,6 +44,18 @@ class AtelierDockShowApps extends Dash.ShowAppsIcon {
     /** @param {number} size - of the icon, logical pixels */
     setIconSize(size) {
         this.icon.setIconSize(size);
+    }
+
+    // The system's own grid icon (as the session names it, e.g.
+    // view-app-grid-ubuntu-symbolic), GNOME's where it has none; or always
+    // GNOME's.
+    _createIcon(size) {
+        const icon = super._createIcon(size);
+        if (this._dock?.settings.get_string('show-apps-icon') !== 'GRID') {
+            icon.fallback_icon_name = icon.icon_name;
+            icon.icon_name = `view-app-grid-${Main.sessionMode.currentMode}-symbolic`;
+        }
+        return icon;
     }
 
     // Beside it, away from the dock's edge, as the apps' names.

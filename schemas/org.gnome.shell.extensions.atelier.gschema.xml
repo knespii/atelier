@@ -83,6 +83,11 @@
     <value nick="DYNAMIC" value="2"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.ShowAppsIcon">
+    <value nick="SYSTEM" value="0"/>
+    <value nick="GRID" value="1"/>
+  </enum>
+
   <enum id="org.gnome.shell.extensions.atelier.DockIndicator">
     <value nick="DEFAULT" value="0"/>
     <value nick="DOT" value="1"/>
@@ -623,6 +628,11 @@
     <key name="show-show-apps-button" type="b">
       <default>false</default>
       <summary>Show Applications button</summary>
+    </key>
+    <key name="show-apps-icon" enum="org.gnome.shell.extensions.atelier.ShowAppsIcon">
+      <default>'SYSTEM'</default>
+      <summary>Show Applications icon</summary>
+      <description>The system's own (Ubuntu's, on Ubuntu; elsewhere GNOME's grid of dots), or always GNOME's grid of dots.</description>
     </key>
     <key name="show-apps-at-top" type="b">
       <default>false</default>
