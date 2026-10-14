@@ -31,6 +31,21 @@ export function setCursor(name) {
 }
 
 /**
+ * A picture of a part of the stage, as it is drawn now.
+ *
+ * @param {Mtk.Rectangle} rect - on the stage
+ * @param {number} scale
+ * @param {Clutter.PaintFlag} flags
+ * @returns {Clutter.Content}
+ */
+export function paintStage(rect, scale, flags) {
+    // (From 50 its colors' state goes in too: none, for the stage's own.)
+    if (global.stage.paint_to_content.length > 3)
+        return global.stage.paint_to_content(rect, scale, null, flags);
+    return global.stage.paint_to_content(rect, scale, flags);
+}
+
+/**
  * @param {Clutter.Grab} grab - from Main.pushModal()
  * @returns {boolean} whether it has the keyboard (from 50, a grab always
  *   has it)
