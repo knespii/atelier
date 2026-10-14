@@ -11,7 +11,7 @@
 // is described there.
 
 // The settings these checks change, put back after them.
-const KEYS = ['click-action', 'scroll-action', 'scroll-switch-workspace', 'hot-keys', 'hotkeys-overlay',
+const KEYS = ['click-action', 'middle-click-action', 'shift-click-action', 'scroll-action', 'scroll-switch-workspace', 'hot-keys', 'hotkeys-overlay',
     'hotkeys-show-dock', 'shortcut-timeout', 'shortcut', 'magnification'];
 
 const APP_ID = 'org.atelier.DockTest';
@@ -101,6 +101,47 @@ function scroll(t, down) {
     };
 }
 
+let devices = null;
+
+// Real input on an actor, as the user gives it (GNOME 48's button takes
+// the presses itself, 49's a click gesture): a click of a button, Shift
+// held or not; a turn of the wheel.
+function inputDevices(t) {
+    const {Clutter} = t;
+    const seat = global.stage.context.get_backend().get_default_seat();
+    devices ??= {
+        pointer: seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE),
+        keyboard: seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE),
+    };
+    return devices;
+}
+
+async function realClick(t, actor, button, shift = false) {
+    const {Clutter, GLib} = t;
+    const {pointer, keyboard} = inputDevices(t);
+    await t.pointerTo(...t.centerOf(actor));
+    const shiftKey = async state => {
+        keyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Shift_L, state);
+        await t.sleep(40);
+    };
+    if (shift)
+        await shiftKey(Clutter.KeyState.PRESSED);
+    for (const state of [Clutter.ButtonState.PRESSED, Clutter.ButtonState.RELEASED]) {
+        pointer.notify_button(GLib.get_monotonic_time(), button, state);
+        await t.sleep(60);
+    }
+    if (shift)
+        await shiftKey(Clutter.KeyState.RELEASED);
+}
+
+async function realScroll(t, actor, down) {
+    const {Clutter, GLib} = t;
+    await t.pointerTo(...t.centerOf(actor));
+    inputDevices(t).pointer.notify_discrete_scroll(GLib.get_monotonic_time(),
+        down ? Clutter.ScrollDirection.DOWN : Clutter.ScrollDirection.UP, Clutter.ScrollSource.WHEEL);
+    await t.sleep(60);
+}
+
 // The windows the overview shows.
 async function overviewWindows(t) {
     const {WindowPreview} = await import('resource:///org/gnome/shell/ui/windowPreview.js');
@@ -145,6 +186,36 @@ export async function shell(t) {
     }
 }
 
+// The clicks as the user clicks: the one window of the focused app goes
+// down and comes up; the middle button and Shift do what they are set to.
+async function realClicks(t, itemOf, window) {
+    const {Clutter, check, settings} = t;
+    const dock = t.module.dock;
+    dock.force(true);
+    await t.sleep(400);
+    await realClick(t, itemOf(), Clutter.BUTTON_PRIMARY);
+    check(await t.waitFor(() => window.minimized, 2000), 'clicked for real: minimized');
+    await t.sleep(600);
+    await realClick(t, itemOf(), Clutter.BUTTON_PRIMARY);
+    check(await t.waitFor(() => !window.minimized && global.display.focus_window === window, 2000),
+        'and brought up again');
+    settings.set_string('middle-click-action', 'minimize');
+    settings.set_string('shift-click-action', 'minimize');
+    for (const [what, button, shift] of [['the middle button', Clutter.BUTTON_MIDDLE, false],
+        ['Shift and a click', Clutter.BUTTON_PRIMARY, true]]) {
+        await t.sleep(400);
+        await realClick(t, itemOf(), button, shift);
+        check(await t.waitFor(() => window.minimized, 2000), `${what}, set to minimize: minimized`);
+        await t.sleep(600);
+        await focus(t, window);
+    }
+    settings.reset('middle-click-action');
+    settings.reset('shift-click-action');
+    dock.force(false);
+    await t.restPointer();
+    await t.sleep(400);
+}
+
 async function clicks(t, windows) {
     const {Main, check, settings} = t;
     const app = await windows.app();
@@ -169,6 +240,7 @@ async function clicks(t, windows) {
     itemOf().icon.activate(1);
     check(await t.waitFor(() => !first.minimized && global.display.focus_window === first, 2000),
         'and brought up again');
+    await realClicks(t, itemOf, first);
 
     const second = await windows.open('Dock Test 2');
     await focus(t, second);
@@ -204,6 +276,13 @@ async function clicks(t, windows) {
     await t.sleep(400);
     icon.vfunc_scroll_event(scroll(t, false));
     check(await t.waitFor(() => global.display.focus_window === second, 1000), 'scrolling up: back');
+    await t.sleep(400);
+    t.module.dock.force(true);
+    await realScroll(t, itemOf(), true);
+    check(await t.waitFor(() => global.display.focus_window === first, 1000), 'the wheel turned on the app: the same');
+    t.module.dock.force(false);
+    await t.restPointer();
+    await focus(t, second);
 
     // Or switches workspaces; so does scrolling on the dock between apps.
     const manager = global.workspace_manager;

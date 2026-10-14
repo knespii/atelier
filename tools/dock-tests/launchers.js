@@ -67,6 +67,14 @@ async function trash(t, locations) {
     const item = dock.items.get(TRASH_ID);
     check(item?.mapped && locations.apps().map(app => app.get_id()).join() === TRASH_ID,
         'the trash: an item in the dock');
+    // (GVfs has the trash: a system without it, a bare container, has no
+    // trash to show.)
+    if (!Gio.Vfs.get_default().get_supported_uri_schemes().includes('trash')) {
+        print('SKIP  the trash\'s count, filling and emptying: no GVfs here, so no trash:// to read');
+        await setDock(t, {'show-trash': null});
+        check(!t.module.dock.items.has(TRASH_ID) && !locations._trash, 'turned off, it goes');
+        return;
+    }
     check(await t.waitFor(() => locations._trash.count === 0, 5000) && iconName(item) === 'user-trash',
         `empty, with the empty trash's icon (${locations._trash.count}, ${iconName(item)})`);
     // File manager windows go with it, but there is no file manager here.

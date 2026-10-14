@@ -166,11 +166,13 @@ async function coveringWindows(t) {
     a.make_above();
     await mode('FOCUS_APPLICATION_WINDOWS', b, true, 'another app\'s window kept on top over it');
     a.unmake_above();
-    a.maximize(Meta.MaximizeFlags.BOTH);
+    // (Only in the shell: the preferences' checks import this file too.)
+    const compat = await import('../../shell/core/compat.js');
+    compat.maximize(a);
     await t.waitFor(() => a.maximized_horizontally && a.maximized_vertically, 2000);
     await mode('MAXIMIZED_WINDOWS', b, true, 'another app\'s maximized window');
     await mode('ALWAYS_ON_TOP', a, false, 'the focused app\'s maximized window');
-    a.unmaximize(Meta.MaximizeFlags.BOTH);
+    compat.unmaximize(a);
     await moveWindow(t, a, {x: rect.x, y: rect.y - 250, width: 600, height: 300});
     a.minimize();
     await mode('ALL_WINDOWS', b, false, 'the window over it minimized');

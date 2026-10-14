@@ -20,8 +20,71 @@ const rectOf = actor => {
     return {x, y, width, height};
 };
 
+/**
+ * At least so many apps that can be pinned (shown in the app grid). Where
+ * the system has fewer (a bare container, say), made-up ones that run
+ * `true` are installed for the user (in the test's data dir) to make up the
+ * count.
+ *
+ * @param {object} t
+ * @param {number} count
+ * @returns {Promise<Shell.App[]>} all of them, the system's first
+ */
+export async function pinnableApps(t, count) {
+    const {Shell, GLib} = t;
+    const system = Shell.AppSystem.get_default();
+    const madeUp = app => app.get_id().startsWith('org.atelier.Test');
+    const shown = () => {
+        const apps = system.get_installed().filter(info => info.should_show())
+            .map(info => system.lookup_app(info.get_id())).filter(Boolean);
+        return [...apps.filter(app => !madeUp(app)), ...apps.filter(madeUp)];
+    };
+    const missing = count - shown().length;
+    if (missing <= 0)
+        return shown();
+    const dir = GLib.build_filenamev([GLib.get_user_data_dir(), 'applications']);
+    GLib.mkdir_with_parents(dir, 0o755);
+    for (let i = 1; i <= missing; i++) {
+        GLib.file_set_contents(GLib.build_filenamev([dir, `org.atelier.Test${i}.desktop`]),
+            `[Desktop Entry]\nType=Application\nName=Test App ${i}\nExec=true\nIcon=application-x-executable\n`);
+    }
+    // (A folder made after the shell started is noticed in a few seconds.)
+    await t.waitFor(() => shown().length >= count, 15000);
+    return shown();
+}
+
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width &&
     a.y < b.y + b.height && b.y < a.y + a.height;
+
+let rightButton = null;
+
+// An app's menu, opened by a right click (as the user does: GNOME 48 takes
+// the press itself, 49 on a gesture), faces the middle of the screen.
+async function menuFacesAway(t, dock) {
+    const {Clutter, GLib, check} = t;
+    const item = dock.orderedItems.find(i => i.visible);
+    const icon = item?.icon;
+    if (!check(icon, `${dock.side.toLowerCase()}: an app to open the menu of`))
+        return;
+    rightButton ??= global.stage.context.get_backend().get_default_seat()
+        .create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const [x, y] = t.centerOf(icon);
+    await t.pointerTo(x, y);
+    for (const state of [Clutter.ButtonState.PRESSED, Clutter.ButtonState.RELEASED]) {
+        rightButton.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_SECONDARY, state);
+        await t.sleep(60);
+    }
+    await t.sleep(400);
+    const menu = icon._menu;
+    const open = Boolean(menu?.isOpen);
+    const [mx, my] = open ? t.centerOf(menu.actor) : [x, y];
+    const away = {BOTTOM: my < y, TOP: my > y, LEFT: mx > x, RIGHT: mx < x}[dock.side];
+    check(open && away, `${dock.side.toLowerCase()}: an app's menu opens away from the edge ` +
+        `(${open ? `at ${Math.round(mx)}, ${Math.round(my)}, the icon at ${Math.round(x)}, ${Math.round(y)}` : 'not open'})`);
+    menu?.close();
+    await t.restPointer();
+    await t.sleep(300);
+}
 
 /**
  * Change dock settings and wait for the dock built anew, laid out.
@@ -51,12 +114,21 @@ async function setDock(t, values) {
 }
 
 export async function shell(t) {
-    const {Main, St, Shell, AppFavorites, check} = t;
+    const {Main, St, AppFavorites, check} = t;
     const module = t.module;
     let dock = module.dock;
     await t.restPointer();
     await t.sleep(500);
     const monitor = Main.layoutManager.primaryMonitor;
+    // Some pinned apps, where the system pins none that are installed (the
+    // container's Ubuntu: its favourites aren't in it); and a few more to pin.
+    const installed = await pinnableApps(t, 16);
+    check(installed.length >= 16, `apps enough to pin (${installed.length})`);
+    if (AppFavorites.getAppFavorites().getFavorites().length === 0) {
+        global.settings.set_strv('favorite-apps', installed.slice(0, 4).map(app => app.get_id()));
+        await t.waitFor(() => dock.items.size >= 4, 2000);
+        await t.sleep(900);
+    }
     const [dockX, dockY] = dock.actor.get_transformed_position();
     check(Math.abs(dockX + dock.actor.width / 2 - (monitor.x + monitor.width / 2)) <= 1 &&
         dockY + dock.actor.height <= monitor.y + monitor.height && dockY > monitor.height - 150,
@@ -66,6 +138,7 @@ export async function shell(t) {
         `with the pinned apps (${favorites.length})`);
     check(!dock.hidden, 'shown while no window covers it');
     check(dock.iconSize === 48 && !dock._scroll, `its icons the size asked for (${dock.iconSize})`);
+    await menuFacesAway(t, dock);
     await t.screenshotArea('60-dock', monitor.x, monitor.y + monitor.height - 140, monitor.width, 140);
 
     // Brought back by the bottom edge, it stays while the pointer rests
@@ -88,8 +161,6 @@ export async function shell(t) {
     check(pill.get_parent() === dock.box && dock.box.get_last_child() === pill, 'the pill stays at its end');
 
     // An app dropped on it is pinned.
-    const system = Shell.AppSystem.get_default();
-    const installed = system.get_installed().map(info => system.lookup_app(info.get_id())).filter(Boolean);
     const app = installed.find(a => !AppFavorites.getAppFavorites().isFavorite(a.get_id()));
     if (app) {
         dock.acceptDrop({app}, null, 10000, 0);
@@ -147,6 +218,7 @@ async function sides(t, monitor) {
             (vertical ? rect.height > rect.width : rect.width > rect.height),
         `${side.toLowerCase()}: ${vertical ? 'a column' : 'a row'}`);
         await t.screenshotArea(`60-dock-${side.toLowerCase()}`, monitor.x, monitor.y, monitor.width, monitor.height);
+        await menuFacesAway(t, dock);
         dock.hider._slide(true);
         await t.sleep(500);
         const away = rectOf(dock.container);
@@ -312,6 +384,7 @@ export async function prefs(t) {
         rows.get('enabled').get_ancestor(t.Adw.PreferencesGroup).sensitive,
     'the dock off, its options grey out (not the switch)');
     settings.reset('enabled');
+
 }
 
 // In the overview, in place of GNOME's dash: the dash hidden and taking no
@@ -319,6 +392,21 @@ export async function prefs(t) {
 async function inOverview(t, monitor) {
     const {Main, check} = t;
     const controls = Main.overview._overview._controls;
+    // An app pinned while GNOME's dash is hidden: the dash lays its apps
+    // out without fault (from 49 the new icon has no picture until drawn).
+    const favorites = global.settings.get_strv('favorite-apps');
+    const pinned = (await pinnableApps(t, 16)).find(app => !favorites.includes(app.get_id()));
+    let error = null;
+    if (pinned) {
+        // (Not said in the island.)
+        global.settings.set_strv('favorite-apps', [...favorites, pinned.get_id()]);
+        try {
+            Main.overview.dash._redisplay();
+        } catch (e) {
+            error = e;
+        }
+    }
+    check(pinned && !error, `GNOME's dash, hidden, takes an app pinned meanwhile (${error?.message ?? 'no fault'})`);
     Main.overview.show();
     await t.waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
     await t.sleep(300);
@@ -339,8 +427,11 @@ async function inOverview(t, monitor) {
     Main.overview.show();
     await t.waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
     await t.sleep(300);
-    check(Main.overview.dash.visible && t.module.dock.hidden && t.module.services.overview.room.size === 0,
-        'off: the dock goes in the overview, GNOME\'s dash is there');
+    const dashIcons = Main.overview.dash._box.get_children().map(child => child.child?._delegate?.icon).filter(Boolean);
+    check(Main.overview.dash.visible && t.module.dock.hidden && t.module.services.overview.room.size === 0 &&
+        dashIcons.length > 0 && dashIcons.every(icon => icon.icon),
+    'off: the dock goes in the overview, GNOME\'s dash is there (with the pictures of its apps)');
+    global.settings.set_strv('favorite-apps', favorites);
     Main.overview.hide();
     await t.waitFor(() => !Main.overview.visible, 4000);
     await setDock(t, {'show-in-overview': null});

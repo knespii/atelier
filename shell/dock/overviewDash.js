@@ -60,9 +60,11 @@ export class OverviewDash {
             const size = room.side === 'BOTTOM' ? room.size : 0;
             return [size, size];
         });
-        // (Hidden, it is neither sized nor placed.)
+        // (Hidden, it is neither sized nor placed; nor are its icons, which
+        // aren't drawn – from 49, one pinned meanwhile has no picture yet.)
         this._injections.overrideMethod(dash, 'setMaxSize', () => function () {});
         this._injections.overrideMethod(dash, 'allocate', () => function () {});
+        this._injections.overrideMethod(dash, '_adjustIconSize', () => function () {});
         const layout = Object.getPrototypeOf(controls.layout_manager);
         const clear = (box, state) => {
             if (state === ControlsState.HIDDEN || room.side === 'BOTTOM' || room.size === 0)
@@ -95,6 +97,7 @@ export class OverviewDash {
         this._injections.clear();
         dash.disconnectObject(this);
         dash.show();
+        dash._queueRedisplay();
         dash.queue_relayout();
         this._controls?.queue_relayout();
     }

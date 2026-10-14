@@ -39,6 +39,9 @@ class AtelierDockIcon extends Dash.DashIcon {
         this._iconSize = iconSize;
         this._cycle = null;
         this.icon.setIconSize(iconSize);
+        // (From 49 GNOME's icon opens its menu to the side it was made
+        // with, not the one popupMenu() is given.)
+        this._popupMenuSide = St.Side[ctx.side] ?? St.Side.BOTTOM;
         [this._dot.x_align, this._dot.y_align] = DOT_ALIGN[ctx.side] ?? DOT_ALIGN.BOTTOM;
         this._decorations = new IconDecorations(this, ctx);
         this._updateRunningStyle();
@@ -93,7 +96,7 @@ class AtelierDockIcon extends Dash.DashIcon {
 
     // The menu opens away from the dock's edge, its arrow towards it.
     popupMenu() {
-        AppDisplay.AppIcon.prototype.popupMenu.call(this, St.Side[this._ctx.side] ?? St.Side.BOTTOM);
+        AppDisplay.AppIcon.prototype.popupMenu.call(this, this._popupMenuSide);
     }
 
     getDragActor() {

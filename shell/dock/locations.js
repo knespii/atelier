@@ -10,6 +10,7 @@
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
@@ -61,7 +62,7 @@ const LocationApp = GObject.registerClass({
         keyFile.set_string('Desktop Entry', 'Type', 'Application');
         keyFile.set_string('Desktop Entry', 'Name', name);
         keyFile.set_string('Desktop Entry', 'Exec', `gio open ${execArgument(uri || TRASH_URI)}`);
-        super._init({app_info: Gio.DesktopAppInfo.new_from_keyfile(keyFile)});
+        super._init({app_info: GioUnix.DesktopAppInfo.new_from_keyfile(keyFile)});
         this._locationId = id;
         this._name = name;
         this._gicon = icon;
@@ -119,7 +120,10 @@ class AtelierLocationIcon extends DockIcon {
 
     popupMenu() {
         this.setForcedHighlight(true);
-        this._removeMenuTimeout();
+        // (Up to 48, as GNOME's app icon does: no long press waiting to open
+        // it again, the press's release not picking an item. From 49 a long
+        // press is a gesture, and GNOME's icon asks for neither.)
+        this._removeMenuTimeout?.();
         this.fake_release();
         if (!this._menu) {
             this._menu = new PopupMenu.PopupMenu(this, 0.5, St.Side[this._ctx.side] ?? St.Side.BOTTOM);
@@ -143,7 +147,7 @@ class AtelierLocationIcon extends DockIcon {
         }
         this.emit('menu-state-changed', true);
         this._menu.open(BoxPointer.PopupAnimation.FULL);
-        this._menuManager.ignoreRelease();
+        this._menuManager.ignoreRelease?.();
         this.emit('sync-tooltip');
         return false;
     }
