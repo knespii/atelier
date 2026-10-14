@@ -1078,6 +1078,9 @@ async function testDesktop(ext) {
         Main.overview.hide();
         await waitFor(() => !Main.overview.visible, 4000);
     }
+    // (Just started, the widgets may still be spreading back from the
+    // overview the session starts in.)
+    await waitFor(() => !desktop._flowing, 3000);
     check(layer.get_parent() === Main.layoutManager._backgroundGroup,
         'the widgets lie on the wallpaper, under the windows');
     check(['clock', 'date', 'calendar'].every(id => desktop.widgets.get(id)?.mapped), 'a clock, the date and the calendar');
@@ -1272,7 +1275,13 @@ async function testDesktop(ext) {
     await Scripting.sleep(400);
     const watch = [...desktop.widgets.values()].find(w => w.entry.kind === 'clock' && w.entry.face === 'watch');
     check(watch?.entry.x === 28 && watch.entry.y === 10 && Boolean(watch._face), 'a face dragged out is a clock with that face');
-    desktop.removeWidget(watch?.entry.id);
+    // Its button in the corner removes it: clicked, not dragged.
+    const removeButton = watch?._editControls?.get_first_child();
+    await clickAt(...centerOf(removeButton));
+    await Scripting.sleep(300);
+    check(!desktop.widgets.has(watch?.entry.id) && !desktop._editor._drag, 'a click on its corner button removes it');
+    if (desktop.widgets.has(watch?.entry.id))
+        desktop.removeWidget(watch.entry.id);
     const weather = desktop.widgets.get('weather');
     await Scripting.sleep(200);
     check(Boolean(weather._editHandle?.mapped), 'it has a handle on its corner');
@@ -1352,6 +1361,28 @@ async function testDesktop(ext) {
         weather.width === card && weather.entry.size === 'card' && saved()?.size === 'card', 'Esc puts them back');
     const after = await pointerTip(...centerOf(desktop.widgets.get('date')));
     check(after === arrow, `and the pointer is the arrow again, also over a widget (${after})`);
+    // Done, clicked, is done too.
+    desktop.edit();
+    await Scripting.sleep(800);
+    await clickAt(...centerOf(desktop._editor._gallery.get_last_child()));
+    check(await waitFor(() => !desktop.editing, 1000), 'a click on Done is done editing');
+    await waitFor(() => !desktop._closing?.actor, 1500);
+    await restPointer();
+    // A button on a widget (the calendar's for a task, say) takes its own
+    // clicks: the widget opens nothing then.
+    const host = desktop.widgets.get('date');
+    const inner = new St.Button({label: 'Inner', reactive: true, x_expand: false});
+    host.add_child(inner);
+    let innerClicks = 0;
+    let opened = 0;
+    inner.connect('clicked', () => innerClicks++);
+    host.activate = () => opened++;
+    await Scripting.sleep(200);
+    await clickAt(...centerOf(inner));
+    await Scripting.sleep(200);
+    check(innerClicks === 1 && opened === 0, `a button on a widget takes its click (${innerClicks}, the widget ${opened})`);
+    delete host.activate;
+    inner.destroy();
     await restPointer();
 
 
