@@ -8,15 +8,15 @@
   between them, the island, notes that drip out of it
 </p>
 
-A GNOME Shell 48 extension that styles the whole desktop as one piece.
-**Profiles** keep a look – wallpaper, light/dark style, accent, GTK and shell
-theme, icons, cursor, font, palette and the widgets – and one key switches
-between them. A **palette taken from the wallpaper** colors Atelier and, if you
-want, GTK apps and GNOME Terminal. In the middle of the top bar, an **island**
-takes the place of GNOME's clock: it grows into a glance, the notifications and
-the control centre, and new notes drip out of it. On the desktop there are
-**widgets** on glass, **notes** pinned to the edge of the screen and a
-**dock**.
+A GNOME Shell extension (GNOME 48 to 50) that styles the whole desktop as one
+piece. **Profiles** keep a look – wallpaper, light/dark style, accent, GTK and
+shell theme, icons, cursor, font, palette and the widgets – and one key
+switches between them. A **palette taken from the wallpaper** colors Atelier
+and, if you want, GTK apps and GNOME Terminal. In the middle of the top bar,
+an **island** takes the place of GNOME's clock: it grows into a glance, the
+notifications and the control centre, and new notes drip out of it. On the
+desktop there are **widgets** on glass, **notes** pinned to the edge of the
+screen and a **dock**.
 
 ![The desktop with Atelier: the island as a notch of glass, widgets on the left, two notes on the edge, the dock](docs/screenshots/desktop.jpg)
 
@@ -232,8 +232,8 @@ Optional, in Settings → Appearance:
 
 ## Install
 
-Atelier is made for **GNOME Shell 48** (shell extensions are tied to the
-version of GNOME they were made for). It needs `git`, `make`,
+Atelier runs on **GNOME Shell 48, 49 and 50** (shell extensions are tied to
+the versions of GNOME they were made for). It needs `git`, `make`,
 `glib-compile-schemas` (on Debian and Ubuntu in `libglib2.0-bin`, on Fedora in
 `glib2`) and `gnome-extensions` (comes with GNOME Shell).
 
@@ -260,13 +260,42 @@ git pull
 make
 ```
 
+### Ubuntu 26.04 / GNOME 50
+
+Ubuntu 26.04 comes with GNOME 50, which Atelier supports like 48 and 49.
+Install the tools first (the Extensions app is the
+`gnome-shell-extension-prefs` package):
+
+```sh
+sudo apt install git make libglib2.0-bin gnome-shell-extension-prefs
+```
+
+Then either install from git as above, or from a zip built with `make pack`
+(`gnome-extensions install` compiles the settings schema itself):
+
+```sh
+gnome-extensions install --force atelier@local.shell-extension.zip
+```
+
+Ubuntu brings two extensions of its own that do the same jobs as parts of
+Atelier: **Ubuntu Dock** and **Desktop Icons**. To use Atelier's dock and
+desktop widgets, turn them off in the Extensions app (or with
+`gnome-extensions disable ubuntu-dock@ubuntu.com` and
+`gnome-extensions disable ding@rastersoft.com`). Atelier never turns them off
+itself; while they are on, its settings show a notice on the Dock and Desktop
+pages. Then log out and back in, and enable Atelier:
+
+```sh
+gnome-extensions enable atelier@local
+```
+
 ## Themes: why they used to break the desktop
 
 - **Shell themes are tied to the GNOME version.** A theme made for GNOME 42 or
   older doesn't know the quick settings menu, the new notifications and other
-  parts of GNOME 48, so the shell ends up half styled and partly broken.
-  Atelier flags such themes (Settings → System → Theme Check, and in the
-  profile editor). Use themes that list GNOME 47/48 support.
+  parts of GNOME 48 and later, so the shell ends up half styled and partly
+  broken. Atelier flags such themes (Settings → System → Theme Check, and in
+  the profile editor). Use themes that list support for your GNOME version.
 - **Most GNOME apps ignore GTK themes.** Apps built with libadwaita (Files,
   Settings, Text Editor, …) don't read the `gtk-theme` setting at all; only
   GTK 3 apps do. A theme can still restyle them if it ships a `gtk-4.0`
@@ -308,6 +337,12 @@ desktop is still showing them.
 
 The test sessions use their own settings, data, cache and runtime
 directories under `tests/output`, so they never touch the running desktop.
+
+The same suites run against GNOME Shell 50 in an Ubuntu 26.04 container
+(with Ubuntu Dock and Desktop Icons installed): `tools/gnome50/run.sh
+[main|two-monitors|dock|prefs]` builds the image with `podman` the first
+time, mounts the repository read-only (run `make` first, for the compiled
+schema) and puts the results in `tests/output/gnome50/<suite>/run`.
 
 Layout:
 
