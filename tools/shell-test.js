@@ -2535,6 +2535,14 @@ async function testQuitWithControlCentreOpen(ext) {
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => hasClass(islandModule?.island?.page, 'atelier-cc'), 1000),
         'the control centre is open as the shell quits');
+    // A notification waits behind it, for the island to be free – which it
+    // becomes as the shell takes its UI down.
+    const source = appSource('Files', 'org.gnome.Nautilus', 'folder-symbolic');
+    const waiting = new MessageTray.Notification({source, title: 'Waiting', body: 'behind the control centre'});
+    source.addNotification(waiting);
+    await Scripting.sleep(300);
+    check(Main.messageTray._notificationQueue.includes(waiting) && hasClass(islandModule?.island?.page, 'atelier-cc'),
+        'and a notification waits behind it');
 }
 
 // The shell quits with the island's layout, the bar's place and the

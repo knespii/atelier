@@ -95,7 +95,8 @@ export class IslandModule {
 
     /** @returns {boolean} whether the island is on screen to show pages */
     get available() {
-        return Boolean(this._island?.visible && this._slot?.mapped);
+        // (Not once the shell has taken its UI down as it quits.)
+        return Boolean(!this._stopped && this._island?.visible && this._slot?.mapped);
     }
 
     /**
@@ -103,7 +104,7 @@ export class IslandModule {
      *   keyboard (switcher, power menu) or a toast is up
      */
     get occupied() {
-        const island = this._island;
+        const island = this._stopped ? null : this._island;
         return Boolean(island && (island.busy || island.page instanceof ToastPage));
     }
 

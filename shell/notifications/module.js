@@ -58,6 +58,12 @@ export class NotificationsModule {
                 return bridge._page ? undefined : original.call(this, ...args);
             });
         }
+        // When the shell quits, GNOME takes its UI down with uiGroup while
+        // JS still runs (extensions stay enabled). The island's page goes
+        // down with it, and with the tray, the notification list and the
+        // top bar going too, nothing may be handed on: from then on the tray
+        // is GNOME's alone, as it is without Atelier.
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._stop(), this);
     }
 
     disable() {
@@ -65,6 +71,7 @@ export class NotificationsModule {
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         this._island()?.island.disconnectObject(this);
+        Main.layoutManager.uiGroup.disconnectObject(this);
         // The tray must not be left waiting for an island page.
         const page = this._page;
         if (page) {
@@ -236,6 +243,15 @@ export class NotificationsModule {
             island.disconnectObject(this);
             tray._updateState();
         }, this);
+    }
+
+    _stop() {
+        Main.layoutManager.uiGroup.disconnectObject(this);
+        this._timeouts.forEach(id => GLib.source_remove(id));
+        this._timeouts.clear();
+        this._island()?.island?.disconnectObject(this);
+        this._page = null;
+        this._injections.clear();
     }
 
     _after(delay, callback) {
