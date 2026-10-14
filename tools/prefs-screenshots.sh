@@ -13,6 +13,12 @@ if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
     NO_X11="--no-x11"
 fi
 SOCKET=atelier-prefs-0
+# GNOME Shell's private libraries (the Extensions app code imports Shew):
+# in /usr/lib64 on Fedora.
+SHELL_LIBDIR=/usr/lib/gnome-shell
+if [ ! -d "$SHELL_LIBDIR" ] && [ -d /usr/lib64/gnome-shell ]; then
+    SHELL_LIBDIR=/usr/lib64/gnome-shell
+fi
 
 rm -rf "$ROOT"
 mkdir -p "$ROOT/config" "$ROOT/data" "$ROOT/bin"
@@ -42,7 +48,7 @@ chmod +x "$ROOT/bin/ibus-daemon"
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_DISPLAY -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
     XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 PATH="$ROOT/bin:$PATH" ATELIER_PREFS_OUTPUT="$ROOT" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
-    GSETTINGS_BACKEND=memory GDK_DEBUG=no-portals NO_AT_BRIDGE=1 ROOT="$ROOT" SOCKET="$SOCKET" NO_X11="$NO_X11" \
+    GSETTINGS_BACKEND=memory GDK_DEBUG=no-portals NO_AT_BRIDGE=1 ROOT="$ROOT" SOCKET="$SOCKET" NO_X11="$NO_X11" SHELL_LIBDIR="$SHELL_LIBDIR" \
     dbus-run-session -- sh -c '
         gnome-shell --headless --virtual-monitor 1920x1200 $NO_X11 \
             --wayland-display="$SOCKET" > "$ROOT/shell.log" 2>&1 &
@@ -53,7 +59,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_DISPLAY -u GNOME_KEYRING_CONTROL -u 
         done
         status=0
         WAYLAND_DISPLAY="$SOCKET" \
-        GI_TYPELIB_PATH=/usr/lib/gnome-shell/girepository-1.0 LD_LIBRARY_PATH=/usr/lib/gnome-shell \
+        GI_TYPELIB_PATH="$SHELL_LIBDIR/girepository-1.0" LD_LIBRARY_PATH="$SHELL_LIBDIR" \
             timeout 90 gjs -m tools/run-prefs.js --sample --screenshots "$ROOT" --selftest || status=$?
         kill "$shell" 2>/dev/null || true
         wait "$shell" 2>/dev/null || true

@@ -5,8 +5,9 @@
 //
 // Options: --sample (add sample profiles), --screenshots DIR (render the pages),
 // --selftest (drive the main flows and report PASS/FAIL). Both quit afterwards.
-// Needs GI_TYPELIB_PATH/LD_LIBRARY_PATH pointing at /usr/lib/gnome-shell,
-// which the Makefile sets, because the Extensions app code imports Shew.
+// Needs GI_TYPELIB_PATH/LD_LIBRARY_PATH pointing at GNOME Shell's private
+// libraries (/usr/lib/gnome-shell; /usr/lib64/gnome-shell on Fedora), which
+// the Makefile sets, because the Extensions app code imports Shew.
 
 import Adw from 'gi://Adw?version=1';
 import Gio from 'gi://Gio';
