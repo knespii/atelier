@@ -14,7 +14,6 @@
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
-import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -23,6 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {gather, overflow, spread} from '../../lib/liquid.js';
 import {CLOCK_FACES, KINDS, UNIT, cellOrigin, cellsAt, cellsOf, pixelSize} from '../../lib/widgets.js';
+import {setCursor} from '../core/compat.js';
 import {LiquidPaint} from '../core/liquid.js';
 
 const SNAP_TIME = 160;
@@ -757,18 +757,18 @@ export class DesktopEditor {
     // A hand over a widget, closed while dragging it; arrows on the handle.
     _syncCursor() {
         const widgets = [...this._desktop.widgets.values()];
-        let cursor = Meta.Cursor.DEFAULT;
+        let cursor = 'DEFAULT';
         if (this._drag?.fresh)
-            cursor = this._drag.moved ? Meta.Cursor.GRABBING : Meta.Cursor.DEFAULT;
+            cursor = this._drag.moved ? 'GRABBING' : 'DEFAULT';
         else if (this._drag)
-            cursor = this._drag.stretch ? Meta.Cursor.SE_RESIZE : Meta.Cursor.GRABBING;
+            cursor = this._drag.stretch ? 'SE_RESIZE' : 'GRABBING';
         else if (widgets.some(widget => widget._editHandle?.hover))
-            cursor = Meta.Cursor.SE_RESIZE;
+            cursor = 'SE_RESIZE';
         else if (widgets.some(widget => widget.hover && !widget._editControls?.get_children().some(b => b.hover)))
-            cursor = Meta.Cursor.GRAB;
+            cursor = 'GRAB';
         if (cursor !== this._cursor) {
             this._cursor = cursor;
-            global.display.set_cursor(cursor);
+            setCursor(cursor);
         }
     }
 
@@ -824,7 +824,7 @@ export class DesktopEditor {
             Main.popModal(this._grab);
         this._grab = null;
         this._desktop.widgets.forEach(widget => this._releaseWidget(widget));
-        global.display.set_cursor(Meta.Cursor.DEFAULT);
+        setCursor('DEFAULT');
         const layer = this._desktop.layer;
         this.actor.remove_child(layer);
         this._desktop.restoreLayer();

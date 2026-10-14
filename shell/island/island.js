@@ -18,6 +18,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {grabHasKeyboard} from '../core/compat.js';
+
 /** How long the island takes to change shape, in milliseconds. */
 export const MORPH_TIME = 280;
 const FADE_OUT_TIME = 90;
@@ -233,7 +235,7 @@ export const Island = GObject.registerClass({
 
         if (modal && !this._grab) {
             const grab = Main.pushModal(this, {actionMode: Shell.ActionMode.POPUP});
-            if ((grab.get_seat_state() & Clutter.GrabState.KEYBOARD) === 0) {
+            if (!grabHasKeyboard(grab)) {
                 Main.popModal(grab);
                 return false;
             }

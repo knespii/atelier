@@ -14,6 +14,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {chrome} from '../core/compat.js';
 import {NoteContent, paperStyle} from './card.js';
 
 const PEEK = 18; // logical pixels of a paper that show at the edge
@@ -218,7 +219,7 @@ export class EdgeTabs {
             // Over the widgets, which a paper sliding out covers.
             desktopLayer.connectObject('child-added', () => desktopLayer.set_child_above_sibling(sheet, null), sheet);
         } else {
-            Main.layoutManager.addChrome(sheet, {affectsInputRegion: false, trackFullscreen: true});
+            Main.layoutManager.addChrome(sheet, chrome({affectsInputRegion: false, trackFullscreen: true}));
         }
         this.sync();
     }
@@ -253,7 +254,7 @@ export class EdgeTabs {
                 tab.hold();
             // (Over the windows, it takes the clicks the sheet doesn't.)
             if (!this._onDesktop)
-                Main.layoutManager.trackChrome(tab, {affectsInputRegion: true, trackFullscreen: false});
+                Main.layoutManager.trackChrome(tab, chrome({affectsInputRegion: true, trackFullscreen: false}));
             this._tabs.set(note.id, tab);
             // (Placed once it has its size, after it is laid out.)
             tab.connect('notify::width', () => this._queuePlace());

@@ -3,7 +3,9 @@
   "name": "Atelier",
   "description": "A desktop atelier for GNOME: profiles with wallpaper, palette and themes, switched from a quick picker.",
   "shell-version": [
-    "48"
+    "48",
+    "49",
+    "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.atelier",
   "version-name": "0.2.0",

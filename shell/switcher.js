@@ -9,6 +9,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {grabHasKeyboard} from './core/compat.js';
 import {switcherWidth} from './switcherContent.js';
 
 const TOP_MARGIN = 10;
@@ -59,7 +60,7 @@ class AtelierSwitcherPopup extends St.Widget {
     /** @returns {boolean} whether the popup could take the keyboard */
     open() {
         const grab = Main.pushModal(this, {actionMode: Shell.ActionMode.POPUP});
-        if ((grab.get_seat_state() & Clutter.GrabState.KEYBOARD) === 0) {
+        if (!grabHasKeyboard(grab)) {
             Main.popModal(grab);
             this.destroy();
             return false;

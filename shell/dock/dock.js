@@ -28,6 +28,7 @@ import {DockHider} from './hider.js';
 import {DockItem} from './icon.js';
 import {Intellihide} from './intellihide.js';
 import {createShowAppsItem} from './showApps.js';
+import {chrome} from '../core/compat.js';
 import {DockMagnifier} from './magnifier.js';
 import {DockTheming} from './theming.js';
 import {Timers} from './timers.js';
@@ -116,7 +117,7 @@ export class Dock extends EventEmitter {
         // Always visible, it keeps maximized windows off it.
         if (settings.get_boolean('dock-fixed')) {
             this._strut = new St.Widget({name: 'atelier-dock-strut', reactive: false});
-            Main.layoutManager.addChrome(this._strut, {affectsStruts: true, affectsInputRegion: false});
+            Main.layoutManager.addChrome(this._strut, chrome({affectsStruts: true, affectsInputRegion: false}));
         }
 
         if (glass) {
