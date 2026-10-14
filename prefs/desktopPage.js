@@ -1,6 +1,7 @@
 // "Desktop" section: the widgets on the desktop – their look, and what the
 // GitHub and photo widgets show. Where they are is edited on the desktop
-// itself (right-click it, Edit Widgets).
+// itself (right-click it, Edit Widgets). While Ubuntu's Desktop Icons runs,
+// covering them, it says so.
 
 import Adw from 'gi://Adw';
 import Cairo from 'cairo';
@@ -16,6 +17,12 @@ import {ShortcutRow} from './shortcutRow.js';
 
 Gio._promisify(Gtk.FileDialog.prototype, 'open', 'open_finish');
 Gio._promisify(Gtk.FileDialog.prototype, 'select_folder', 'select_folder_finish');
+
+// Ubuntu's Desktop Icons, and the app that turns extensions on and off.
+const DESKTOP_ICONS = 'ding@rastersoft.com';
+const EXTENSIONS_APP = 'org.gnome.Extensions.desktop';
+// An extension's state, as the shell tells it: running.
+const ACTIVE = 1;
 
 const STYLES = [
     ['modern', 'Modern', 'Dark cards in the palette\'s colors'],
@@ -92,6 +99,31 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
                 'the GitHub user and the photo are the same for all.',
         });
         this.add(widgets);
+        // Ubuntu's Desktop Icons lays a desktop of its own over the
+        // wallpaper: the widgets are under it, and its menu is the desktop's.
+        // Turning it off is the user's call, in the Extensions app.
+        this._desktopIcons = new Adw.ActionRow({
+            title: 'Desktop Icons is on',
+            subtitle: 'Its desktop covers the widgets, and its menu replaces the desktop\'s. ' +
+                'Turn it off in the Extensions app to see them.',
+            css_classes: ['warning'],
+            visible: false,
+        });
+        this._desktopIcons.add_prefix(new Gtk.Image({icon_name: 'dialog-information-symbolic'}));
+        const extensionsApp = Gio.DesktopAppInfo.new(EXTENSIONS_APP);
+        if (extensionsApp) {
+            const open = new Gtk.Button({label: 'Open Extensions', valign: Gtk.Align.CENTER});
+            open.connect('clicked', () => {
+                try {
+                    extensionsApp.launch([], null);
+                } catch (e) {
+                    console.warn(`Atelier: could not open the Extensions app: ${e.message}`);
+                }
+            });
+            this._desktopIcons.add_suffix(open);
+        }
+        widgets.add(this._desktopIcons);
+        this._watchDesktopIcons();
         this._enabled = this._switch(widgets, 'enabled', 'Widgets on the desktop', '');
 
         const lookRow = new Adw.PreferencesRow({activatable: false});
@@ -240,6 +272,37 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         this._ids.push(this._desktop.connect('changed::photo', syncPhoto));
     }
 
+    // Whether Desktop Icons runs, asked of the shell as the Extensions app
+    // asks it (Ubuntu turns it on for its session, not in the settings), and
+    // told again as that changes.
+    _watchDesktopIcons() {
+        const bus = Gio.DBus.session;
+        this._desktopIconsId = bus.signal_subscribe('org.gnome.Shell', 'org.gnome.Shell.Extensions',
+            'ExtensionStateChanged', '/org/gnome/Shell', DESKTOP_ICONS, Gio.DBusSignalFlags.NONE,
+            (_conn, _sender, _path, _iface, _signal, params) => {
+                const [, info] = params.recursiveUnpack();
+                this.syncDesktopIcons(info.state);
+            });
+        bus.call('org.gnome.Shell', '/org/gnome/Shell', 'org.gnome.Shell.Extensions', 'GetExtensionInfo',
+            new GLib.Variant('(s)', [DESKTOP_ICONS]), new GLib.VariantType('(a{sv})'),
+            Gio.DBusCallFlags.NONE, -1, null, (_conn, result) => {
+                let info = {};
+                try {
+                    [info] = bus.call_finish(result).recursiveUnpack();
+                } catch {
+                    // (No shell to ask: nothing to say.)
+                }
+                // (Unless the settings were closed meanwhile.)
+                if (this._desktopIconsId)
+                    this.syncDesktopIcons(info.state);
+            });
+    }
+
+    /** @param {number|undefined} state - Desktop Icons' state, as the shell has it */
+    syncDesktopIcons(state) {
+        this._desktopIcons.visible = state === ACTIVE;
+    }
+
     async _choose(folder) {
         const dialog = new Gtk.FileDialog({
             title: folder ? 'Choose a Folder of Pictures' : 'Choose a Picture',
@@ -275,6 +338,9 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
     disconnectSettings() {
         this._ids.forEach(id => this._desktop.disconnect(id));
         this._ids = [];
+        if (this._desktopIconsId)
+            Gio.DBus.session.signal_unsubscribe(this._desktopIconsId);
+        this._desktopIconsId = 0;
         this._notesShortcut.disconnectSettings();
         for (let i = 0; i < this._bound.length; i += 2)
             Gio.Settings.unbind(this._bound[i], this._bound[i + 1]);
