@@ -63,3 +63,28 @@ export function pressIsForGesture(event, parent) {
     // (Outside it, under its grab.)
     return false;
 }
+
+/**
+ * Maximize a window, both ways.
+ *
+ * @param {Meta.Window} window
+ */
+export function maximize(window) {
+    // (From 49 it takes no flags: it is both ways, always.)
+    if (SHELL >= 49)
+        window.maximize();
+    else
+        window.maximize(Meta.MaximizeFlags.BOTH);
+}
+
+/**
+ * Put a window maximized both ways back to its size.
+ *
+ * @param {Meta.Window} window
+ */
+export function unmaximize(window) {
+    if (SHELL >= 49)
+        window.unmaximize();
+    else
+        window.unmaximize(Meta.MaximizeFlags.BOTH);
+}
