@@ -1,6 +1,9 @@
 UUID := atelier@local
 INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 JS_FILES = $(shell git ls-files --cached --others --exclude-standard '*.js')
+# GNOME Shell's private libraries (the Extensions app code imports Shew):
+# /usr/lib/gnome-shell on Debian and Ubuntu, /usr/lib64/gnome-shell on Fedora.
+SHELL_LIBDIR := $(firstword $(wildcard /usr/lib/gnome-shell /usr/lib64/gnome-shell) /usr/lib/gnome-shell)
 
 .PHONY: all schemas install uninstall pack check test prefs prefs-screenshots shell-test showcase clean
 
@@ -43,8 +46,8 @@ test: schemas
 
 # Open the preferences window outside of GNOME Shell (settings are kept in memory).
 prefs: schemas
-	GSETTINGS_BACKEND=memory GI_TYPELIB_PATH=/usr/lib/gnome-shell/girepository-1.0 \
-	LD_LIBRARY_PATH=/usr/lib/gnome-shell gjs -m tools/run-prefs.js --sample
+	GSETTINGS_BACKEND=memory GI_TYPELIB_PATH=$(SHELL_LIBDIR)/girepository-1.0 \
+	LD_LIBRARY_PATH=$(SHELL_LIBDIR) gjs -m tools/run-prefs.js --sample
 
 # Render the preference pages to PNGs in tests/output/prefs (headless).
 prefs-screenshots: schemas

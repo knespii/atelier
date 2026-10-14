@@ -8,6 +8,7 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {OptionCards} from './optionCards.js';
+import {naturalWidth} from './widgets.js';
 
 const STYLES = [
     ['grouped', 'Grouped', 'The workspaces, the island and the status icons together in the middle'],
@@ -312,7 +313,7 @@ class AtelierBarPage extends Adw.PreferencesPage {
         for (const [id, label] of choices)
             toggles.add(new Adw.Toggle({name: id, label}));
         const row = new Adw.ActionRow({title});
-        row.add_suffix(toggles);
+        row.add_suffix(naturalWidth(toggles));
         group.add(row);
         this._sidesRow = row;
 
