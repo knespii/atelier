@@ -237,22 +237,44 @@ export async function prefs(t) {
     check(row !== null, 'the status has a row that imports Dash to Dock\'s settings');
     if (!row)
         return;
+    // (The user's Dash to Dock, or the system's Ubuntu Dock: Ubuntu
+    // installs its schema with the system's.)
+    const SCHEMA_ID = 'org.gnome.shell.extensions.dash-to-dock';
     const dir = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'gnome-shell', 'extensions',
         'dash-to-dock@micxgx.gmail.com', 'schemas']);
-    if (!GLib.file_test(GLib.build_filenamev([dir, 'gschemas.compiled']), GLib.FileTest.EXISTS)) {
-        print(`SKIP  Dash to Dock isn't installed in ${dir}`);
+    const schema = GLib.file_test(GLib.build_filenamev([dir, 'gschemas.compiled']), GLib.FileTest.EXISTS)
+        ? Gio.SettingsSchemaSource.new_from_directory(dir, Gio.SettingsSchemaSource.get_default(), false)
+            .lookup(SCHEMA_ID, false)
+        : Gio.SettingsSchemaSource.get_default().lookup(SCHEMA_ID, true);
+    if (!schema) {
+        print(`SKIP  neither Dash to Dock (in ${dir}) nor Ubuntu Dock is installed`);
         return;
     }
-    const schema = Gio.SettingsSchemaSource.new_from_directory(dir, Gio.SettingsSchemaSource.get_default(), false)
-        .lookup('org.gnome.shell.extensions.dash-to-dock', false);
     const dashToDock = new Gio.Settings({settings_schema: schema});
+    // Where Ubuntu Dock is installed and Dash to Dock isn't (Ubuntu), its
+    // settings are what comes over, and are named so.
+    const installed = uuid => [GLib.get_user_data_dir(), ...GLib.get_system_data_dirs()].some(dataDir =>
+        GLib.file_test(GLib.build_filenamev([dataDir, 'gnome-shell', 'extensions', uuid, 'metadata.json']),
+            GLib.FileTest.EXISTS));
+    if (installed('ubuntu-dock@ubuntu.com') && !installed('dash-to-dock@micxgx.gmail.com')) {
+        // (Only here: the shell's checks import this file too.)
+        const {findSchema, sourceName: nameOf} = await import('../../prefs/dock/import.js');
+        check(findSchema() !== null && nameOf() === 'Ubuntu Dock', 'Ubuntu Dock\'s settings are found, as its');
+    }
     const openSource = row.openSource;
+    const sourceName = row.sourceName;
     row.openSource = () => null;
     row.syncSource();
     check(!row.sensitive && row.subtitle.includes('isn\'t installed'), 'without Dash to Dock it greys out, and says why');
     row.openSource = () => dashToDock;
+    row.sourceName = () => 'Dash to Dock';
     row.syncSource();
-    check(row.sensitive, 'with it, it can be pressed');
+    check(row.sensitive && row.subtitle.startsWith('Its position'), 'with it, it can be pressed');
+    row.sourceName = () => 'Ubuntu Dock';
+    row.syncSource();
+    check(row.sensitive && row.subtitle.startsWith('Ubuntu Dock\'s, which are Dash to Dock\'s'),
+        'with Ubuntu Dock\'s, it says they are Ubuntu Dock\'s');
+    row.sourceName = sourceName;
 
     dashToDock.set_enum('dock-position', 3); // LEFT
     dashToDock.set_string('click-action', 'focus-minimize-or-previews');

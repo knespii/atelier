@@ -178,6 +178,17 @@ export async function shell(t) {
     delete module.blocked;
     module._sync();
     check(module.dock !== null, 'and comes back without it');
+    // So it does for Ubuntu Dock (as the shell's extension manager has it
+    // in Ubuntu's session), and comes back as that goes.
+    const manager = Main.extensionManager;
+    const lookup = manager.lookup;
+    manager.lookup = uuid => (uuid === 'ubuntu-dock@ubuntu.com' ? {uuid, state: 1} : lookup.call(manager, uuid));
+    module._sync();
+    check(module.blocked && module.dock === null, 'with Ubuntu Dock on, it goes too');
+    manager.lookup = lookup;
+    module._sync();
+    check(module.dock !== null, 'and comes back as Ubuntu Dock goes');
+    dock = module.dock;
     pill.destroy();
 
     // (Pinning said so in the island, over where the dock is at the top.)
@@ -385,6 +396,30 @@ export async function prefs(t) {
     'the dock off, its options grey out (not the switch)');
     settings.reset('enabled');
 
+    // It says which other dock keeps it off: as the shell says (Ubuntu's
+    // session brings Ubuntu Dock, which its settings don't list), or as
+    // the settings say where the shell can't (org.gnome.shell's, in memory
+    // here).
+    const warning = page._blocked;
+    const askShell = page.askShell;
+    await page.syncBlocked();
+    check(!warning.visible, 'no other dock on here: no warning');
+    page.askShell = async () => new Map([['ubuntu-dock@ubuntu.com', true]]);
+    await page.syncBlocked();
+    check(warning.visible && warning.title === 'Ubuntu Dock is on' && warning.subtitle.includes('Ubuntu Dock is turned off'),
+        `Ubuntu Dock on, as the shell says: the warning names it (${warning.title})`);
+    page.askShell = async () => null;
+    const shell = page._shell;
+    shell.set_strv('enabled-extensions', ['dash-to-dock@micxgx.gmail.com']);
+    await page.syncBlocked();
+    check(warning.visible && warning.title === 'Dash to Dock is on', `Dash to Dock enabled in the settings (${warning.title})`);
+    shell.set_strv('disabled-extensions', ['dash-to-dock@micxgx.gmail.com']);
+    await page.syncBlocked();
+    check(!warning.visible, 'and disabled again: no warning');
+    shell.reset('enabled-extensions');
+    shell.reset('disabled-extensions');
+    page.askShell = askShell;
+    await page.syncBlocked();
 }
 
 // In the overview, in place of GNOME's dash: the dash hidden and taking no

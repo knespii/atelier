@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 
-import {CLICK_ACTIONS, IGNORED, describeKeys, mapDashToDock} from '../lib/dockImport.js';
+import {CLICK_ACTIONS, IGNORED, describeKeys, mapDashToDock, otherDockOn} from '../lib/dockImport.js';
 import {assert, assertEqual} from './util.js';
 
 // Atelier's dock's keys, from its schema (make test points GSettings at
@@ -90,4 +90,28 @@ export function testEnabledUntouched() {
     const result = mapDashToDock(reader({enabled: false, intellihide: false}), keys);
     assertEqual(result.values, [['intellihide', false]], 'whether the dock is on never comes over');
     assert(!result.ignored.includes('enabled'), 'nor counts as left over');
+}
+
+// The other docks, as the shell or the settings say.
+const DASH_TO_DOCK = 'dash-to-dock@micxgx.gmail.com';
+const UBUNTU_DOCK = 'ubuntu-dock@ubuntu.com';
+const session = (more = {}) => ({running: () => undefined, enabled: [], disabled: [], userOff: false, ...more});
+const nameOn = known => otherDockOn(session(known))?.name ?? null;
+
+export function testOtherDockFromSettings() {
+    assertEqual(nameOn({}), null, 'none enabled: none on');
+    assertEqual(nameOn({enabled: [DASH_TO_DOCK]}), 'Dash to Dock', 'Dash to Dock enabled');
+    assertEqual(nameOn({enabled: ['other@x', UBUNTU_DOCK]}), 'Ubuntu Dock', 'Ubuntu Dock enabled');
+    assertEqual(nameOn({enabled: [UBUNTU_DOCK, DASH_TO_DOCK]}), 'Dash to Dock', 'both: Dash to Dock first');
+    assertEqual(nameOn({enabled: [UBUNTU_DOCK], disabled: [UBUNTU_DOCK]}), null, 'disabled wins over enabled');
+    assertEqual(nameOn({enabled: [DASH_TO_DOCK], userOff: true}), null, 'user extensions off: off');
+}
+
+export function testOtherDockFromShell() {
+    // Ubuntu's session brings Ubuntu Dock: not in the settings, the shell says.
+    assertEqual(nameOn({running: uuid => uuid === UBUNTU_DOCK}), 'Ubuntu Dock', 'on as the shell says');
+    assertEqual(nameOn({running: () => false, enabled: [DASH_TO_DOCK]}), null,
+        'the shell says it is off (it failed, say): off, whatever the settings');
+    assertEqual(nameOn({running: uuid => (uuid === DASH_TO_DOCK ? undefined : false), enabled: [DASH_TO_DOCK]}),
+        'Dash to Dock', 'where the shell can\'t say, the settings do');
 }

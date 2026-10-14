@@ -1,23 +1,29 @@
 // The row of the dock's status that brings Dash to Dock's settings over
 // (lib/dockImport.js says how): "Import from Dash to Dock…". Dash to
 // Dock's settings are only read, never written; Atelier's are written at
-// once, in one go. The row greys out when Dash to Dock isn't installed.
+// once, in one go. Ubuntu Dock, Ubuntu's fork of Dash to Dock, has the same
+// settings: they come over the same way. The row greys out when neither is
+// installed.
 
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 
-import {describeKeys, mapDashToDock} from '../../lib/dockImport.js';
+import {OTHER_DOCKS, describeKeys, mapDashToDock} from '../../lib/dockImport.js';
 import {toast} from '../widgets.js';
 
 const SCHEMA_ID = 'org.gnome.shell.extensions.dash-to-dock';
-const UUID = 'dash-to-dock@micxgx.gmail.com';
 const SUBTITLE = 'Its position, hiding, clicks, marks and look, as this dock\'s';
 
+// An extension's folders, the user's first.
+const extensionDirs = uuid => [GLib.get_user_data_dir(), ...GLib.get_system_data_dirs()]
+    .map(dataDir => GLib.build_filenamev([dataDir, 'gnome-shell', 'extensions', uuid]));
+
 /**
- * Dash to Dock's schema: installed with the system's, or in its
- * extension's folder (the user's, then the system's).
+ * Dash to Dock's schema: installed with the system's (as Ubuntu installs
+ * Ubuntu Dock's), or in Dash to Dock's or Ubuntu Dock's extension folder
+ * (the user's, then the system's).
  *
  * @returns {Gio.SettingsSchema|null}
  */
@@ -25,8 +31,8 @@ export function findSchema() {
     const installed = Gio.SettingsSchemaSource.get_default()?.lookup(SCHEMA_ID, true);
     if (installed)
         return installed;
-    for (const dataDir of [GLib.get_user_data_dir(), ...GLib.get_system_data_dirs()]) {
-        const dir = GLib.build_filenamev([dataDir, 'gnome-shell', 'extensions', UUID, 'schemas']);
+    for (const extensionDir of OTHER_DOCKS.flatMap(other => extensionDirs(other.uuid))) {
+        const dir = GLib.build_filenamev([extensionDir, 'schemas']);
         if (!GLib.file_test(GLib.build_filenamev([dir, 'gschemas.compiled']), GLib.FileTest.EXISTS))
             continue;
         try {
@@ -40,6 +46,17 @@ export function findSchema() {
         }
     }
     return null;
+}
+
+/**
+ * @returns {string} the dock whose settings those are: Ubuntu Dock where
+ *   it is installed and Dash to Dock isn't, or else Dash to Dock
+ */
+export function sourceName() {
+    const installed = other => extensionDirs(other.uuid)
+        .some(dir => GLib.file_test(GLib.build_filenamev([dir, 'metadata.json']), GLib.FileTest.EXISTS));
+    const [dashToDock, ubuntuDock] = OTHER_DOCKS;
+    return !installed(dashToDock) && installed(ubuntuDock) ? ubuntuDock.name : dashToDock.name;
 }
 
 /** @returns {Gio.Settings|null} Dash to Dock's settings, to read */
@@ -91,17 +108,25 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
  * @param {Adw.PreferencesPage} page
  * @param {object} ctx - {settings, binder}
  * @returns {Adw.ActionRow} the row, for the status group; row.openSource
- *   (→ Dash to Dock's Gio.Settings or null) may be replaced, then
- *   row.syncSource() called (the checks give it settings in memory)
+ *   (→ Dash to Dock's Gio.Settings or null) and row.sourceName (→ whose
+ *   they are) may be replaced, then row.syncSource() called (the checks
+ *   give it settings in memory)
  */
 export function build(page, {settings, binder}) {
     const row = new Adw.ActionRow({title: 'Import from Dash to Dock…', activatable: true});
     row.add_suffix(new Gtk.Image({icon_name: 'go-next-symbolic'}));
     row.openSource = openDashToDock;
+    row.sourceName = sourceName;
     row.syncSource = () => {
         const found = row.openSource() !== null;
+        const name = row.sourceName();
         row.sensitive = found;
-        row.subtitle = found ? SUBTITLE : 'Dash to Dock isn\'t installed, so there is nothing to bring over';
+        if (!found)
+            row.subtitle = 'Dash to Dock isn\'t installed, so there is nothing to bring over';
+        else if (name === OTHER_DOCKS[0].name)
+            row.subtitle = SUBTITLE;
+        else
+            row.subtitle = `${name}'s, which are Dash to Dock's: its position, hiding, clicks, marks and look, as this dock's`;
     };
     row.syncSource();
 

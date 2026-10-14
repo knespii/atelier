@@ -1,9 +1,9 @@
 // The dock feature: a dock on the chosen monitor (on every monitor, if
 // asked), and what all of them share – one set of window signals, the
 // badges, the places, the app spread, the shortcuts, Dynamic Music Pill's
-// handle. It stays off while Dash to Dock is on (the two would fight over
-// the edge of the screen and over Dynamic Music Pill) and starts by itself
-// once Dash to Dock is turned off.
+// handle. It stays off while Dash to Dock (or Ubuntu Dock, Ubuntu's fork of
+// it) is on – the two would fight over the edge of the screen and over
+// Dynamic Music Pill – and starts by itself once that is turned off.
 
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import Meta from 'gi://Meta';
@@ -11,6 +11,7 @@ import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {pickMonitors} from '../../lib/dockGeometry.js';
+import {OTHER_DOCKS} from '../../lib/dockImport.js';
 import {AppSpread} from './appSpread.js';
 import {BadgeSource} from './badges.js';
 import {Dock} from './dock.js';
@@ -20,8 +21,8 @@ import {MusicPill} from './musicPill.js';
 import {OverviewDash} from './overviewDash.js';
 import {WindowWatcher} from './windowWatcher.js';
 
-const DASH_TO_DOCK = 'dash-to-dock@micxgx.gmail.com';
-// Dash to Dock counts as on while it runs or is about to.
+// Another dock counts as on while it runs or is about to.
+const OTHER_UUIDS = OTHER_DOCKS.map(other => other.uuid);
 const RUNNING = [ExtensionState.ACTIVE, ExtensionState.ACTIVATING, ExtensionState.DEACTIVATING];
 
 // Settings the docks are built anew for; the others are applied as they
@@ -45,16 +46,16 @@ export class DockModule {
         return this.docks[0] ?? null;
     }
 
-    /** @returns {boolean} whether Dash to Dock keeps it off */
+    /** @returns {boolean} whether Dash to Dock or Ubuntu Dock keeps it off */
     get blocked() {
-        return RUNNING.includes(Main.extensionManager.lookup(DASH_TO_DOCK)?.state);
+        return OTHER_UUIDS.some(uuid => RUNNING.includes(Main.extensionManager.lookup(uuid)?.state));
     }
 
     enable() {
         this._dockSettings = this._settings.get_child('dock');
         this._barSettings = this._settings.get_child('bar');
         Main.extensionManager.connectObject('extension-state-changed', (_, extension) => {
-            if (extension.uuid === DASH_TO_DOCK)
+            if (OTHER_UUIDS.includes(extension.uuid))
                 this._sync();
         }, this);
         this._dockSettings.connectObject(
