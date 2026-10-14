@@ -40,3 +40,26 @@ export function grabHasKeyboard(grab) {
         return true;
     return (grab.get_seat_state() & Clutter.GrabState.KEYBOARD) !== 0;
 }
+
+/**
+ * Whether a press inside an actor is for a gesture of something in it. From
+ * 49 a button (St.Button) takes its clicks with a gesture that needs the
+ * press to go on through its parents: one of them that keeps it to itself
+ * (EVENT_STOP) cancels the click. (Up to 48 the button kept the press.)
+ *
+ * @param {Clutter.Event} event - a button press or touch begin
+ * @param {Clutter.Actor} parent - the actor it reached, inside which it was
+ * @returns {boolean}
+ */
+export function pressIsForGesture(event, parent) {
+    if (!Clutter.Gesture)
+        return false;
+    let gesture = false;
+    for (let actor = global.stage.get_event_actor(event); actor; actor = actor.get_parent()) {
+        if (actor === parent)
+            return gesture;
+        gesture ||= actor.reactive && actor.get_actions().some(action => action instanceof Clutter.Gesture && action.enabled);
+    }
+    // (Outside it, under its grab.)
+    return false;
+}
