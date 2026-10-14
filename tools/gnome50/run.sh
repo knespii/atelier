@@ -14,6 +14,8 @@ OUT="$REPO/tests/output/gnome50/$SUITE"
 if ! podman image exists "$IMAGE"; then
     podman build -t "$IMAGE" tools/gnome50
 fi
+# (The repository goes in read-only: its schemas compiled before.)
+[ -f schemas/gschemas.compiled ] || glib-compile-schemas --strict schemas/
 rm -rf "$OUT"
 mkdir -p "$OUT"
 if [ "$SUITE" = prefs ]; then
