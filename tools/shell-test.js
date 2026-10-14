@@ -1167,9 +1167,11 @@ async function testDesktop(ext) {
     check(desktop.setWidgetSize('clock', 'card'), 'the clock stretched to a card');
     await Scripting.sleep(300);
     const beside = faceClock._time;
-    const [besideX] = faceClock._suffix?.get_transformed_position() ?? [Infinity];
+    // (Its end: the AM/PM after it, or with a 24-hour clock, the time.)
+    const end = [faceClock._suffix, beside].find(label => label?.visible);
+    const [endX] = end?.get_transformed_position() ?? [Infinity];
     check(Boolean(faceClock._face) && Boolean(beside) && !beside.clutter_text.get_layout().is_ellipsized() &&
-        besideX + faceClock._suffix.width <= faceClock.get_transformed_position()[0] + faceClock.width,
+        endX + end.width <= faceClock.get_transformed_position()[0] + faceClock.width,
     `stretched, the time beside the face shows whole (${beside?.text})`);
     await screenshotArea('40-clock-watch-card', ...faceClock.get_transformed_position().map(v => Math.round(v) - 8),
         Math.round(faceClock.width) + 16, Math.round(faceClock.height) + 16);
@@ -1198,6 +1200,20 @@ async function testDesktop(ext) {
     await Scripting.sleep(600);
     check(desktop.editing && layer.get_parent() === desktop._editor.actor && coming._dim.opacity === 255 &&
         coming._hint.progress === 1 && coming._gallery.opacity === 255, 'editing, they come up over everything');
+    // The pointer: a hand over a widget, the arrow elsewhere (told apart by
+    // where their tips are).
+    const tracker = global.backend.get_cursor_tracker();
+    const pointerTip = async (x, y) => {
+        await pointerTo(x, y);
+        await Scripting.sleep(150);
+        return String(tracker.get_hot());
+    };
+    const nowhere = [area.x + area.width - 300, area.y + area.height - 300];
+    const arrow = await pointerTip(...nowhere);
+    const hand = await pointerTip(...centerOf(desktop.widgets.get('date')));
+    check(hand !== arrow && desktop._editor._cursor === 'GRAB',
+        `editing, the pointer is a hand over a widget (its tip at ${hand}, the arrow's at ${arrow})`);
+    await pointerTo(...nowhere);
     // The gallery: a click adds nothing (a shake: drag me); dragged out, a
     // widget drips out of it and lands where its shadow is.
     const galleryButton = label => desktop._editor._gallery.get_children()
@@ -1334,6 +1350,9 @@ async function testDesktop(ext) {
     await pointerUp();
     check(!desktop.editing && layer.get_parent() === Main.layoutManager._backgroundGroup &&
         weather.width === card && weather.entry.size === 'card' && saved()?.size === 'card', 'Esc puts them back');
+    const after = await pointerTip(...centerOf(desktop.widgets.get('date')));
+    check(after === arrow, `and the pointer is the arrow again, also over a widget (${after})`);
+    await restPointer();
 
 
     // GitHub: anyone's contributions (made up here; the tests stay offline).
