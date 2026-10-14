@@ -193,6 +193,24 @@ async function realClicks(t, itemOf, window) {
     const dock = t.module.dock;
     dock.force(true);
     await t.sleep(400);
+    // Held down, only the dock's own highlight: no square of the shell
+    // theme's under it (Ubuntu's Yaru has one), nothing on the icon.
+    const tile = itemOf().child;
+    const [x, y] = t.centerOf(tile);
+    await t.pointerDown(x, y);
+    await t.sleep(200);
+    const pressed = tile.has_style_pseudo_class('active');
+    const back = tile.get_theme_node().get_background_color();
+    const inner = tile.icon.get_theme_node().get_background_color();
+    await t.pointerUp();
+    check(pressed && Math.abs(back.alpha - 31) <= 1 && back.red === 255 && inner.alpha === 0,
+        `held down, only the dock's highlight (${back.red},${back.alpha}; ${inner.alpha})`);
+    await t.sleep(600);
+    if (window.minimized) {
+        window.unminimize();
+        window.activate(global.get_current_time());
+        await t.sleep(600);
+    }
     await realClick(t, itemOf(), Clutter.BUTTON_PRIMARY);
     check(await t.waitFor(() => window.minimized, 2000), 'clicked for real: minimized');
     await t.sleep(600);

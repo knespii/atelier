@@ -2365,9 +2365,35 @@
   box-shadow: none;
 }
 
+/* Only this highlight, whatever the shell theme draws for a tile pressed,
+   focused, checked or highlighted (Ubuntu's Yaru, say: a square of its
+   own, under ours), and nothing on the icon inside it. */
+.atelier-dock .overview-tile:active,
+.atelier-dock .overview-tile:checked,
+.atelier-dock .overview-tile:highlighted,
+.atelier-dock .overview-tile:insensitive,
+.atelier-dock .overview-tile .overview-icon,
+.atelier-dock .overview-tile:hover .overview-icon,
+.atelier-dock .overview-tile:focus .overview-icon,
+.atelier-dock .overview-tile:active .overview-icon,
+.atelier-dock .overview-tile:checked .overview-icon,
+.atelier-dock .show-apps .overview-icon,
+.atelier-dock .show-apps:hover .overview-icon,
+.atelier-dock .show-apps:focus .overview-icon,
+.atelier-dock .show-apps:active .overview-icon,
+.atelier-dock .show-apps:checked .overview-icon {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  border: none;
+}
+
 .atelier-dock .overview-tile:hover,
 .atelier-dock .overview-tile:focus,
-.atelier-dock .overview-tile:selected {
+.atelier-dock .overview-tile:selected,
+.atelier-dock .overview-tile:focus:hover,
+.atelier-dock .overview-tile:active:hover,
+.atelier-dock .overview-tile:active:focus {
   background-color: rgba(255, 255, 255, 0.12);
 }
 
@@ -2472,9 +2498,16 @@
   border: none;
 }
 
+.atelier-dock .atelier-dock-show-apps .show-apps:active {
+  background-color: transparent;
+  box-shadow: none;
+}
+
 .atelier-dock .atelier-dock-show-apps .show-apps:hover,
 .atelier-dock .atelier-dock-show-apps .show-apps:focus,
-.atelier-dock .atelier-dock-show-apps .show-apps:checked {
+.atelier-dock .atelier-dock-show-apps .show-apps:checked,
+.atelier-dock .atelier-dock-show-apps .show-apps:active:hover,
+.atelier-dock .atelier-dock-show-apps .show-apps:checked:hover {
   background-color: rgba(255, 255, 255, 0.12);
 }
 
