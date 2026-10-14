@@ -71,9 +71,9 @@ profile called **Original**, so there is always a way back.
   notifications, the Do Not Disturb icon). Rest the pointer on it for a
   glance – a big clock, this week, what's left of today's events and the
   weather, from GNOME's own calendar and weather. Clicking it opens the
-  control centre. The glance's power button opens a power menu (Lock,
-  Suspend, Log Out, Restart, Power Off); after a profile switch the island
-  briefly shows its name.
+  control centre. GNOME's power button in the control centre opens a power
+  menu in the island (Lock, Suspend, Log Out, Restart, Power Off); after a
+  profile switch the island briefly shows its name.
 - **Notifications** appear in the island instead of under the top bar. GNOME
   still decides what shows (Do Not Disturb, its per-app settings, the queue)
   and they stay in the notification list. Per app you choose the buttons:
