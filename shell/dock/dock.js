@@ -336,13 +336,14 @@ export class Dock extends EventEmitter {
         const atStart = this._settings.get_boolean('show-apps-at-top');
         const atEdge = this._extend && this._settings.get_boolean('show-apps-always-in-the-edge');
         const slot = atEdge ? (atStart ? this._startSlot : this._endSlot) : null;
-        if (button.get_parent() && button.get_parent() !== this._box && button.get_parent() !== slot)
-            button.get_parent().remove_child(button);
-        if (slot) {
-            if (button.get_parent() !== slot)
+        // (Out of where it was first: the row, too, on its way to a slot.)
+        const place = slot ?? this._box;
+        if (button.get_parent() !== place) {
+            button.get_parent()?.remove_child(button);
+            if (slot)
                 slot.set_child(button);
-        } else if (button.get_parent() !== this._box) {
-            this._box.add_child(button);
+            else
+                this._box.add_child(button);
         }
         this._startSlot.visible = slot === this._startSlot;
         this._endSlot.visible = slot === this._endSlot;
