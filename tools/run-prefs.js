@@ -278,6 +278,12 @@ async function runSelftest(window) {
     // Desktop widgets.
     const desktop = await section(window, 'desktop');
     const desktopSettings = store.settings.get_child('desktop');
+    // Desktop Icons (Ubuntu's) on, it says so; off, it doesn't.
+    check(!desktop._desktopIcons.visible, 'without Desktop Icons, no notice about it');
+    desktop.syncDesktopIcons(1);
+    const noticed = desktop._desktopIcons.visible;
+    desktop.syncDesktopIcons(2);
+    check(noticed && !desktop._desktopIcons.visible, 'with Desktop Icons on, a notice about it; off, none');
     desktop._style.setSelected('analogue');
     check(desktopSettings.get_string('style') === 'analogue' && !desktop._glass.sensitive,
         'the Analogue look is saved, glass is for Modern only');
