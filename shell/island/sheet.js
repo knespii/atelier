@@ -20,6 +20,8 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {pressIsForGesture} from '../core/compat.js';
+
 const OPEN_TIME = 1150;
 const CLOSE_TIME = 760;
 const AWAY_TIME = 950;
@@ -305,6 +307,9 @@ export const LiquidSheet = GObject.registerClass({
     }
 
     vfunc_button_press_event(event) {
+        // (A button in it takes its own click.)
+        if (pressIsForGesture(event, this))
+            return Clutter.EVENT_PROPAGATE;
         // (Modal: clicks anywhere come here first.)
         if (!this.contains(global.stage.get_event_actor(event)))
             this.emit('dismissed');

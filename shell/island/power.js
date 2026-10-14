@@ -36,26 +36,31 @@ function logOutAllowed() {
 export const POWER_ACTIONS = [
     {
         id: 'lock', label: 'Lock', icon: 'system-lock-screen-symbolic',
+        property: 'can-lock-screen',
         available: actions => actions.canLockScreen,
         run: actions => actions.activateLockScreen(),
     },
     {
         id: 'suspend', label: 'Suspend', icon: 'weather-clear-night-symbolic',
+        property: 'can-suspend',
         available: actions => actions.canSuspend,
         run: actions => actions.activateSuspend(),
     },
     {
         id: 'logout', label: 'Log Out', icon: 'system-log-out-symbolic',
+        property: 'can-logout',
         available: actions => actions.canLogout || logOutAllowed(),
         run: actions => (actions.canLogout ? actions.activateLogout() : logOut()),
     },
     {
         id: 'restart', label: 'Restart', icon: 'system-reboot-symbolic',
+        property: 'can-restart',
         available: actions => actions.canRestart,
         run: actions => actions.activateRestart(),
     },
     {
         id: 'power-off', label: 'Power Off', icon: 'system-shutdown-symbolic',
+        property: 'can-power-off',
         available: actions => actions.canPowerOff,
         run: actions => actions.activatePowerOff(),
     },
@@ -74,9 +79,9 @@ export const PowerPage = GObject.registerClass({
         this._tiles = new St.BoxLayout({style_class: 'atelier-power-tiles'});
         this.add_child(this._tiles);
 
+        this._actions = actions;
         this._buttons = new Map();
         for (const action of POWER_ACTIONS) {
-            const available = Boolean(action.available(actions));
             const box = new St.BoxLayout({
                 style_class: 'atelier-power-tile-box',
                 orientation: Clutter.Orientation.VERTICAL,
@@ -96,16 +101,34 @@ export const PowerPage = GObject.registerClass({
             const button = new St.Button({
                 style_class: 'atelier-power-tile',
                 accessible_name: action.label,
-                can_focus: available,
-                reactive: available,
                 child: box,
             });
-            if (!available)
-                button.add_style_pseudo_class('insensitive');
             button.connect('clicked', () => this.emit('activate', action.id));
             this._tiles.add_child(button);
             this._buttons.set(action.id, button);
         }
+        this._sync();
+        // SystemActions asks the session again as the menu opens, and hears
+        // back later (from 50, about Restart on its own): the tiles follow.
+        actions.connectObject?.(
+            ...POWER_ACTIONS.flatMap(action => [`notify::${action.property}`, () => this._sync()]),
+            this);
+    }
+
+    _sync() {
+        let lostFocus = false;
+        for (const action of POWER_ACTIONS) {
+            const available = Boolean(action.available(this._actions));
+            const button = this._buttons.get(action.id);
+            lostFocus ||= !available && button.has_key_focus();
+            button.set({can_focus: available, reactive: available});
+            if (available)
+                button.remove_style_pseudo_class('insensitive');
+            else
+                button.add_style_pseudo_class('insensitive');
+        }
+        if (lostFocus)
+            this.focus();
     }
 
     focus() {

@@ -9,7 +9,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {grabHasKeyboard} from './core/compat.js';
+import {grabHasKeyboard, pressIsForGesture} from './core/compat.js';
 import {switcherWidth} from './switcherContent.js';
 
 const TOP_MARGIN = 10;
@@ -131,12 +131,17 @@ class AtelierSwitcherPopup extends St.Widget {
     }
 
     vfunc_button_press_event(event) {
+        // (A card takes its own click.)
+        if (pressIsForGesture(event, this))
+            return Clutter.EVENT_PROPAGATE;
         if (this._isOutsidePanel(event))
             this._content.close();
         return Clutter.EVENT_STOP;
     }
 
     vfunc_touch_event(event) {
+        if (event.type() === Clutter.EventType.TOUCH_BEGIN && pressIsForGesture(event, this))
+            return Clutter.EVENT_PROPAGATE;
         if (event.type() === Clutter.EventType.TOUCH_BEGIN && this._isOutsidePanel(event))
             this._content.close();
         return Clutter.EVENT_STOP;

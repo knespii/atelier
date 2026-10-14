@@ -18,7 +18,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {grabHasKeyboard} from '../core/compat.js';
+import {grabHasKeyboard, pressIsForGesture} from '../core/compat.js';
 
 /** How long the island takes to change shape, in milliseconds. */
 export const MORPH_TIME = 280;
@@ -391,6 +391,9 @@ export const Island = GObject.registerClass({
     }
 
     vfunc_button_press_event(event) {
+        // A button in a page takes its own click.
+        if (pressIsForGesture(event, this))
+            return Clutter.EVENT_PROPAGATE;
         // With the keyboard taken, clicks anywhere go to the island first.
         if (this._grab) {
             if (this._isOutside(event))
@@ -403,7 +406,7 @@ export const Island = GObject.registerClass({
     }
 
     vfunc_touch_event(event) {
-        if (event.type() !== Clutter.EventType.TOUCH_BEGIN)
+        if (event.type() !== Clutter.EventType.TOUCH_BEGIN || pressIsForGesture(event, this))
             return Clutter.EVENT_PROPAGATE;
         if (this._grab) {
             if (this._isOutside(event))

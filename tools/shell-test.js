@@ -216,18 +216,27 @@ function wallpapersSettled() {
 
 // Stand-ins: the tests never lock, suspend or power off the machine, and
 // the calendar and weather have known content.
-function fakeSystemActions(calls) {
-    const run = name => () => calls.push(name);
-    return {
-        canLockScreen: true, canSuspend: true, canLogout: true, canRestart: true, canPowerOff: false,
-        forceUpdate() {},
-        activateLockScreen: run('lock'),
-        activateSuspend: run('suspend'),
-        activateLogout: run('logout'),
-        activateRestart: run('restart'),
-        activatePowerOff: run('power-off'),
-    };
-}
+// (Like GNOME's SystemActions, a GObject whose can-* properties change as it
+// hears back from the session.)
+const FakeSystemActions = GObject.registerClass({
+    Properties: Object.fromEntries(
+        ['can-lock-screen', 'can-suspend', 'can-logout', 'can-restart', 'can-power-off'].map(name =>
+            [name, GObject.ParamSpec.boolean(name, null, null, GObject.ParamFlags.READWRITE, false)])),
+}, class FakeSystemActions extends GObject.Object {
+    _init(calls) {
+        super._init({can_lock_screen: true, can_suspend: true, can_logout: true, can_restart: true, can_power_off: false});
+        const run = name => () => calls.push(name);
+        this.activateLockScreen = run('lock');
+        this.activateSuspend = run('suspend');
+        this.activateLogout = run('logout');
+        this.activateRestart = run('restart');
+        this.activatePowerOff = run('power-off');
+    }
+
+    forceUpdate() {}
+});
+
+const fakeSystemActions = calls => new FakeSystemActions(calls);
 
 // A page that asks for an endless width (as something in the control
 // centre once did).
@@ -387,6 +396,36 @@ async function testIsland(ext, atelier) {
     await clickAt(200, global.stage.height - 200);
     check(await waitFor(() => island.page === null && !island.busy, 1000), 'so does a click outside');
     check(calls.length === 1, `nothing else ran (${calls})`);
+
+    // The tiles follow what SystemActions can do as it hears back from the
+    // session, and a click on each runs its own action.
+    const actions = module.systemActions;
+    module.togglePowerMenu();
+    await waitFor(() => island.busy, 1000);
+    actions.can_power_off = true;
+    check(island.page._buttons.get('power-off').reactive, 'a tile turns on as its action becomes available');
+    actions.can_restart = false;
+    check(!island.page._buttons.get('restart').reactive &&
+        island.page._buttons.get('restart').has_style_pseudo_class('insensitive'), 'and off as it no longer is');
+    actions.can_restart = true;
+    await pressKey(Clutter.KEY_Escape);
+    await waitFor(() => island.page === null && !island.busy, 1000);
+    calls.length = 0;
+    const ids = ['lock', 'suspend', 'logout', 'restart', 'power-off'];
+    for (const id of ids) {
+        module.togglePowerMenu();
+        await waitFor(() => hasClass(island.page, 'atelier-power') && island.busy, 1000);
+        await Scripting.sleep(500);
+        const before = calls.length;
+        await clickAt(...centerOf(island.page._buttons.get(id)));
+        await waitFor(() => calls.length > before && island.page === null && !island.busy, 1000);
+        if (hasClass(island.page, 'atelier-power'))
+            await pressKey(Clutter.KEY_Escape);
+        await restPointer();
+        await waitFor(() => island.page === null, 1000);
+    }
+    check(calls.join() === ids.join(), `a click on each tile runs its action (${calls})`);
+    actions.can_power_off = false;
 
     // A page that can't say how big it is doesn't get the island stuck
     // around nothing, holding the keyboard.
@@ -549,8 +588,13 @@ async function testNotifications(ext, atelier) {
         n => n.addAction('Open Folder', () => (opened = true)));
     check(await waitFor(() => showsNotification(island, copied), 2000) &&
         JSON.stringify(island.page.buttonLabels) === '["Open Folder"]', 'other apps get their own buttons');
-    click(island.page._buttons.get_child_at_index(0));
-    check(opened && await waitFor(() => island.page === null, 2000), 'a button runs and closes the notification');
+    // (Clicked for real: the button has the click, not the island around it.)
+    await Scripting.sleep(500);
+    await clickAt(...centerOf(island.page._buttons.get_child_at_index(0)));
+    check(await waitFor(() => opened && island.page === null, 2000),
+        `a button runs and closes the notification (${opened}, ${island.page?.style_class})`);
+    await restPointer();
+    await waitFor(() => island.page === null, 2000);
 
     let activated = false;
     const clicked = await notify(files(), 'Clicked', 'Opens the app', n => n.connect('activated', () => (activated = true)));
@@ -715,6 +759,29 @@ async function testControlCentre(ext) {
     check(await waitFor(() => hasClass(island.page, 'atelier-power') && island.busy, 1000) &&
         !systemItem.menu.isOpen, 'its power button opens Atelier\'s power menu');
     await pressKey(Clutter.KEY_Escape);
+    await waitFor(() => island.page === null && !island.busy, 1000);
+    // Clicked, and its menu's Power Off clicked. (GNOME shows the button
+    // while SystemActions can do any of its menu's actions: without a
+    // session manager and logind, as in a container, none.)
+    const calls = [];
+    modules.get('island').systemActions = fakeSystemActions(calls);
+    modules.get('island').systemActions.can_power_off = true;
+    const shutdownItem = systemItem.child.get_last_child();
+    const shutdownShown = shutdownItem.visible;
+    shutdownItem.visible = true;
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
+    await Scripting.sleep(500);
+    await clickAt(...centerOf(shutdownItem));
+    const opened = await waitFor(() => hasClass(island.page, 'atelier-power') && island.busy, 1000);
+    if (opened) {
+        await Scripting.sleep(500);
+        await clickAt(...centerOf(island.page._buttons.get('power-off')));
+    }
+    check(opened && await waitFor(() => calls.join() === 'power-off' && island.page === null, 1000),
+        `a click on it, then on Power Off, powers off (a stand-in: ${calls})`);
+    shutdownItem.visible = shutdownShown;
+    await restPointer();
     await waitFor(() => island.page === null && !island.busy, 1000);
 
     // Turned off: GNOME's menu and the icons in the bar come back.
