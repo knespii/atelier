@@ -68,7 +68,15 @@ function monitorRow(group, settings, binder) {
             options.push([chosen, `${chosen} (not connected)`]);
         values = options.map(([value]) => value);
         syncing = true;
-        row.model = Gtk.StringList.new(options.map(([, label]) => label));
+        // (The list changed in place: chosen in it, the setting changes and
+        // brings us here, while the row still says so; a list put in its
+        // place then is one it no longer has.)
+        const labels = options.map(([, label]) => label);
+        const model = row.model;
+        if (!model)
+            row.model = Gtk.StringList.new(labels);
+        else if (labels.some((label, i) => model.get_string(i) !== label) || model.get_n_items() !== labels.length)
+            model.splice(0, model.get_n_items(), labels);
         row.selected = values.indexOf(chosen);
         syncing = false;
     };
