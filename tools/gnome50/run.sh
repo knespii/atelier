@@ -5,6 +5,7 @@
 #
 # Usage: tools/gnome50/run.sh [main|two-monitors|dock|prefs]
 #        ATELIER_TEST_ONLY=testDesktop,testNotes tools/gnome50/run.sh (some parts)
+#        ATELIER_SHELL_MODE=ubuntu tools/gnome50/run.sh (Ubuntu's own session)
 set -eu
 SUITE="${1:-main}"
 cd "$(dirname "$0")/../.."
@@ -25,7 +26,7 @@ else
 fi
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
     --security-opt label=disable --memory 6g \
-    -v "$REPO:/atelier:ro" -v "$OUT:/out" -e ATELIER_OUTPUT_ROOT=/out/run -e ATELIER_TEST_ONLY \
+    -v "$REPO:/atelier:ro" -v "$OUT:/out" -e ATELIER_OUTPUT_ROOT=/out/run -e ATELIER_TEST_ONLY -e ATELIER_SHELL_MODE \
     -w /atelier "$IMAGE" sh -c "
         gnome-shell --version
         # GNOME 50 wants a system bus (login, parental controls): a private

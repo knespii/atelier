@@ -25,6 +25,17 @@ if [ "$SUITE" = two-monitors ]; then
 fi
 # (Elsewhere when asked: out of a container, say, the repository read-only.)
 ROOT="${ATELIER_OUTPUT_ROOT:-$ROOT}"
+# As a distribution has it (ATELIER_SHELL_MODE=ubuntu: Ubuntu's look, and
+# its own extensions, with its dock and desktop icons turned off, as
+# Atelier's README says).
+MODE=""
+DISABLED="@as []"
+ICONS=""
+if [ -n "${ATELIER_SHELL_MODE:-}" ]; then
+    MODE="--mode=$ATELIER_SHELL_MODE"
+    DISABLED="['ubuntu-dock@ubuntu.com', 'ding@rastersoft.com']"
+    ICONS="icon-theme='Yaru'"
+fi
 # Only a shell that still has X11 (48) is told to go without it.
 NO_X11=""
 if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
@@ -122,6 +133,7 @@ PROFILES="[\
 cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]
 enabled-extensions=['$UUID', 'user-theme@gnome-shell-extensions.gcampax.github.com']
+disabled-extensions=$DISABLED
 
 [org/gnome/desktop/background]
 picture-uri='file://$LEGACY_WALLPAPER'
@@ -129,6 +141,7 @@ picture-uri-dark='file://$LEGACY_WALLPAPER'
 
 [org/gnome/desktop/interface]
 color-scheme='prefer-dark'
+$ICONS
 
 [org/gnome/terminal/legacy/profiles:]
 list=['b1dcc9dd-5262-4d8d-a863-c897e6d979b9']
@@ -152,7 +165,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
     dbus-run-session -- timeout --kill-after=5 600 \
-    gnome-shell --headless $MONITORS $NO_X11 \
+    gnome-shell --headless $MONITORS $NO_X11 $MODE \
         --wayland-display=atelier-test-0 --force-animations \
         --automation-script="$REPO/tools/shell-test.js" \
     > "$ROOT/shell.log" 2>&1 || status=$?
