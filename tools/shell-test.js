@@ -3027,6 +3027,7 @@ async function testLockPasswordField() {
         check(await waitFor(() => lock().state.phase === 'ready' && entry.contains(global.stage.key_focus), 3000),
             'asked again, it has the keyboard again');
         await typeText('right');
+        check(field().form.message === '', 'typing again puts away what GNOME said, as its own prompt does');
         await pressKey(Clutter.KEY_Return);
         check(await waitFor(() => verifier.answers.includes('right'), 2000), 'Enter: the right one goes to GNOME');
         verifier.emit('verification-complete');

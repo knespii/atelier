@@ -267,6 +267,8 @@ export class PasswordField {
         this._submitting = false;
         this._broken = false;
         this._watched = [];
+        this._message = null;
+        this._dismissed = null;
     }
 
     /** @returns {PasswordForm|null} the popup's form, while it is open */
@@ -306,7 +308,8 @@ export class PasswordField {
                 this._detach({restore: false});
                 break;
             }
-            this.form?.setMessage(state.message);
+            this._message = state.message;
+            this._showMessage();
         } catch (e) {
             console.error('Atelier: the lock screen\'s password popup failed', e);
             this._broken = true;
@@ -368,6 +371,7 @@ export class PasswordField {
                 'submit', () => this._submit(),
                 'cancel', () => this._prompt?.cancel(),
                 this);
+            form.entry.clutter_text.connectObject('text-changed', () => this._onTyped(form), this);
             this._popup = new MeltPopup(form, this._island.actor);
             this._popup.open();
         }
@@ -380,6 +384,19 @@ export class PasswordField {
 
     _close() {
         this._popup?.close();
+    }
+
+    // What GNOME says, unless typing has put it away.
+    _showMessage() {
+        this.form?.setMessage(this._message === this._dismissed ? null : this._message);
+    }
+
+    // Typing again puts away what GNOME said, as in GNOME's own prompt.
+    _onTyped(form) {
+        if (!form.entry.text || !this._message)
+            return;
+        this._dismissed = this._message;
+        this._showMessage();
     }
 
     // Handed over as GNOME's own Enter does it.
