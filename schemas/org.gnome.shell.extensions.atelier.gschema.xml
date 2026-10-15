@@ -407,7 +407,7 @@
     <key name="gnome-clock" type="b">
       <default>true</default>
       <summary>GNOME's clock on the lock screen</summary>
-      <description>Off when the lock screen's own clocks take its place.</description>
+      <description>Off when the lock screen's own clocks take its place (with the hint under it, how to unlock: the island's padlock is there to click).</description>
     </key>
     <key name="edit-request" type="s">
       <default>''</default>

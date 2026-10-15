@@ -2918,8 +2918,8 @@ async function testLockWidgets() {
         check(!clock.reactive && !board.layer.reactive, 'it takes no clicks');
         check(/^\d{1,2}$/.test(clock._hours?.text) && /^\d{2}/.test(clock._minutes?.text) && clock._date?.text,
             `stacked: the date, the hours over the minutes (${clock._hours?.text} ${clock._minutes?.text})`);
-        const labels = [dialog._clock._time, dialog._clock._date];
-        check(labels.every(l => !l.visible), 'in place of GNOME\'s clock');
+        const labels = [dialog._clock._time, dialog._clock._date, dialog._clock._hint];
+        check(labels.every(l => !l.visible), 'in place of GNOME\'s clock, its hint gone with it');
         lockSettings.set_boolean('gnome-clock', true);
         check(labels.every(l => l.visible), 'which comes back when asked');
         lockSettings.set_boolean('gnome-clock', false);

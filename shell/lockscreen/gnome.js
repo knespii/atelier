@@ -68,12 +68,13 @@ export function promptProgressOf(dialog) {
 
 /**
  * @param {UnlockDialog} dialog
- * @returns {Clutter.Actor[]} GNOME's time and date (not its hint, which
- *   says how to unlock); GNOME animates the clock around them, not these
+ * @returns {Clutter.Actor[]} GNOME's time, date and the hint under them
+ *   (how to unlock); GNOME animates the clock around them and the hint's
+ *   opacity, never whether they show
  */
 export function clockLabelsOf(dialog) {
     const clock = dialog?._clock;
-    return [clock?._time, clock?._date].filter(actor => actor instanceof Clutter.Actor);
+    return [clock?._time, clock?._date, clock?._hint].filter(actor => actor instanceof Clutter.Actor);
 }
 
 /**

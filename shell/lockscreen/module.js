@@ -82,7 +82,8 @@ export class LockModule {
         this._board.layer.opacity = Math.round(255 * (1 - (1 - DIMMED) * progress));
     }
 
-    // GNOME's time and date, unless the lock screen's own clocks take their place.
+    // GNOME's time and date (and the hint under them, which would be left
+    // on its own), unless the lock screen's own clocks take their place.
     _syncClock(shown = this._lockSettings.get_boolean('gnome-clock')) {
         for (const label of clockLabelsOf(this._dialog))
             label.visible = shown;
