@@ -1,6 +1,7 @@
 // While the screen is locked, this is all of Atelier that runs: the island
 // with the padlock over GNOME's lock screen, following GNOME's check of who
-// is there (lib/lockState.js), and the lock screen's widgets (board.js).
+// is there (lib/lockState.js), the lock screen's widgets (board.js) and its
+// own password field (password.js).
 // Nothing here launches anything, reads the network, shows notifications or
 // takes the keyboard.
 
@@ -13,6 +14,7 @@ import {LockBoard} from './board.js';
 import {clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt} from './gnome.js';
 import {LockIsland} from './island.js';
 import {AuthObserver} from './observer.js';
+import {PasswordField} from './password.js';
 
 const SETTLE_TIME = 900; // how long a failure shows, ms
 const DIMMED = 0.25; // what is left of the widgets while the prompt is up
@@ -27,6 +29,7 @@ export class LockModule {
         this._dialog = null;
         this._island = null;
         this._board = null;
+        this._field = null;
         this._observer = null;
         this._settleId = 0;
         this._unlocking = false;
@@ -52,6 +55,9 @@ export class LockModule {
         if (this._lockSettings.get_boolean('island')) {
             this._island = new LockIsland(this._settings.get_child('bar'));
             this._island.actor.connectObject('clicked', () => showPrompt(this._dialog), this);
+            // (The island grows into it.)
+            if (this._lockSettings.get_boolean('password-field'))
+                this._field = new PasswordField(this._island);
         }
         this._board = new LockBoard(this._lockSettings);
         if (placeOverBackground(this._dialog, this._board.layer)) {
@@ -82,6 +88,7 @@ export class LockModule {
     _dispatch(event) {
         const before = this.state.phase;
         this.state = reduce(this.state, event);
+        this._field?.follow(event, this.state);
         if (this.state.phase === Phase.FAILED && before !== Phase.FAILED) {
             this._island?.shake();
             this._settleLater();
@@ -100,7 +107,9 @@ export class LockModule {
     }
 
     _show() {
-        this._island?.setLook(look(this.state));
+        const shown = look(this.state);
+        this._island?.setLook(shown);
+        this._field?.setLook(shown);
     }
 
     /**
@@ -125,6 +134,9 @@ export class LockModule {
         this._settleId = 0;
         this._observer?.destroy();
         this._observer = null;
+        // (Unlocked, GNOME's prompt goes as it is: hidden.)
+        this._field?.destroy({restore: !this._unlocking});
+        this._field = null;
         this._island?.destroy();
         this._island = null;
         this._lockSettings?.disconnectObject(this);

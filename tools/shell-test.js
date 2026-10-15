@@ -2785,7 +2785,7 @@ async function testLockScreen(ext) {
         check(phase() === 'locked' && island.padlock.look.shackle === 'closed', 'the padlock is closed');
         await restPointer();
         await Scripting.sleep(400);
-        await screenshotIsland('70-lock-padlock', 120);
+        await screenshotIsland('80-lock-padlock', 120);
 
         // A click on the island brings up the password prompt.
         await clickAt(...centerOf(island.actor));
@@ -2809,7 +2809,7 @@ async function testLockScreen(ext) {
         // (Retrying, GDM asks again at once.)
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);
         check(phase() === 'failed' && island.padlock.has_style_pseudo_class('failed'), 'a failure turns the ring red');
-        await screenshotIsland('71-lock-failed', 120);
+        await screenshotIsland('81-lock-failed', 120);
         check(await waitFor(() => phase() === 'ready', 3000), 'and settles');
 
         // The right one.
@@ -2821,7 +2821,7 @@ async function testLockScreen(ext) {
         check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
             island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
         await Scripting.sleep(400);
-        await screenshotIsland('72-lock-success', 120);
+        await screenshotIsland('82-lock-success', 120);
 
         // logind's Unlock, as GDM would have it sent.
         shield.deactivate(false);
@@ -2923,7 +2923,7 @@ async function testLockWidgets() {
         lockSettings.set_boolean('gnome-clock', false);
         await restPointer();
         await Scripting.sleep(500);
-        await screenshot('73-lock-widgets');
+        await screenshot('83-lock-widgets');
 
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
@@ -2945,12 +2945,73 @@ async function testLockWidgets() {
         JSON.parse(lockSettings.get_string('widgets')).some(e => e.kind === 'date'), 'a widget added is kept');
     check(!preview._board.addWidget('github'), 'nothing that opens an app or reads the network');
     await Scripting.sleep(600);
-    await screenshot('74-lock-editor');
+    await screenshot('84-lock-editor');
     await pressKey(Clutter.KEY_Escape);
     check(await waitFor(() => !editor.preview && !findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-preview')), 3000),
         'Escape and it goes');
     lockSettings.reset('widgets');
     lockSettings.reset('gnome-clock');
+}
+
+// The lock screen's own password field: the island grows into it, what is
+// typed goes to GNOME's (hidden) prompt as GNOME's own Enter sends it, what
+// GNOME says shows in it, and GNOME's prompt shows again whenever the field
+// can't stand in for it.
+async function testLockPasswordField() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the password field untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const field = () => lock()?._field;
+    const locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.island?.actor?.mapped, 3000), 'locked');
+        // The key that wakes the lock screen goes into the field.
+        await pressKey(Clutter.KEY_a);
+        check(await waitFor(() => field()?.page?.mapped, 3000), 'a key: the island grows into the password field');
+        const prompt = shield._dialog._authPrompt;
+        let entry = field().page.entry;
+        check(prompt.opacity === 0, 'GNOME\'s prompt hidden behind it');
+        const picked = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, ...centerOf(prompt._entry));
+        check(!prompt.contains(picked), 'and out of the pointer\'s way');
+        check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the field (${entry.text})`);
+        check(entry.contains(global.stage.key_focus), 'which has the keyboard');
+        // Escape, as in GNOME's prompt: back to the clock.
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => lock().state.phase === 'locked' && !field().page, 3000), 'Escape: back to the clock');
+        await Scripting.sleep(600);
+
+        // A wrong password, then something to choose from.
+        await clickAt(...centerOf(lock().island.actor));
+        check(await waitFor(() => field()?.page?.mapped && lock().state.phase === 'ready', 3000), 'clicked, the field again');
+        entry = field().page.entry;
+        await typeText('abc');
+        await restPointer();
+        await screenshotIsland('85-lock-password', 160);
+        await pressKey(Clutter.KEY_Return);
+        const verifier = locked.verifiers.at(-1);
+        check(await waitFor(() => verifier.answers.length === 1, 2000) && verifier.answers[0] === 'abc' && entry.text === '',
+            `Enter: GNOME has the answer once, the field is empty (${verifier.answers.length})`);
+        verifier.emit('show-message', 'gdm-password', 'Sorry, that didn\'t work. Please try again.', 3);
+        verifier.emit('verification-failed', 'gdm-password', true);
+        verifier.emit('ask-question', 'gdm-password', 'Password:', true);
+        check(field().page?.message.includes('didn\'t work') && field().page.padlock.look.tone === 'red',
+            'what GNOME says shows in it, the padlock red');
+        await Scripting.sleep(300);
+        await screenshotIsland('86-lock-password-wrong', 160);
+        check(await waitFor(() => lock().state.phase === 'ready' && entry.contains(global.stage.key_focus), 3000),
+            'asked again, it has the keyboard again');
+        const again = shield._dialog._authPrompt;
+        verifier.emit('show-choice-list', 'gdm-password', 'Choose', {});
+        check(again.opacity === 255 && !field().page, 'a list to choose from: GNOME\'s prompt shows instead');
+        locked.verifiers.at(-1).emit('verification-complete');
+        check(lock().state.phase === 'success', 'unlocked');
+    } finally {
+        await locked.unlock();
+    }
 }
 
 async function testDisableCleansUp(atelier) {
@@ -3131,6 +3192,7 @@ export async function run() {
         // turns Atelier off and on.)
         await part(testLockScreen, ext);
         await part(testLockWidgets);
+        await part(testLockPasswordField);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);

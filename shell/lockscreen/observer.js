@@ -59,13 +59,13 @@ export class AuthObserver {
                 type: 'message', text, kind,
                 fingerprint: verifier.serviceIsFingerprint?.(service) ?? service === FINGERPRINT_SERVICE,
             })),
-            'ask-question', tell((_v, _service, _question, secret) => ({type: 'question', secret})),
+            'ask-question', tell((_v, _service, question, secret) => ({type: 'question', question, secret})),
             'verification-complete', tell(() => ({type: 'complete'})),
             'verification-failed', tell(() => ({type: 'failed'})),
             'reset', tell(() => ({type: 'reset'})),
             'show-choice-list', tell(() => ({type: 'choices'})),
             this);
-        tell(() => ({type: 'prompt'}))();
+        tell(() => ({type: 'prompt', prompt}))();
     }
 
     _detach() {
