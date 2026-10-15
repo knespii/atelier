@@ -2903,6 +2903,8 @@ async function testLockWidgets() {
         {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
     ]));
     lockSettings.set_boolean('gnome-clock', false);
+    // (GNOME's own prompt, in the middle: the widgets make room for it.)
+    lockSettings.set_boolean('password-field', false);
     const locked = await lockForTest();
     try {
         const lock = () => atelier().lockModules?.get('lockscreen');
@@ -2951,6 +2953,7 @@ async function testLockWidgets() {
         'Escape and it goes');
     lockSettings.reset('widgets');
     lockSettings.reset('gnome-clock');
+    lockSettings.reset('password-field');
 }
 
 // The lock screen's own password field: the island grows into it, what is
@@ -2979,6 +2982,7 @@ async function testLockPasswordField() {
         check(!prompt.contains(picked), 'and out of the pointer\'s way');
         check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the field (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
+        check(lock().board.layer.opacity === 255, 'GNOME\'s prompt hidden, the widgets stay as they are');
         // Escape, as in GNOME's prompt: back to the clock.
         await pressKey(Clutter.KEY_Escape);
         check(await waitFor(() => lock().state.phase === 'locked' && !field().page, 3000), 'Escape: back to the clock');

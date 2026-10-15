@@ -74,8 +74,11 @@ export class LockModule {
         this._show();
     }
 
+    // (With the island's own field, GNOME's prompt is hidden: the middle
+    // stays free, and the widgets as they are.)
     _dim() {
-        const progress = Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
+        const progress = this._field?.standing
+            ? 0 : Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
         this._board.layer.opacity = Math.round(255 * (1 - (1 - DIMMED) * progress));
     }
 
@@ -89,6 +92,8 @@ export class LockModule {
         const before = this.state.phase;
         this.state = reduce(this.state, event);
         this._field?.follow(event, this.state);
+        if (this._board)
+            this._dim();
         if (this.state.phase === Phase.FAILED && before !== Phase.FAILED) {
             this._island?.shake();
             this._settleLater();

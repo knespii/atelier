@@ -135,6 +135,11 @@ export class PasswordField {
         return this._page;
     }
 
+    /** @returns {boolean} whether it stands in for GNOME's prompt (which is hidden) */
+    get standing() {
+        return this._prompt !== null;
+    }
+
     /**
      * What GNOME's unlock dialog says (see lib/lockState.js reduce()).
      *
