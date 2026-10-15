@@ -2790,7 +2790,7 @@ async function testLockScreen(ext) {
         check(phase() === 'locked' && island.padlock.look.shackle === 'closed', 'the padlock is closed');
         await restPointer();
         await Scripting.sleep(400);
-        await screenshotIsland('80-lock-padlock', 120);
+        await screenshotIsland('80-lock-padlock', 140);
 
         // A click on the island brings up the password prompt.
         await clickAt(...centerOf(island.actor));
@@ -2814,7 +2814,7 @@ async function testLockScreen(ext) {
         // (Retrying, GDM asks again at once.)
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);
         check(phase() === 'failed' && island.padlock.has_style_pseudo_class('failed'), 'a failure turns the ring red');
-        await screenshotIsland('81-lock-failed', 120);
+        await screenshotIsland('81-lock-failed', 140);
         check(await waitFor(() => phase() === 'ready', 3000), 'and settles');
 
         // The right one.
@@ -2836,7 +2836,7 @@ async function testLockScreen(ext) {
         check(jump > 1.02 && swing > 0.1 && swell > 1.03,
             `springing open: the shackle jumps past and swings, the padlock swells (${jump.toFixed(2)}, ${swing.toFixed(2)}, ${swell.toFixed(2)})`);
         check(padlock._shackle === 1 && padlock._swing === 0 && padlock._swell === 1, 'and settles open');
-        await screenshotIsland('82-lock-success', 120);
+        await screenshotIsland('82-lock-success', 140);
 
         // logind's Unlock, as GDM would have it sent.
         shield.deactivate(false);
