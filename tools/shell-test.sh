@@ -36,6 +36,12 @@ if [ -n "${ATELIER_SHELL_MODE:-}" ]; then
     DISABLED="['ubuntu-dock@ubuntu.com', 'ding@rastersoft.com']"
     ICONS="icon-theme='Yaru'"
 fi
+# Apps' tray icons come through the AppIndicator extension, when it is
+# installed (Debian's and Ubuntu's uuid, or the one from extensions.gnome.org).
+TRAY=""
+if [ "$SUITE" = main ]; then
+    TRAY=", 'ubuntu-appindicators@ubuntu.com', 'appindicatorsupport@rgcjonas.gmail.com'"
+fi
 # Only a shell that still has X11 (48) is told to go without it.
 NO_X11=""
 if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
@@ -132,7 +138,7 @@ PROFILES="[\
 
 cat > "$ROOT/config/glib-2.0/settings/keyfile" <<EOF
 [org/gnome/shell]
-enabled-extensions=['$UUID', 'user-theme@gnome-shell-extensions.gcampax.github.com']
+enabled-extensions=['$UUID', 'user-theme@gnome-shell-extensions.gcampax.github.com'$TRAY]
 disabled-extensions=$DISABLED
 
 [org/gnome/desktop/background]

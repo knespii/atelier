@@ -124,10 +124,10 @@ async function pointerTo(x, y) {
     await Scripting.sleep(80);
 }
 
-async function clickAt(x, y) {
+async function clickAt(x, y, button = Clutter.BUTTON_PRIMARY) {
     await pointerTo(x, y);
     for (const state of [Clutter.ButtonState.PRESSED, Clutter.ButtonState.RELEASED]) {
-        virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, state);
+        virtualPointer.notify_button(GLib.get_monotonic_time(), button, state);
         await Scripting.sleep(60);
     }
 }
@@ -815,6 +815,156 @@ async function testControlCentre(ext) {
         'a removed extension\'s tile goes away');
     indicator.quickSettingsItems.forEach(item => item.destroy());
     indicator.destroy();
+}
+
+const dbusCall = (connection, ...args) => new Promise((resolve, reject) => {
+    connection.call(...args, null, Gio.DBusCallFlags.NONE, -1, null, (c, result) => {
+        try {
+            resolve(c.call_finish(result));
+        } catch (e) {
+            reject(e);
+        }
+    });
+});
+
+/**
+ * A made-up app with a tray icon, on a D-Bus connection of its own, as the
+ * AppIndicator extension sees apps: an icon, a menu of one item, and a name
+ * that it only says later.
+ *
+ * @param {string} extensionPath - the AppIndicator extension's, for its interfaces
+ * @returns {object} the app: title(), activations, menuEvents, stop()
+ */
+async function startTrayApp(extensionPath) {
+    // (Its files hold the bare interface, as the extension wraps them.)
+    const xml = name => `<node>${new TextDecoder().decode(
+        Gio.File.new_for_path(`${extensionPath}/interfaces-xml/${name}.xml`).load_contents(null)[1])}</node>`;
+    const connection = Gio.DBusConnection.new_for_address_sync(
+        Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, null),
+        Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+        null, null);
+    const app = {title: '', activations: 0, menuEvents: []};
+    const item = Gio.DBusExportedObject.wrapJSObject(xml('StatusNotifierItem'), {
+        Category: 'ApplicationStatus',
+        Id: 'atelier-test-app',
+        get Title() {
+            return app.title;
+        },
+        Status: 'Active',
+        WindowId: 0,
+        IconThemePath: '',
+        Menu: '/MenuBar',
+        ItemIsMenu: false,
+        IconName: 'applications-science-symbolic',
+        IconPixmap: [],
+        OverlayIconName: '',
+        OverlayIconPixmap: [],
+        AttentionIconName: '',
+        AttentionIconPixmap: [],
+        AttentionMovieName: '',
+        ToolTip: ['', [], '', ''],
+        Activate() {
+            app.activations++;
+        },
+        SecondaryActivate() {},
+        XAyatanaSecondaryActivate() {},
+        ContextMenu() {},
+        Scroll() {},
+        ProvideXdgActivationToken() {},
+    });
+    const entry = {
+        'label': new GLib.Variant('s', 'Open the test app'),
+        'enabled': new GLib.Variant('b', true),
+        'visible': new GLib.Variant('b', true),
+    };
+    const menu = Gio.DBusExportedObject.wrapJSObject(xml('DBusMenu'), {
+        Version: 3,
+        TextDirection: 'ltr',
+        Status: 'normal',
+        IconThemePath: [],
+        GetLayout: () => [1, [0, {'children-display': new GLib.Variant('s', 'submenu')},
+            [new GLib.Variant('(ia{sv}av)', [1, entry, []])]]],
+        GetGroupProperties: ids => ids.filter(id => id === 1).map(id => [id, entry]),
+        GetProperty: (id, name) => entry[name] ?? new GLib.Variant('s', ''),
+        Event: (id, eventId) => {
+            app.menuEvents.push(`${id} ${eventId}`);
+        },
+        EventGroup: events => {
+            events.forEach(([id, eventId]) => app.menuEvents.push(`${id} ${eventId}`));
+            return [];
+        },
+        AboutToShow: () => false,
+        AboutToShowGroup: () => [[], []],
+    });
+    item.export(connection, '/StatusNotifierItem');
+    menu.export(connection, '/MenuBar');
+    await dbusCall(connection, 'org.kde.StatusNotifierWatcher', '/StatusNotifierWatcher',
+        'org.kde.StatusNotifierWatcher', 'RegisterStatusNotifierItem', new GLib.Variant('(s)', ['/StatusNotifierItem']));
+    return Object.assign(app, {
+        // It says its name, as apps do once they are up.
+        setTitle(title) {
+            app.title = title;
+            item.emit_signal('NewTitle', null);
+        },
+        stop() {
+            item.unexport();
+            menu.unexport();
+            connection.close_sync(null);
+        },
+    });
+}
+
+// An app's tray icon, through the AppIndicator extension (when it is
+// installed): in the control centre named after the app, opening it with a
+// click, its menu on the right button.
+async function testTrayApp(ext) {
+    const appIndicator = ['ubuntu-appindicators@ubuntu.com', 'appindicatorsupport@rgcjonas.gmail.com']
+        .map(uuid => Main.extensionManager.lookup(uuid))
+        .find(extension => extension?.state === ExtensionState.ACTIVE);
+    if (!appIndicator) {
+        results.push('INFO  no AppIndicator extension active here: apps\' tray icons untested');
+        return;
+    }
+    const module = ext.stateObj.modules.get('control-centre');
+    const island = ext.stateObj.modules.get('island').island;
+    const app = await startTrayApp(appIndicator.path);
+    try {
+        const tileOf = () => module.tray?.tiles.find(t => t.role.startsWith('appindicator-'));
+        if (!check(await waitFor(() => tileOf(), 5000), 'an app\'s tray icon moves into the control centre'))
+            return;
+        const tile = tileOf();
+        check(!tile.name.includes(':') && !tile.name.includes('/'), `never named after its D-Bus address (${tile.name})`);
+        app.setTitle('Test App');
+        check(await waitFor(() => tile.name === 'Test App', 3000), `named after the app once it says (${tile.name})`);
+
+        module.open('extensions');
+        check(await waitFor(() => island.page?.tab === 'extensions' && tile.mapped, 2000), 'on the Extensions tab');
+        await restPointer();
+        await Scripting.sleep(400);
+        await screenshotIsland('24-control-centre-tray-app', 300);
+        const menu = tile.indicator.menu;
+        await waitFor(() => menu.numMenuItems > 0, 3000);
+        await clickAt(...centerOf(tile.indicator), Clutter.BUTTON_SECONDARY);
+        check(await waitFor(() => menu.isOpen, 1500) && app.activations === 0, 'the right button brings up its menu');
+        if (menu.isOpen) {
+            await clickAt(...centerOf(menu.firstMenuItem));
+            check(await waitFor(() => app.menuEvents.includes('1 clicked'), 2000),
+                `and its items reach the app (${app.menuEvents.join(', ')})`);
+            menu.close();
+            await Scripting.sleep(300);
+        }
+        if (!island.page)
+            module.open('extensions');
+        await waitFor(() => tile.mapped, 1000);
+        await clickAt(...centerOf(tile.indicator));
+        check(await waitFor(() => app.activations === 1, 2000), 'a click opens the app');
+        check(await waitFor(() => island.page === null, 1500) && !menu.isOpen,
+            'and the control centre makes way for its window, without the menu');
+    } finally {
+        app.stop();
+    }
+    check(await waitFor(() => !module.tray?.tiles.some(t => t.role.startsWith('appindicator-')), 5000),
+        'its tile goes when the app quits');
 }
 
 // A window full screen on the main monitor: nothing of the bar, the island
@@ -2696,6 +2846,7 @@ export async function run() {
         await part(testIsland, ext, atelier);
         await part(testNotifications, ext, atelier);
         await part(testControlCentre, ext);
+        await part(testTrayApp, ext);
         await part(testOverviewBar);
         await part(testBarStyles, ext);
         await part(testFullscreen, ext);
