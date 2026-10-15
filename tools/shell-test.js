@@ -2817,20 +2817,21 @@ async function testLockScreen(ext) {
         // (Retrying, GDM asks again at once.)
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);
         check(phase() === 'failed' && island.padlock.has_style_pseudo_class('failed'), 'a failure turns the ring red');
-        let [tight, shaken, pictured] = [0, 0, false];
+        let [tight, shaken, reddened, pictured] = [0, 0, 0, false];
         await waitFor(() => {
             const [t, shake] = island.padlock._cramping();
             tight = Math.max(tight, t);
             shaken = Math.max(shaken, Math.abs(shake));
+            reddened = Math.max(reddened, island.padlock._red);
             if (!pictured && t > 0.8) {
                 pictured = true;
                 screenshotIsland('81-lock-failed', 160);
             }
             return !island.padlock._timelines.has('cramp');
         }, 2000);
-        check(tight > 0.8 && shaken > 0.5 && island.padlock._cramp === 0,
-            `it cramps up, smaller and darker, the padlock shaking, and lets go (${tight.toFixed(2)}, ${shaken.toFixed(2)})`);
-        check(await waitFor(() => phase() === 'ready', 3000), 'and settles');
+        check(tight > 0.8 && shaken > 0.5 && reddened > 0.5 && island.padlock._cramp === 0,
+            `it cramps up, smaller and darker, the padlock smaller, reddened and shaking, and lets go (${tight.toFixed(2)}, ${shaken.toFixed(2)}, ${reddened.toFixed(2)})`);
+        check(await waitFor(() => phase() === 'ready' && island.padlock._red === 0, 3000), 'and settles, white again');
 
         // The right one.
         await typeText('right');

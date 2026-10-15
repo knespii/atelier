@@ -3,7 +3,8 @@
 // passes grow and fall back, as a stadium's wave. The ring shows faintly
 // while a fingerprint reader waits, and turns red for a moment on a
 // failure: it cramps up – smaller, its ticks shorter and darker, with a
-// tremor – while the padlock gives a jerky shake, sideways and askew. It
+// tremor – while the padlock, smaller too and a little red, gives a jerky
+// shake, sideways and askew. It
 // turns green when the screen unlocks (its colour always blending softly
 // from one to the next). Unlocked, the ring spreads out a little, the
 // ticks' tips paling a moment as it does, and the padlock springs open –
@@ -38,6 +39,8 @@ const CRAMP_TIME = 850; // a failure's cramp
 const SHRINK = 0.07; // how much smaller the ring gets then, of its size
 const SHORTEN = 0.4; // how much shorter its ticks
 const DARKEN = 0.45; // how far towards black
+const LOCK_SHRINK = 0.12; // how much smaller the padlock gets then
+const LOCK_RED = 0.4; // how far it turns the ring's red: less than the ring
 // The padlock's shake: [when (of the cramp's time), where (-1 left … 1 right)],
 // straight from one to the next, ever shorter.
 const SHAKE = [[0, 0], [0.05, -1], [0.11, 0.85], [0.17, -0.8], [0.24, 0.6], [0.31, -0.55], [0.4, 0.35],
@@ -68,6 +71,7 @@ class AtelierPadlock extends St.DrawingArea {
         this._hop = 0; // how far the hops have got, 0 … 1 (0: none)
         this._cramp = 0; // how far a failure's cramp has got, 0 … 1 (0: none)
         this._color = 1; // from the colour shown before (0) to the ring's own (1)
+        this._red = 0; // how red the padlock is (of how red it gets)
         this._from = null;
         this._shown = null; // the ring's colour as last drawn
         this._ticks = 0; // how much the ring shows, 0 … 1
@@ -129,6 +133,7 @@ class AtelierPadlock extends St.DrawingArea {
             this._from = this._shown;
             this._color = 0;
             this._tween('color', 1, COLOR_TIME, Clutter.AnimationMode.EASE_IN_OUT_SINE);
+            this._tween('red', tone === 'red' ? 1 : 0, COLOR_TIME, Clutter.AnimationMode.EASE_IN_OUT_SINE);
         }
         for (const [name, wanted] of [['success', tone === 'green'], ['failed', tone === 'red']]) {
             if (wanted)
@@ -353,6 +358,12 @@ class AtelierPadlock extends St.DrawingArea {
         cr.translate(cx, base - size * up);
         cr.scale(1 - 1.2 * squash, 1 + 1.6 * squash);
         cr.translate(-cx, -base);
+        // Cramped up, smaller (round its middle, which is the ring's).
+        if (tight > 0) {
+            cr.translate(cx, cy);
+            cr.scale(1 - LOCK_SHRINK * tight, 1 - LOCK_SHRINK * tight);
+            cr.translate(-cx, -cy);
+        }
         // Shaking: sideways and askew, turning on its middle.
         if (shake !== 0) {
             const middleY = bodyY + bodyHeight / 2;
@@ -360,7 +371,11 @@ class AtelierPadlock extends St.DrawingArea {
             cr.rotate(0.12 * shake);
             cr.translate(-cx, -middleY);
         }
-        set(color, 1);
+        // (A little of the ring's red, as it turns red.)
+        const fill = {alpha: color.alpha};
+        for (const channel of ['red', 'green', 'blue'])
+            fill[channel] = mix(color[channel], ink[channel], LOCK_RED * this._red);
+        set(fill, 1);
         cr.setLineWidth(stroke);
         cr.setLineCap(Cairo.LineCap.BUTT);
         // The right leg stays in the body (the shackle turns on it); the
