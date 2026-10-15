@@ -15,8 +15,10 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {PopupDummyMenu} from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-// What stays in the bar: GNOME's own and everything of Atelier's.
-const KEEP = new Set(['activities', 'dateMenu', 'quickSettings', 'keyboard', 'screenRecording', 'screenSharing']);
+// What stays in the bar: GNOME's own and everything of Atelier's. (GNOME
+// puts its own icons in the bar anew when the screen locks, too.)
+const KEEP = new Set(['activities', 'dateMenu', 'quickSettings', 'keyboard', 'a11y', 'dwellClick',
+    'screenRecording', 'screenSharing']);
 const keeps = role => KEEP.has(role) || role.startsWith('atelier');
 
 /**
