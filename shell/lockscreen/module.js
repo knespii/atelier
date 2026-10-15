@@ -1,23 +1,30 @@
 // While the screen is locked, this is all of Atelier that runs: the island
 // with the padlock over GNOME's lock screen, following GNOME's check of who
 // is there (lib/lockState.js), the lock screen's widgets (board.js) and its
-// own password popup (password.js).
+// own password popup (password.js). The wallpaper stays sharp until the
+// password is asked, and blurs as GNOME blurs it as the prompt comes up.
 // Nothing here launches anything, reads the network, shows notifications or
 // takes the keyboard.
 
 import GLib from 'gi://GLib';
+import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Phase, initialState, look, reduce} from '../../lib/lockState.js';
 import {LockBoard} from './board.js';
-import {clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt} from './gnome.js';
+import {
+    clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt, wallpaperBlursOf,
+} from './gnome.js';
 import {LockIsland} from './island.js';
 import {AuthObserver} from './observer.js';
 import {PasswordField} from './password.js';
 
 const SETTLE_TIME = 900; // how long a failure shows, ms
-const DIMMED = 0.25; // what is left of the widgets while the prompt is up
+const GAP = 20; // between a clock that goes up and the popup, or the island; logical pixels
+// GNOME's blur of the lock screen's wallpaper (ui/unlockDialog.js), if it
+// can't be read.
+const BLUR = {radius: 90, brightness: 0.65};
 
 export class LockModule {
     /**
@@ -60,26 +67,54 @@ export class LockModule {
                 this._field = new PasswordField(this._island);
         }
         this._board = new LockBoard(this._lockSettings);
-        if (placeOverBackground(this._dialog, this._board.layer)) {
-            // (In the way of the prompt or the popup, in the middle: they
-            // make room.)
-            promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._dim(), this);
-            this._dim();
-        } else {
+        if (!placeOverBackground(this._dialog, this._board.layer)) {
             this._board.destroy();
             this._board = null;
         }
+        // GNOME's blur at its fullest, as it has set it.
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [blur] = wallpaperBlursOf(this._dialog);
+        this._blur = blur?.radius > 0 ? {radius: blur.radius / scale, brightness: blur.brightness} : BLUR;
+        // As the prompt comes up (or the popup asking instead), and as GNOME
+        // sets its blur anew.
+        promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._makeRoom(), this);
+        St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => this._makeRoom(), this);
+        Main.layoutManager.connectObject('monitors-changed', () => this._makeRoom(), this);
+        this._makeRoom();
         this._lockSettings.connectObject('changed::gnome-clock', () => this._syncClock(), this);
         this._syncClock();
         this._observer = new AuthObserver(this._dialog, event => this._dispatch(event));
         this._show();
     }
 
-    // (GNOME's prompt comes up the same way whether it shows or the popup
-    // asks instead.)
-    _dim() {
+    // GNOME's prompt comes up the same way whether it shows or the popup
+    // asks instead: the wallpaper blurs as it does, and the widgets make
+    // room in the middle.
+    _makeRoom(animate = false) {
+        // (Unlocked, it all slides away as it is.)
+        if (this._unlocking)
+            return;
         const progress = Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
-        this._board.layer.opacity = Math.round(255 * (1 - (1 - DIMMED) * progress));
+        this._blurWallpaper(progress);
+        if (!this._board)
+            return;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const island = this._island?.actor;
+        const monitor = Main.layoutManager.primaryMonitor;
+        const top = (island ? island.y + island.height - monitor.y : 0) + GAP * scale;
+        this._board.makeRoom(progress, this._field?.standing ? this._field.rect : null, top, GAP * scale, animate);
+    }
+
+    /** @param {number} progress - 0 sharp … 1 as blurred (and darkened) as GNOME has it */
+    _blurWallpaper(progress) {
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        for (const effect of wallpaperBlursOf(this._dialog)) {
+            effect.set({
+                radius: Math.round(this._blur.radius * scale * progress),
+                brightness: 1 - (1 - this._blur.brightness) * progress,
+            });
+            effect.enabled = progress > 0;
+        }
     }
 
     // GNOME's time and date (and the hint under them, which would be left
@@ -93,8 +128,8 @@ export class LockModule {
         const before = this.state.phase;
         this.state = reduce(this.state, event);
         this._field?.follow(event, this.state);
-        if (this._board)
-            this._dim();
+        // (The popup may have come up, or grown with what GNOME says.)
+        this._makeRoom(true);
         if (this.state.phase === Phase.FAILED && before !== Phase.FAILED) {
             this._island?.shake();
             this._settleLater();
@@ -145,12 +180,16 @@ export class LockModule {
         this._island = null;
         this._lockSettings?.disconnectObject(this);
         promptProgressOf(this._dialog)?.disconnectObject(this);
+        St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
+        Main.layoutManager.disconnectObject(this);
         this._board?.destroy({keepLayer: this._unlocking});
         this._board = null;
         // (Unlocked, the lock screen goes as it is; turned off, GNOME's own
-        // clock comes back.)
-        if (this._dialog && !this._unlocking)
+        // clock and blur come back.)
+        if (this._dialog && !this._unlocking) {
             this._syncClock(true);
+            this._blurWallpaper(1);
+        }
         this._lockSettings = null;
         this._dialog = null;
     }

@@ -28,6 +28,7 @@ import {LiquidPaint} from '../core/liquid.js';
 
 const SPREAD_TIME = 560;
 const GATHER_TIME = 380;
+const EXPECTED_SIZE = [320, 230]; // the popup's, before it has been shown: logical pixels
 
 // Keys that would copy, cut or paste.
 const CLIPBOARD_KEYS = [Clutter.KEY_c, Clutter.KEY_C, Clutter.KEY_x, Clutter.KEY_X, Clutter.KEY_v, Clutter.KEY_V,
@@ -290,6 +291,7 @@ export class PasswordField {
         this._watched = [];
         this._message = null;
         this._dismissed = null;
+        this._size = null;
     }
 
     /** @returns {PasswordForm|null} the popup's form, while it is open */
@@ -300,6 +302,23 @@ export class PasswordField {
     /** @returns {boolean} whether it stands in for GNOME's prompt (which is hidden) */
     get standing() {
         return this._prompt !== null;
+    }
+
+    /**
+     * @returns {number[]} where the popup is on the main monitor (or was
+     *   last, or will be about), [x, y, width, height] from its corner
+     */
+    get rect() {
+        const form = this._popup?.form;
+        if (form) {
+            const [, width] = form.get_preferred_width(-1);
+            const [, height] = form.get_preferred_height(width);
+            this._size = [width, height];
+        }
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [width, height] = this._size ?? [EXPECTED_SIZE[0] * scale, EXPECTED_SIZE[1] * scale];
+        const monitor = Main.layoutManager.primaryMonitor;
+        return [Math.round((monitor.width - width) / 2), Math.round((monitor.height - height) / 2), width, height];
     }
 
     /**

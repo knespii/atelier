@@ -1,14 +1,13 @@
 // Editing the lock screen's widgets, in the session: the real lock screen
 // can't be edited (it is locked). The preferences ask for it (lockscreen's
-// edit-request); the screen then shows a mock lock screen – the wallpaper
-// blurred as GNOME blurs it and GNOME's clock where it sits (when it
-// shows) – and the desktop's editor over the lock screen's widgets. Done
-// (or Escape) and it goes.
+// edit-request); the screen then shows a mock lock screen – the wallpaper,
+// sharp as the lock screen shows it until the password is asked, and
+// GNOME's clock where it sits (when it shows) – and the desktop's editor
+// over the lock screen's widgets. Done (or Escape) and it goes.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GnomeDesktop from 'gi://GnomeDesktop';
-import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
@@ -17,9 +16,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {DesktopEditor} from '../desktop/editor.js';
 import {LockBoard} from './board.js';
 
-// As GNOME's lock screen (ui/unlockDialog.js).
-const BLUR_BRIGHTNESS = 0.65;
-const BLUR_RADIUS = 90;
 const FADE_TIME = 300;
 
 class LockPreview {
@@ -31,7 +27,6 @@ class LockPreview {
         this._onClosed = onClosed;
         const lockSettings = settings.get_child('lockscreen');
         const monitor = Main.layoutManager.primaryMonitor;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
 
         this.actor = new St.Widget({
             style_class: 'atelier-lock-preview',
@@ -50,11 +45,6 @@ class LockPreview {
             monitorIndex: Main.layoutManager.primaryIndex,
             controlPosition: false,
         });
-        this._background.backgroundActor.add_effect(new Shell.BlurEffect({
-            brightness: BLUR_BRIGHTNESS,
-            radius: BLUR_RADIUS * scale,
-            mode: Shell.BlurMode.ACTOR,
-        }));
 
         // GNOME's clock, where GNOME puts it (a third of the way down).
         if (lockSettings.get_boolean('gnome-clock')) {

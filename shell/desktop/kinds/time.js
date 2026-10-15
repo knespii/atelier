@@ -114,7 +114,7 @@ class AtelierClockWidget extends DesktopWidget {
             this._clock = new GnomeDesktop.WallClock({time_only: true});
             this._clock.connectObject('notify::clock', () => this._sync(), this);
         }
-        this._face = null;
+        this._face = this._stacked = null;
         this._time = this._suffix = this._date = this._hours = this._minutes = null;
         this._stopSeconds();
 
@@ -186,6 +186,12 @@ class AtelierClockWidget extends DesktopWidget {
         minutes.add_child(this._suffix);
         for (const part of [this._date, this._hours, minutes])
             stack.add_child(part);
+        this._stacked = stack;
+    }
+
+    /** @returns {St.BoxLayout|null} the date, hours and minutes, when stacked */
+    get stacked() {
+        return this._stacked ?? null;
     }
 
     _stopSeconds() {

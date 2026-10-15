@@ -3,8 +3,10 @@
 // the lockscreen settings' widgets. On the lock screen they only show – a
 // click goes through to GNOME's lock screen, which brings up the prompt;
 // in the editor (a mock lock screen in the session, see preview.js) they
-// are moved and stretched as on the desktop.
+// are moved and stretched as on the desktop. When the password is asked,
+// they make room for the prompt.
 
+import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -16,6 +18,10 @@ import {
 import {ClockWidget, DateWidget} from '../desktop/kinds/time.js';
 
 const WIDGETS = {clock: ClockWidget, date: DateWidget};
+const DIMMED = 0.25; // what is left of the widgets while the prompt is up
+const SMALLEST = 0.35; // how small a clock gets to go up over the popup
+const SHIFT_TIME = 250; // moving on when the popup changes size
+const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
 
 export class LockBoard {
     /**
@@ -130,6 +136,73 @@ export class LockBoard {
         this._widgets.set(entry.id, widget);
         this._editor?.adopt(widget);
         return widget;
+    }
+
+    /**
+     * Make room for the prompt in the middle, as it comes up: the widgets
+     * dim. Over them, with the lock screen's own popup, a clock of hours
+     * over minutes stays bright, and goes up over the popup if it is in its
+     * way (smaller, if it has to be, to fit under the island).
+     *
+     * @param {number} progress - from the clock (0) to the prompt (1)
+     * @param {number[]|null} popup - [x, y, width, height] in the layer;
+     *   null for GNOME's own prompt
+     * @param {number} top - how high a clock may go, in the layer
+     * @param {number} gap - kept between the clock and the popup, pixels
+     * @param {boolean} [animate] - eased, for a change of the popup (not
+     *   following the progress)
+     */
+    makeRoom(progress, popup, top, gap, animate = false) {
+        const dim = Math.round(255 * (1 - (1 - DIMMED) * progress));
+        this.layer.opacity = popup ? 255 : dim;
+        for (const widget of this.widgets) {
+            const room = popup ? this._roomFor(widget, popup, top, gap) : null;
+            widget.opacity = !popup || room ? 255 : dim;
+            this._shift(widget, room, progress, animate);
+        }
+    }
+
+    // Where a stacked clock goes, for the popup: as it is if it is out of
+    // its way, otherwise over it, in the middle. Null for anything else.
+    _roomFor(widget, [x, y, width, height], top, gap) {
+        const clock = widget.stacked;
+        if (!clock)
+            return null;
+        // (Where it is laid out, however it is moved now.)
+        const own = widget.get_allocation_box();
+        let [left, upper] = [0, 0];
+        for (let actor = clock; actor && actor !== widget; actor = actor.get_parent()) {
+            const box = actor.get_allocation_box();
+            left += box.x1;
+            upper += box.y1;
+        }
+        const [w, h] = [clock.width, clock.height];
+        const bottom = y - gap;
+        const [cx, cy] = [own.x1 + left + w / 2, own.y1 + upper + h / 2];
+        const inTheWay = cx - w / 2 < x + width && cx + w / 2 > x && cy + h / 2 > bottom && cy - h / 2 < y + height;
+        if (!inTheWay || own.get_width() <= 0 || own.get_height() <= 0)
+            return {dx: 0, dy: 0, scale: 1};
+        const scale = Math.max(SMALLEST, Math.min(1, (bottom - top) / h));
+        return {
+            dx: x + width / 2 - cx,
+            dy: bottom - h * scale / 2 - cy,
+            scale,
+            pivot: [(left + w / 2) / own.get_width(), (upper + h / 2) / own.get_height()],
+        };
+    }
+
+    _shift(widget, room, progress, animate) {
+        const {dx = 0, dy = 0, scale = 1, pivot} = room ?? {};
+        if (pivot)
+            widget.set_pivot_point(...pivot);
+        const s = 1 + (scale - 1) * progress;
+        const values = {translation_x: dx * progress, translation_y: dy * progress, scale_x: s, scale_y: s};
+        if (animate) {
+            widget.ease({...values, duration: SHIFT_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        } else {
+            MOVED.forEach(name => widget.remove_transition(name));
+            widget.set(values);
+        }
     }
 
     // Each widget at its cells, as far as the screen allows (only shown:

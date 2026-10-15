@@ -3,6 +3,7 @@
 // is used, and anything missing leaves GNOME's lock screen as it is.
 
 import Clutter from 'gi://Clutter';
+import Shell from 'gi://Shell';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {UnlockDialog} from 'resource:///org/gnome/shell/ui/unlockDialog.js';
@@ -55,6 +56,20 @@ export function placeOverBackground(dialog, layer) {
     layer.get_parent()?.remove_child(layer);
     dialog.insert_child_above(layer, background);
     return true;
+}
+
+/**
+ * @param {UnlockDialog} dialog
+ * @returns {Shell.BlurEffect[]} what blurs the lock screen's wallpaper, one
+ *   for each monitor; GNOME sets them anew when the monitors or the scale
+ *   change
+ */
+export function wallpaperBlursOf(dialog) {
+    const background = dialog?._backgroundGroup;
+    if (!(background instanceof Clutter.Actor))
+        return [];
+    return background.get_children().map(widget => widget.get_effect('blur'))
+        .filter(effect => effect instanceof Shell.BlurEffect);
 }
 
 /**

@@ -98,11 +98,13 @@ profile called **Original**, so there is always a way back.
   ticks. A wave runs round the ring while GNOME checks the password (or a
   face, with a PAM module such as Howdy), the ring shows faintly while a
   fingerprint reader waits, the padlock shakes in a red ring on a failure and
-  springs open in a green one as the screen unlocks. Asked for the password,
-  a popup of its own – the user's picture and name over the field, Enter
-  sends it – spreads out of a drop in the middle of the screen; what is typed
-  goes to GNOME, which still does all the checking (and its own prompt shows
-  whenever GNOME asks for something else). Clocks – a stacked one too,
+  springs open in a green one as the screen unlocks. The wallpaper stays
+  sharp until the password is asked. Then it blurs, and a popup of its own –
+  the user's picture and name over the field, Enter sends it – spreads out
+  of a drop in the middle of the screen, while a clock of hours over minutes
+  in its way goes up over it. What is typed goes to GNOME, which still does
+  all the checking (and its own prompt shows whenever GNOME asks for
+  something else). Clocks – a stacked one too,
   the date over big hours over dimmer minutes – and the date can be placed
   anywhere on it, on a mock lock screen opened from the settings' Lock
   Screen page. Nothing on the lock screen opens an app, reads the network or

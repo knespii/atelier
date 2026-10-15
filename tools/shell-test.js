@@ -2937,9 +2937,14 @@ async function testLockWidgets() {
         await Scripting.sleep(500);
         await screenshot('83-lock-widgets');
 
+        const blurs = () => dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
+        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+            'the wallpaper sharp until the password is asked');
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
         check(await waitFor(() => board.layer.opacity < 100, 2000), 'and the widgets make room for it');
+        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness < 0.7), 2000),
+            `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
     } finally {
         await locked.unlock();
     }
@@ -2981,9 +2986,24 @@ async function testLockPasswordField() {
     const field = () => lock()?._field;
     const shown = () => field()?.form?.mapped && field().form.opacity === 255;
     const sheet = () => findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-sheet'));
+    // A clock of hours over minutes in the popup's way (as the user has it), the date aside.
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 15, y: 3, fine: true, face: 'stacked'},
+        {id: 'date', kind: 'date', size: 'square', x: 2, y: 2, fine: true},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    const widget = id => lock().board.widgets.find(w => w.entry.id === id);
+    const blurs = () => shield._dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
     let locked = await lockForTest();
     try {
-        check(await waitFor(() => lock()?.island?.actor?.mapped, 3000), 'locked');
+        check(await waitFor(() => lock()?.island?.actor?.mapped && lock().board?.widgets.length === 2 &&
+            widget('clock').stacked?.has_allocation(), 3000), 'locked');
+        const clock = widget('clock');
+        // (Where it is at rest: in the popup's way, as checked below.)
+        const clockBottom = clock.stacked.get_transformed_position()[1] + clock.stacked.get_transformed_size()[1];
+        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+            'the wallpaper sharp until the password is asked');
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
         // (Its liquid over all the monitor, the drop wherever it is.)
@@ -3012,12 +3032,27 @@ async function testLockPasswordField() {
         check(!prompt.contains(picked), 'and out of the pointer\'s way');
         check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the popup (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
-        check(await waitFor(() => lock().board.layer.opacity < 100, 2000), 'the widgets make room for it');
+        check(!findActor(form, a => a instanceof St.Button), 'no buttons: Enter sends it, Escape goes back');
+        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness < 0.7), 2000),
+            `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => shield._dialog._adjustment.value === 1 && !clock.get_transition('translation_y'), 2000),
+            'the prompt is up');
+        const [cx, cy] = clock.stacked.get_transformed_position();
+        const [cw, ch] = clock.stacked.get_transformed_size();
+        const [, formY] = form.get_transformed_position();
+        check(cy + ch <= formY - 10 && cy >= lock().island.actor.y + lock().island.actor.height &&
+            Math.abs(cx + cw / 2 - (monitor.x + monitor.width / 2)) <= 2 && clockBottom > formY,
+        `the stacked clock in its way goes up over it, between it and the island (${Math.round(cy)}–${Math.round(cy + ch)} over ${Math.round(formY)})`);
+        check(clock.opacity === 255 && lock().board.layer.opacity === 255 && widget('date').opacity < 100,
+            'and stays bright, the other widgets dim');
+        await restPointer();
+        await screenshot('87-lock-room');
         // Escape, as in GNOME's prompt: back to the clock.
         await pressKey(Clutter.KEY_Escape);
         check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
-        check(await waitFor(() => !sheet() && lock().board.layer.opacity === 255, 2000),
-            'the popup draws back, the widgets as they were');
+        check(await waitFor(() => !sheet() && shield._dialog._adjustment.value === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
+            widget('date').opacity === 255 && blurs().every(e => e.radius === 0), 2000),
+        'the popup draws back, the clock comes down, the wallpaper is sharp again');
         await Scripting.sleep(600);
 
         // A wrong password, then the right one.
@@ -3064,6 +3099,8 @@ async function testLockPasswordField() {
         check(await waitFor(() => !sheet(), 2000), 'the popup gone');
     } finally {
         await locked.unlock();
+        lockSettings.reset('widgets');
+        lockSettings.reset('gnome-clock');
     }
 }
 
