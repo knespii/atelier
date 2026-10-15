@@ -382,7 +382,7 @@
     <key name="island" type="b">
       <default>true</default>
       <summary>Island with a padlock</summary>
-      <description>The island at the top of the lock screen shows a padlock in a ring of ticks: a wave runs round the ring while GNOME checks, the padlock shakes on a failure and opens in a green ring when the screen unlocks.</description>
+      <description>As the password is asked, an island comes out of the top of the lock screen with a padlock in a ring of ticks: a wave runs round the ring while GNOME checks, the padlock shakes on a failure and springs open in a green ring when the screen unlocks.</description>
     </key>
     <key name="password-field" type="b">
       <default>true</default>

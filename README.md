@@ -94,18 +94,19 @@ profile called **Original**, so there is always a way back.
   GNOME's own menus don't open anymore; the status icons in the bar only show
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.
-- **Lock screen**: the island stays at the top with a padlock in a ring of
-  ticks. A wave runs round the ring while GNOME checks the password (or a
+- **Lock screen**: the wallpaper stays sharp until the password is asked.
+  Then it blurs, the island comes out of the top edge with a padlock in a
+  ring of ticks, and a popup of its own – the user's picture and name over
+  the field, Enter sends it – spreads out of a drop in the middle of the
+  screen, while a clock of hours over minutes puts its minutes beside its
+  hours, as a digital clock, and goes up over the popup if it is still in
+  its way. A wave runs round the ring while GNOME checks the password (or a
   face, with a PAM module such as Howdy), the ring shows faintly while a
-  fingerprint reader waits, the padlock shakes in a red ring on a failure and
-  springs open in a green one as the screen unlocks. The wallpaper stays
-  sharp until the password is asked. Then it blurs, and a popup of its own –
-  the user's picture and name over the field, Enter sends it – spreads out
-  of a drop in the middle of the screen, while a clock of hours over minutes
-  puts its minutes beside its hours, as a digital clock, and goes up over
-  the popup if it is still in its way. What is typed goes to GNOME, which still does
-  all the checking (and its own prompt shows whenever GNOME asks for
-  something else). Clocks – a stacked one too,
+  fingerprint reader waits, the padlock shakes in a red ring on a failure,
+  and as the screen unlocks it springs open in a green ring squeezed like a
+  stress ball. What is typed goes to GNOME, which still does all the
+  checking (and its own prompt shows whenever GNOME asks for something
+  else). Clocks – a stacked one too,
   the date over big hours over dimmer minutes – and the date can be placed
   anywhere on it, on a mock lock screen opened from the settings' Lock
   Screen page. Nothing on the lock screen opens an app, reads the network or
