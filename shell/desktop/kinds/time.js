@@ -20,6 +20,7 @@ function splitTime(text) {
 }
 
 const format = fmt => GLib.DateTime.new_now_local().format(fmt);
+const MINUTES_DIM = 150; // the stacked minutes' opacity
 
 // A clock face with hands, drawn in the colors of its style: as on paper
 // (ticks for the hours), a watch (minutes, and a second hand), numerals, or
@@ -114,7 +115,8 @@ class AtelierClockWidget extends DesktopWidget {
             this._clock = new GnomeDesktop.WallClock({time_only: true});
             this._clock.connectObject('notify::clock', () => this._sync(), this);
         }
-        this._face = this._stacked = null;
+        this._face = this._stacked = this._hoursRow = this._colon = this._minutesBox = null;
+        this._inline = 0;
         this._time = this._suffix = this._date = this._hours = this._minutes = null;
         this._stopSeconds();
 
@@ -166,7 +168,8 @@ class AtelierClockWidget extends DesktopWidget {
         this._sync();
     }
 
-    // The date over the hours, over the minutes (dimmer).
+    // The date over the hours, over the minutes (dimmer). (A colon waits
+    // behind the hours, for the minutes coming up beside them.)
     _buildStacked(box) {
         const stack = new St.BoxLayout({
             style_class: 'atelier-widget-stacked',
@@ -177,14 +180,18 @@ class AtelierClockWidget extends DesktopWidget {
         });
         box.add_child(stack);
         this._date = label('atelier-widget-stacked-date', '', {x_align: Clutter.ActorAlign.CENTER});
+        this._hoursRow = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true});
         this._hours = label('atelier-widget-stacked-hours', '', {x_align: Clutter.ActorAlign.CENTER});
+        this._colon = label('atelier-widget-stacked-hours', ':', {x_align: Clutter.ActorAlign.CENTER, opacity: 0});
+        this._hoursRow.add_child(this._colon);
+        this._hoursRow.add_child(this._hours);
         // (AM or PM small beside the minutes.)
-        const minutes = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, opacity: 150});
+        this._minutesBox = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, opacity: MINUTES_DIM});
         this._minutes = label('atelier-widget-stacked-minutes');
         this._suffix = label('atelier-widget-stacked-suffix', '', {y_align: Clutter.ActorAlign.END});
-        minutes.add_child(this._minutes);
-        minutes.add_child(this._suffix);
-        for (const part of [this._date, this._hours, minutes])
+        this._minutesBox.add_child(this._minutes);
+        this._minutesBox.add_child(this._suffix);
+        for (const part of [this._date, this._hoursRow, this._minutesBox])
             stack.add_child(part);
         this._stacked = stack;
     }
@@ -192,6 +199,41 @@ class AtelierClockWidget extends DesktopWidget {
     /** @returns {St.BoxLayout|null} the date, hours and minutes, when stacked */
     get stacked() {
         return this._stacked ?? null;
+    }
+
+    /**
+     * Stacked, the minutes under the hours (0), or beside them as on a
+     * digital clock (1), after a colon: moved there, not laid out anew.
+     *
+     * @param {number} t
+     */
+    setInline(t) {
+        if (!this._stacked)
+            return;
+        this._inline = t;
+        const width = actor => actor.get_preferred_width(-1)[1];
+        const [hours, colon, minutes] = [width(this._hours), width(this._colon), width(this._minutesBox)];
+        // On one line, round the middle the stacked lines are centred on.
+        const line = hours + colon + minutes;
+        const rise = this._hoursRow.get_allocation_box().y1 - this._minutesBox.get_allocation_box().y1;
+        this._hours.translation_x = (hours - line) / 2 * t;
+        this._colon.translation_x = (2 * hours + colon - line) / 2 * t;
+        this._colon.opacity = Math.round(255 * t);
+        this._minutesBox.set({
+            translation_x: (2 * (hours + colon) + minutes - line) / 2 * t,
+            translation_y: rise * t,
+            opacity: Math.round(MINUTES_DIM + (255 - MINUTES_DIM) * t),
+        });
+    }
+
+    /**
+     * @param {number} t - as for setInline()
+     * @returns {number} how high the date, hours and minutes are then, pixels
+     */
+    stackedHeight(t) {
+        const height = this._stacked?.height ?? 0;
+        const inline = this._hoursRow ? this._hoursRow.get_allocation_box().y2 : height;
+        return height + (inline - height) * t;
     }
 
     _stopSeconds() {
@@ -209,6 +251,9 @@ class AtelierClockWidget extends DesktopWidget {
             this._suffix.text = suffix;
             this._suffix.visible = suffix !== '';
             this._date.text = format('%A, %B %-d');
+            // (Wider or narrower digits: the line centred anew.)
+            if (this._inline > 0)
+                this.setInline(this._inline);
             return;
         }
         if (!this._time)

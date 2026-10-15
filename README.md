@@ -102,7 +102,8 @@ profile called **Original**, so there is always a way back.
   sharp until the password is asked. Then it blurs, and a popup of its own –
   the user's picture and name over the field, Enter sends it – spreads out
   of a drop in the middle of the screen, while a clock of hours over minutes
-  in its way goes up over it. What is typed goes to GNOME, which still does
+  puts its minutes beside its hours, as a digital clock, and goes up over
+  the popup if it is still in its way. What is typed goes to GNOME, which still does
   all the checking (and its own prompt shows whenever GNOME asks for
   something else). Clocks – a stacked one too,
   the date over big hours over dimmer minutes – and the date can be placed

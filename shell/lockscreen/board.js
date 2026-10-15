@@ -141,7 +141,8 @@ export class LockBoard {
     /**
      * Make room for the prompt in the middle, as it comes up: the widgets
      * dim. Over them, with the lock screen's own popup, a clock of hours
-     * over minutes stays bright, and goes up over the popup if it is in its
+     * over minutes stays bright, its minutes go beside its hours as on a
+     * digital clock, and it goes up over the popup if it is still in its
      * way (smaller, if it has to be, to fit under the island).
      *
      * @param {number} progress - from the clock (0) to the prompt (1)
@@ -156,14 +157,16 @@ export class LockBoard {
         const dim = Math.round(255 * (1 - (1 - DIMMED) * progress));
         this.layer.opacity = popup ? 255 : dim;
         for (const widget of this.widgets) {
+            widget.setInline?.(popup ? progress : 0);
             const room = popup ? this._roomFor(widget, popup, top, gap) : null;
             widget.opacity = !popup || room ? 255 : dim;
             this._shift(widget, room, progress, animate);
         }
     }
 
-    // Where a stacked clock goes, for the popup: as it is if it is out of
-    // its way, otherwise over it, in the middle. Null for anything else.
+    // Where a stacked clock goes, for the popup (its minutes beside its
+    // hours by then): as it is if it is out of its way, otherwise over it,
+    // in the middle. Null for anything else.
     _roomFor(widget, [x, y, width, height], top, gap) {
         const clock = widget.stacked;
         if (!clock)
@@ -176,7 +179,7 @@ export class LockBoard {
             left += box.x1;
             upper += box.y1;
         }
-        const [w, h] = [clock.width, clock.height];
+        const [w, h] = [clock.width, widget.stackedHeight(1)];
         const bottom = y - gap;
         const [cx, cy] = [own.x1 + left + w / 2, own.y1 + upper + h / 2];
         const inTheWay = cx - w / 2 < x + width && cx + w / 2 > x && cy + h / 2 > bottom && cy - h / 2 < y + height;

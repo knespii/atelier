@@ -3061,12 +3061,21 @@ async function testLockPasswordField() {
             `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
         check(await waitFor(() => lock().room === 1 && !clock.get_transition('translation_y'), 2000),
             'the prompt is up, room made for it');
-        const [cx, cy] = clock.stacked.get_transformed_position();
-        const [cw, ch] = clock.stacked.get_transformed_size();
+        const box = actor => {
+            const [x, y] = actor.get_transformed_position();
+            const [w, h] = actor.get_transformed_size();
+            return {x, y, w, h};
+        };
+        const [hours, colon, minutes] = [clock._hours, clock._colon, clock._minutes].map(box);
+        check(Math.abs(minutes.y - hours.y) <= 2 && colon.x >= hours.x + hours.w - 2 &&
+            minutes.x >= colon.x + colon.w - 2 && clock._colon.opacity === 255,
+        'the stacked clock\'s minutes go beside its hours, after a colon, as on a digital clock');
         const [, formY] = form.get_transformed_position();
-        check(cy + ch <= formY - 10 && cy >= lock().island.actor.y + lock().island.actor.height &&
-            Math.abs(cx + cw / 2 - (monitor.x + monitor.width / 2)) <= 2 && clockBottom > formY,
-        `the stacked clock in its way goes up over it, between it and the island (${Math.round(cy)}–${Math.round(cy + ch)} over ${Math.round(formY)})`);
+        const [, clockY] = clock.stacked.get_transformed_position();
+        check(clockBottom > formY && hours.y + hours.h <= formY - 10 &&
+            clockY >= lock().island.actor.y + lock().island.actor.height &&
+            Math.abs((hours.x + minutes.x + minutes.w) / 2 - (monitor.x + monitor.width / 2)) <= 40,
+        `in its way at first, it is over it then, under the island (${Math.round(clockY)}–${Math.round(hours.y + hours.h)} over ${Math.round(formY)})`);
         check(clock.opacity === 255 && lock().board.layer.opacity === 255 && widget('date').opacity < 100,
             'and stays bright, the other widgets dim');
         await restPointer();
@@ -3075,8 +3084,9 @@ async function testLockPasswordField() {
         await pressKey(Clutter.KEY_Escape);
         check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
         check(await waitFor(() => !sheet() && lock().room === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
+            clock._colon.opacity === 0 && clock._minutesBox.translation_y === 0 &&
             widget('date').opacity === 255 && blurs().every(e => e.radius === 0), 2000),
-        'the popup draws back, the clock comes down, the wallpaper is sharp again');
+        'the popup draws back, the clock comes down, stacked again, the wallpaper is sharp again');
         await Scripting.sleep(600);
 
         // A wrong password, then the right one.
