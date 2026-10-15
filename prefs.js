@@ -11,6 +11,7 @@ import {BarPage} from './prefs/barPage.js';
 import {DesktopPage} from './prefs/desktopPage.js';
 import {DockPage} from './prefs/dockPage.js';
 import {IslandPage} from './prefs/islandPage.js';
+import {LockScreenPage} from './prefs/lockScreenPage.js';
 import {NotificationsPage} from './prefs/notificationsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
@@ -42,6 +43,11 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 keywords: ['bar', 'panel', 'transparent', 'background', 'quick settings', 'control centre',
                     'control center', 'wi-fi', 'bluetooth', 'extensions', 'icons', 'tray'],
                 create: () => new BarPage(settings),
+            },
+            {
+                id: 'lock-screen', title: 'Lock Screen', icon: 'system-lock-screen-symbolic', group: 'THE SHELL',
+                keywords: ['lock', 'padlock', 'unlock', 'password', 'fingerprint', 'face', 'clock', 'widgets'],
+                create: () => new LockScreenPage(settings),
             },
             {
                 id: 'profiles', title: 'Profiles', icon: 'view-grid-symbolic', group: 'THE DESK',

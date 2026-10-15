@@ -1,8 +1,8 @@
 import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
 import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
-    DEFAULT_LAYOUT, PITCH, UNIT, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize,
-    nearestSpot, newId, nextSize, normalizeWidgets, parseLayout, pixelSize, placeAt, serializeLayout,
+    DEFAULT_LAYOUT, LOCK_KINDS, PITCH, UNIT, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize,
+    nearestSpot, newId, nextSize, normalizeWidgets, parseLayout, pixelSize, placeAt, serializeLayout, splitClock,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
@@ -192,4 +192,30 @@ export function testCardStyle() {
     assertEqual(cardStyle('modern', 7), '', 'never more than the look');
     assertEqual(normalizeWidgets({layout: []}).opacity, 1, 'kept before: as it is');
     assertEqual(normalizeWidgets({layout: [], opacity: -2}).opacity, 0);
+}
+
+export function testLockScreenKinds() {
+    const json = JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 0, y: 0, fine: true, face: 'stacked'},
+        {id: 'github', kind: 'github', size: 'card', x: 8, y: 0, fine: true},
+        {id: 'date', kind: 'date', size: 'square', x: 0, y: 8, fine: true},
+    ]);
+    const lock = parseLayout(json, LOCK_KINDS);
+    assertEqual(lock.map(e => e.id), ['clock', 'date'], 'only clocks and the date on the lock screen');
+    assertEqual(lock[0].size, 'large', 'a clock may be big there');
+    assertEqual(lock[0].face, 'stacked', 'with its face');
+    assertEqual(parseLayout(json).find(e => e.id === 'clock').size, 'square', 'not on the desktop');
+    assertEqual(nextSize('clock', 'large', LOCK_KINDS), 'square');
+    assertEqual(nextSize('clock', 'card', LOCK_KINDS), 'large');
+    const grid = [36, 20];
+    assertEqual(nearestSize([], {id: 'c', kind: 'clock', size: 'square', x: 0, y: 0}, grid, 8, 8, LOCK_KINDS), 'large');
+    assertEqual(nearestSize([], {id: 'c', kind: 'clock', size: 'square', x: 0, y: 0}, grid, 8, 8), 'card',
+        'the desktop\'s clock comes in no large square');
+}
+
+export function testSplitClock() {
+    assertEqual(splitClock('23∶54'), {hours: '23', minutes: '54', suffix: ''});
+    assertEqual(splitClock('11:54 PM'), {hours: '11', minutes: '54', suffix: 'PM'});
+    assertEqual(splitClock(' 9.05 '), {hours: '9', minutes: '05', suffix: ''});
+    assertEqual(splitClock('noon'), {hours: 'noon', minutes: '', suffix: ''});
 }

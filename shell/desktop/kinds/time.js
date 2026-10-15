@@ -7,6 +7,7 @@ import GnomeDesktop from 'gi://GnomeDesktop';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
+import {splitClock} from '../../../lib/widgets.js';
 import {DesktopWidget, label, launchApp} from '../widget.js';
 
 /**
@@ -114,13 +115,18 @@ class AtelierClockWidget extends DesktopWidget {
             this._clock.connectObject('notify::clock', () => this._sync(), this);
         }
         this._face = null;
-        this._time = this._suffix = this._date = null;
+        this._time = this._suffix = this._date = this._hours = this._minutes = null;
         this._stopSeconds();
 
         // Its face: digital, or with hands (in the Analogue look, as on paper).
         const choice = this.entry.face ?? 'auto';
         const analogue = this._context.style() === 'analogue';
         const design = choice === 'auto' ? (analogue ? 'paper' : 'digital') : choice;
+        if (design === 'stacked') {
+            this._buildStacked(box);
+            this._sync();
+            return;
+        }
         const hands = design !== 'digital';
         const row = new St.BoxLayout({style_class: 'atelier-widget-clock', x_expand: true, y_expand: true});
         box.add_child(row);
@@ -160,6 +166,28 @@ class AtelierClockWidget extends DesktopWidget {
         this._sync();
     }
 
+    // The date over the hours, over the minutes (dimmer).
+    _buildStacked(box) {
+        const stack = new St.BoxLayout({
+            style_class: 'atelier-widget-stacked',
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+            y_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        box.add_child(stack);
+        this._date = label('atelier-widget-stacked-date', '', {x_align: Clutter.ActorAlign.CENTER});
+        this._hours = label('atelier-widget-stacked-hours', '', {x_align: Clutter.ActorAlign.CENTER});
+        // (AM or PM small beside the minutes.)
+        const minutes = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, opacity: 150});
+        this._minutes = label('atelier-widget-stacked-minutes');
+        this._suffix = label('atelier-widget-stacked-suffix', '', {y_align: Clutter.ActorAlign.END});
+        minutes.add_child(this._minutes);
+        minutes.add_child(this._suffix);
+        for (const part of [this._date, this._hours, minutes])
+            stack.add_child(part);
+    }
+
     _stopSeconds() {
         if (this._secondsId)
             GLib.source_remove(this._secondsId);
@@ -168,6 +196,15 @@ class AtelierClockWidget extends DesktopWidget {
 
     _sync() {
         this._face?.queue_repaint();
+        if (this._hours) {
+            const {hours, minutes, suffix} = splitClock(this._clock.clock);
+            this._hours.text = hours;
+            this._minutes.text = minutes;
+            this._suffix.text = suffix;
+            this._suffix.visible = suffix !== '';
+            this._date.text = format('%A, %B %-d');
+            return;
+        }
         if (!this._time)
             return;
         const [digits, suffix] = splitTime(this._clock.clock);

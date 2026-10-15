@@ -320,7 +320,7 @@ async function runSelftest(window) {
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'notifications', 'top-bar', 'desktop', 'dock', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'top-bar', 'lock-screen', 'desktop', 'dock', 'profiles', 'wallpapers', 'appearance', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         await render(window, id);

@@ -22,6 +22,7 @@ import {DesktopModule} from './shell/desktop/module.js';
 import {DockModule} from './shell/dock/module.js';
 import {IslandModule} from './shell/island/module.js';
 import {LockModule} from './shell/lockscreen/module.js';
+import {LockPreviewModule} from './shell/lockscreen/preview.js';
 import {WindowAnimationsModule} from './shell/windows/module.js';
 import {NotesModule} from './shell/notes/module.js';
 import {NotificationsModule} from './shell/notifications/module.js';
@@ -56,6 +57,8 @@ export default class AtelierExtension extends Extension {
             {settings: this._settings.get_child('dock'), key: 'enabled'});
         this.modules.register('windows', ctx => new WindowAnimationsModule(ctx),
             {settings: this._settings.get_child('windows'), key: 'enabled'});
+        // (Placing the lock screen's widgets happens in the session.)
+        this.modules.register('lockscreen-editor', ctx => new LockPreviewModule(ctx));
 
         // What runs while the screen is locked.
         this.lockModules = new ModuleManager(context);

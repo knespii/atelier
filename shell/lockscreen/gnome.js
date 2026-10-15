@@ -41,6 +41,42 @@ export function authPromptOf(dialog) {
 }
 
 /**
+ * Put a layer right over the lock screen's blurred wallpaper, under its
+ * clock and prompt; it slides away and goes with the lock screen.
+ *
+ * @param {UnlockDialog} dialog
+ * @param {Clutter.Actor} layer
+ * @returns {boolean} whether it is there
+ */
+export function placeOverBackground(dialog, layer) {
+    const background = dialog?._backgroundGroup;
+    if (!(background instanceof Clutter.Actor) || background.get_parent() !== dialog)
+        return false;
+    layer.get_parent()?.remove_child(layer);
+    dialog.insert_child_above(layer, background);
+    return true;
+}
+
+/**
+ * @param {UnlockDialog} dialog
+ * @returns {St.Adjustment|null} from the clock (0) to the prompt (1)
+ */
+export function promptProgressOf(dialog) {
+    const adjustment = dialog?._adjustment;
+    return typeof adjustment?.value === 'number' ? adjustment : null;
+}
+
+/**
+ * @param {UnlockDialog} dialog
+ * @returns {Clutter.Actor[]} GNOME's time and date (not its hint, which
+ *   says how to unlock); GNOME animates the clock around them, not these
+ */
+export function clockLabelsOf(dialog) {
+    const clock = dialog?._clock;
+    return [clock?._time, clock?._date].filter(actor => actor instanceof Clutter.Actor);
+}
+
+/**
  * Bring up the password prompt, as a key press does.
  *
  * @param {UnlockDialog} dialog

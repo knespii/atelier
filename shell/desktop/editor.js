@@ -160,6 +160,8 @@ export class DesktopEditor {
      */
     constructor(desktop) {
         this._desktop = desktop;
+        // (The kinds and their sizes: the desktop's, or the lock screen's.)
+        this._kinds = desktop.catalog ?? KINDS;
         this._drag = null;
         this._ghostShown = false;
         this._ghostKey = null;
@@ -195,7 +197,7 @@ export class DesktopEditor {
         layer.set_position(area.x, area.y);
 
         this._gallery = new St.BoxLayout({style_class: 'atelier-widget-gallery'});
-        for (const [kind, {name, icon}] of Object.entries(KINDS).filter(([k]) => desktop.kinds.has(k))) {
+        for (const [kind, {name, icon}] of Object.entries(this._kinds).filter(([k]) => desktop.kinds.has(k))) {
             const box = new St.BoxLayout({style_class: 'atelier-widget-gallery-item', orientation: Clutter.Orientation.VERTICAL});
             box.add_child(new St.Icon({
                 style_class: 'atelier-widget-gallery-icon',
@@ -348,7 +350,7 @@ export class DesktopEditor {
         controls.add_child(remove);
         widget.add_child(controls);
         widget._editControls = controls;
-        if (KINDS[widget.entry.kind]?.sizes.length > 1) {
+        if (this._kinds[widget.entry.kind]?.sizes.length > 1) {
             widget._editHandle = new ResizeHandle();
             widget._editHandle.connect('notify::hover', () => this._syncCursor());
             widget.add_child(widget._editHandle);
@@ -630,7 +632,7 @@ export class DesktopEditor {
     _stretch(drag, dx, dy) {
         const {widget} = drag;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const sizes = KINDS[widget.entry.kind].sizes.map(size => pixelSize(size).map(v => v * scale));
+        const sizes = this._kinds[widget.entry.kind].sizes.map(size => pixelSize(size).map(v => v * scale));
         const give = (value, axis) => {
             const min = Math.min(...sizes.map(size => size[axis]));
             const max = Math.max(...sizes.map(size => size[axis]));

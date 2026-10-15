@@ -384,6 +384,31 @@
       <summary>Island with a padlock</summary>
       <description>The island at the top of the lock screen shows a padlock: a ring turns while GNOME checks, the padlock shakes on a failure and opens with a green ring when the screen unlocks.</description>
     </key>
+    <key name="widgets" type="s">
+      <default>'[]'</default>
+      <summary>Widgets on the lock screen</summary>
+      <description>Clocks and the date on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
+    </key>
+    <key name="style" type="s">
+      <choices>
+        <choice value="bare"/>
+        <choice value="modern"/>
+        <choice value="analogue"/>
+      </choices>
+      <default>'bare'</default>
+      <summary>Look of the lock screen's widgets</summary>
+      <description>Bare: just what they show, on the wallpaper; or cards as on the desktop.</description>
+    </key>
+    <key name="gnome-clock" type="b">
+      <default>true</default>
+      <summary>GNOME's clock on the lock screen</summary>
+      <description>Off when the lock screen's own clocks take its place.</description>
+    </key>
+    <key name="edit-request" type="s">
+      <default>''</default>
+      <summary>Request to edit the lock screen</summary>
+      <description>Set by the preferences: the shell shows a mock lock screen to place the widgets on.</description>
+    </key>
   </schema>
 
   <schema id="org.gnome.shell.extensions.atelier.notes"

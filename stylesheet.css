@@ -1701,6 +1701,50 @@
   width: 140px;
 }
 
+/* (A large clock is the lock screen's.) */
+.atelier-widget-large .atelier-widget-time {
+  font-size: 76pt;
+}
+
+/* Stacked: the date over the hours, over the minutes */
+
+.atelier-widget-stacked-date {
+  font-size: 10pt;
+  font-weight: bold;
+}
+
+.atelier-widget-stacked-hours,
+.atelier-widget-stacked-minutes {
+  font-size: 40pt;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-card .atelier-widget-stacked-hours,
+.atelier-widget-card .atelier-widget-stacked-minutes {
+  font-size: 44pt;
+}
+
+.atelier-widget-stacked-suffix {
+  font-size: 12pt;
+  font-weight: 800;
+  margin: 0 0 12px 4px;
+}
+
+.atelier-widget-large .atelier-widget-stacked-date {
+  font-size: 15pt;
+}
+
+.atelier-widget-large .atelier-widget-stacked-hours,
+.atelier-widget-large .atelier-widget-stacked-minutes {
+  font-size: 100pt;
+}
+
+/* On the lock screen, bare: just what the widgets show, on the wallpaper */
+.atelier-lock-bare .atelier-widget {
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
 /* Date */
 
 .atelier-widget-weekday {

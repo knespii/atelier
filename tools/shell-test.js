@@ -1301,16 +1301,17 @@ async function testDesktop(ext) {
     const faceClock = desktop.widgets.get('clock');
     desktop._showWidgetMenu(faceClock);
     await Scripting.sleep(300);
-    check(faceClock._faces?.length === 5 && faceClock._faces[0]._ornament === PopupMenu.Ornament.CHECK,
+    check(faceClock._faces?.length === 6 && faceClock._faces[0]._ornament === PopupMenu.Ornament.CHECK,
         'the clock\'s menu has its faces, Automatic chosen');
     faceClock._menu.close();
-    for (const face of ['watch', 'numerals', 'minimal', 'digital']) {
+    for (const face of ['watch', 'numerals', 'minimal', 'stacked', 'digital']) {
         desktop.setWidgetOption('clock', 'face', face);
         await Scripting.sleep(300);
         await screenshotArea(`40-clock-${face}`, ...faceClock.get_transformed_position().map(v => Math.round(v) - 8),
             Math.round(faceClock.width) + 16, Math.round(faceClock.height) + 16);
-        const hands = face !== 'digital';
-        check(Boolean(faceClock._face) === hands && Boolean(faceClock._time) === !hands &&
+        const hands = face !== 'digital' && face !== 'stacked';
+        check(Boolean(faceClock._face) === hands && Boolean(faceClock._time) === (face === 'digital') &&
+            Boolean(faceClock._hours) === (face === 'stacked') &&
             faceClock.width === desktop.widgets.get('date').width &&
             JSON.parse(settings.get_string('widgets')).find(e => e.id === 'clock').face === face,
         `the ${face} face, in its square, kept with it`);
@@ -1413,7 +1414,7 @@ async function testDesktop(ext) {
     }
     await Scripting.sleep(500);
     const spill = desktop._editor._spill?.panel;
-    check(spill?.get_n_children() === 4 && desktop._editor._spill.progress === 1 && onwards &&
+    check(spill?.get_n_children() === 5 && desktop._editor._spill.progress === 1 && onwards &&
         spill.get_children().every(item => item.opacity === 255),
     'a click on the clock lets its faces flow out of the gallery');
     await screenshot('41b-clock-faces-spilled');
@@ -2834,6 +2835,9 @@ async function testLockScreen(ext) {
             'nothing of Atelier is left in the lock screen');
 
         // Turned off and on while locked: only the padlock comes back.
+        // (GNOME's calendar starts its event source anew with each unlock:
+        // not dropped mid-way by a lock a moment later.)
+        await Scripting.sleep(2000);
         shield.lock(false);
         await waitFor(() => lock()?.island, 5000);
         Main.extensionManager.disableExtension(UUID);
@@ -2851,6 +2855,102 @@ async function testLockScreen(ext) {
         await waitFor(() => !Main.sessionMode.isLocked && atelier()?.modules?.get('island')?.island, 5000);
         shield._loginSession = loginSession;
     }
+}
+
+// The screen locked for a part, with made-up verifiers (see FakeVerifier)
+// and logind's locked hint of the real session left alone.
+async function lockForTest() {
+    const shield = Main.screenShield;
+    // (GNOME's calendar starts its event source anew with each unlock.)
+    await Scripting.sleep(2000);
+    const injections = new InjectionManager();
+    const verifiers = [];
+    injections.overrideMethod(AuthPromptModule.AuthPrompt.prototype, '_createUserVerifier', () => function () {
+        const verifier = new FakeVerifier();
+        verifiers.push(verifier);
+        return verifier;
+    });
+    const loginSession = shield._loginSession;
+    shield._loginSession = null;
+    shield.lock(false);
+    await waitFor(() => Main.sessionMode.isLocked, 5000);
+    return {
+        verifiers,
+        async unlock() {
+            injections.clear();
+            if (Main.sessionMode.isLocked)
+                shield.deactivate(false);
+            await waitFor(() => !Main.sessionMode.isLocked &&
+                Main.extensionManager.lookup(UUID).stateObj?.modules?.get('island')?.island, 5000);
+            shield._loginSession = loginSession;
+        },
+    };
+}
+
+// The lock screen's widgets: a stacked clock placed there shows over the
+// blurred wallpaper and under GNOME's prompt, takes no clicks (they bring
+// up the prompt) and may take GNOME's clock's place. They are placed on a
+// mock lock screen, which the preferences ask for.
+async function testLockWidgets() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the lock screen\'s widgets untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    const locked = await lockForTest();
+    try {
+        const lock = () => atelier().lockModules?.get('lockscreen');
+        check(await waitFor(() => lock()?.board?.widgets.length === 1, 3000), 'locked: the clock placed there is on it');
+        const board = lock().board;
+        const dialog = shield._dialog;
+        const children = dialog.get_children();
+        check(children.indexOf(board.layer) === children.indexOf(dialog._backgroundGroup) + 1,
+            'over the blurred wallpaper, under GNOME\'s clock and prompt');
+        const clock = board.widgets[0];
+        check(!clock.reactive && !board.layer.reactive, 'it takes no clicks');
+        check(/^\d{1,2}$/.test(clock._hours?.text) && /^\d{2}/.test(clock._minutes?.text) && clock._date?.text,
+            `stacked: the date, the hours over the minutes (${clock._hours?.text} ${clock._minutes?.text})`);
+        const labels = [dialog._clock._time, dialog._clock._date];
+        check(labels.every(l => !l.visible), 'in place of GNOME\'s clock');
+        lockSettings.set_boolean('gnome-clock', true);
+        check(labels.every(l => l.visible), 'which comes back when asked');
+        lockSettings.set_boolean('gnome-clock', false);
+        await restPointer();
+        await Scripting.sleep(500);
+        await screenshot('73-lock-widgets');
+
+        await clickAt(...centerOf(clock));
+        check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
+        check(await waitFor(() => board.layer.opacity < 100, 2000), 'and the widgets make room for it');
+    } finally {
+        await locked.unlock();
+    }
+    check(await waitFor(() => !findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-widgets')), 3000),
+        'unlocked, they go with the lock screen');
+
+    // Placed on a mock lock screen.
+    const editor = atelier().modules.get('lockscreen-editor');
+    lockSettings.set_string('edit-request', 'test');
+    check(await waitFor(() => editor?.preview && findActor(Main.uiGroup, a => hasClass(a, 'atelier-desktop-editor')), 3000),
+        'asked by the preferences, a mock lock screen opens to place them on');
+    const preview = editor.preview;
+    check(preview._board.widgets.length === 1, 'with the clock on it');
+    check(Boolean(preview._board.addWidget('date')) &&
+        JSON.parse(lockSettings.get_string('widgets')).some(e => e.kind === 'date'), 'a widget added is kept');
+    check(!preview._board.addWidget('github'), 'nothing that opens an app or reads the network');
+    await Scripting.sleep(600);
+    await screenshot('74-lock-editor');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !editor.preview && !findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-preview')), 3000),
+        'Escape and it goes');
+    lockSettings.reset('widgets');
+    lockSettings.reset('gnome-clock');
 }
 
 async function testDisableCleansUp(atelier) {
@@ -3030,6 +3130,7 @@ export async function run() {
         // (After the parts that keep the modules they started with: this
         // turns Atelier off and on.)
         await part(testLockScreen, ext);
+        await part(testLockWidgets);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);
