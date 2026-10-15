@@ -2,8 +2,10 @@
 // checks (a password, a face), a wave runs round the ring: the ticks it
 // passes grow and fall back, as a stadium's wave. The ring shows faintly
 // while a fingerprint reader waits, turns red for a moment on a failure,
-// and green as the shackle opens when the screen unlocks, with one last
-// wave round it. Drawn, so that the shackle can lift.
+// and green when the screen unlocks, with one last wave round it, as the
+// padlock springs open: the shackle jumps up past where it stays, swinging
+// out on its right leg, and the padlock swells a little. Drawn, so that the
+// shackle can move.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -15,10 +17,17 @@ import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUti
 const TICKS = 48;
 const WAVE_WIDTH = 0.95; // half the wave's width, radians
 const WAVE_GROW = 1.4; // how much longer a tick is on the wave's crest
-const OPEN_TIME = 320;
+const OPEN_TIME = 700; // springing open
+const CLOSE_TIME = 320;
+const SWING = 0.7; // how far the shackle swings out as it opens, radians
+const SWELL = 0.1; // how much bigger the padlock gets for a moment
 const FADE_TIME = 220;
 const TURN_TIME = 1300; // the wave once round, while GNOME checks
 const SWEEP_TIME = 760; // the last wave, once unlocked
+
+const clamp01 = t => Math.min(1, Math.max(0, t));
+// Past the end and back: 1.1 at most.
+const easeOutBack = t => 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
 
 // How far a tick at angle a is from the wave's crest at c, 0 (on it) to π.
 function apart(a, c) {
@@ -34,7 +43,9 @@ class AtelierPadlock extends St.DrawingArea {
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._shackle = 0; // 0 closed … 1 open
+        this._shackle = 0; // 0 closed … 1 open (a little more as it springs open)
+        this._swing = 0; // the shackle turned on its right leg, radians
+        this._swell = 1; // the padlock's scale
         this._ticks = 0; // how much the ring shows, 0 … 1
         this._wave = 0; // how high the wave is, 0 … 1
         this._crest = 0; // where it is: radians from the top, clockwise
@@ -62,7 +73,14 @@ class AtelierPadlock extends St.DrawingArea {
             else
                 this.remove_style_pseudo_class(name);
         }
-        this._tween('shackle', shackle === 'open' ? 1 : 0, OPEN_TIME);
+        if (shackle === 'open' && before.shackle !== 'open') {
+            this._open();
+        } else if (shackle !== 'open') {
+            this._stop('open');
+            this._swing = 0;
+            this._swell = 1;
+            this._tween('shackle', 0, CLOSE_TIME);
+        }
         this._ring = ring;
         this._tween('ticks', ring === 'none' ? 0 : 1, FADE_TIME);
         if (ring === 'spin') {
@@ -124,6 +142,42 @@ class AtelierPadlock extends St.DrawingArea {
         });
         this._timelines.set('sweep', timeline);
         timeline.start();
+    }
+
+    _open() {
+        this._stop('shackle');
+        this._stop('open');
+        const opened = () => {
+            this._shackle = 1;
+            this._swing = 0;
+            this._swell = 1;
+            this._timelines.delete('open');
+            this.queue_repaint();
+        };
+        const duration = adjustAnimationTime(OPEN_TIME);
+        if (duration <= 0) {
+            opened();
+            return;
+        }
+        const from = this._shackle;
+        const timeline = new Clutter.Timeline({actor: this, duration});
+        timeline.connect('new-frame', () => {
+            this._opening(timeline.get_progress(), from);
+            this.queue_repaint();
+        });
+        timeline.connect('completed', opened);
+        this._timelines.set('open', timeline);
+        timeline.start();
+    }
+
+    // Springing open, at p (0 … 1): the shackle jumps up past where it
+    // stays and back; meanwhile it swings out to the left and back, a
+    // little less each time; the padlock swells and settles.
+    _opening(p, from) {
+        this._shackle = from + (1 - from) * easeOutBack(clamp01(p / 0.5));
+        const swing = clamp01((p - 0.1) / 0.9);
+        this._swing = -SWING * Math.exp(-3 * swing) * Math.sin(2.5 * Math.PI * swing) * (1 - swing);
+        this._swell = 1 + SWELL * Math.sin(Math.PI * clamp01(p / 0.45));
     }
 
     // Move one of the drawing's values to a target, eased.
@@ -192,26 +246,36 @@ class AtelierPadlock extends St.DrawingArea {
             }
         }
 
-        // The padlock, inside the ring.
-        const bodyWidth = size * 0.3;
-        const bodyHeight = size * 0.235;
+        // The padlock, inside the ring, in the middle of it when closed.
+        const bodyWidth = size * 0.34;
+        const bodyHeight = size * 0.26;
         const bodyX = cx - bodyWidth / 2;
-        const bodyY = cy - size * 0.02;
-        const stroke = Math.max(1.5 * scale, size * 0.048);
-        const shackle = size * 0.085;
-        const lift = size * 0.06 * this._shackle;
-        const top = bodyY - size * 0.07 - lift; // where the shackle's bow starts
+        const bodyY = cy - size * 0.032;
+        const stroke = Math.max(1.5 * scale, size * 0.052);
+        const shackle = size * 0.095;
+        const lift = size * 0.07 * this._shackle;
+        const top = bodyY - size * 0.075 - lift; // where the shackle's bow starts
+        cr.save();
+        cr.translate(cx, cy);
+        cr.scale(this._swell, this._swell);
+        cr.translate(-cx, -cy);
         set(color, 1);
         cr.setLineWidth(stroke);
         cr.setLineCap(Cairo.LineCap.BUTT);
-        // The right leg stays in the body; the left one comes out of it.
+        // The right leg stays in the body (the shackle turns on it); the
+        // left one comes out of it.
+        cr.save();
+        cr.translate(cx + shackle, bodyY);
+        cr.rotate(this._swing);
+        cr.translate(-cx - shackle, -bodyY);
         cr.moveTo(cx + shackle, bodyY + stroke / 2);
         cr.lineTo(cx + shackle, top);
         cr.arcNegative(cx, top, shackle, 2 * Math.PI, Math.PI);
         cr.lineTo(cx - shackle, bodyY + stroke / 2 - lift);
         cr.stroke();
+        cr.restore();
 
-        const corner = size * 0.05;
+        const corner = size * 0.055;
         cr.newSubPath();
         cr.arc(bodyX + bodyWidth - corner, bodyY + corner, corner, -Math.PI / 2, 0);
         cr.arc(bodyX + bodyWidth - corner, bodyY + bodyHeight - corner, corner, 0, Math.PI / 2);
@@ -219,6 +283,7 @@ class AtelierPadlock extends St.DrawingArea {
         cr.arc(bodyX + corner, bodyY + corner, corner, Math.PI, 1.5 * Math.PI);
         cr.closePath();
         cr.fill();
+        cr.restore();
         cr.$dispose();
     }
 });

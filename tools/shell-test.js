@@ -2820,7 +2820,17 @@ async function testLockScreen(ext) {
         verifier.emit('verification-complete');
         check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
             island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
-        await Scripting.sleep(400);
+        const padlock = island.padlock;
+        let [jump, swing, swell] = [0, 0, 0];
+        await waitFor(() => {
+            jump = Math.max(jump, padlock._shackle);
+            swing = Math.max(swing, Math.abs(padlock._swing));
+            swell = Math.max(swell, padlock._swell);
+            return !padlock._timelines.has('open');
+        }, 2000);
+        check(jump > 1.02 && swing > 0.1 && swell > 1.03,
+            `springing open: the shackle jumps past and swings, the padlock swells (${jump.toFixed(2)}, ${swing.toFixed(2)}, ${swell.toFixed(2)})`);
+        check(padlock._shackle === 1 && padlock._swing === 0 && padlock._swell === 1, 'and settles open');
         await screenshotIsland('82-lock-success', 120);
 
         // logind's Unlock, as GDM would have it sent.
