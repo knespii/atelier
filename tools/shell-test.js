@@ -2829,17 +2829,27 @@ async function testLockScreen(ext) {
         check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
             island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
         const padlock = island.padlock;
-        let [jump, swing, swell] = [0, 0, 0];
+        let [jump, swing, swell, squeeze, blend] = [0, 0, 0, 0, 1];
+        let squeezed = false;
         await waitFor(() => {
             jump = Math.max(jump, padlock._shackle);
             swing = Math.max(swing, Math.abs(padlock._swing));
             swell = Math.max(swell, padlock._swell);
-            return !padlock._timelines.has('open');
-        }, 2000);
+            squeeze = Math.max(squeeze, padlock._squeeze);
+            blend = Math.min(blend, padlock._color);
+            if (!squeezed && padlock._squeeze > 0.3) {
+                squeezed = true;
+                screenshotIsland('82a-lock-squeezed', 160);
+            }
+            return !padlock._timelines.has('open') && !padlock._timelines.has('squeeze') &&
+                !padlock._timelines.has('color');
+        }, 3000);
         check(jump > 1.02 && swing > 0.1 && swell > 1.03,
             `springing open: the shackle jumps past and swings, the padlock swells (${jump.toFixed(2)}, ${swing.toFixed(2)}, ${swell.toFixed(2)})`);
-        check(padlock._shackle === 1 && padlock._swing === 0 && padlock._swell === 1, 'and settles open');
-        await screenshotIsland('82-lock-success', 140);
+        check(squeeze > 0.5 && blend < 0.5, `its ring squeezed like a stress ball, turning green softly (${squeeze.toFixed(2)}, ${blend.toFixed(2)})`);
+        check(padlock._shackle === 1 && padlock._swing === 0 && padlock._swell === 1 && padlock._squeeze === 0 &&
+            padlock._color === 1, 'and settles open, in its green ring');
+        await screenshotIsland('82-lock-success', 160);
 
         // logind's Unlock, as GDM would have it sent.
         shield.deactivate(false);

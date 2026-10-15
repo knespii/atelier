@@ -2,10 +2,12 @@
 // checks (a password, a face), a wave runs round the ring: the ticks it
 // passes grow and fall back, as a stadium's wave. The ring shows faintly
 // while a fingerprint reader waits, turns red for a moment on a failure,
-// and green when the screen unlocks, with one last wave round it, as the
-// padlock springs open: the shackle jumps up past where it stays, swinging
-// out on its right leg, and the padlock swells a little. Drawn, so that the
-// shackle can move.
+// and green when the screen unlocks (its colour always blending softly
+// from one to the next). Unlocked, the ring is squeezed like a stress ball:
+// it swells and squashes out of round, wobbles back, the ticks' tips paling
+// a little meanwhile; and the padlock springs open: the shackle jumps up
+// past where it stays, swinging out on its right leg, and the padlock
+// swells a little. Drawn, so that it all can move.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -15,6 +17,7 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 const TICKS = 48;
+const RING = 0.37; // the ring's radius, of the padlock's size: room round it to swell
 const WAVE_WIDTH = 0.95; // half the wave's width, radians
 const WAVE_GROW = 1.4; // how much longer a tick is on the wave's crest
 const OPEN_TIME = 700; // springing open
@@ -23,7 +26,9 @@ const SWING = 0.7; // how far the shackle swings out as it opens, radians
 const SWELL = 0.1; // how much bigger the padlock gets for a moment
 const FADE_TIME = 220;
 const TURN_TIME = 1300; // the wave once round, while GNOME checks
-const SWEEP_TIME = 760; // the last wave, once unlocked
+const SQUEEZE_TIME = 1200; // the ring squeezed, once unlocked
+const PALE = 0.4; // how far the ticks' tips pale towards white then, at most
+const COLOR_TIME = 300; // from one colour of the ring to the next
 
 const clamp01 = t => Math.min(1, Math.max(0, t));
 // Past the end and back: 1.1 at most.
@@ -46,6 +51,10 @@ class AtelierPadlock extends St.DrawingArea {
         this._shackle = 0; // 0 closed … 1 open (a little more as it springs open)
         this._swing = 0; // the shackle turned on its right leg, radians
         this._swell = 1; // the padlock's scale
+        this._squeeze = 0; // how far the ring's squeeze has got, 0 … 1 (0: none)
+        this._color = 1; // from the colour shown before (0) to the ring's own (1)
+        this._from = null;
+        this._shown = null; // the ring's colour as last drawn
         this._ticks = 0; // how much the ring shows, 0 … 1
         this._wave = 0; // how high the wave is, 0 … 1
         this._crest = 0; // where it is: radians from the top, clockwise
@@ -67,6 +76,12 @@ class AtelierPadlock extends St.DrawingArea {
     setLook({shackle, ring, tone}) {
         const before = this._look;
         this._look = {shackle, ring, tone};
+        // (From the colour shown, softly.)
+        if (tone !== before.tone) {
+            this._from = this._shown;
+            this._color = 0;
+            this._tween('color', 1, COLOR_TIME, Clutter.AnimationMode.EASE_IN_OUT_SINE);
+        }
         for (const [name, wanted] of [['success', tone === 'green'], ['failed', tone === 'red']]) {
             if (wanted)
                 this.add_style_pseudo_class(name);
@@ -84,16 +99,14 @@ class AtelierPadlock extends St.DrawingArea {
         this._ring = ring;
         this._tween('ticks', ring === 'none' ? 0 : 1, FADE_TIME);
         if (ring === 'spin') {
-            this._stop('sweep');
             this._tween('wave', 1, FADE_TIME);
             if (!this._timelines.has('spin'))
                 this._startSpin();
         } else {
             this._stop('spin');
+            this._tween('wave', 0, FADE_TIME);
             if (tone === 'green' && before.tone !== 'green')
-                this._sweep();
-            else
-                this._tween('wave', 0, FADE_TIME);
+                this._tween('squeeze', 1, SQUEEZE_TIME, Clutter.AnimationMode.LINEAR, 0);
         }
         this.queue_repaint();
     }
@@ -111,36 +124,6 @@ class AtelierPadlock extends St.DrawingArea {
             this.queue_repaint();
         });
         this._timelines.set('spin', timeline);
-        timeline.start();
-    }
-
-    // Unlocked: one last wave round the ring, ebbing away.
-    _sweep() {
-        this._stop('wave');
-        this._stop('sweep');
-        const duration = adjustAnimationTime(SWEEP_TIME);
-        if (duration <= 0) {
-            this._wave = 0;
-            return;
-        }
-        const from = this._crest;
-        const timeline = new Clutter.Timeline({
-            actor: this,
-            duration,
-            progress_mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-        });
-        timeline.connect('new-frame', () => {
-            const t = timeline.get_progress();
-            this._crest = from + 2 * Math.PI * t;
-            this._wave = 1 - t;
-            this.queue_repaint();
-        });
-        timeline.connect('completed', () => {
-            this._wave = 0;
-            this._timelines.delete('sweep');
-            this.queue_repaint();
-        });
-        this._timelines.set('sweep', timeline);
         timeline.start();
     }
 
@@ -180,27 +163,31 @@ class AtelierPadlock extends St.DrawingArea {
         this._swell = 1 + SWELL * Math.sin(Math.PI * clamp01(p / 0.45));
     }
 
-    // Move one of the drawing's values to a target, eased.
-    _tween(name, target, time) {
+    /**
+     * Move one of the drawing's values to a target, eased.
+     *
+     * @param {string} name
+     * @param {number} target
+     * @param {number} time - milliseconds
+     * @param {Clutter.AnimationMode} [mode]
+     * @param {number} [end] - where it is left once there (the target)
+     */
+    _tween(name, target, time, mode = Clutter.AnimationMode.EASE_OUT_CUBIC, end = target) {
         const property = `_${name}`;
         this._stop(name);
         const from = this[property];
         const duration = adjustAnimationTime(time);
         if (from === target || duration <= 0) {
-            this[property] = target;
+            this[property] = end;
             return;
         }
-        const timeline = new Clutter.Timeline({
-            actor: this,
-            duration,
-            progress_mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
-        });
+        const timeline = new Clutter.Timeline({actor: this, duration, progress_mode: mode});
         timeline.connect('new-frame', () => {
             this[property] = from + (target - from) * timeline.get_progress();
             this.queue_repaint();
         });
         timeline.connect('completed', () => {
-            this[property] = target;
+            this[property] = end;
             this._timelines.delete(name);
             this.queue_repaint();
         });
@@ -225,23 +212,60 @@ class AtelierPadlock extends St.DrawingArea {
         const size = Math.min(width, height);
         const [cx, cy] = [width / 2, height / 2];
 
+        // The ring's colour, on its way from the one shown before.
+        const own = hasRing ? ringColor : color;
+        const from = this._from ?? own;
+        const mix = (a, b, k) => a + (b - a) * k;
+        const ink = {};
+        for (const channel of ['red', 'green', 'blue', 'alpha'])
+            ink[channel] = mix(from[channel], own[channel], this._color);
+        this._shown = ink;
+
         if (this._ticks > 0) {
             // Waiting for a finger: the ring, faint and still.
             const faint = this._ring === 'track';
-            const middle = size * 0.4;
             const length = size * 0.06;
+            // Squeezed: swelling, squashed out of round (as by a hand,
+            // turning a little) and a little lumpy, all wobbling back.
+            const p = this._squeeze;
+            const ebb = 1 - p;
+            const swell = 0.24 * Math.exp(-3 * p) * Math.sin(2.2 * Math.PI * p) * ebb;
+            const squash = 0.12 * Math.exp(-2.5 * p) * Math.sin(3 * Math.PI * p) * ebb;
+            const lumps = 0.02 * Math.exp(-3 * p) * Math.sin(4.4 * Math.PI * p) * ebb;
+            const axis = Math.PI / 4 + 0.8 * p;
+            const pale = PALE * Math.sin(Math.PI * Math.min(1, p / 0.7)) ** 2;
+            const tip = {};
+            for (const channel of ['red', 'green', 'blue'])
+                tip[channel] = mix(ink[channel], 255, pale);
+            tip.alpha = ink.alpha;
             cr.setLineCap(Cairo.LineCap.ROUND);
             for (let i = 0; i < TICKS; i++) {
                 const angle = 2 * Math.PI * i / TICKS;
                 const distance = apart(angle, this._crest);
                 const crest = faint || distance >= WAVE_WIDTH
                     ? 0 : this._wave * 0.5 * (1 + Math.cos(Math.PI * distance / WAVE_WIDTH));
-                const half = length * (1 + WAVE_GROW * crest) / 2;
+                const bulge = swell + squash * Math.cos(2 * (angle - axis)) + lumps * Math.cos(3 * angle + 1.3);
+                const middle = size * RING * (1 + bulge);
+                // (Stretched where it bulges.)
+                const half = length * (1 + WAVE_GROW * crest) * (1 + 1.5 * Math.max(0, bulge)) / 2;
                 const [dx, dy] = [Math.sin(angle), -Math.cos(angle)];
+                const [x0, y0] = [cx + dx * (middle - half), cy + dy * (middle - half)];
+                const [x1, y1] = [cx + dx * (middle + half), cy + dy * (middle + half)];
+                const alpha = Math.min(1, this._ticks * (faint ? 0.35 : 0.75 + 0.25 * crest + 0.25 * pale));
                 cr.setLineWidth(Math.max(scale, size * 0.022) * (1 + 0.5 * crest));
-                set(hasRing ? ringColor : color, this._ticks * (faint ? 0.35 : 0.75 + 0.25 * crest));
-                cr.moveTo(cx + dx * (middle - half), cy + dy * (middle - half));
-                cr.lineTo(cx + dx * (middle + half), cy + dy * (middle + half));
+                if (pale > 0.002) {
+                    // (Paling towards the tip, softly.)
+                    const gradient = new Cairo.LinearGradient(x0, y0, x1, y1);
+                    gradient.addColorStopRGBA(0.2, ink.red / 255, ink.green / 255, ink.blue / 255,
+                        alpha * ink.alpha / 255);
+                    gradient.addColorStopRGBA(1, tip.red / 255, tip.green / 255, tip.blue / 255,
+                        alpha * tip.alpha / 255);
+                    cr.setSource(gradient);
+                } else {
+                    set(ink, alpha);
+                }
+                cr.moveTo(x0, y0);
+                cr.lineTo(x1, y1);
                 cr.stroke();
             }
         }
