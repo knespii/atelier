@@ -1,8 +1,9 @@
 // The lock screen's own password popup: when GNOME asks for the password
 // (or another answer), a popup like the one notes are edited in spreads out
 // of a drop in the middle of the screen, with the user's picture and name
-// over the field (Enter sends what is typed) and what GNOME says (a wrong
-// password, a face being looked for), and draws back into it when done.
+// over the field (Enter sends what is typed, Escape goes back to the clock)
+// and what GNOME says (a wrong password, a face being looked for), and
+// draws back into it when done.
 // What is typed goes to GNOME's own prompt, which stays hidden and does the
 // asking: it is handed over as GNOME's Enter hands it over
 // (AuthPrompt._activateNext), so an answer typed early (while a face is
@@ -113,17 +114,9 @@ export const PasswordForm = GObject.registerClass({
         capsLock.add_style_class_name('atelier-lock-message');
         this.add_child(capsLock);
 
-        // (Back to the clock, as Escape does; Enter sends the answer.)
-        const cancel = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-flat atelier-lock-cancel',
-            label: 'Cancel', can_focus: true, x_align: Clutter.ActorAlign.CENTER});
-        cancel.connect('clicked', () => this.emit('cancel'));
-        this.add_child(cancel);
-
+        // Enter sends the answer, Escape goes back to the clock.
         this.entry.clutter_text.connect('activate', () => this.emit('submit'));
         this.entry.clutter_text.connect('key-press-event', (_text, event) => this._onEntryKey(event));
-        // (Escape also from Cancel; Tab goes between it and the field.)
-        this.connect('key-press-event', (_actor, event) => this._onKey(event));
-        global.focus_manager.add_group(this);
     }
 
     /** @returns {string} what the message says, if anything */
@@ -131,17 +124,12 @@ export const PasswordForm = GObject.registerClass({
         return this._message.visible ? this._message.text : '';
     }
 
-    _onKey(event) {
-        if (event.get_key_symbol() !== Clutter.KEY_Escape)
-            return Clutter.EVENT_PROPAGATE;
-        this.emit('cancel');
-        return Clutter.EVENT_STOP;
-    }
-
     _onEntryKey(event) {
         const symbol = event.get_key_symbol();
-        if (symbol === Clutter.KEY_Escape)
-            return this._onKey(event);
+        if (symbol === Clutter.KEY_Escape) {
+            this.emit('cancel');
+            return Clutter.EVENT_STOP;
+        }
         // Nothing copied out of it or pasted in.
         const state = event.get_state();
         const ctrl = (state & Clutter.ModifierType.CONTROL_MASK) !== 0;
