@@ -1,6 +1,7 @@
 // The lock screen's own password popup: when GNOME asks for the password
 // (or another answer), a popup like the one notes are edited in spreads out
-// of a drop in the middle of the screen, with what GNOME says (a wrong
+// of a drop in the middle of the screen, with the user's picture and name
+// over the field (Enter sends what is typed) and what GNOME says (a wrong
 // password, a face being looked for), and draws back into it when done.
 // What is typed goes to GNOME's own prompt, which stays hidden and does the
 // asking: it is handed over as GNOME's Enter hands it over
@@ -9,6 +10,7 @@
 // of GNOME's prompt, or when GNOME asks for something else (a list to
 // choose from), GNOME's prompt shows.
 
+import AccountsService from 'gi://AccountsService';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
@@ -47,19 +49,60 @@ function usable(prompt) {
         prompt._entry instanceof St.Entry && entriesOf(prompt).length === 2;
 }
 
-/** @returns {string} who is asked for the password */
-function userName() {
-    const name = GLib.get_real_name();
+/**
+ * @param {AccountsService.User|null} user
+ * @returns {string} who is asked for the password
+ */
+function nameOf(user) {
+    const name = user?.is_loaded ? user.get_real_name() : GLib.get_real_name();
     return name && name !== 'Unknown' ? name : GLib.get_user_name();
 }
+
+// The user's picture, as GNOME's own prompt shows it (AccountsService's),
+// round; GNOME's generic one without.
+const Avatar = GObject.registerClass(
+class AtelierLockAvatar extends St.Bin {
+    _init(user) {
+        super._init({style_class: 'atelier-lock-avatar', x_align: Clutter.ActorAlign.CENTER});
+        this._user = user;
+        this._picture = null;
+        user?.connectObject(
+            'notify::is-loaded', () => this._sync(),
+            'changed', () => this._sync(),
+            this);
+        this._sync();
+    }
+
+    /** @returns {string|null} the picture's file, if there is one */
+    get picture() {
+        return this._picture;
+    }
+
+    _sync() {
+        const file = this._user?.is_loaded ? this._user.get_icon_file() : null;
+        this._picture = file && GLib.file_test(file, GLib.FileTest.EXISTS) ? file : null;
+        if (this._picture) {
+            this.child = null;
+            this.style = `background-image: url("${this._picture}");`;
+        } else {
+            this.style = null;
+            this.child ??= new St.Icon({style_class: 'atelier-lock-avatar-icon', icon_name: 'avatar-default-symbolic'});
+        }
+    }
+});
 
 export const PasswordForm = GObject.registerClass({
     Signals: {'submit': {}, 'cancel': {}},
 }, class AtelierPasswordForm extends St.BoxLayout {
     _init() {
         super._init({style_class: 'atelier-lock-sheet', orientation: Clutter.Orientation.VERTICAL, reactive: true});
-        this.add_child(new St.Label({style_class: 'atelier-lock-sheet-title', text: userName(),
-            x_align: Clutter.ActorAlign.CENTER}));
+        const user = AccountsService.UserManager.get_default()?.get_user(GLib.get_user_name()) ?? null;
+        this.avatar = new Avatar(user);
+        this.add_child(this.avatar);
+        const title = new St.Label({style_class: 'atelier-lock-sheet-title', text: nameOf(user),
+            x_align: Clutter.ActorAlign.CENTER});
+        user?.connectObject('changed', () => (title.text = nameOf(user)), title);
+        this.add_child(title);
         this.entry = new St.PasswordEntry({style_class: 'atelier-lock-entry', can_focus: true, x_expand: true});
         this.add_child(this.entry);
         this._message = new St.Label({style_class: 'atelier-lock-message', visible: false,
@@ -70,20 +113,15 @@ export const PasswordForm = GObject.registerClass({
         capsLock.add_style_class_name('atelier-lock-message');
         this.add_child(capsLock);
 
-        const buttons = new St.BoxLayout({style_class: 'atelier-sheet-buttons', x_align: Clutter.ActorAlign.END});
-        this.add_child(buttons);
-        const cancel = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-flat', label: 'Cancel',
-            can_focus: true});
+        // (Back to the clock, as Escape does; Enter sends the answer.)
+        const cancel = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-flat atelier-lock-cancel',
+            label: 'Cancel', can_focus: true, x_align: Clutter.ActorAlign.CENTER});
         cancel.connect('clicked', () => this.emit('cancel'));
-        this._unlock = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-primary', label: 'Unlock',
-            can_focus: true});
-        this._unlock.connect('clicked', () => this.emit('submit'));
-        buttons.add_child(cancel);
-        buttons.add_child(this._unlock);
+        this.add_child(cancel);
 
         this.entry.clutter_text.connect('activate', () => this.emit('submit'));
         this.entry.clutter_text.connect('key-press-event', (_text, event) => this._onEntryKey(event));
-        // (Escape also from the buttons; Tab goes round them and the field.)
+        // (Escape also from Cancel; Tab goes between it and the field.)
         this.connect('key-press-event', (_actor, event) => this._onKey(event));
         global.focus_manager.add_group(this);
     }
@@ -127,11 +165,6 @@ export const PasswordForm = GObject.registerClass({
     setSensitive(sensitive) {
         this.entry.reactive = sensitive;
         this.entry.clutter_text.editable = sensitive;
-        this._unlock.reactive = sensitive;
-        if (sensitive)
-            this._unlock.remove_style_pseudo_class('insensitive');
-        else
-            this._unlock.add_style_pseudo_class('insensitive');
     }
 
     /** @param {object|null} message - {text, kind} from lib/lockState.js */

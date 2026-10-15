@@ -3000,6 +3000,11 @@ async function testLockPasswordField() {
         const layer = uiGroup.indexOf(form.get_parent());
         check(layer > uiGroup.indexOf(Main.layoutManager.screenShieldGroup) &&
             layer < uiGroup.indexOf(lock().island.actor), 'over the lock screen, under the island');
+        const avatar = form.avatar;
+        check(avatar.mapped && avatar.get_transformed_position()[1] < form.entry.get_transformed_position()[1] &&
+            (avatar.picture ? avatar.style.includes(avatar.picture) : avatar.child instanceof St.Icon),
+        `the user's picture over the field, or GNOME's generic one (${avatar.picture})`);
+        check(!findActor(form, a => a instanceof St.Button && a.label === 'Unlock'), 'no Unlock button: Enter sends it');
         const prompt = shield._dialog._authPrompt;
         let entry = form.entry;
         check(prompt.opacity === 0, 'GNOME\'s prompt hidden behind it');
@@ -3022,10 +3027,10 @@ async function testLockPasswordField() {
         await typeText('abc');
         await restPointer();
         await screenshot('85-lock-password');
-        await clickAt(...centerOf(field().form._unlock));
+        await pressKey(Clutter.KEY_Return);
         const verifier = locked.verifiers.at(-1);
         check(await waitFor(() => verifier.answers.length === 1, 2000) && verifier.answers[0] === 'abc' && entry.text === '',
-            `Unlock: GNOME has the answer once, the field is empty (${verifier.answers.length})`);
+            `Enter: GNOME has the answer once, the field is empty (${verifier.answers.length})`);
         verifier.emit('show-message', 'gdm-password', 'Sorry, that didn\'t work. Please try again.', 3);
         verifier.emit('verification-failed', 'gdm-password', true);
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);

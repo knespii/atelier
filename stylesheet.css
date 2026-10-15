@@ -1421,13 +1421,28 @@
 
 /* (No spacing: GNOME's caps lock warning is there even while it is 0 high.) */
 .atelier-lock-sheet {
-  width: 340px;
-  padding: 22px 24px 18px;
+  width: 320px;
+  padding: 26px 24px 14px;
   spacing: 0;
   border-radius: 28px;
   background-color: #000000;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   color: #f4f4f5;
+}
+
+.atelier-lock-avatar {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.1);
+  background-size: cover;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.16);
+}
+
+.atelier-lock-avatar-icon {
+  icon-size: 48px;
+  color: rgba(244, 244, 245, 0.7);
 }
 
 .atelier-lock-sheet-title {
@@ -1441,8 +1456,9 @@
   padding-top: 10px;
 }
 
-.atelier-lock-sheet .atelier-sheet-buttons {
-  margin-top: 16px;
+.atelier-lock-sheet .atelier-lock-cancel {
+  margin-top: 10px;
+  font-size: 9.5pt;
 }
 
 .atelier-lock-entry {
