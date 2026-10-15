@@ -12,7 +12,6 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-import {wiggle} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
@@ -92,10 +91,10 @@ export class LockIsland {
         });
     }
 
-    /** A failure: the padlock shakes its head. */
+    /** A failure: the ring cramps up, the padlock shakes its head. */
     shake() {
         if (this.actor)
-            wiggle(this.padlock, {offset: 3, duration: 65, wiggleCount: 3});
+            this.padlock.shake();
     }
 
     // A notch curves into the top edge with ears; a capsule floats.

@@ -102,7 +102,8 @@ profile called **Original**, so there is always a way back.
   hours, as a digital clock, and goes up over the popup if it is still in
   its way. A wave runs round the ring while GNOME checks the password (or a
   face, with a PAM module such as Howdy), the ring shows faintly while a
-  fingerprint reader waits, the padlock shakes in a red ring on a failure,
+  fingerprint reader waits, on a failure the ring cramps up in red as the
+  padlock gives a jerky shake,
   and as the screen unlocks it springs open and hops for joy in a green
   ring that spreads out a little. What is typed goes to GNOME, which still does all the
   checking (and its own prompt shows whenever GNOME asks for something

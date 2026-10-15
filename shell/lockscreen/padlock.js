@@ -1,8 +1,10 @@
 // The padlock in the lock screen's island, in a ring of ticks. While GNOME
 // checks (a password, a face), a wave runs round the ring: the ticks it
 // passes grow and fall back, as a stadium's wave. The ring shows faintly
-// while a fingerprint reader waits, turns red for a moment on a failure,
-// and green when the screen unlocks (its colour always blending softly
+// while a fingerprint reader waits, and turns red for a moment on a
+// failure: it cramps up – smaller, its ticks shorter and darker, with a
+// tremor – while the padlock gives a jerky shake, sideways and askew. It
+// turns green when the screen unlocks (its colour always blending softly
 // from one to the next). Unlocked, the ring spreads out a little, the
 // ticks' tips paling a moment as it does, and the padlock springs open –
 // the shackle jumps up past where it stays, swinging out on its right leg
@@ -32,6 +34,14 @@ const HOP_TIME = 950; // the padlock's hops for joy
 // Each hop: when it lands (of the hops' time) and how high it goes (of the
 // padlock's size).
 const HOPS = [[0.42, 0.055], [0.74, 0.03], [1, 0.012]];
+const CRAMP_TIME = 850; // a failure's cramp
+const SHRINK = 0.07; // how much smaller the ring gets then, of its size
+const SHORTEN = 0.4; // how much shorter its ticks
+const DARKEN = 0.45; // how far towards black
+// The padlock's shake: [when (of the cramp's time), where (-1 left … 1 right)],
+// straight from one to the next, ever shorter.
+const SHAKE = [[0, 0], [0.05, -1], [0.11, 0.85], [0.17, -0.8], [0.24, 0.6], [0.31, -0.55], [0.4, 0.35],
+    [0.5, -0.2], [0.6, 0.08], [0.7, 0]];
 const COLOR_TIME = 300; // from one colour of the ring to the next
 
 const clamp01 = t => Math.min(1, Math.max(0, t));
@@ -56,6 +66,7 @@ class AtelierPadlock extends St.DrawingArea {
         this._swing = 0; // the shackle turned on its right leg, radians
         this._spread = 0; // the ring spread out, 0 … 1
         this._hop = 0; // how far the hops have got, 0 … 1 (0: none)
+        this._cramp = 0; // how far a failure's cramp has got, 0 … 1 (0: none)
         this._color = 1; // from the colour shown before (0) to the ring's own (1)
         this._from = null;
         this._shown = null; // the ring's colour as last drawn
@@ -74,6 +85,39 @@ class AtelierPadlock extends St.DrawingArea {
     /** @returns {object} the look it shows, or is on its way to */
     get look() {
         return this._look;
+    }
+
+    /** A failure: the ring cramps up, the padlock shakes. */
+    shake() {
+        this._cramp = 0;
+        this._tween('cramp', 1, CRAMP_TIME, Clutter.AnimationMode.LINEAR, 0);
+    }
+
+    /**
+     * @returns {number[]} how far the ring is cramped up (0 … 1, trembling)
+     *   and where the padlock is in its shake (-1 … 1)
+     */
+    _cramping() {
+        const p = this._cramp;
+        if (p <= 0)
+            return [0, 0];
+        // Tight at once, held with a tremor, then let go.
+        let tight;
+        if (p < 0.08)
+            tight = Math.sqrt(p / 0.08);
+        else if (p < 0.5)
+            tight = 1 - 0.12 * Math.abs(Math.sin(2 * Math.PI * 9 * p));
+        else
+            tight = (1 - (p - 0.5) / 0.5) ** 3;
+        let shake = 0;
+        for (let i = 1; i < SHAKE.length; i++) {
+            const [[t0, a], [t1, b]] = [SHAKE[i - 1], SHAKE[i]];
+            if (p <= t1) {
+                shake = a + (b - a) * (p - t0) / (t1 - t0);
+                break;
+            }
+        }
+        return [tight, shake];
     }
 
     /** @param {object} look - from lib/lockState.js look() */
@@ -248,16 +292,21 @@ class AtelierPadlock extends St.DrawingArea {
             ink[channel] = mix(from[channel], own[channel], this._color);
         this._shown = ink;
 
+        const [tight, shake] = this._cramping();
         if (this._ticks > 0) {
             // Waiting for a finger: the ring, faint and still.
             const faint = this._ring === 'track';
-            const length = size * 0.06;
+            // Cramped up (a failure): smaller, shorter, darker.
+            const length = size * 0.06 * (1 - SHORTEN * tight);
             // Spread out (unlocked), the tips paling as it spreads.
-            const middle = size * RING * (1 + SPREAD * this._spread);
+            const middle = size * RING * (1 + SPREAD * this._spread - SHRINK * tight);
             const pale = PALE * Math.sin(Math.PI * this._spread) ** 2;
+            const dark = {...ink};
+            for (const channel of ['red', 'green', 'blue'])
+                dark[channel] = ink[channel] * (1 - DARKEN * tight);
             const tip = {};
             for (const channel of ['red', 'green', 'blue'])
-                tip[channel] = mix(ink[channel], 255, pale);
+                tip[channel] = mix(dark[channel], 255, pale);
             tip.alpha = ink.alpha;
             cr.setLineCap(Cairo.LineCap.ROUND);
             for (let i = 0; i < TICKS; i++) {
@@ -274,13 +323,13 @@ class AtelierPadlock extends St.DrawingArea {
                 if (pale > 0.002) {
                     // (Paling towards the tip, softly.)
                     const gradient = new Cairo.LinearGradient(x0, y0, x1, y1);
-                    gradient.addColorStopRGBA(0.2, ink.red / 255, ink.green / 255, ink.blue / 255,
+                    gradient.addColorStopRGBA(0.2, dark.red / 255, dark.green / 255, dark.blue / 255,
                         alpha * ink.alpha / 255);
                     gradient.addColorStopRGBA(1, tip.red / 255, tip.green / 255, tip.blue / 255,
                         alpha * tip.alpha / 255);
                     cr.setSource(gradient);
                 } else {
-                    set(ink, alpha);
+                    set(dark, alpha);
                 }
                 cr.moveTo(x0, y0);
                 cr.lineTo(x1, y1);
@@ -304,6 +353,13 @@ class AtelierPadlock extends St.DrawingArea {
         cr.translate(cx, base - size * up);
         cr.scale(1 - 1.2 * squash, 1 + 1.6 * squash);
         cr.translate(-cx, -base);
+        // Shaking: sideways and askew, turning on its middle.
+        if (shake !== 0) {
+            const middleY = bodyY + bodyHeight / 2;
+            cr.translate(cx + size * 0.035 * shake, middleY - size * 0.012 * shake);
+            cr.rotate(0.12 * shake);
+            cr.translate(-cx, -middleY);
+        }
         set(color, 1);
         cr.setLineWidth(stroke);
         cr.setLineCap(Cairo.LineCap.BUTT);
