@@ -186,7 +186,8 @@ class MeltPopup {
     // The liquid that the form is while it moves, right under it, in its
     // look; and where the form is (or will be, once laid out).
     _melt() {
-        const paint = new LiquidPaint();
+        // (As big as the layer: it would be laid out as big as it asks to be.)
+        const paint = new LiquidPaint({width: this.actor.width, height: this.actor.height});
         paint.connect('destroy', () => {
             if (this._paint === paint)
                 this._paint = null;

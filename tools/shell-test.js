@@ -2976,7 +2976,11 @@ async function testLockPasswordField() {
         check(await waitFor(() => lock()?.island?.actor?.mapped, 3000), 'locked');
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
-        check(await waitFor(shown, 3000), 'a key: the password popup spreads out');
+        // (Its liquid over all the monitor, the drop wherever it is.)
+        const liquid = () => field()?._popup?._paint;
+        check(await waitFor(() => liquid()?.get_allocation_box().get_width() === Main.layoutManager.primaryMonitor.width,
+            1000), 'a key: the password popup spreads out of a drop');
+        check(await waitFor(shown, 3000) && !liquid(), 'and is there');
         const form = field().form;
         const monitor = Main.layoutManager.primaryMonitor;
         const [x, y] = centerOf(form);
