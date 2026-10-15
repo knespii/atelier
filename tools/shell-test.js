@@ -3035,8 +3035,8 @@ async function testLockPasswordField() {
         check(!findActor(form, a => a instanceof St.Button), 'no buttons: Enter sends it, Escape goes back');
         check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness < 0.7), 2000),
             `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
-        check(await waitFor(() => shield._dialog._adjustment.value === 1 && !clock.get_transition('translation_y'), 2000),
-            'the prompt is up');
+        check(await waitFor(() => lock().room === 1 && !clock.get_transition('translation_y'), 2000),
+            'the prompt is up, room made for it');
         const [cx, cy] = clock.stacked.get_transformed_position();
         const [cw, ch] = clock.stacked.get_transformed_size();
         const [, formY] = form.get_transformed_position();
@@ -3050,7 +3050,7 @@ async function testLockPasswordField() {
         // Escape, as in GNOME's prompt: back to the clock.
         await pressKey(Clutter.KEY_Escape);
         check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
-        check(await waitFor(() => !sheet() && shield._dialog._adjustment.value === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
+        check(await waitFor(() => !sheet() && lock().room === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
             widget('date').opacity === 255 && blurs().every(e => e.radius === 0), 2000),
         'the popup draws back, the clock comes down, the wallpaper is sharp again');
         await Scripting.sleep(600);

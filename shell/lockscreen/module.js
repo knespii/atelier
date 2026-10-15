@@ -6,9 +6,11 @@
 // Nothing here launches anything, reads the network, shows notifications or
 // takes the keyboard.
 
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Phase, initialState, look, reduce} from '../../lib/lockState.js';
@@ -22,6 +24,9 @@ import {PasswordField} from './password.js';
 
 const SETTLE_TIME = 900; // how long a failure shows, ms
 const GAP = 20; // between a clock that goes up and the popup, or the island; logical pixels
+// How slowly the room made follows GNOME's prompt coming up (which takes
+// 300 ms): about half a second to get there, as the popup spreads out.
+const LAG = 150;
 // GNOME's blur of the lock screen's wallpaper (ui/unlockDialog.js), if it
 // can't be read.
 const BLUR = {radius: 90, brightness: 0.65};
@@ -40,7 +45,14 @@ export class LockModule {
         this._observer = null;
         this._settleId = 0;
         this._unlocking = false;
+        this._room = 0;
+        this._following = null;
         this.state = initialState();
+    }
+
+    /** @returns {number} how much room is made for the prompt: 0 … 1 */
+    get room() {
+        return this._room;
     }
 
     /** @returns {LockIsland|null} the island with the padlock */
@@ -77,14 +89,50 @@ export class LockModule {
         this._blur = blur?.radius > 0 ? {radius: blur.radius / scale, brightness: blur.brightness} : BLUR;
         // As the prompt comes up (or the popup asking instead), and as GNOME
         // sets its blur anew.
-        promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._makeRoom(), this);
+        promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._follow(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => this._makeRoom(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._makeRoom(), this);
+        this._room = this._progress();
         this._makeRoom();
         this._lockSettings.connectObject('changed::gnome-clock', () => this._syncClock(), this);
         this._syncClock();
         this._observer = new AuthObserver(this._dialog, event => this._dispatch(event));
         this._show();
+    }
+
+    /** @returns {number} GNOME's, from the clock (0) to the prompt (1) */
+    _progress() {
+        return Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
+    }
+
+    // Room made a little after GNOME's prompt, frame by frame (a swipe up
+    // too): smoothly, whichever way it goes.
+    _follow() {
+        const lag = adjustAnimationTime(LAG);
+        if (lag <= 0) {
+            this._room = this._progress();
+            this._makeRoom();
+            return;
+        }
+        if (this._following)
+            return;
+        this._following = new Clutter.Timeline({actor: Main.layoutManager.uiGroup, duration: 1000, repeat_count: -1});
+        this._following.connect('new-frame', timeline => {
+            const target = this._progress();
+            const step = 1 - Math.exp(-timeline.get_delta() / lag);
+            this._room += (target - this._room) * step;
+            if (Math.abs(target - this._room) < 0.002) {
+                this._room = target;
+                this._stopFollowing();
+            }
+            this._makeRoom();
+        });
+        this._following.start();
+    }
+
+    _stopFollowing() {
+        this._following?.stop();
+        this._following = null;
     }
 
     // GNOME's prompt comes up the same way whether it shows or the popup
@@ -94,7 +142,7 @@ export class LockModule {
         // (Unlocked, it all slides away as it is.)
         if (this._unlocking)
             return;
-        const progress = Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
+        const progress = this._room;
         this._blurWallpaper(progress);
         if (!this._board)
             return;
@@ -173,6 +221,7 @@ export class LockModule {
         this._settleId = 0;
         this._observer?.destroy();
         this._observer = null;
+        this._stopFollowing();
         // (Unlocked, GNOME's prompt goes as it is: hidden.)
         this._field?.destroy({restore: !this._unlocking});
         this._field = null;
