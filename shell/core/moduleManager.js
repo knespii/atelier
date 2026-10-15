@@ -38,7 +38,14 @@ export class ModuleManager extends EventEmitter {
         return this._entries.find(entry => entry.id === id)?.instance ?? null;
     }
 
+    /** @returns {boolean} whether the modules are on (as their switches have it) */
+    get enabled() {
+        return this._enabled;
+    }
+
     enable() {
+        if (this._enabled)
+            return;
         this._enabled = true;
         for (const entry of this._entries) {
             entry.settings?.connectObject(`changed::${entry.key}`, () => this._sync(entry), this);
@@ -74,7 +81,9 @@ export class ModuleManager extends EventEmitter {
             this.emit('started', entry.id);
         } catch (e) {
             console.error(`Atelier: the ${entry.id} module could not start`, e);
-            Main.notifyError('Atelier', `The ${entry.id} feature could not start: ${e.message}`);
+            // (Not on the lock screen, where it would sit in its list.)
+            if (!Main.sessionMode.isLocked)
+                Main.notifyError('Atelier', `The ${entry.id} feature could not start: ${e.message}`);
             try {
                 instance?.disable();
             } catch {

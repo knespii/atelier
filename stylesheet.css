@@ -1392,6 +1392,23 @@
   border-radius: 0 0 26px 26px;
 }
 
+/* The lock screen's island: a padlock in a ring */
+
+.atelier-lock-padlock {
+  width: 24px;
+  height: 24px;
+  color: #f4f4f5;
+  -atelier-ring-color: #f4f4f5;
+}
+
+.atelier-lock-padlock:success {
+  -atelier-ring-color: #57e389;
+}
+
+.atelier-lock-padlock:failed {
+  -atelier-ring-color: #ff7b72;
+}
+
 /* Modules on the right of the bar */
 
 .atelier-bar-module-box {

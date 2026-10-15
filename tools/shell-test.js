@@ -11,6 +11,8 @@ import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as AuthPromptModule from 'resource:///org/gnome/shell/gdm/authPrompt.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
@@ -2692,6 +2694,165 @@ async function testSwitcherPopupGoesWithAtelier() {
     await Scripting.sleep(300);
 }
 
+// Stands in for GNOME's check of who is there on the lock screen: a real
+// one would ask GDM and PAM about the real session's user. It asks for a
+// password (a moment later, as GDM does) and keeps the answers.
+class FakeVerifier extends EventEmitter {
+    constructor() {
+        super();
+        this.answers = [];
+        this.smartcardDetected = false;
+        this.hasPendingMessages = false;
+        this.allowedFailures = 3;
+    }
+
+    begin(_userName, hold) {
+        hold?.release?.();
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this.emit('ask-question', 'gdm-password', 'Password:', true);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    answerQuery(_service, answer) {
+        this.answers.push(answer);
+    }
+
+    serviceIsDefault(service) {
+        return service === 'gdm-password';
+    }
+
+    serviceIsFingerprint(service) {
+        return service === 'gdm-fingerprint';
+    }
+
+    foregroundServiceDeterminesUsername() {
+        return false;
+    }
+
+    cancel() {}
+
+    clear() {}
+
+    selectChoice() {}
+
+    increaseCurrentMessageTimeout() {}
+
+    destroy() {}
+}
+
+async function typeText(text) {
+    for (const char of text)
+        await pressKey(Clutter.unicode_to_keysym(char.codePointAt(0)));
+}
+
+// The lock screen: the rest of Atelier stops, the island with the padlock
+// follows a made-up check, and everything comes back once it is unlocked.
+// (The lock screen's own check is made up: see FakeVerifier.)
+async function testLockScreen(ext) {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the lock screen untested');
+        return;
+    }
+    const injections = new InjectionManager();
+    const verifiers = [];
+    injections.overrideMethod(AuthPromptModule.AuthPrompt.prototype, '_createUserVerifier', () => function () {
+        const verifier = new FakeVerifier();
+        verifiers.push(verifier);
+        return verifier;
+    });
+    // (It is the real session's: locking here must not tell logind it is locked.)
+    const loginSession = shield._loginSession;
+    shield._loginSession = null;
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const phase = () => lock()?.state.phase;
+    try {
+        shield.lock(false);
+        check(await waitFor(() => Main.sessionMode.isLocked && lock()?.island?.actor?.mapped, 5000),
+            'locked: the island with the padlock is over the lock screen');
+        const island = lock().island;
+        const uiGroup = Main.layoutManager.uiGroup.get_children();
+        check(uiGroup.indexOf(island.actor) > uiGroup.indexOf(Main.layoutManager.screenShieldGroup),
+            'above GNOME\'s lock screen, as the top bar is');
+        check(ext.state === ExtensionState.ACTIVE && atelier().modules.get('island') === null &&
+            atelier().modules.get('desktop') === null && atelier().modules.get('dock') === null,
+            'the rest of Atelier is down, the extension still on');
+        check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock' || a.name === 'atelier-desktop'),
+            'nothing else of it shows');
+        check(phase() === 'locked' && island.padlock.look.shackle === 'closed', 'the padlock is closed');
+        await restPointer();
+        await Scripting.sleep(400);
+        await screenshotIsland('70-lock-padlock', 120);
+
+        // A click on the island brings up the password prompt.
+        await clickAt(...centerOf(island.actor));
+        check(await waitFor(() => phase() === 'ready', 3000), `a click brings up the prompt (${phase()})`);
+        const verifier = verifiers.at(-1);
+        // A face looked for before the password is asked (Howdy says so).
+        verifier.emit('reset');
+        verifier.emit('show-message', 'gdm-password', 'Attempting face login', 2);
+        check(phase() === 'scanning' && island.padlock.look.ring === 'spin', `a face is looked for (${phase()})`);
+        check(await waitFor(() => phase() === 'ready', 3000), 'then the password is asked after all');
+        verifier.emit('show-message', 'gdm-fingerprint', '(or place finger on reader)', 1);
+        check(lock().state.finger && island.padlock.look.ring === 'track', 'a fingerprint reader waits beside it');
+
+        // A wrong password: one answer, a shake, asked again.
+        await typeText('wrong');
+        await pressKey(Clutter.KEY_Return);
+        check(await waitFor(() => verifier.answers.length === 1, 2000) && verifier.answers[0] === 'wrong',
+            `the answer goes to GNOME once (${verifier.answers.length})`);
+        verifier.emit('show-message', 'gdm-password', 'Sorry, that didn\'t work. Please try again.', 3);
+        verifier.emit('verification-failed', 'gdm-password', true);
+        // (Retrying, GDM asks again at once.)
+        verifier.emit('ask-question', 'gdm-password', 'Password:', true);
+        check(phase() === 'failed' && island.padlock.has_style_pseudo_class('failed'), 'a failure turns the ring red');
+        await screenshotIsland('71-lock-failed', 120);
+        check(await waitFor(() => phase() === 'ready', 3000), 'and settles');
+
+        // The right one.
+        await typeText('right');
+        await pressKey(Clutter.KEY_Return);
+        check(await waitFor(() => verifier.answers.includes('right'), 2000),
+            `the right one goes to GNOME too (${verifier.answers.length})`);
+        verifier.emit('verification-complete');
+        check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
+            island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
+        await Scripting.sleep(400);
+        await screenshotIsland('72-lock-success', 120);
+
+        // logind's Unlock, as GDM would have it sent.
+        shield.deactivate(false);
+        check(await waitFor(() => !Main.sessionMode.isLocked && atelier().modules.get('island')?.island, 4000),
+            'unlocked, the rest of Atelier is back');
+        const afterglow = atelier()._afterglow;
+        check(Boolean(afterglow?.actor) && atelier().lockModules.get('lockscreen') === null,
+            'the padlock stays a moment over the island');
+        check(await waitFor(() => !afterglow.actor, 2000), 'and goes');
+        check(!findActor(Main.layoutManager.screenShieldGroup, a => a.style_class?.includes('atelier')),
+            'nothing of Atelier is left in the lock screen');
+
+        // Turned off and on while locked: only the padlock comes back.
+        shield.lock(false);
+        await waitFor(() => lock()?.island, 5000);
+        Main.extensionManager.disableExtension(UUID);
+        check(await waitFor(() => !findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-island')), 2000),
+            'turned off while locked, the padlock goes');
+        Main.extensionManager.enableExtension(UUID);
+        check(await waitFor(() => lock()?.island && atelier().modules.get('island') === null, 5000),
+            'turned on while locked, only the padlock comes back');
+        shield.deactivate(false);
+        check(await waitFor(() => atelier().modules.get('island')?.island, 4000), 'and the rest once unlocked');
+    } finally {
+        injections.clear();
+        if (Main.sessionMode.isLocked)
+            shield.deactivate(false);
+        await waitFor(() => !Main.sessionMode.isLocked && atelier()?.modules?.get('island')?.island, 5000);
+        shield._loginSession = loginSession;
+    }
+}
+
 async function testDisableCleansUp(atelier) {
     // (Grouped, with a black notch: the sides moved and the ears are up.)
     const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
@@ -2866,6 +3027,9 @@ export async function run() {
         await part(testNewProfile, ext, atelier);
         await part(testDisableCleansUp, atelier);
         await part(testSwitcherPopupGoesWithAtelier);
+        // (After the parts that keep the modules they started with: this
+        // turns Atelier off and on.)
+        await part(testLockScreen, ext);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);
