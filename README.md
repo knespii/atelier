@@ -103,8 +103,8 @@ profile called **Original**, so there is always a way back.
   its way. A wave runs round the ring while GNOME checks the password (or a
   face, with a PAM module such as Howdy), the ring shows faintly while a
   fingerprint reader waits, the padlock shakes in a red ring on a failure,
-  and as the screen unlocks it springs open in a green ring squeezed like a
-  stress ball. What is typed goes to GNOME, which still does all the
+  and as the screen unlocks it springs open and hops for joy in a green
+  ring that spreads out a little. What is typed goes to GNOME, which still does all the
   checking (and its own prompt shows whenever GNOME asks for something
   else). Clocks – a stacked one too,
   the date over big hours over dimmer minutes – and the date can be placed

@@ -3,11 +3,11 @@
 // passes grow and fall back, as a stadium's wave. The ring shows faintly
 // while a fingerprint reader waits, turns red for a moment on a failure,
 // and green when the screen unlocks (its colour always blending softly
-// from one to the next). Unlocked, the ring is squeezed like a stress ball:
-// it swells and squashes out of round, wobbles back, the ticks' tips paling
-// a little meanwhile; and the padlock springs open: the shackle jumps up
-// past where it stays, swinging out on its right leg, and the padlock
-// swells a little. Drawn, so that it all can move.
+// from one to the next). Unlocked, the ring spreads out a little, the
+// ticks' tips paling a moment as it does, and the padlock springs open –
+// the shackle jumps up past where it stays, swinging out on its right leg
+// – and hops for joy: twice, and a little settling hop. Drawn, so that it
+// all can move.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -17,17 +17,21 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 const TICKS = 48;
-const RING = 0.37; // the ring's radius, of the padlock's size: room round it to swell
+const RING = 0.37; // the ring's radius, of the padlock's size: room round it to spread
 const WAVE_WIDTH = 0.95; // half the wave's width, radians
 const WAVE_GROW = 1.4; // how much longer a tick is on the wave's crest
 const OPEN_TIME = 700; // springing open
 const CLOSE_TIME = 320;
 const SWING = 0.7; // how far the shackle swings out as it opens, radians
-const SWELL = 0.1; // how much bigger the padlock gets for a moment
 const FADE_TIME = 220;
 const TURN_TIME = 1300; // the wave once round, while GNOME checks
-const SQUEEZE_TIME = 1200; // the ring squeezed, once unlocked
-const PALE = 0.4; // how far the ticks' tips pale towards white then, at most
+const SPREAD_TIME = 700; // the ring spreading out, once unlocked
+const SPREAD = 0.08; // by how much of its size
+const PALE = 0.4; // how far the ticks' tips pale towards white meanwhile, at most
+const HOP_TIME = 950; // the padlock's hops for joy
+// Each hop: when it lands (of the hops' time) and how high it goes (of the
+// padlock's size).
+const HOPS = [[0.42, 0.055], [0.74, 0.03], [1, 0.012]];
 const COLOR_TIME = 300; // from one colour of the ring to the next
 
 const clamp01 = t => Math.min(1, Math.max(0, t));
@@ -50,8 +54,8 @@ class AtelierPadlock extends St.DrawingArea {
         });
         this._shackle = 0; // 0 closed … 1 open (a little more as it springs open)
         this._swing = 0; // the shackle turned on its right leg, radians
-        this._swell = 1; // the padlock's scale
-        this._squeeze = 0; // how far the ring's squeeze has got, 0 … 1 (0: none)
+        this._spread = 0; // the ring spread out, 0 … 1
+        this._hop = 0; // how far the hops have got, 0 … 1 (0: none)
         this._color = 1; // from the colour shown before (0) to the ring's own (1)
         this._from = null;
         this._shown = null; // the ring's colour as last drawn
@@ -93,7 +97,6 @@ class AtelierPadlock extends St.DrawingArea {
         } else if (shackle !== 'open') {
             this._stop('open');
             this._swing = 0;
-            this._swell = 1;
             this._tween('shackle', 0, CLOSE_TIME);
         }
         this._ring = ring;
@@ -105,8 +108,12 @@ class AtelierPadlock extends St.DrawingArea {
         } else {
             this._stop('spin');
             this._tween('wave', 0, FADE_TIME);
-            if (tone === 'green' && before.tone !== 'green')
-                this._tween('squeeze', 1, SQUEEZE_TIME, Clutter.AnimationMode.LINEAR, 0);
+        }
+        if (tone === 'green' && before.tone !== 'green') {
+            this._tween('spread', 1, SPREAD_TIME, Clutter.AnimationMode.EASE_OUT_CUBIC);
+            this._tween('hop', 1, HOP_TIME, Clutter.AnimationMode.LINEAR, 0);
+        } else if (tone !== 'green') {
+            this._tween('spread', 0, FADE_TIME);
         }
         this.queue_repaint();
     }
@@ -133,7 +140,6 @@ class AtelierPadlock extends St.DrawingArea {
         const opened = () => {
             this._shackle = 1;
             this._swing = 0;
-            this._swell = 1;
             this._timelines.delete('open');
             this.queue_repaint();
         };
@@ -155,12 +161,33 @@ class AtelierPadlock extends St.DrawingArea {
 
     // Springing open, at p (0 … 1): the shackle jumps up past where it
     // stays and back; meanwhile it swings out to the left and back, a
-    // little less each time; the padlock swells and settles.
+    // little less each time.
     _opening(p, from) {
         this._shackle = from + (1 - from) * easeOutBack(clamp01(p / 0.5));
         const swing = clamp01((p - 0.1) / 0.9);
         this._swing = -SWING * Math.exp(-3 * swing) * Math.sin(2.5 * Math.PI * swing) * (1 - swing);
-        this._swell = 1 + SWELL * Math.sin(Math.PI * clamp01(p / 0.45));
+    }
+
+    /**
+     * @returns {number[]} where the hops are: [how high, squashed (-) or
+     *   stretched (+)], both of the padlock's size; nothing at rest
+     */
+    _hopping() {
+        const p = this._hop;
+        if (p <= 0)
+            return [0, 0];
+        let start = 0;
+        for (const [end, height] of HOPS) {
+            if (p <= end) {
+                const u = (p - start) / (end - start);
+                const arc = 4 * u * (1 - u);
+                // (Squashed as it takes off and lands, a little stretched in the air.)
+                const ease = Math.min(1, p / 0.06, (1 - p) / 0.1);
+                return [height * arc, height * (0.5 * arc - 0.6 * (1 - arc)) * ease];
+            }
+            start = end;
+        }
+        return [0, 0];
     }
 
     /**
@@ -225,15 +252,9 @@ class AtelierPadlock extends St.DrawingArea {
             // Waiting for a finger: the ring, faint and still.
             const faint = this._ring === 'track';
             const length = size * 0.06;
-            // Squeezed: swelling, squashed out of round (as by a hand,
-            // turning a little) and a little lumpy, all wobbling back.
-            const p = this._squeeze;
-            const ebb = 1 - p;
-            const swell = 0.24 * Math.exp(-3 * p) * Math.sin(2.2 * Math.PI * p) * ebb;
-            const squash = 0.12 * Math.exp(-2.5 * p) * Math.sin(3 * Math.PI * p) * ebb;
-            const lumps = 0.02 * Math.exp(-3 * p) * Math.sin(4.4 * Math.PI * p) * ebb;
-            const axis = Math.PI / 4 + 0.8 * p;
-            const pale = PALE * Math.sin(Math.PI * Math.min(1, p / 0.7)) ** 2;
+            // Spread out (unlocked), the tips paling as it spreads.
+            const middle = size * RING * (1 + SPREAD * this._spread);
+            const pale = PALE * Math.sin(Math.PI * this._spread) ** 2;
             const tip = {};
             for (const channel of ['red', 'green', 'blue'])
                 tip[channel] = mix(ink[channel], 255, pale);
@@ -244,10 +265,7 @@ class AtelierPadlock extends St.DrawingArea {
                 const distance = apart(angle, this._crest);
                 const crest = faint || distance >= WAVE_WIDTH
                     ? 0 : this._wave * 0.5 * (1 + Math.cos(Math.PI * distance / WAVE_WIDTH));
-                const bulge = swell + squash * Math.cos(2 * (angle - axis)) + lumps * Math.cos(3 * angle + 1.3);
-                const middle = size * RING * (1 + bulge);
-                // (Stretched where it bulges.)
-                const half = length * (1 + WAVE_GROW * crest) * (1 + 1.5 * Math.max(0, bulge)) / 2;
+                const half = length * (1 + WAVE_GROW * crest) / 2;
                 const [dx, dy] = [Math.sin(angle), -Math.cos(angle)];
                 const [x0, y0] = [cx + dx * (middle - half), cy + dy * (middle - half)];
                 const [x1, y1] = [cx + dx * (middle + half), cy + dy * (middle + half)];
@@ -279,10 +297,13 @@ class AtelierPadlock extends St.DrawingArea {
         const shackle = size * 0.095;
         const lift = size * 0.07 * this._shackle;
         const top = bodyY - size * 0.075 - lift; // where the shackle's bow starts
+        // Hopping: up, squashed onto (or stretched off) its bottom.
+        const [up, squash] = this._hopping();
+        const base = bodyY + bodyHeight;
         cr.save();
-        cr.translate(cx, cy);
-        cr.scale(this._swell, this._swell);
-        cr.translate(-cx, -cy);
+        cr.translate(cx, base - size * up);
+        cr.scale(1 - 1.2 * squash, 1 + 1.6 * squash);
+        cr.translate(-cx, -base);
         set(color, 1);
         cr.setLineWidth(stroke);
         cr.setLineCap(Cairo.LineCap.BUTT);

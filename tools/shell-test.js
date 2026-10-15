@@ -2829,26 +2829,23 @@ async function testLockScreen(ext) {
         check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
             island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
         const padlock = island.padlock;
-        let [jump, swing, swell, squeeze, blend] = [0, 0, 0, 0, 1];
-        let squeezed = false;
+        let [jump, swing, hop, blend] = [0, 0, 0, 1];
+        let hopped = false;
         await waitFor(() => {
             jump = Math.max(jump, padlock._shackle);
             swing = Math.max(swing, Math.abs(padlock._swing));
-            swell = Math.max(swell, padlock._swell);
-            squeeze = Math.max(squeeze, padlock._squeeze);
+            hop = Math.max(hop, padlock._hopping()[0]);
             blend = Math.min(blend, padlock._color);
-            if (!squeezed && padlock._squeeze > 0.3) {
-                squeezed = true;
-                screenshotIsland('82a-lock-squeezed', 160);
+            if (!hopped && padlock._hopping()[0] > 0.04) {
+                hopped = true;
+                screenshotIsland('82a-lock-hop', 160);
             }
-            return !padlock._timelines.has('open') && !padlock._timelines.has('squeeze') &&
-                !padlock._timelines.has('color');
+            return ['open', 'hop', 'spread', 'color'].every(name => !padlock._timelines.has(name));
         }, 3000);
-        check(jump > 1.02 && swing > 0.1 && swell > 1.03,
-            `springing open: the shackle jumps past and swings, the padlock swells (${jump.toFixed(2)}, ${swing.toFixed(2)}, ${swell.toFixed(2)})`);
-        check(squeeze > 0.5 && blend < 0.5, `its ring squeezed like a stress ball, turning green softly (${squeeze.toFixed(2)}, ${blend.toFixed(2)})`);
-        check(padlock._shackle === 1 && padlock._swing === 0 && padlock._swell === 1 && padlock._squeeze === 0 &&
-            padlock._color === 1, 'and settles open, in its green ring');
+        check(jump > 1.02 && swing > 0.1, `springing open: the shackle jumps past and swings (${jump.toFixed(2)}, ${swing.toFixed(2)})`);
+        check(hop > 0.04 && blend < 0.5, `the padlock hops for joy, its ring turning green softly (${hop.toFixed(3)}, ${blend.toFixed(2)})`);
+        check(padlock._shackle === 1 && padlock._swing === 0 && padlock._hop === 0 && padlock._spread === 1 &&
+            padlock._color === 1, 'and settles open, in its green ring spread out a little');
         await screenshotIsland('82-lock-success', 160);
 
         // logind's Unlock, as GDM would have it sent.
