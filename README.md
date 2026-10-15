@@ -103,12 +103,11 @@ profile called **Original**, so there is always a way back.
   its way. A wave runs round the ring while GNOME checks the password (or a
   face, with a PAM module such as Howdy), the ring shows faintly while a
   fingerprint reader waits, on a failure the ring cramps up in red as the
-  padlock gives a jerky shake,
-  and as the screen unlocks it springs open and hops for joy in a green
-  ring that spreads out a little. What is typed goes to GNOME, which still does all the
-  checking (and its own prompt shows whenever GNOME asks for something
-  else). Clocks – a stacked one too,
-  the date over big hours over dimmer minutes – and the date can be placed
+  padlock gives a jerky shake, and as the screen unlocks it springs open and
+  hops for joy in a green ring that spreads out a little. What is typed goes
+  to GNOME, which still does all the checking (and its own prompt shows
+  whenever GNOME asks for something else). Clocks – a stacked one too, the
+  date over big hours over dimmer minutes – and the date can be placed
   anywhere on it, on a mock lock screen opened from the settings' Lock
   Screen page. Nothing on the lock screen opens an app, reads the network or
   shows notifications; everything else of Atelier stops while it is locked.
