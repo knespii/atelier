@@ -203,16 +203,21 @@ export class LockModule {
     /**
      * The screen unlocked: the island stays a moment longer on its own.
      *
+     * @param {Function} [onGone] - called once the island has gone up (at
+     *   once without one)
      * @returns {LockIsland|null} the island, for Atelier to destroy if it
      *   goes before the island has
      */
-    handOver() {
+    handOver(onGone = null) {
         // (The widgets slide away with the lock screen.)
         this._unlocking = true;
         const island = this._island;
         this._island = null;
         island?.actor?.disconnectObject(this);
-        island?.handOver();
+        if (island)
+            island.handOver(onGone);
+        else
+            onGone?.();
         return island;
     }
 

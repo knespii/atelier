@@ -35,6 +35,7 @@ const GLANCE_DELAY = 300;
 const GLANCE_HIDE_DELAY = 250;
 // How far down the screen the island may grow, for its glass.
 const GLASS_REACH = 0.9;
+const COME_OUT_TIME = 380; // out of the top edge, after the lock screen's padlock
 
 // Keeps the island's place in the center of the top bar.
 const IslandSlot = GObject.registerClass(
@@ -70,6 +71,7 @@ export class IslandModule {
         this._waits = new Map();
         this._laterId = 0;
         this._stopped = false;
+        this._tucked = false;
         this._glanceBlocked = false;
         this._ear = 0;
         this._sheet = null;
@@ -106,6 +108,33 @@ export class IslandModule {
     get occupied() {
         const island = this._stopped ? null : this._island;
         return Boolean(island && (island.busy || island.page instanceof ToastPage));
+    }
+
+    /**
+     * Hidden (laid out all the same) until it comes out: while the lock
+     * screen's padlock goes back up.
+     */
+    tuckAway() {
+        if (!this._island)
+            return;
+        this._tucked = true;
+        this._island.opacity = 0;
+    }
+
+    /** Out of the top edge (once the lock screen's padlock has gone). */
+    comeOut() {
+        const island = this._island;
+        // (Not once the shell has taken its UI down as it quits.)
+        if (!island || !this._tucked || this._stopped)
+            return;
+        this._tucked = false;
+        island.translation_y = -Math.ceil(island.y + island.height);
+        island.ease({
+            translation_y: 0,
+            opacity: 255,
+            duration: COME_OUT_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+        });
     }
 
     enable() {
@@ -154,6 +183,7 @@ export class IslandModule {
         this._island.connectObject(
             'notify::x', () => this._syncShape(),
             'notify::y', () => this._syncShape(),
+            'notify::translation-y', () => this._syncShape(),
             'notify::width', () => this._syncShape(),
             'notify::height', () => this._syncShape(),
             'notify::visible', () => this._syncShape(),
@@ -477,7 +507,9 @@ export class IslandModule {
         const shown = island.visible && island.opacity > 0;
         const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const node = island.get_theme_node();
-        const shape = [island.x, island.y, island.width, island.height,
+        // (Moved by its translation as it comes out.)
+        const y = island.y + island.translation_y;
+        const shape = [island.x, y, island.width, island.height,
             node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
         // Grown out over the windows, its glass is live: of them too, not
         // just of the wallpaper (which the overview shows, though).
@@ -495,7 +527,7 @@ export class IslandModule {
         }
         if (this._ears) {
             this._ears.show(shown, island.opacity);
-            this._ears.setShape(island.x, island.y, island.width, ear);
+            this._ears.setShape(island.x, y, island.width, ear);
         }
     }
 

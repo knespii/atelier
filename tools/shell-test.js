@@ -2868,7 +2868,12 @@ async function testLockScreen(ext) {
         const afterglow = atelier()._afterglow;
         check(Boolean(afterglow?.actor) && atelier().lockModules.get('lockscreen') === null,
             'the padlock stays a moment over the island');
-        check(await waitFor(() => !afterglow.actor, 2000), 'and goes');
+        const sessionIsland = atelier().modules.get('island').island;
+        check(sessionIsland.opacity === 0, 'which waits, tucked away');
+        check(await waitFor(() => !afterglow.actor, 2000), 'the padlock goes back up');
+        check(await waitFor(() => sessionIsland.translation_y === 0 && sessionIsland.opacity === 255 &&
+            !sessionIsland.get_transition('translation_y'), 2000) && atelier()._afterglow === null,
+        'then the island comes out of the top edge');
         check(!findActor(Main.layoutManager.screenShieldGroup, a => a.style_class?.includes('atelier')),
             'nothing of Atelier is left in the lock screen');
 

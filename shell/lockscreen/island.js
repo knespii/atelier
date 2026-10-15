@@ -4,7 +4,8 @@
 // the top bar does, tucked away above the top edge while the lock screen
 // rests: it comes out as the password is asked. When the screen unlocks it
 // stays a moment over the session's own island, which is built anew under
-// it, and fades: the unlocking itself never waits for it.
+// it, and goes back up; the session's island comes out after it. The
+// unlocking itself never waits for it.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -20,7 +21,7 @@ import {Island} from '../island/island.js';
 import {Padlock} from './padlock.js';
 
 const AFTERGLOW = 750; // how long the open padlock stays once unlocked (its ring squeezed), ms
-const FADE_TIME = 250;
+const RETRACT_TIME = 280; // going back up, once unlocked
 const PADDING = 5; // above and below the padlock's ring, logical pixels
 
 // The island at rest: the padlock.
@@ -51,6 +52,7 @@ export class LockIsland {
         this._notch = false;
         this._laterId = 0;
         this._timeoutId = 0;
+        this._onGone = null;
 
         barSettings.connectObject('changed::island-shape', () => this._syncLook(), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueLayout(), this);
@@ -156,19 +158,25 @@ export class LockIsland {
 
     /**
      * The screen unlocked: over everything, the open padlock stays a moment
-     * longer and fades, then the island goes.
+     * longer (if it is out) and goes back up, then the island goes.
+     *
+     * @param {Function} [onGone] - called once it has gone, however it goes
      */
-    handOver() {
-        if (!this.actor)
+    handOver(onGone = null) {
+        this._onGone = onGone;
+        if (!this.actor?.visible) {
+            this.destroy();
             return;
+        }
         Main.layoutManager.uiGroup.set_child_above_sibling(this.actor, null);
         this.setLook({shackle: 'open', ring: 'fill', tone: 'green'});
         this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, AFTERGLOW, () => {
             this._timeoutId = 0;
             this.actor?.ease({
+                translation_y: -Math.ceil(this.actor.y + this.actor.height),
                 opacity: 0,
-                duration: FADE_TIME,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                duration: RETRACT_TIME,
+                mode: Clutter.AnimationMode.EASE_IN_CUBIC,
                 onStopped: () => this.destroy(),
             });
             return GLib.SOURCE_REMOVE;
@@ -176,8 +184,10 @@ export class LockIsland {
     }
 
     destroy() {
-        if (!this.actor)
+        if (!this.actor) {
+            this._gone();
             return;
+        }
         this._ears?.destroy();
         this._ears = null;
         this.actor.destroy();
@@ -195,5 +205,12 @@ export class LockIsland {
         // (Ears left are going with the rest of the UI.)
         this._ears = null;
         this.actor = null;
+        this._gone();
+    }
+
+    _gone() {
+        const onGone = this._onGone;
+        this._onGone = null;
+        onGone?.();
     }
 }

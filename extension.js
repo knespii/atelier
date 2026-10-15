@@ -113,13 +113,25 @@ export default class AtelierExtension extends Extension {
             return;
         }
         // Just unlocked: the padlock plays on over the island built anew,
-        // which waits until GNOME has let go of the lock screen.
+        // which waits until GNOME has let go of the lock screen – and comes
+        // out of the top edge once the padlock has gone back up.
         this._afterglow?.destroy();
-        this._afterglow = this.lockModules.get('lockscreen')?.handOver() ?? null;
+        this._afterglow = null;
+        // (Gone at once, without the padlock out.)
+        let afterglow = null;
+        afterglow = this.lockModules.get('lockscreen')?.handOver(() => {
+            if (this._afterglow === afterglow)
+                this._afterglow = null;
+            this.modules?.get('island')?.comeOut();
+        }) ?? null;
+        this._afterglow = afterglow?.actor ? afterglow : null;
         this.lockModules.disable();
         Promise.resolve().then(() => {
-            if (this.modules === modules && !Main.sessionMode.isLocked)
-                modules.enable();
+            if (this.modules !== modules || Main.sessionMode.isLocked)
+                return;
+            modules.enable();
+            if (this._afterglow)
+                modules.get('island')?.tuckAway();
         });
     }
 
