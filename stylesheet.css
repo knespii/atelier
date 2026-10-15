@@ -2177,8 +2177,12 @@
 /* The clock's faces, flowed out of the gallery: on liquid of its look */
 .atelier-widget-spill {
   padding: 12px;
-  spacing: 6px;
   border-radius: 28px;
+  -st-hfade-offset: 32px;
+}
+
+.atelier-widget-spill-row {
+  spacing: 6px;
 }
 
 .atelier-widget-spill-item {

@@ -1413,10 +1413,11 @@ async function testDesktop(ext) {
         await Scripting.sleep(40);
     }
     await Scripting.sleep(500);
-    const spill = desktop._editor._spill?.panel;
+    const spill = desktop._editor._spill?.row;
     check(spill?.get_n_children() === 5 && desktop._editor._spill.progress === 1 && onwards &&
         spill.get_children().every(item => item.opacity === 255),
     'a click on the clock lets its faces flow out of the gallery');
+    check(facesFit(desktop._editor._spill), 'each face a square clock in its place on the panel');
     await screenshot('41b-clock-faces-spilled');
     const watchItem = spill.get_children().find(item => item.accessible_name === 'Watch');
     [gx, gy] = centerOf(watchItem);
@@ -1435,6 +1436,10 @@ async function testDesktop(ext) {
     check(!desktop.widgets.has(watch?.entry.id) && !desktop._editor._drag, 'a click on its corner button removes it');
     if (desktop.widgets.has(watch?.entry.id))
         desktop.removeWidget(watch.entry.id);
+    // Clicked again, the faces flow back (out of the way of what is under them).
+    await clickAt(...centerOf(galleryButton('Clock')));
+    check(await waitFor(() => !desktop._editor._spill && !desktop._editor._spillBack?.panel.get_parent(), 2000),
+        'the clock clicked again, its faces flow back into the gallery');
     const weather = desktop.widgets.get('weather');
     await Scripting.sleep(200);
     check(Boolean(weather._editHandle?.mapped), 'it has a handle on its corner');
@@ -2897,6 +2902,18 @@ async function lockForTest() {
     };
 }
 
+// The clock's faces spilled out of an editor's gallery: each sample within
+// its place, all of them on the panel or scrolled to.
+function facesFit(spill) {
+    const [, , pw] = [...spill.panel.get_transformed_position(), ...spill.panel.get_transformed_size()];
+    return spill.row.get_children().every(item => {
+        const holder = item.get_first_child();
+        const [sw, sh] = holder.get_first_child().widget.get_transformed_size();
+        const [hw, hh] = holder.get_transformed_size();
+        return sw <= hw + 1 && sh <= hh + 1;
+    }) && pw > 0 && (spill.row.width <= spill.panel.width || spill.panel.hadjustment.upper > spill.panel.hadjustment.page_size);
+}
+
 // The lock screen's widgets: a stacked clock placed there shows over the
 // blurred wallpaper and under GNOME's prompt, takes no clicks (they bring
 // up the prompt) and may take GNOME's clock's place. They are placed on a
@@ -2963,6 +2980,13 @@ async function testLockWidgets() {
     check(!preview._board.addWidget('github'), 'nothing that opens an app or reads the network');
     await Scripting.sleep(600);
     await screenshot('84-lock-editor');
+    // (Its clocks are large at first: the faces on offer are square ones all the same.)
+    const lockEditor = preview._editor;
+    await clickAt(...centerOf(lockEditor._clockButton));
+    check(await waitFor(() => lockEditor._spill?.progress === 1, 3000) && facesFit(lockEditor._spill),
+        'the clock\'s faces flow out here too, each a square clock in its place');
+    await restPointer();
+    await screenshot('84b-lock-editor-faces');
     await pressKey(Clutter.KEY_Escape);
     check(await waitFor(() => !editor.preview && !findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-preview')), 3000),
         'Escape and it goes');

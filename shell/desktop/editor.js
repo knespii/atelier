@@ -42,13 +42,15 @@ const ARC_GAP = 4;
 const DRIP_SCALE = 0.5;
 const DRIP_TIME = 260;
 // The clock's faces flowing out of the gallery (and back), each this big
-// once there. Logical pixels: the drop the gallery swells into, and how
-// near the liquid melts.
+// once there, on a panel at most this wide (it scrolls sideways beyond).
+// Logical pixels: the drop the gallery swells into, and how near the
+// liquid melts.
 const SPILL_TIME = 680;
 const SPILL_BACK_TIME = 460;
 const SPILL_STAGGER = 40;
 const SPILL_FACES_TIME = 160;
-const SAMPLE = 84;
+const SAMPLE = 112;
+const SPILL_WIDEST = 760;
 const SPILL_DROP = 16;
 const SPILL_BLEND = 20;
 // Coming up and going, milliseconds; of that, how much the cells farthest
@@ -492,7 +494,8 @@ export class DesktopEditor {
 
     // The clock's faces, out of the gallery: it swells at the clock into a
     // drop, which rises on a neck, lets go and spreads into a panel above
-    // it, where the faces come up – each as it looks, to drag out. Clicked
+    // it, where the faces come up – each as it looks (a square clock), to
+    // drag out; the panel scrolls sideways if they don't all fit. Clicked
     // again, they go, and the panel flows back into the gallery.
     _toggleSpill() {
         if (this._spill) {
@@ -502,11 +505,13 @@ export class DesktopEditor {
             return;
         }
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const panel = new St.BoxLayout({style_class: 'atelier-widget-spill'});
+        const row = new St.BoxLayout({style_class: 'atelier-widget-spill-row'});
         CLOCK_FACES.filter(([id]) => id !== 'auto').forEach(([face, name]) => {
             const item = new St.BoxLayout({style_class: 'atelier-widget-spill-item', orientation: Clutter.Orientation.VERTICAL,
                 reactive: true, track_hover: true, accessible_name: name});
-            const sample = this._desktop.makeWidget('clock', {face});
+            // (Square, whatever size a clock first gets here: on the lock
+            // screen, a large one.)
+            const sample = this._desktop.makeWidget('clock', {face, size: 'square'});
             const holder = new St.Widget({width: SAMPLE * scale, height: SAMPLE * scale, x_align: Clutter.ActorAlign.CENTER});
             const [w] = pixelSize('square');
             sample.widget.set_scale(SAMPLE / w, SAMPLE / w);
@@ -515,14 +520,36 @@ export class DesktopEditor {
             item.add_child(new St.Label({text: name, x_align: Clutter.ActorAlign.CENTER}));
             item.connect('button-press-event', (_, event) => this._onGalleryPress('clock', {face}, item, event));
             item.opacity = 0;
-            panel.add_child(item);
+            row.add_child(item);
+        });
+        const panel = new St.ScrollView({
+            style_class: 'atelier-widget-spill',
+            hscrollbar_policy: St.PolicyType.AUTOMATIC,
+            vscrollbar_policy: St.PolicyType.NEVER,
+            overlay_scrollbars: true,
+            child: row,
+        });
+        // (The wheel scrolls it sideways, as it only goes that way.)
+        panel.connect('scroll-event', (_, event) => {
+            const direction = event.get_scroll_direction();
+            let delta;
+            if (direction === Clutter.ScrollDirection.SMOOTH) {
+                const [dx, dy] = event.get_scroll_delta();
+                delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+            } else {
+                delta = direction === Clutter.ScrollDirection.UP || direction === Clutter.ScrollDirection.LEFT ? -1 : 1;
+            }
+            panel.hadjustment.adjust_for_scroll_event(delta);
+            return Clutter.EVENT_STOP;
         });
         this.actor.add_child(panel);
         // Above the clock in the gallery, on the screen.
         const [bx, by] = this._clockButton.get_transformed_position();
-        const [, width] = panel.get_preferred_width(-1);
-        const [, height] = panel.get_preferred_height(width);
         const monitor = Main.layoutManager.primaryMonitor;
+        const [, natural] = panel.get_preferred_width(-1);
+        const width = Math.min(natural, SPILL_WIDEST * scale, monitor.width - 24 * scale);
+        panel.width = width;
+        const [, height] = panel.get_preferred_height(width);
         const originX = bx + this._clockButton.width / 2;
         const x = Math.max(monitor.x + 12 * scale, Math.min(originX - width / 2, monitor.x + monitor.width - width - 12 * scale));
         const y = by - height - 26 * scale;
@@ -535,14 +562,14 @@ export class DesktopEditor {
         liquid.setLook(this._gallery);
         // (Where it is: it isn't laid out yet.)
         const rect = [Math.round(x), Math.round(y), Math.ceil(width), Math.ceil(height)];
-        this._spill = {panel, liquid, rect, originX, progress: 0, timeline: null};
+        this._spill = {panel, row, liquid, rect, originX, progress: 0, timeline: null};
         this._flowSpill(this._spill, true);
     }
 
     // The liquid on its way out of the gallery (or back into it), from
     // where it is.
     _flowSpill(spill, out) {
-        const {panel, liquid} = spill;
+        const {panel, row, liquid} = spill;
         spill.timeline?.stop();
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const [mx, my] = liquid.get_position();
@@ -559,7 +586,7 @@ export class DesktopEditor {
             liquid.setShapes(overflow(bar, radius(this._gallery), ...shape, spill.originX - mx, t, look),
                 [...bar, radius(this._gallery)]);
         };
-        const faces = panel.get_children();
+        const faces = row.get_children();
         faces.forEach(face => face.remove_transition('opacity'));
         // The faces come up once it has spread – and go before it flows back.
         if (out) {
