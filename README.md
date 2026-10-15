@@ -88,6 +88,9 @@ profile called **Original**, so there is always a way back.
   GNOME's notification list with Do Not Disturb (<kbd>Super</kbd>+<kbd>V</kbd>),
   the calendar with the day's events, the notes, Claude Code's numbers and the
   icons extensions put into the top bar, as tiles that do what the icons did.
+  Apps that live in a tray (Blip, Discord, Steam…) need the AppIndicator
+  extension (`gnome-shell-extension-appindicator`); their tiles carry the
+  app's name, a click opens the app and the right button its menu.
   GNOME's own menus don't open anymore; the status icons in the bar only show
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.

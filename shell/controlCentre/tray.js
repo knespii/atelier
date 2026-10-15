@@ -1,8 +1,10 @@
 // Extension icons out of the top bar: each moves into a tile on the
 // control centre's Extensions tab, where clicking it does what it did in the
-// bar (usually opening its menu). The bar keeps the workspaces, the island,
-// GNOME's status icons and the screen sharing and recording indicators.
-// Everything goes back when the tray is turned off.
+// bar (usually opening its menu). Apps' tray icons, which the AppIndicator
+// extension puts into the bar, are named after the app, and a click opens
+// the app (the right button its menu). The bar keeps the workspaces, the
+// island, GNOME's status icons and the screen sharing and recording
+// indicators. Everything goes back when the tray is turned off.
 
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -18,11 +20,31 @@ const KEEP = new Set(['activities', 'dateMenu', 'quickSettings', 'keyboard', 'sc
 const keeps = role => KEEP.has(role) || role.startsWith('atelier');
 
 /**
+ * An app's tray icon from the AppIndicator extension (Ubuntu's, or the same
+ * from extensions.gnome.org) stands for the app behind it, on D-Bus.
+ *
+ * @param {string} role - key of the button in Main.panel.statusArea
+ * @param {PanelMenu.Button} indicator
+ * @returns {object|null} the extension's AppIndicator: title, id, open(), supportsActivation
+ */
+function trayAppOf(role, indicator) {
+    const app = indicator._indicator;
+    return role.startsWith('appindicator-') && typeof app?.open === 'function' ? app : null;
+}
+
+/**
  * @param {string} role - key of the button in Main.panel.statusArea
  * @param {PanelMenu.Button} indicator
  * @returns {string} a name for the tile
  */
 function nameFor(role, indicator) {
+    // An app's name comes once the app has answered (never the D-Bus address
+    // the role is made of).
+    const app = trayAppOf(role, indicator);
+    if (app) {
+        const id = app.id?.replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
+        return app.title || indicator.accessible_name || id || '';
+    }
     const extension = Main.extensionManager.lookup(role) ??
         Main.extensionManager.getUuids().map(uuid => Main.extensionManager.lookup(uuid))
             .find(ext => ext?.uuid.split('@')[0] === role);
@@ -34,8 +56,9 @@ function nameFor(role, indicator) {
     return role.split('@')[0].replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
 }
 
-const Tile = GObject.registerClass(
-class AtelierExtensionTile extends St.Widget {
+const Tile = GObject.registerClass({
+    Signals: {'opened': {}},
+}, class AtelierExtensionTile extends St.Widget {
     _init(role, indicator) {
         super._init({
             style_class: 'atelier-ext-tile',
@@ -60,7 +83,11 @@ class AtelierExtensionTile extends St.Widget {
         this._label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         this.add_child(this._label);
 
-        indicator.connectObject('notify::visible', () => this._syncVisible(), this);
+        // (An app's tray icon shows, and gets its name, once the app answers.)
+        indicator.connectObject(
+            'notify::visible', () => this._syncVisible(),
+            'notify::accessible-name', () => this._syncName(),
+            this);
         indicator.container.connectObject('notify::visible', () => this._syncVisible(), this);
         this._syncVisible();
     }
@@ -88,6 +115,27 @@ class AtelierExtensionTile extends St.Widget {
 
     _syncVisible() {
         this.visible = this.indicator.visible && this.indicator.container.visible;
+        this._syncName();
+    }
+
+    _syncName() {
+        const name = nameFor(this.role, this.indicator);
+        if (this._label.text !== name)
+            this._label.text = name;
+    }
+
+    // An app's tray icon opens the app with a click, its own button too (in
+    // the bar the extension waits whether a second click comes first); the
+    // right button still brings up its menu.
+    vfunc_captured_event(event) {
+        const app = trayAppOf(this.role, this.indicator);
+        if (!app || app.supportsActivation === false ||
+            event.type() !== Clutter.EventType.BUTTON_PRESS || event.get_button() !== Clutter.BUTTON_PRIMARY)
+            return Clutter.EVENT_PROPAGATE;
+        // The control centre goes first, so that the app's window comes up.
+        this.emit('opened');
+        app.open(...event.get_coords(), event.get_time()).catch(logError);
+        return Clutter.EVENT_STOP;
     }
 
     vfunc_button_press_event(event) {
@@ -103,7 +151,7 @@ class AtelierExtensionTile extends St.Widget {
 const COLUMNS = 3;
 
 export const ExtensionTray = GObject.registerClass({
-    Signals: {'changed': {}},
+    Signals: {'changed': {}, 'opened': {}},
 }, class AtelierExtensionTray extends St.Widget {
     _init() {
         const layout = new Clutter.GridLayout({column_homogeneous: true});
@@ -152,7 +200,10 @@ export const ExtensionTray = GObject.registerClass({
             const index = box.get_children().indexOf(container);
             const tile = new Tile(role, indicator);
             tile.adopt(container);
-            tile.connectObject('notify::visible', () => this._arrange(), this);
+            tile.connectObject(
+                'notify::visible', () => this._arrange(),
+                'opened', () => this.emit('opened'),
+                this);
             indicator.connectObject('destroy', () => this._forget(role), this);
             this.layout_manager.attach(tile, 0, 0, 1, 1);
             this._moved.push({role, tile, box, index});

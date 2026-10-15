@@ -244,7 +244,11 @@ export class ControlCentreModule {
         const wanted = Boolean(this._quickSettingsHost) && this._ccSettings.get_boolean('extensions');
         if (wanted && !this._tray) {
             this._tray = new ExtensionTray();
-            this._tray.connectObject('changed', () => this._page?.sync(), this);
+            this._tray.connectObject(
+                'changed', () => this._page?.sync(),
+                // An app was opened from its tray icon: its window comes up.
+                'opened', () => this.close(),
+                this);
         } else if (!wanted && this._tray) {
             // An open control centre would lose its Extensions tab under it.
             this.close();
