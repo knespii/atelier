@@ -21,6 +21,7 @@ import {Padlock} from './padlock.js';
 
 const AFTERGLOW = 450; // how long the open padlock stays once unlocked, ms
 const FADE_TIME = 250;
+const PADDING = 5; // above and below the padlock's ring, logical pixels
 
 // The island at rest: the padlock.
 const LockIdle = GObject.registerClass({
@@ -136,11 +137,14 @@ export class LockIsland {
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const panelHeight = Main.panel.height || 32 * scale;
-        const height = this._notch ? panelHeight : capsuleHeight(panelHeight, scale);
+        // Taller than the bar when the padlock's ring needs it.
+        const [, padlock] = this.padlock.get_preferred_height(-1);
+        const height = Math.max(this._notch ? panelHeight : capsuleHeight(panelHeight, scale),
+            Math.ceil(padlock + 2 * PADDING * scale));
         const restyled = this._idle.height !== height;
         this._idle.height = height;
         const panelY = Main.panel.has_allocation() ? Main.panel.get_transformed_position()[1] : monitor.y;
-        const top = this._notch ? panelY : Math.round(panelY + (panelHeight - height) / 2);
+        const top = this._notch ? panelY : Math.max(monitor.y, Math.round(panelY + (panelHeight - height) / 2));
         this.actor.setAnchor(Math.round(monitor.x + monitor.width / 2), top);
         if (restyled)
             this.actor.relayout();
