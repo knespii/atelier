@@ -25,9 +25,9 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
         this.add(group);
         this._switch(group, 'enabled', 'Atelier on the lock screen');
         const island = this._switch(group, 'island', 'Island with a padlock',
-            'Turns while GNOME checks, shakes on a failure, opens in a green ring');
+            'A wave runs round it while GNOME checks; it shakes on a failure, opens in a green ring');
         const field = this._switch(group, 'password-field', 'Own password field',
-            'The island grows into it; GNOME still checks what is typed');
+            'A popup in the middle of the screen; GNOME still checks what is typed');
         this._lock.bind('island', field, 'sensitive', Gio.SettingsBindFlags.GET);
         this._bound.push([field, 'sensitive']);
 

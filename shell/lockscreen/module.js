@@ -1,7 +1,7 @@
 // While the screen is locked, this is all of Atelier that runs: the island
 // with the padlock over GNOME's lock screen, following GNOME's check of who
 // is there (lib/lockState.js), the lock screen's widgets (board.js) and its
-// own password field (password.js).
+// own password popup (password.js).
 // Nothing here launches anything, reads the network, shows notifications or
 // takes the keyboard.
 
@@ -55,13 +55,14 @@ export class LockModule {
         if (this._lockSettings.get_boolean('island')) {
             this._island = new LockIsland(this._settings.get_child('bar'));
             this._island.actor.connectObject('clicked', () => showPrompt(this._dialog), this);
-            // (The island grows into it.)
+            // (It pops up right under the island.)
             if (this._lockSettings.get_boolean('password-field'))
                 this._field = new PasswordField(this._island);
         }
         this._board = new LockBoard(this._lockSettings);
         if (placeOverBackground(this._dialog, this._board.layer)) {
-            // (In the way of the prompt, in the middle: they make room.)
+            // (In the way of the prompt or the popup, in the middle: they
+            // make room.)
             promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._dim(), this);
             this._dim();
         } else {
@@ -74,11 +75,10 @@ export class LockModule {
         this._show();
     }
 
-    // (With the island's own field, GNOME's prompt is hidden: the middle
-    // stays free, and the widgets as they are.)
+    // (GNOME's prompt comes up the same way whether it shows or the popup
+    // asks instead.)
     _dim() {
-        const progress = this._field?.standing
-            ? 0 : Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
+        const progress = Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
         this._board.layer.opacity = Math.round(255 * (1 - (1 - DIMMED) * progress));
     }
 
@@ -113,9 +113,7 @@ export class LockModule {
     }
 
     _show() {
-        const shown = look(this.state);
-        this._island?.setLook(shown);
-        this._field?.setLook(shown);
+        this._island?.setLook(look(this.state));
     }
 
     /**

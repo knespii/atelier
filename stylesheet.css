@@ -1417,28 +1417,35 @@
   -atelier-ring-color: #ff7b72;
 }
 
-/* The island grown into the lock screen's password field */
+/* The lock screen's password popup, in the middle: black as the island */
 
-.atelier-lock-password {
-  background-color: transparent;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-  margin: 0;
-  padding: 10px 14px;
-  spacing: 6px;
+/* (No spacing: GNOME's caps lock warning is there even while it is 0 high.) */
+.atelier-lock-sheet {
+  width: 340px;
+  padding: 22px 24px 18px;
+  spacing: 0;
+  border-radius: 28px;
+  background-color: #000000;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  color: #f4f4f5;
 }
 
-.atelier-lock-password-row {
-  background-color: transparent;
-  border: none;
-  margin: 0;
-  padding: 0;
-  spacing: 10px;
+.atelier-lock-sheet-title {
+  font-size: 13pt;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 14px;
+}
+
+.atelier-lock-sheet .atelier-lock-message {
+  padding-top: 10px;
+}
+
+.atelier-lock-sheet .atelier-sheet-buttons {
+  margin-top: 16px;
 }
 
 .atelier-lock-entry {
-  width: 240px;
   background-color: rgba(255, 255, 255, 0.1);
   color: #f4f4f5;
   caret-color: #f4f4f5;
@@ -1447,7 +1454,7 @@
   border: none;
   border-radius: 999px;
   box-shadow: none;
-  padding: 6px 14px;
+  padding: 9px 16px;
   font-size: 11pt;
 }
 

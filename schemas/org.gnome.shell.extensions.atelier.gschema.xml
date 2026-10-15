@@ -382,12 +382,12 @@
     <key name="island" type="b">
       <default>true</default>
       <summary>Island with a padlock</summary>
-      <description>The island at the top of the lock screen shows a padlock: a ring turns while GNOME checks, the padlock shakes on a failure and opens with a green ring when the screen unlocks.</description>
+      <description>The island at the top of the lock screen shows a padlock in a ring of ticks: a wave runs round the ring while GNOME checks, the padlock shakes on a failure and opens in a green ring when the screen unlocks.</description>
     </key>
     <key name="password-field" type="b">
       <default>true</default>
       <summary>Own password field</summary>
-      <description>The island grows into a password field of its own when GNOME asks for the password; what is typed goes to GNOME, which still checks it. Off, GNOME's own prompt shows.</description>
+      <description>A password popup of its own spreads out in the middle of the screen when GNOME asks for the password; what is typed goes to GNOME, which still checks it. Off, GNOME's own prompt shows.</description>
     </key>
     <key name="widgets" type="s">
       <default>'[]'</default>

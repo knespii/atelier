@@ -94,13 +94,14 @@ profile called **Original**, so there is always a way back.
   GNOME's own menus don't open anymore; the status icons in the bar only show
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.
-- **Lock screen**: the island stays at the top with a padlock. A ring turns
-  while GNOME checks the password (or a face, with a PAM module such as
-  Howdy), shows faintly while a fingerprint reader waits, the padlock shakes
-  in a red ring on a failure and opens in a green one as the screen unlocks.
-  Asked for the password, the island grows into a field of its own; what is
-  typed goes to GNOME, which still does all the checking (and its own prompt
-  shows whenever GNOME asks for something else). Clocks – a stacked one too,
+- **Lock screen**: the island stays at the top with a padlock in a ring of
+  ticks. A wave runs round the ring while GNOME checks the password (or a
+  face, with a PAM module such as Howdy), the ring shows faintly while a
+  fingerprint reader waits, the padlock shakes in a red ring on a failure and
+  opens in a green one as the screen unlocks. Asked for the password, a popup
+  of its own spreads out of a drop in the middle of the screen; what is typed
+  goes to GNOME, which still does all the checking (and its own prompt shows
+  whenever GNOME asks for something else). Clocks – a stacked one too,
   the date over big hours over dimmer minutes – and the date can be placed
   anywhere on it, on a mock lock screen opened from the settings' Lock
   Screen page. Nothing on the lock screen opens an app, reads the network or

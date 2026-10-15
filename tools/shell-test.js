@@ -2956,63 +2956,92 @@ async function testLockWidgets() {
     lockSettings.reset('password-field');
 }
 
-// The lock screen's own password field: the island grows into it, what is
-// typed goes to GNOME's (hidden) prompt as GNOME's own Enter sends it, what
-// GNOME says shows in it, and GNOME's prompt shows again whenever the field
-// can't stand in for it.
+// The lock screen's own password popup: it spreads out in the middle when
+// GNOME asks, what is typed goes to GNOME's (hidden) prompt as GNOME's own
+// Enter sends it, what GNOME says shows in it, it draws back when done, and
+// GNOME's prompt shows again whenever the popup can't stand in for it.
 async function testLockPasswordField() {
     const shield = Main.screenShield;
     if (!shield) {
-        results.push('INFO  no lock screen here (no GDM): the password field untested');
+        results.push('INFO  no lock screen here (no GDM): the password popup untested');
         return;
     }
     const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
     const lock = () => atelier().lockModules?.get('lockscreen');
     const field = () => lock()?._field;
-    const locked = await lockForTest();
+    const shown = () => field()?.form?.mapped && field().form.opacity === 255;
+    const sheet = () => findActor(Main.uiGroup, a => hasClass(a, 'atelier-lock-sheet'));
+    let locked = await lockForTest();
     try {
         check(await waitFor(() => lock()?.island?.actor?.mapped, 3000), 'locked');
-        // The key that wakes the lock screen goes into the field.
+        // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
-        check(await waitFor(() => field()?.page?.mapped, 3000), 'a key: the island grows into the password field');
+        check(await waitFor(shown, 3000), 'a key: the password popup spreads out');
+        const form = field().form;
+        const monitor = Main.layoutManager.primaryMonitor;
+        const [x, y] = centerOf(form);
+        check(Math.abs(x - (monitor.x + monitor.width / 2)) <= 1 && Math.abs(y - (monitor.y + monitor.height / 2)) <= 1,
+            `in the middle of the screen (${Math.round(x)}, ${Math.round(y)})`);
+        const uiGroup = Main.layoutManager.uiGroup.get_children();
+        const layer = uiGroup.indexOf(form.get_parent());
+        check(layer > uiGroup.indexOf(Main.layoutManager.screenShieldGroup) &&
+            layer < uiGroup.indexOf(lock().island.actor), 'over the lock screen, under the island');
         const prompt = shield._dialog._authPrompt;
-        let entry = field().page.entry;
+        let entry = form.entry;
         check(prompt.opacity === 0, 'GNOME\'s prompt hidden behind it');
         const picked = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, ...centerOf(prompt._entry));
         check(!prompt.contains(picked), 'and out of the pointer\'s way');
-        check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the field (${entry.text})`);
+        check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the popup (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
-        check(lock().board.layer.opacity === 255, 'GNOME\'s prompt hidden, the widgets stay as they are');
+        check(await waitFor(() => lock().board.layer.opacity < 100, 2000), 'the widgets make room for it');
         // Escape, as in GNOME's prompt: back to the clock.
         await pressKey(Clutter.KEY_Escape);
-        check(await waitFor(() => lock().state.phase === 'locked' && !field().page, 3000), 'Escape: back to the clock');
+        check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
+        check(await waitFor(() => !sheet() && lock().board.layer.opacity === 255, 2000),
+            'the popup draws back, the widgets as they were');
         await Scripting.sleep(600);
 
-        // A wrong password, then something to choose from.
+        // A wrong password, then the right one.
         await clickAt(...centerOf(lock().island.actor));
-        check(await waitFor(() => field()?.page?.mapped && lock().state.phase === 'ready', 3000), 'clicked, the field again');
-        entry = field().page.entry;
+        check(await waitFor(() => shown() && lock().state.phase === 'ready', 3000), 'clicked, the popup again');
+        entry = field().form.entry;
         await typeText('abc');
         await restPointer();
-        await screenshotIsland('85-lock-password', 160);
-        await pressKey(Clutter.KEY_Return);
+        await screenshot('85-lock-password');
+        await clickAt(...centerOf(field().form._unlock));
         const verifier = locked.verifiers.at(-1);
         check(await waitFor(() => verifier.answers.length === 1, 2000) && verifier.answers[0] === 'abc' && entry.text === '',
-            `Enter: GNOME has the answer once, the field is empty (${verifier.answers.length})`);
+            `Unlock: GNOME has the answer once, the field is empty (${verifier.answers.length})`);
         verifier.emit('show-message', 'gdm-password', 'Sorry, that didn\'t work. Please try again.', 3);
         verifier.emit('verification-failed', 'gdm-password', true);
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);
-        check(field().page?.message.includes('didn\'t work') && field().page.padlock.look.tone === 'red',
+        check(field().form?.message.includes('didn\'t work') && lock().island.padlock.look.tone === 'red',
             'what GNOME says shows in it, the padlock red');
+        await restPointer();
         await Scripting.sleep(300);
-        await screenshotIsland('86-lock-password-wrong', 160);
+        await screenshot('86-lock-password-wrong');
         check(await waitFor(() => lock().state.phase === 'ready' && entry.contains(global.stage.key_focus), 3000),
             'asked again, it has the keyboard again');
-        const again = shield._dialog._authPrompt;
-        verifier.emit('show-choice-list', 'gdm-password', 'Choose', {});
-        check(again.opacity === 255 && !field().page, 'a list to choose from: GNOME\'s prompt shows instead');
-        locked.verifiers.at(-1).emit('verification-complete');
-        check(lock().state.phase === 'success', 'unlocked');
+        await typeText('right');
+        await pressKey(Clutter.KEY_Return);
+        check(await waitFor(() => verifier.answers.includes('right'), 2000), 'Enter: the right one goes to GNOME');
+        verifier.emit('verification-complete');
+        check(lock().state.phase === 'success' && !field().form, 'unlocked: the popup draws back');
+    } finally {
+        await locked.unlock();
+    }
+    check(await waitFor(() => !sheet(), 2000), 'and goes');
+
+    // Something to choose from: GNOME's own prompt.
+    locked = await lockForTest();
+    try {
+        await waitFor(() => lock()?.island?.actor?.mapped, 3000);
+        await pressKey(Clutter.KEY_a);
+        await waitFor(shown, 3000);
+        const prompt = shield._dialog._authPrompt;
+        locked.verifiers.at(-1).emit('show-choice-list', 'gdm-password', 'Choose', {});
+        check(prompt.opacity === 255 && !field().form, 'a list to choose from: GNOME\'s prompt shows instead');
+        check(await waitFor(() => !sheet(), 2000), 'the popup gone');
     } finally {
         await locked.unlock();
     }

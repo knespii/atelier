@@ -71,22 +71,6 @@ export class LockIsland {
             this.padlock.setLook(look);
     }
 
-    /**
-     * Grow into a page (the password field). Not modal: on the lock screen
-     * nothing of Atelier takes the keyboard to itself.
-     *
-     * @param {IslandPage} page
-     * @returns {boolean} whether it shows
-     */
-    open(page) {
-        return this.actor ? this.actor.open(page) : false;
-    }
-
-    /** @param {IslandPage} page - back to the padlock, if it shows that */
-    close(page) {
-        this.actor?.close(page);
-    }
-
     /** A failure: the padlock shakes its head. */
     shake() {
         if (this.actor)

@@ -1,22 +1,30 @@
-// The lock screen's own password field: the island grows into it when
-// GNOME asks for the password (or another answer), with a small padlock and
-// what GNOME says (a wrong password, a face being looked for). What is typed
-// goes to GNOME's own prompt, which stays hidden and does the asking: it is
-// handed over as GNOME's Enter hands it over (AuthPrompt._activateNext), so
-// an answer typed early (while a face is looked for) and the counting of
-// tries stay GNOME's. Without what it needs of GNOME's prompt, or when GNOME
-// asks for something else (a list to choose from), GNOME's prompt shows.
+// The lock screen's own password popup: when GNOME asks for the password
+// (or another answer), a popup like the one notes are edited in spreads out
+// of a drop in the middle of the screen, with what GNOME says (a wrong
+// password, a face being looked for), and draws back into it when done.
+// What is typed goes to GNOME's own prompt, which stays hidden and does the
+// asking: it is handed over as GNOME's Enter hands it over
+// (AuthPrompt._activateNext), so an answer typed early (while a face is
+// looked for) and the counting of tries stay GNOME's. Without what it needs
+// of GNOME's prompt, or when GNOME asks for something else (a list to
+// choose from), GNOME's prompt shows.
 
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ShellEntry from 'resource:///org/gnome/shell/ui/shellEntry.js';
 
+import {clamp01, gather, spread} from '../../lib/liquid.js';
 import {MessageKind} from '../../lib/lockState.js';
-import {IslandPage} from '../island/page.js';
-import {Padlock} from './padlock.js';
+import {LiquidPaint} from '../core/liquid.js';
+
+const SPREAD_TIME = 560;
+const GATHER_TIME = 380;
 
 // Keys that would copy, cut or paste.
 const CLIPBOARD_KEYS = [Clutter.KEY_c, Clutter.KEY_C, Clutter.KEY_x, Clutter.KEY_X, Clutter.KEY_v, Clutter.KEY_V,
@@ -32,38 +40,52 @@ function entriesOf(prompt) {
 
 /**
  * @param {object} prompt - GNOME's AuthPrompt
- * @returns {boolean} whether the field can stand in for its entry
+ * @returns {boolean} whether the popup can stand in for its entry
  */
 function usable(prompt) {
     return typeof prompt?._activateNext === 'function' && typeof prompt.cancel === 'function' &&
         prompt._entry instanceof St.Entry && entriesOf(prompt).length === 2;
 }
 
-export const PasswordPage = GObject.registerClass({
+/** @returns {string} who is asked for the password */
+function userName() {
+    const name = GLib.get_real_name();
+    return name && name !== 'Unknown' ? name : GLib.get_user_name();
+}
+
+export const PasswordForm = GObject.registerClass({
     Signals: {'submit': {}, 'cancel': {}},
-}, class AtelierPasswordPage extends IslandPage {
+}, class AtelierPasswordForm extends St.BoxLayout {
     _init() {
-        super._init({style_class: 'atelier-lock-password', orientation: Clutter.Orientation.VERTICAL});
-        const row = new St.BoxLayout({style_class: 'atelier-lock-password-row'});
-        this.add_child(row);
-        this.padlock = new Padlock();
-        row.add_child(this.padlock);
-        this.entry = new St.PasswordEntry({
-            style_class: 'atelier-lock-entry',
-            can_focus: true,
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        row.add_child(this.entry);
+        super._init({style_class: 'atelier-lock-sheet', orientation: Clutter.Orientation.VERTICAL, reactive: true});
+        this.add_child(new St.Label({style_class: 'atelier-lock-sheet-title', text: userName(),
+            x_align: Clutter.ActorAlign.CENTER}));
+        this.entry = new St.PasswordEntry({style_class: 'atelier-lock-entry', can_focus: true, x_expand: true});
+        this.add_child(this.entry);
         this._message = new St.Label({style_class: 'atelier-lock-message', visible: false,
             x_align: Clutter.ActorAlign.CENTER});
+        this._message.clutter_text.line_wrap = true;
         this.add_child(this._message);
         const capsLock = new ShellEntry.CapsLockWarning({x_align: Clutter.ActorAlign.CENTER});
         capsLock.add_style_class_name('atelier-lock-message');
         this.add_child(capsLock);
 
+        const buttons = new St.BoxLayout({style_class: 'atelier-sheet-buttons', x_align: Clutter.ActorAlign.END});
+        this.add_child(buttons);
+        const cancel = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-flat', label: 'Cancel',
+            can_focus: true});
+        cancel.connect('clicked', () => this.emit('cancel'));
+        this._unlock = new St.Button({style_class: 'atelier-sheet-button atelier-sheet-primary', label: 'Unlock',
+            can_focus: true});
+        this._unlock.connect('clicked', () => this.emit('submit'));
+        buttons.add_child(cancel);
+        buttons.add_child(this._unlock);
+
         this.entry.clutter_text.connect('activate', () => this.emit('submit'));
-        this.entry.clutter_text.connect('key-press-event', (_text, event) => this._onKey(event));
+        this.entry.clutter_text.connect('key-press-event', (_text, event) => this._onEntryKey(event));
+        // (Escape also from the buttons; Tab goes round them and the field.)
+        this.connect('key-press-event', (_actor, event) => this._onKey(event));
+        global.focus_manager.add_group(this);
     }
 
     /** @returns {string} what the message says, if anything */
@@ -72,11 +94,16 @@ export const PasswordPage = GObject.registerClass({
     }
 
     _onKey(event) {
+        if (event.get_key_symbol() !== Clutter.KEY_Escape)
+            return Clutter.EVENT_PROPAGATE;
+        this.emit('cancel');
+        return Clutter.EVENT_STOP;
+    }
+
+    _onEntryKey(event) {
         const symbol = event.get_key_symbol();
-        if (symbol === Clutter.KEY_Escape) {
-            this.emit('cancel');
-            return Clutter.EVENT_STOP;
-        }
+        if (symbol === Clutter.KEY_Escape)
+            return this._onKey(event);
         // Nothing copied out of it or pasted in.
         const state = event.get_state();
         const ctrl = (state & Clutter.ModifierType.CONTROL_MASK) !== 0;
@@ -100,6 +127,11 @@ export const PasswordPage = GObject.registerClass({
     setSensitive(sensitive) {
         this.entry.reactive = sensitive;
         this.entry.clutter_text.editable = sensitive;
+        this._unlock.reactive = sensitive;
+        if (sensitive)
+            this._unlock.remove_style_pseudo_class('insensitive');
+        else
+            this._unlock.add_style_pseudo_class('insensitive');
     }
 
     /** @param {object|null} message - {text, kind} from lib/lockState.js */
@@ -117,22 +149,128 @@ export const PasswordPage = GObject.registerClass({
     }
 });
 
+// A form in the middle of the main monitor, over GNOME's lock screen (right
+// under the island): it spreads out of a drop there and draws back into it.
+// (A layer over the monitor keeps it in the middle as it grows, with a
+// message; it takes no clicks itself.)
+class MeltPopup {
+    /**
+     * @param {St.Widget} form
+     * @param {Clutter.Actor} island
+     */
+    constructor(form, island) {
+        this.form = form;
+        this.closing = false;
+        this._paint = null;
+        this._timeline = null;
+        this.actor = new St.Widget({layout_manager: new Clutter.BinLayout()});
+        form.set({x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
+        this.actor.add_child(form);
+        island.get_parent().insert_child_below(this.actor, island);
+        Main.layoutManager.connectObject('monitors-changed', () => this._fit(), this.actor);
+        // However it goes: also with all of GNOME's UI when the shell quits.
+        this.actor.connect('destroy', () => {
+            this._timeline?.stop();
+            this._timeline = null;
+            this.actor = this.form = this._paint = null;
+        });
+        this._fit();
+    }
+
+    _fit() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (monitor)
+            this.actor.set({x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height});
+    }
+
+    // The liquid that the form is while it moves, right under it, in its
+    // look; and where the form is (or will be, once laid out).
+    _melt() {
+        const paint = new LiquidPaint();
+        paint.connect('destroy', () => {
+            if (this._paint === paint)
+                this._paint = null;
+        });
+        this._paint = paint;
+        this.actor.insert_child_below(paint, this.form);
+        paint.setLook(this.form);
+        const [, width] = this.form.get_preferred_width(-1);
+        const [, height] = this.form.get_preferred_height(width);
+        const rect = [Math.round((this.actor.width - width) / 2), Math.round((this.actor.height - height) / 2),
+            width, height];
+        return [rect, {radius: this.form.get_theme_node().get_border_radius(St.Corner.TOPLEFT)}];
+    }
+
+    // Over a duration: step(t) every frame, then done (at once without
+    // animations).
+    _play(time, step, done) {
+        const duration = adjustAnimationTime(time);
+        if (duration <= 0) {
+            step(1);
+            done();
+            return;
+        }
+        const timeline = new Clutter.Timeline({actor: this.actor, duration});
+        timeline.connect('new-frame', () => step(timeline.get_progress()));
+        timeline.connect('completed', () => {
+            this._timeline = null;
+            step(1);
+            done();
+        });
+        this._timeline = timeline;
+        step(0);
+        timeline.start();
+    }
+
+    // Spreading out of a drop; what is on it shows once it is there.
+    open() {
+        const [rect, look] = this._melt();
+        this.form.opacity = 0;
+        this._play(SPREAD_TIME, t => {
+            this._paint?.setShapes(spread(rect, clamp01(t / 0.8), look));
+            this.form.opacity = Math.round(255 * clamp01((t - 0.7) / 0.3));
+        }, () => this._dry());
+    }
+
+    // Drawing back into the drop, and gone.
+    close() {
+        if (this.closing || !this.actor)
+            return;
+        this.closing = true;
+        this._timeline?.stop();
+        this._timeline = null;
+        this._dry();
+        const [rect, look] = this._melt();
+        this.form.hide();
+        this._play(GATHER_TIME, t => this._paint?.setShapes(gather(rect, clamp01(t / 0.8), look)),
+            () => this.destroy());
+    }
+
+    _dry() {
+        this._paint?.destroy();
+    }
+
+    destroy() {
+        this.actor?.destroy();
+    }
+}
+
 export class PasswordField {
     /**
-     * @param {LockIsland} island - it grows into the field
+     * @param {LockIsland} island - the popup goes right under it
      */
     constructor(island) {
         this._island = island;
         this._prompt = null;
-        this._page = null;
+        this._popup = null;
         this._submitting = false;
         this._broken = false;
         this._watched = [];
     }
 
-    /** @returns {PasswordPage|null} the field, while the island shows it */
-    get page() {
-        return this._page;
+    /** @returns {PasswordForm|null} the popup's form, while it is open */
+    get form() {
+        return this._popup && !this._popup.closing ? this._popup.form : null;
     }
 
     /** @returns {boolean} whether it stands in for GNOME's prompt (which is hidden) */
@@ -167,21 +305,16 @@ export class PasswordField {
                 this._detach({restore: false});
                 break;
             }
-            this._page?.setMessage(state.message);
+            this.form?.setMessage(state.message);
         } catch (e) {
-            console.error('Atelier: the lock screen\'s password field failed', e);
+            console.error('Atelier: the lock screen\'s password popup failed', e);
             this._broken = true;
             this._detach();
         }
     }
 
-    /** @param {object} look - from lib/lockState.js look() */
-    setLook(look) {
-        this._page?.padlock.setLook(look);
-    }
-
     // GNOME's new prompt: hidden (and out of the pointer's way) while the
-    // field asks instead.
+    // popup asks instead.
     _attach(prompt) {
         this._detach();
         if (this._broken || !usable(prompt))
@@ -223,47 +356,41 @@ export class PasswordField {
     _ask(question, secret) {
         if (!this._prompt)
             return;
-        if (!this._page) {
-            const page = new PasswordPage();
-            page.connectObject(
-                'submit', () => this._submit(),
-                'cancel', () => this._prompt?.cancel(),
-                'destroy', () => {
-                    if (this._page === page)
-                        this._page = null;
-                },
-                this);
-            if (!this._island.open(page)) {
-                page.destroy();
+        if (!this.form) {
+            if (!this._island.actor) {
                 this._detach();
                 return;
             }
-            this._page = page;
+            this._popup?.destroy();
+            const form = new PasswordForm();
+            form.connectObject(
+                'submit', () => this._submit(),
+                'cancel', () => this._prompt?.cancel(),
+                this);
+            this._popup = new MeltPopup(form, this._island.actor);
+            this._popup.open();
         }
-        this._page.setQuestion(question, secret);
+        this.form.setQuestion(question, secret);
         this._syncSensitive();
         // (What went into GNOME's entry before: the key that woke the lock screen.)
         this._takeTyped(this._prompt._entry);
-        this._page.focus();
+        this.form.focus();
     }
 
     _close() {
-        const page = this._page;
-        this._page = null;
-        if (page)
-            this._island.close(page);
+        this._popup?.close();
     }
 
     // Handed over as GNOME's own Enter does it.
     _submit() {
         const prompt = this._prompt;
-        const page = this._page;
-        if (!prompt || !page || !prompt._entry.reactive)
+        const form = this.form;
+        if (!prompt || !form || !prompt._entry.reactive)
             return;
         this._submitting = true;
         try {
-            prompt._entry.text = page.entry.text;
-            page.entry.text = '';
+            prompt._entry.text = form.entry.text;
+            form.entry.text = '';
             prompt._activateNext(true);
         } finally {
             this._submitting = false;
@@ -271,34 +398,40 @@ export class PasswordField {
     }
 
     _syncSensitive() {
+        const form = this.form;
         const sensitive = Boolean(this._prompt?._entry.reactive);
-        this._page?.setSensitive(sensitive);
+        form?.setSensitive(sensitive);
         if (sensitive)
-            this._page?.focus();
+            form?.focus();
     }
 
     // Typed into GNOME's entry (it takes the key that wakes the lock
-    // screen): into the field.
+    // screen): into the popup.
     _takeTyped(entry) {
-        if (this._submitting || !this._page || !entry?.text)
+        const form = this.form;
+        if (this._submitting || !form || !entry?.text)
             return;
         const typed = entry.text;
         entry.text = '';
-        this._page.entry.text += typed;
-        this._page.entry.clutter_text.set_cursor_position(-1);
+        form.entry.text += typed;
+        form.entry.clutter_text.set_cursor_position(-1);
     }
 
     _takeFocus() {
         const focus = global.stage.key_focus;
-        if (this._page && focus && this._prompt?.contains(focus))
-            this._page.focus();
+        if (this.form && focus && this._prompt?.contains(focus))
+            this.form.focus();
     }
 
     /**
      * @param {object} [options]
-     * @param {boolean} [options.restore] - put GNOME's prompt back (not when unlocked)
+     * @param {boolean} [options.restore] - put GNOME's prompt back; not when
+     *   unlocked, when the popup draws back into its drop on its own
      */
     destroy({restore = true} = {}) {
         this._detach({restore});
+        if (restore)
+            this._popup?.destroy();
+        this._popup = null;
     }
 }
