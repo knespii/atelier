@@ -1395,16 +1395,16 @@
 /* The lock screen's island: a padlock in a ring */
 
 .atelier-lock-island.atelier-island-notch {
-  border-radius: 0 0 32px 32px;
+  border-radius: 0 0 44px 44px;
 }
 
 .atelier-lock-idle {
-  padding: 0 14px;
+  padding: 0 16px;
 }
 
 .atelier-lock-padlock {
-  width: 88px;
-  height: 88px;
+  width: 132px;
+  height: 132px;
   color: #f4f4f5;
   -atelier-ring-color: #f4f4f5;
 }

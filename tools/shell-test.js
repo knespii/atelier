@@ -2776,8 +2776,8 @@ async function testLockScreen(ext) {
     const phase = () => lock()?.state.phase;
     try {
         shield.lock(false);
-        check(await waitFor(() => Main.sessionMode.isLocked && lock()?.island?.actor?.mapped, 5000),
-            'locked: the island with the padlock is over the lock screen');
+        check(await waitFor(() => Main.sessionMode.isLocked && lock()?.island?.actor, 5000) &&
+            !lock().island.actor.visible, 'locked: the island with the padlock tucked away while it rests');
         const island = lock().island;
         const uiGroup = Main.layoutManager.uiGroup.get_children();
         check(uiGroup.indexOf(island.actor) > uiGroup.indexOf(Main.layoutManager.screenShieldGroup),
@@ -2788,13 +2788,16 @@ async function testLockScreen(ext) {
         check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock' || a.name === 'atelier-desktop'),
             'nothing else of it shows');
         check(phase() === 'locked' && island.padlock.look.shackle === 'closed', 'the padlock is closed');
-        await restPointer();
-        await Scripting.sleep(400);
-        await screenshotIsland('80-lock-padlock', 140);
 
-        // A click on the island brings up the password prompt.
-        await clickAt(...centerOf(island.actor));
+        // A click on the lock screen brings up the password prompt, and the
+        // island comes out of the top edge.
+        await clickAt(300, 800);
         check(await waitFor(() => phase() === 'ready', 3000), `a click brings up the prompt (${phase()})`);
+        check(await waitFor(() => lock().room === 1 && island.actor.mapped && island.actor.translation_y === 0 &&
+            island.actor.opacity === 255, 2000), 'the island comes out of the top edge as it does');
+        await restPointer();
+        await Scripting.sleep(300);
+        await screenshotIsland('80-lock-padlock', 160);
         const verifier = verifiers.at(-1);
         // A face looked for before the password is asked (Howdy says so).
         verifier.emit('reset');
@@ -2814,7 +2817,7 @@ async function testLockScreen(ext) {
         // (Retrying, GDM asks again at once.)
         verifier.emit('ask-question', 'gdm-password', 'Password:', true);
         check(phase() === 'failed' && island.padlock.has_style_pseudo_class('failed'), 'a failure turns the ring red');
-        await screenshotIsland('81-lock-failed', 140);
+        await screenshotIsland('81-lock-failed', 160);
         check(await waitFor(() => phase() === 'ready', 3000), 'and settles');
 
         // The right one.
@@ -3021,7 +3024,7 @@ async function testLockPasswordField() {
     const blurs = () => shield._dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
     let locked = await lockForTest();
     try {
-        check(await waitFor(() => lock()?.island?.actor?.mapped && lock().board?.widgets.length === 2 &&
+        check(await waitFor(() => lock()?.island?.actor && lock().board?.widgets.length === 2 &&
             widget('clock').stacked?.has_allocation(), 3000), 'locked');
         const clock = widget('clock');
         // (Where it is at rest: in the popup's way, as checked below.)
@@ -3089,8 +3092,9 @@ async function testLockPasswordField() {
         'the popup draws back, the clock comes down, stacked again, the wallpaper is sharp again');
         await Scripting.sleep(600);
 
+        check(!lock().island.actor.visible, 'the island tucked away again');
         // A wrong password, then the right one.
-        await clickAt(...centerOf(lock().island.actor));
+        await clickAt(300, 800);
         check(await waitFor(() => shown() && lock().state.phase === 'ready', 3000), 'clicked, the popup again');
         entry = field().form.entry;
         await typeText('abc');
@@ -3124,7 +3128,7 @@ async function testLockPasswordField() {
     // Something to choose from: GNOME's own prompt.
     locked = await lockForTest();
     try {
-        await waitFor(() => lock()?.island?.actor?.mapped, 3000);
+        await waitFor(() => lock()?.island?.actor, 3000);
         await pressKey(Clutter.KEY_a);
         await waitFor(shown, 3000);
         const prompt = shield._dialog._authPrompt;

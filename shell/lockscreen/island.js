@@ -1,9 +1,10 @@
 // The island on the lock screen: just the padlock, in the island's shape
 // and place (a capsule floating in the bar, or a notch hanging from the top
 // edge, as the bar's settings have it). It sits over GNOME's lock screen as
-// the top bar does; a click on it brings up the password prompt. When the
-// screen unlocks it stays a moment over the session's own island, which is
-// built anew under it, and fades: the unlocking itself never waits for it.
+// the top bar does, tucked away above the top edge while the lock screen
+// rests: it comes out as the password is asked. When the screen unlocks it
+// stays a moment over the session's own island, which is built anew under
+// it, and fades: the unlocking itself never waits for it.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -19,7 +20,7 @@ import {NotchEars} from '../core/ears.js';
 import {Island} from '../island/island.js';
 import {Padlock} from './padlock.js';
 
-const AFTERGLOW = 450; // how long the open padlock stays once unlocked, ms
+const AFTERGLOW = 750; // how long the open padlock stays once unlocked (its ring squeezed), ms
 const FADE_TIME = 250;
 const PADDING = 5; // above and below the padlock's ring, logical pixels
 
@@ -43,6 +44,8 @@ export class LockIsland {
         this._idle = new LockIdle(this.padlock);
         this.actor = new Island(this._idle);
         this.actor.add_style_class_name('atelier-lock-island');
+        // (Until the password is asked.)
+        this.actor.visible = false;
         Main.layoutManager.addChrome(this.actor);
         this._ears = null;
         this._ear = 0;
@@ -56,6 +59,7 @@ export class LockIsland {
         this.actor.connectObject(
             'notify::x', () => this._syncEars(),
             'notify::y', () => this._syncEars(),
+            'notify::translation-y', () => this._syncEars(),
             'notify::width', () => this._syncEars(),
             'notify::visible', () => this._syncEars(),
             'notify::opacity', () => this._syncEars(),
@@ -69,6 +73,23 @@ export class LockIsland {
     setLook(look) {
         if (this.actor)
             this.padlock.setLook(look);
+    }
+
+    /**
+     * Out of the top edge as the password is asked (and back).
+     *
+     * @param {number} progress - 0 tucked away … 1 out
+     */
+    reveal(progress) {
+        if (!this.actor)
+            return;
+        const p = Math.min(1, Math.max(0, progress));
+        this.actor.set({
+            visible: p > 0,
+            translation_y: -Math.ceil(this.actor.height) * (1 - p),
+            // (Not on a monitor over this one, on its way.)
+            opacity: Math.round(255 * Math.min(1, p * 2)),
+        });
     }
 
     /** A failure: the padlock shakes its head. */
@@ -101,7 +122,7 @@ export class LockIsland {
         const actor = this.actor;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         this._ears.show(actor.visible && actor.opacity > 0, actor.opacity);
-        this._ears.setShape(actor.x, actor.y, actor.width, this._ear * scale);
+        this._ears.setShape(actor.x, actor.y + actor.translation_y, actor.width, this._ear * scale);
     }
 
     _queueLayout() {

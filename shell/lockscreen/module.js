@@ -144,6 +144,7 @@ export class LockModule {
             return;
         const progress = this._room;
         this._blurWallpaper(progress);
+        this._island?.reveal(progress);
         if (!this._board)
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
