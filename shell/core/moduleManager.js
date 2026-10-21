@@ -2,6 +2,8 @@
 // failing feature is reported and the others keep working. Emits 'started'
 // and 'stopped' with the id of a module, for modules that build on others.
 
+import GLib from 'gi://GLib';
+
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -14,6 +16,8 @@ export class ModuleManager extends EventEmitter {
         this._context = context;
         this._entries = [];
         this._enabled = false;
+        this._queue = null; // what is still to start, enabled in turn
+        this._turnId = 0;
     }
 
     /**
@@ -53,7 +57,52 @@ export class ModuleManager extends EventEmitter {
         }
     }
 
+    /**
+     * Start them one at a time, each when the shell has a moment, so that
+     * the frames go on in between (just unlocked, GNOME's lock screen
+     * sliding away); those named in `later` only once `until` is done.
+     *
+     * @param {object} [options]
+     * @param {string[]} [options.later] - ids of the heavier modules
+     * @param {Promise} [options.until] - when they may start
+     */
+    enableInTurn({later = [], until = Promise.resolve()} = {}) {
+        if (this._enabled)
+            return;
+        this._enabled = true;
+        // (A switch turned meanwhile: as always.)
+        for (const entry of this._entries)
+            entry.settings?.connectObject(`changed::${entry.key}`, () => this._sync(entry), this);
+        const queue = this._entries.filter(entry => !later.includes(entry.id));
+        this._queue = queue;
+        this._next();
+        until.then(() => {
+            if (this._queue !== queue)
+                return;
+            queue.push(...this._entries.filter(entry => later.includes(entry.id)));
+            this._next();
+        });
+    }
+
+    // The next one in turn, on the main loop's next idle moment.
+    _next() {
+        if (this._turnId || !this._queue?.length)
+            return;
+        this._turnId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._turnId = 0;
+            const entry = this._queue?.shift();
+            if (entry)
+                this._sync(entry);
+            this._next();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     disable() {
+        if (this._turnId)
+            GLib.source_remove(this._turnId);
+        this._turnId = 0;
+        this._queue = null;
         this._enabled = false;
         for (const entry of [...this._entries].reverse()) {
             entry.settings?.disconnectObject(this);

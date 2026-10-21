@@ -3078,6 +3078,7 @@ async function testLockScreen(ext) {
         // island comes out of the top edge.
         await clickAt(300, 800);
         check(await waitFor(() => phase() === 'ready', 3000), `a click brings up the prompt (${phase()})`);
+        check(island.padlock.look.ring === 'spin', 'and the wave runs round the ring from then on, not only once typed');
         check(await waitFor(() => lock().room === 1 && island.actor.mapped && island.actor.translation_y === 0 &&
             island.actor.opacity === 255, 2000), 'the island comes out of the top edge as it does');
         await restPointer();
@@ -3148,6 +3149,10 @@ async function testLockScreen(ext) {
 
         // logind's Unlock, as GDM would have it sent.
         shield.deactivate(false);
+        // (One at a time, the frames going on between: the island first,
+        // the dock and the desktop once the lock screen has gone.)
+        const started = [];
+        atelier().modules.connectObject('started', (_, id) => started.push(id), started);
         check(await waitFor(() => !Main.sessionMode.isLocked && atelier().modules.get('island')?.island, 4000),
             'unlocked, the rest of Atelier is back');
         const afterglow = atelier()._afterglow;
@@ -3155,6 +3160,10 @@ async function testLockScreen(ext) {
             'the padlock stays a moment over the island');
         const sessionIsland = atelier().modules.get('island').island;
         check(sessionIsland.opacity === 0, 'which waits, tucked away');
+        check(await waitFor(() => atelier().modules.get('dock') && atelier().modules.get('desktop'), 3000) &&
+            started.indexOf('island') < started.indexOf('dock') && started.indexOf('bar') < started.indexOf('desktop'),
+        `the rest starts in turn, the heaviest last (${started.join(', ')})`);
+        atelier().modules.disconnectObject(started);
         check(await waitFor(() => !afterglow.actor, 2000), 'the padlock goes back up');
         check(await waitFor(() => sessionIsland.translation_y === 0 && sessionIsland.opacity === 255 &&
             !sessionIsland.get_transition('translation_y'), 2000) && atelier()._afterglow === null,
@@ -3175,12 +3184,14 @@ async function testLockScreen(ext) {
         check(await waitFor(() => lock()?.island && atelier().modules.get('island') === null, 5000),
             'turned on while locked, only the padlock comes back');
         shield.deactivate(false);
-        check(await waitFor(() => atelier().modules.get('island')?.island, 4000), 'and the rest once unlocked');
+        check(await waitFor(() => atelier().modules.get('island')?.island && atelier().modules.get('dock'), 4000),
+            'and the rest once unlocked');
     } finally {
         injections.clear();
         if (Main.sessionMode.isLocked)
             shield.deactivate(false);
-        await waitFor(() => !Main.sessionMode.isLocked && atelier()?.modules?.get('island')?.island, 5000);
+        await waitFor(() => !Main.sessionMode.isLocked && atelier()?.modules?.get('island')?.island &&
+            atelier()?.modules?.get('dock'), 5000);
         shield._loginSession = loginSession;
     }
 }
@@ -3208,8 +3219,10 @@ async function lockForTest() {
             injections.clear();
             if (Main.sessionMode.isLocked)
                 shield.deactivate(false);
+            // (All of it: the modules start in turn once unlocked.)
             await waitFor(() => !Main.sessionMode.isLocked &&
-                Main.extensionManager.lookup(UUID).stateObj?.modules?.get('island')?.island, 5000);
+                Main.extensionManager.lookup(UUID).stateObj?.modules?.get('island')?.island &&
+                Main.extensionManager.lookup(UUID).stateObj?.modules?.get('dock'), 5000);
             shield._loginSession = loginSession;
         },
     };
