@@ -3165,6 +3165,54 @@ async function testLockScreen(ext) {
         check(!findActor(Main.layoutManager.screenShieldGroup, a => a.style_class?.includes('atelier')),
             'nothing of Atelier is left in the lock screen');
 
+        // Unlocked as in a session with other extensions: logind's Unlock a
+        // moment after GDM's verification, and the shell stopped for 600 ms
+        // as GNOME turns them all on (one reloading the shell's theme). Here
+        // only after Atelier has handed the padlock over, its moment ticking
+        // already. The padlock plays all of its moves on the frames after.
+        await Scripting.sleep(2000);
+        shield.lock(false);
+        await waitFor(() => lock()?.island?.actor, 5000);
+        await clickAt(300, 800);
+        check(await waitFor(() => phase() === 'ready' && lock().island.actor.translation_y === 0, 3000),
+            'locked again, the password asked');
+        const leaving = lock().island;
+        const samples = [];
+        const sampler = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+        sampler.connect('new-frame', () => samples.push({
+            time: GLib.get_monotonic_time() / 1000,
+            hop: leaving.padlock._hop,
+            spread: leaving.padlock._spread,
+            shackle: leaving.padlock._shackle,
+            shown: Boolean(leaving.actor?.mapped && leaving.actor.opacity > 0),
+        }));
+        sampler.start();
+        verifiers.at(-1).emit('verification-complete');
+        await Scripting.sleep(50);
+        let thawed = 0;
+        const stopper = Main.sessionMode.connect('updated', () => {
+            Main.sessionMode.disconnect(stopper);
+            const until = GLib.get_monotonic_time() + 600000;
+            while (GLib.get_monotonic_time() < until) {
+                // the shell stopped
+            }
+            thawed = GLib.get_monotonic_time() / 1000;
+        });
+        shield.deactivate(false);
+        check(await waitFor(() => !Main.sessionMode.isLocked && thawed > 0, 4000) && allBack(),
+            'unlocked with the shell stopped a moment, all of Atelier is back at once');
+        await waitFor(() => !leaving.actor, 4000);
+        sampler.stop();
+        const after = samples.filter(sample => sample.time > thawed);
+        const between = (key, low, high) => after.filter(sample => sample[key] > low && sample[key] < high).length;
+        const shownFor = Math.max(0, ...after.filter(sample => sample.shown).map(sample => sample.time)) - thawed;
+        check(between('shackle', 1.02, 2) >= 2 && between('spread', 0.1, 0.9) >= 3 && between('hop', 0.1, 0.9) >= 5,
+            `after the stop the padlock still springs open, its ring spreads, it hops (frames: ${
+                between('shackle', 1.02, 2)}, ${between('spread', 0.1, 0.9)}, ${between('hop', 0.1, 0.9)})`);
+        check(shownFor > 700,`and it stays a moment before it goes back up (${Math.round(shownFor)} ms)`);
+        check(await waitFor(() => atelier().modules.get('island')?.island?.opacity === 255 && atelier()._afterglow === null,
+            2000), 'then the island comes out');
+
         // Turned off and on while locked: only the padlock comes back.
         // (GNOME's calendar starts its event source anew with each unlock:
         // not dropped mid-way by a lock a moment later.)

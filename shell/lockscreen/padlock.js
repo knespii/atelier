@@ -10,7 +10,8 @@
 // ticks' tips paling a moment as it does, and the padlock springs open –
 // the shackle jumps up past where it stays, swinging out on its right leg
 // – and hops for joy: twice, and a little settling hop. Drawn, so that it
-// all can move.
+// all can move; and on frames that come (shell/core/steadyTimeline.js), so
+// that it all plays even as GNOME stops the shell a moment as it unlocks.
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
@@ -18,6 +19,8 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
+
+import {SteadyTimeline} from '../core/steadyTimeline.js';
 
 const TICKS = 48;
 const RING = 0.37; // the ring's radius, of the padlock's size: room round it to spread
@@ -198,12 +201,13 @@ class AtelierPadlock extends St.DrawingArea {
             return;
         }
         const from = this._shackle;
-        const timeline = new Clutter.Timeline({actor: this, duration});
-        timeline.connect('new-frame', () => {
-            this._opening(timeline.get_progress(), from);
-            this.queue_repaint();
+        const timeline = new SteadyTimeline(this, duration, {
+            onFrame: progress => {
+                this._opening(progress, from);
+                this.queue_repaint();
+            },
+            onCompleted: opened,
         });
-        timeline.connect('completed', opened);
         this._timelines.set('open', timeline);
         timeline.start();
     }
@@ -257,15 +261,17 @@ class AtelierPadlock extends St.DrawingArea {
             this[property] = end;
             return;
         }
-        const timeline = new Clutter.Timeline({actor: this, duration, progress_mode: mode});
-        timeline.connect('new-frame', () => {
-            this[property] = from + (target - from) * timeline.get_progress();
-            this.queue_repaint();
-        });
-        timeline.connect('completed', () => {
-            this[property] = end;
-            this._timelines.delete(name);
-            this.queue_repaint();
+        const timeline = new SteadyTimeline(this, duration, {
+            mode,
+            onFrame: progress => {
+                this[property] = from + (target - from) * progress;
+                this.queue_repaint();
+            },
+            onCompleted: () => {
+                this[property] = end;
+                this._timelines.delete(name);
+                this.queue_repaint();
+            },
         });
         this._timelines.set(name, timeline);
         timeline.start();

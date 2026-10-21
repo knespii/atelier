@@ -13,10 +13,12 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
+import {SteadyTimeline} from '../core/steadyTimeline.js';
 import {Island} from '../island/island.js';
 import {Padlock} from './padlock.js';
 
@@ -51,7 +53,7 @@ export class LockIsland {
         this._ear = 0;
         this._notch = false;
         this._laterId = 0;
-        this._timeoutId = 0;
+        this._leaving = null; // the open padlock's moment, then going back up
         this._onGone = null;
 
         barSettings.connectObject('changed::island-shape', () => this._syncLook(), this);
@@ -170,17 +172,31 @@ export class LockIsland {
         }
         Main.layoutManager.uiGroup.set_child_above_sibling(this.actor, null);
         this.setLook({shackle: 'open', ring: 'fill', tone: 'green'});
-        this._timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, AFTERGLOW, () => {
-            this._timeoutId = 0;
-            this.actor?.ease({
-                translation_y: -Math.ceil(this.actor.y + this.actor.height),
-                opacity: 0,
-                duration: RETRACT_TIME,
-                mode: Clutter.AnimationMode.EASE_IN_CUBIC,
-                onStopped: () => this.destroy(),
-            });
-            return GLib.SOURCE_REMOVE;
+        // (Counted in frames that come, as the padlock's moves: GNOME stops
+        // the shell a moment now, turning its other extensions on.)
+        this._leaving = new SteadyTimeline(this.actor, AFTERGLOW, {onCompleted: () => this._retract()});
+        this._leaving.start();
+    }
+
+    // Back up out of sight, then gone.
+    _retract() {
+        const actor = this.actor;
+        const duration = adjustAnimationTime(RETRACT_TIME);
+        if (!actor || duration <= 0) {
+            this.destroy();
+            return;
+        }
+        const [fromY, fromOpacity] = [actor.translation_y, actor.opacity];
+        const toY = -Math.ceil(actor.y + actor.height);
+        this._leaving = new SteadyTimeline(actor, duration, {
+            mode: Clutter.AnimationMode.EASE_IN_CUBIC,
+            onFrame: progress => actor.set({
+                translation_y: fromY + (toY - fromY) * progress,
+                opacity: Math.round(fromOpacity * (1 - progress)),
+            }),
+            onCompleted: () => this.destroy(),
         });
+        this._leaving.start();
     }
 
     destroy() {
@@ -196,9 +212,9 @@ export class LockIsland {
     _onDestroyed() {
         if (this._laterId)
             global.compositor.get_laters().remove(this._laterId);
-        if (this._timeoutId)
-            GLib.source_remove(this._timeoutId);
-        this._laterId = this._timeoutId = 0;
+        this._leaving?.stop();
+        this._leaving = null;
+        this._laterId = 0;
         this._barSettings.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         Main.layoutManager.panelBox.disconnectObject(this);
