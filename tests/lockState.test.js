@@ -13,6 +13,8 @@ export function testPassword() {
     assertEqual(look(initialState()), {shackle: 'closed', ring: 'none', tone: 'neutral'});
     assertEqual(walk({type: 'prompt'}).phase, Phase.WAITING);
     assertEqual(walk({type: 'prompt'}, password).phase, Phase.READY);
+    assertEqual(look(walk({type: 'prompt'})).ring, 'spin', 'the wave runs as soon as the prompt is up');
+    assertEqual(look(walk({type: 'prompt'}, password)).ring, 'spin', 'and while the password is asked');
     const checking = walk({type: 'prompt'}, password, {type: 'submit'});
     assertEqual(checking.phase, Phase.CHECKING);
     assertEqual(look(checking).ring, 'spin');
