@@ -3149,21 +3149,15 @@ async function testLockScreen(ext) {
 
         // logind's Unlock, as GDM would have it sent.
         shield.deactivate(false);
-        // (One at a time, the frames going on between: the island first,
-        // the dock and the desktop once the lock screen has gone.)
-        const started = [];
-        atelier().modules.connectObject('started', (_, id) => started.push(id), started);
         check(await waitFor(() => !Main.sessionMode.isLocked && atelier().modules.get('island')?.island, 4000),
             'unlocked, the rest of Atelier is back');
+        const allBack = () => atelier().modules._entries.every(entry => entry.instance || !atelier().modules._wanted(entry));
+        check(allBack(), 'all of it in one go, not one module after another');
         const afterglow = atelier()._afterglow;
         check(Boolean(afterglow?.actor) && atelier().lockModules.get('lockscreen') === null,
             'the padlock stays a moment over the island');
         const sessionIsland = atelier().modules.get('island').island;
         check(sessionIsland.opacity === 0, 'which waits, tucked away');
-        check(await waitFor(() => atelier().modules.get('dock') && atelier().modules.get('desktop'), 3000) &&
-            started.indexOf('island') < started.indexOf('dock') && started.indexOf('bar') < started.indexOf('desktop'),
-        `the rest starts in turn, the heaviest last (${started.join(', ')})`);
-        atelier().modules.disconnectObject(started);
         check(await waitFor(() => !afterglow.actor, 2000), 'the padlock goes back up');
         check(await waitFor(() => sessionIsland.translation_y === 0 && sessionIsland.opacity === 255 &&
             !sessionIsland.get_transition('translation_y'), 2000) && atelier()._afterglow === null,
@@ -3219,7 +3213,6 @@ async function lockForTest() {
             injections.clear();
             if (Main.sessionMode.isLocked)
                 shield.deactivate(false);
-            // (All of it: the modules start in turn once unlocked.)
             await waitFor(() => !Main.sessionMode.isLocked &&
                 Main.extensionManager.lookup(UUID).stateObj?.modules?.get('island')?.island &&
                 Main.extensionManager.lookup(UUID).stateObj?.modules?.get('dock'), 5000);
