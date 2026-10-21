@@ -118,6 +118,7 @@ export class IslandModule {
         if (!this._island)
             return;
         this._tucked = true;
+        this._island.tucked = true;
         this._island.opacity = 0;
     }
 
@@ -128,6 +129,7 @@ export class IslandModule {
         if (!island || !this._tucked || this._stopped)
             return;
         this._tucked = false;
+        island.tucked = false;
         island.translation_y = -Math.ceil(island.y + island.height);
         island.ease({
             translation_y: 0,

@@ -8,6 +8,7 @@
 // and it neither launches anything nor takes the keyboard.
 
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -28,6 +29,36 @@ import {NotesModule} from './shell/notes/module.js';
 import {NotificationsModule} from './shell/notifications/module.js';
 import {PaletteModule} from './shell/paletteModule.js';
 import {ProfilesModule} from './shell/profilesModule.js';
+
+// Started last after an unlock, once the lock screen has slid away: the
+// heaviest to start, which would stop its slide for a moment.
+const HEAVY = ['claude', 'desktop', 'dock'];
+// GNOME's lock screen slides away in 250 ms (Overview.ANIMATION_TIME);
+// waited for at most this long, ms.
+const LOCK_SCREEN_GONE = 1000;
+
+/** @returns {Promise} done once GNOME's lock screen has gone (or soon after) */
+function lockScreenGone() {
+    const shield = Main.screenShield;
+    if (!shield?.locked)
+        return Promise.resolve();
+    return new Promise(resolve => {
+        let timeoutId = 0;
+        const done = () => {
+            shield.disconnectObject(resolve);
+            if (timeoutId)
+                GLib.source_remove(timeoutId);
+            timeoutId = 0;
+            resolve();
+        };
+        shield.connectObject('locked-changed', () => !shield.locked && done(), resolve);
+        timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LOCK_SCREEN_GONE, () => {
+            timeoutId = 0;
+            done();
+            return GLib.SOURCE_REMOVE;
+        });
+    });
+}
 
 export default class AtelierExtension extends Extension {
     enable() {
@@ -90,6 +121,7 @@ export default class AtelierExtension extends Extension {
         this.lockModules.disable();
         this._afterglow?.destroy();
         this._afterglow = null;
+        this.modules.disconnectObject(this);
         this.modules.disable();
         this.modules = null;
         this.lockModules = null;
@@ -104,6 +136,7 @@ export default class AtelierExtension extends Extension {
             return;
         const modules = this.modules;
         if (Main.sessionMode.isLocked) {
+            modules.disconnectObject(this);
             modules.disable();
             this.lockModules.enable();
             return;
@@ -129,9 +162,14 @@ export default class AtelierExtension extends Extension {
         Promise.resolve().then(() => {
             if (this.modules !== modules || Main.sessionMode.isLocked)
                 return;
-            modules.enable();
-            if (this._afterglow)
-                modules.get('island')?.tuckAway();
+            // One at a time, the frames going on between them; the dock,
+            // the desktop and Claude once the lock screen has slid away.
+            // (The island, built anew, waits tucked away for the padlock.)
+            modules.connectObject('started', (_, id) => {
+                if (id === 'island' && this._afterglow)
+                    modules.get('island')?.tuckAway();
+            }, this);
+            modules.enableInTurn({later: HEAVY, until: lockScreenGone()});
         });
     }
 

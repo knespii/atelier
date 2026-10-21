@@ -190,7 +190,8 @@ export const Island = GObject.registerClass({
         this._anchor = {centerX, top};
         this.y = top;
         this._resize(this._shown, false);
-        if (first)
+        // (Tucked away, it stays so until it comes out.)
+        if (first && !this.tucked)
             this.opacity = 255;
     }
 
