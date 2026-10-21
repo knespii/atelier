@@ -6,6 +6,7 @@
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {whenSystemItem} from '../core/systemItem.js';
 import {BatteryIndicator} from './indicators.js';
 
 // What stays, by its key in Main.panel.statusArea.
@@ -17,11 +18,15 @@ const KEEP = new Set([
 export class CompactBar {
     constructor() {
         this._hidden = new Map(); // actor → whether it wanted to show
-        const powerToggle = Main.panel.statusArea.quickSettings?._system?._systemItem?.powerToggle;
-        if (powerToggle) {
-            this._battery = new BatteryIndicator(powerToggle);
+        this._battery = null;
+        // (As soon as GNOME has its battery tile: at the start of a session,
+        // a moment after the bar.)
+        this._stopWaiting = whenSystemItem(item => {
+            if (!item.powerToggle)
+                return;
+            this._battery = new BatteryIndicator(item.powerToggle);
             Main.panel.addToStatusArea('atelier-battery', this._battery, 0, 'right');
-        }
+        });
         for (const box of this._boxes()) {
             box.connectObject(
                 'child-added', (_, actor) => this._hide(actor),
@@ -66,6 +71,7 @@ export class CompactBar {
     }
 
     destroy() {
+        this._stopWaiting();
         this._boxes().forEach(box => box.disconnectObject(this));
         [...this._hidden.keys()].forEach(actor => this._restore(actor));
         this._battery?.destroy();

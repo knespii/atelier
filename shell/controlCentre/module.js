@@ -7,6 +7,7 @@
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {whenSystemItem} from '../core/systemItem.js';
 import {DateMenuHost} from './dateMenuHost.js';
 import {QuickSettingsHost} from './host.js';
 import {ControlCentrePage} from './page.js';
@@ -26,6 +27,7 @@ export class ControlCentreModule {
         this._dateMenuHost = null;
         this._tray = null;
         this._page = null;
+        this._stopWaiting = null;
     }
 
     /** @returns {ControlCentrePage|null} the control centre, while it is open */
@@ -80,9 +82,11 @@ export class ControlCentreModule {
             original.call(Main.panel);
         });
         // GNOME's power button, next to Lock, opens Atelier's power menu
-        // instead of GNOME's list.
-        const powerMenu = quickSettings._system?._systemItem?.menu;
-        if (powerMenu) {
+        // instead of GNOME's list. (Once GNOME has made it: at the start of a
+        // session, a moment after the bar.)
+        this._stopWaiting = whenSystemItem(({menu: powerMenu}) => {
+            if (!powerMenu)
+                return;
             this._injections.overrideMethod(powerMenu, 'open', original => (...args) => {
                 const islandModule = this._islandModule();
                 if (this._page && islandModule) {
@@ -92,7 +96,7 @@ export class ControlCentreModule {
                     original.call(powerMenu, ...args);
                 }
             });
-        }
+        });
 
         this._modules.connectObject(
             'started', (_, id) => id === 'island' && this._adopt(),
@@ -104,6 +108,8 @@ export class ControlCentreModule {
     }
 
     disable() {
+        this._stopWaiting?.();
+        this._stopWaiting = null;
         this._modules.disconnectObject(this);
         this._ccSettings?.disconnectObject(this);
         this._injections.clear();
