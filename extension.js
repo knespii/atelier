@@ -8,6 +8,8 @@
 // and it neither launches anything nor takes the keyboard.
 
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -15,6 +17,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
+import {releaseKeptStyles} from './shell/core/theme.js';
 import {BarModule} from './shell/bar/module.js';
 import {ClaudeModule} from './shell/claude/module.js';
 import {ControlCentreModule} from './shell/controlCentre/module.js';
@@ -65,6 +68,7 @@ export default class AtelierExtension extends Extension {
         this.lockModules.register('lockscreen', ctx => new LockModule(ctx),
             {settings: this._settings.get_child('lockscreen'), key: 'enabled'});
         this._afterglow = null;
+        this._unlockLater = 0;
         this._ready = false;
         Main.sessionMode.connectObject('updated', () => this._syncSession(), this);
 
@@ -87,10 +91,12 @@ export default class AtelierExtension extends Extension {
 
     disable() {
         Main.sessionMode.disconnectObject(this);
+        this._cancelUnlockLater();
         this.lockModules.disable();
         this._afterglow?.destroy();
         this._afterglow = null;
         this.modules.disable();
+        releaseKeptStyles();
         this.modules = null;
         this.lockModules = null;
         this._settings = null;
@@ -104,6 +110,7 @@ export default class AtelierExtension extends Extension {
             return;
         const modules = this.modules;
         if (Main.sessionMode.isLocked) {
+            this._cancelUnlockLater();
             modules.disable();
             this.lockModules.enable();
             return;
@@ -126,15 +133,27 @@ export default class AtelierExtension extends Extension {
         }) ?? null;
         this._afterglow = afterglow?.actor ? afterglow : null;
         this.lockModules.disable();
-        Promise.resolve().then(() => {
+        // All of it at once, before the first frame after the unlock (in
+        // turn, plain GNOME showed for a moment) – but after GNOME has
+        // turned its other extensions on again, in this same turn of the
+        // main loop: each of their stylesheets (and a shell theme) restyles
+        // everything there is, and Atelier built before them was restyled
+        // with every one.
+        this._unlockLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._unlockLater = 0;
             if (this.modules !== modules || Main.sessionMode.isLocked)
-                return;
-            // All of it at once, as GNOME turns its other extensions on
-            // (started in turn, plain GNOME showed for a moment first).
+                return GLib.SOURCE_REMOVE;
             modules.enable();
             if (this._afterglow)
                 modules.get('island')?.tuckAway();
+            return GLib.SOURCE_REMOVE;
         });
+    }
+
+    _cancelUnlockLater() {
+        if (this._unlockLater)
+            global.compositor.get_laters().remove(this._unlockLater);
+        this._unlockLater = 0;
     }
 
     _legacySettings() {

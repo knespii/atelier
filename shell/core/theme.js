@@ -84,6 +84,20 @@ export function paletteStylesheet(p) {
 `;
 }
 
+// The styles kept loaded while the screen is locked (a ThemeManager that
+// stopped for it): unloading them there and loading them again on unlock
+// restyled the whole shell twice for nothing.
+let kept = null;
+
+/** Unload the styles kept over a lock, if any (Atelier turned off). */
+export function releaseKeptStyles() {
+    if (!kept)
+        return;
+    St.ThemeContext.get_for_stage(global.stage).get_theme().unload_stylesheet(kept);
+    kept.delete_async(GLib.PRIORITY_DEFAULT, null).catch(() => {});
+    kept = null;
+}
+
 export class ThemeManager {
     constructor() {
         this._file = null;
@@ -91,6 +105,9 @@ export class ThemeManager {
         this._wanted = null;
         this._destroyed = false;
         this._dir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'atelier']);
+        // (Those kept over a lock are this one's now: replaced as any.)
+        this._file = kept;
+        kept = null;
     }
 
     /**
@@ -128,8 +145,15 @@ export class ThemeManager {
         this._file = file;
     }
 
-    destroy() {
+    /** @param {boolean} [keep] - the styles stay loaded, for the next one (the screen locked) */
+    destroy(keep = false) {
         this._destroyed = true;
+        if (keep && this._file) {
+            releaseKeptStyles();
+            kept = this._file;
+            this._file = null;
+            return;
+        }
         this._unload(St.ThemeContext.get_for_stage(global.stage).get_theme());
     }
 

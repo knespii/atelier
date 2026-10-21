@@ -6,6 +6,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {GtkStyles} from './core/gtkStyles.js';
@@ -77,7 +78,8 @@ export class PaletteModule extends Signals.EventEmitter {
         this._background.disconnectObject(this);
         this._interface.disconnectObject(this);
         this._paletteSettings.disconnectObject(this);
-        this._theme.destroy();
+        // (Locked, its styles stay as they are, to be used again on unlock.)
+        this._theme.destroy(Main.sessionMode.isLocked);
         this._theme = null;
         this._gtk.disable();
         this._gtk = null;
