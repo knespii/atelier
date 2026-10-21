@@ -201,7 +201,19 @@ export const ExtensionTray = GObject.registerClass({
                 continue;
             const index = box.get_children().indexOf(container);
             const tile = new Tile(role, indicator);
-            tile.adopt(container);
+            // (Another extension's button may throw as it is moved – its
+            // own handlers, half set up: it stays where it is, the others
+            // still come in.)
+            try {
+                tile.adopt(container);
+            } catch (e) {
+                console.warn(`Atelier: ${role} could not go into the control centre: ${e.message}`);
+                tile.release();
+                tile.destroy();
+                if (!container.get_parent())
+                    box.insert_child_at_index(container, index);
+                continue;
+            }
             tile.connectObject(
                 'notify::visible', () => this._arrange(),
                 'opened', () => this.emit('opened'),
