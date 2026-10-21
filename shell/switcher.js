@@ -120,6 +120,10 @@ class AtelierSwitcherPopup extends St.Widget {
         return this._content.handleKeyPress(event) ? Clutter.EVENT_STOP : Clutter.EVENT_PROPAGATE;
     }
 
+    vfunc_key_release_event(event) {
+        return this._content.handleKeyRelease(event) ? Clutter.EVENT_STOP : Clutter.EVENT_PROPAGATE;
+    }
+
     vfunc_scroll_event(event) {
         this._content.handleScroll(event);
         return Clutter.EVENT_STOP;

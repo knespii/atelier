@@ -31,7 +31,10 @@ screen and a **dock**.
   - *Wallpapers* – the pictures in `~/Pictures/Wallpapers` (or another folder).
     Picking one changes the wallpaper for now; no profile changes.
 
-  <kbd>Tab</kbd> switches between the tabs.
+  <kbd>Tab</kbd> switches between the tabs. Held down on a profile, it softens
+  the profile into a drop of itself: <kbd>←</kbd> and <kbd>→</kbd> pour it
+  along the row (its picture runs off in a stream of its own colour and fills
+  the new place), and it firms up where you let go of <kbd>Tab</kbd>.
 - **Profiles stay as you saved them.** A wallpaper picked for a while, or
   anything changed in GNOME Settings, leaves them alone; switching to a
   profile brings its look back. The widgets are the exception: what you change
@@ -349,7 +352,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell and checks the island, notifications, the control centre, the bar, widgets, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell and checks the island, notifications, the control centre, the bar, widgets, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving and moving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make showcase` | Takes the pictures in `docs/screenshots` in a headless GNOME Shell on a 4K monitor at scale 2, with a few profiles of GNOME's own wallpapers (the settings pictures come from `make prefs-screenshots`); `ATELIER_SHOWCASE_FRAMES=<folder> tools/showcase.sh` also records a few moments in slow motion, frame by frame, for a video |

@@ -212,16 +212,23 @@ class AtelierLiquidPaint extends St.Widget {
 });
 
 // Only what lies within the shapes shows of an actor (a window, as it
-// spreads out of a drop, say).
+// spreads out of a drop, say). It may fade out towards the edges of a box
+// as well, into what is under it: [center, half size] and [radius, how far
+// in it starts to fade].
 const MASK_DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
+uniform vec4 maskEdge;
+uniform vec2 maskEdgeLook;
 ${LIQUID_DECLARATIONS}
 `;
 
 const MASK_CODE = `
 vec2 p = origin + cogl_tex_coord_in[0].xy * size;
-cogl_color_out *= clamp(0.5 - atelier_liquid(p), 0.0, 1.0);
+float shown = clamp(0.5 - atelier_liquid(p), 0.0, 1.0);
+if (maskEdgeLook.y > 0.0)
+    shown *= 1.0 - smoothstep(-maskEdgeLook.y, 0.0, atelier_liquid_box(p, maskEdge.xy, maskEdge.zw, maskEdgeLook.x));
+cogl_color_out *= shown;
 `;
 
 /**
@@ -234,8 +241,11 @@ class AtelierLiquidMaskEffect extends Shell.GLSLEffect {
         super._init(params);
         this._origin = this.get_uniform_location('origin');
         this._size = this.get_uniform_location('size');
+        this._edge = this.get_uniform_location('maskEdge');
+        this._edgeLook = this.get_uniform_location('maskEdgeLook');
         this.uniforms = liquidUniforms(this);
         this.setShapes({});
+        this.setEdge(null);
     }
 
     vfunc_build_pipeline() {
@@ -251,5 +261,17 @@ class AtelierLiquidMaskEffect extends Shell.GLSLEffect {
     /** @param {object} shapes - {boxes, capsules} (lib/liquid.js) */
     setShapes(shapes) {
         setLiquid(this, this.uniforms, shapes);
+    }
+
+    /**
+     * @param {number[]|null} box - a box of lib/liquid.js to fade out
+     *   towards the edges of; null: no fading
+     * @param {number} [fade] - how far in (pixels) it starts to fade
+     */
+    setEdge(box, fade = 0) {
+        const [x, y, halfWidth, halfHeight, radius] = box ?? [0, 0, 0, 0, 0];
+        this.set_uniform_float(this._edge, 4, [x, y, halfWidth, halfHeight]);
+        this.set_uniform_float(this._edgeLook, 2, [radius, box ? fade : 0]);
+        this.queue_repaint();
     }
 });

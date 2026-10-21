@@ -71,6 +71,10 @@ export const SwitcherPage = GObject.registerClass({
         return this._content.handleKeyPress(event);
     }
 
+    handleKeyRelease(event) {
+        return this._content.handleKeyRelease(event);
+    }
+
     handleScroll(event) {
         return this._content.handleScroll(event);
     }

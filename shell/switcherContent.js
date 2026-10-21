@@ -5,6 +5,10 @@
 // From one tab to the other (Tab, or a click), the highlight pours over to
 // the other tab, and the cards go off to the side as the other tab's come
 // in from the other, one after another from the one picked out.
+//
+// Tab held down on the Profiles tab softens the profile into a drop of
+// itself (a tap still switches tabs); the arrow keys pour it along the row
+// (switcherMelt.js), and letting go of Tab firms it up there.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -22,6 +26,7 @@ import {describeProfile, effectiveWallpaper} from '../lib/profiles.js';
 import {isSlideshow, prettyName} from '../lib/paths.js';
 import {ensureThumbnail, hasThumbnail, thumbnailPath} from '../lib/thumbnails.js';
 import {LiquidPaint} from './core/liquid.js';
+import {ProfileMelt} from './switcherMelt.js';
 
 export const MODES = ['profiles', 'wallpapers'];
 
@@ -50,6 +55,20 @@ const CARDS_STAGGER = 35;
 const CARDS_SHIFT = 90;
 const POUR_BLEND = 10;
 const TAB_COLOR = [1, 1, 1, 0.14];
+// Moving a profile. Milliseconds: how long Tab is held before the profile
+// softens, how long the others take to make room, how long the card takes
+// to come back over its liquid. Logical pixels: the cards' corners (as in
+// the stylesheet), the room round the strip for the liquid, and how much
+// it may stick out of the row.
+const HOLD_DELAY = 200;
+const MAKE_ROOM_TIME = 420;
+const FIRM_FADE_TIME = 140;
+const CARD_RADIUS = 14;
+const MELT_MARGIN = 24;
+const OVERHANG = 16;
+// Held, the strip stays still as the profile moves, unless that would take
+// it nearer its edges than this (logical pixels).
+const KEEP_IN_VIEW = 60;
 
 /**
  * @param {string} path
@@ -158,6 +177,8 @@ export const SwitcherContent = GObject.registerClass({
         'activate': {param_types: [GObject.TYPE_STRING, GObject.TYPE_STRING]},
         'create': {},
         'mode-changed': {param_types: [GObject.TYPE_STRING]},
+        // A profile put elsewhere in the row: its id, and where it is now.
+        'reorder': {param_types: [GObject.TYPE_STRING, GObject.TYPE_INT]},
         'close-request': {},
     },
 }, class AtelierSwitcherContent extends St.BoxLayout {
@@ -183,6 +204,12 @@ export const SwitcherContent = GObject.registerClass({
         this._closing = false;
         this._preloadId = 0;
         this._preloaded = null;
+        // Tab held down, and the profile it softened, {card, melt, held,
+        // from} (still firming up, once Tab is let go of); where the strip
+        // was last sent.
+        this._hold = null;
+        this._melting = null;
+        this._stripX = null;
         // Known once a host sets the width; measuring before that would
         // need the styles of a widget that isn't on the stage yet.
         this._viewportWidth = 0;
@@ -204,7 +231,8 @@ export const SwitcherContent = GObject.registerClass({
         this.add_child(tabsArea);
         this._transition = null;
 
-        this._viewport = new St.Widget({style_class: 'atelier-viewport', clip_to_allocation: true});
+        // (Clipped at its sides only, more or less: see setWidth.)
+        this._viewport = new St.Widget({style_class: 'atelier-viewport'});
         this.add_child(this._viewport);
 
         this._strip = new St.BoxLayout({style_class: 'atelier-strip'});
@@ -259,6 +287,7 @@ export const SwitcherContent = GObject.registerClass({
     close() {
         if (this._closing || this._destroyed)
             return;
+        this._putDown();
         this._closing = true;
         this.emit('close-request');
     }
@@ -273,7 +302,10 @@ export const SwitcherContent = GObject.registerClass({
         const scale = this._scale;
         const node = this.get_theme_node();
         this._viewportWidth = width - node.get_horizontal_padding();
-        this._viewport.set_size(this._viewportWidth, (CARD_HEIGHT + STRIP_PADDING * 2) * scale);
+        const height = (CARD_HEIGHT + STRIP_PADDING * 2) * scale;
+        this._viewport.set_size(this._viewportWidth, height);
+        // A profile held (bigger, up and swinging) may stick out of the row.
+        this._viewport.set_clip(0, -OVERHANG * scale, this._viewportWidth, height + OVERHANG * 2 * scale);
         this._strip.y = STRIP_PADDING * scale;
         this._select(this._selected, false);
     }
@@ -285,15 +317,25 @@ export const SwitcherContent = GObject.registerClass({
     setProfiles(profiles, activeId) {
         if (this._destroyed)
             return;
-        this._data.profiles = {
-            activeId,
-            items: [
-                ...profiles.map(p => ({id: p.id, name: p.name, wallpaper: p.wallpaper, profile: p})),
-                {id: NEW_PROFILE, name: 'New profile', wallpaper: null},
-            ],
-        };
-        if (this._mode === 'profiles')
+        const shown = this._data.profiles.items;
+        const items = [
+            ...profiles.map(p => ({id: p.id, name: p.name, wallpaper: p.wallpaper, profile: p})),
+            {id: NEW_PROFILE, name: 'New profile', wallpaper: null},
+        ];
+        this._data.profiles = {activeId, items};
+        if (this._mode !== 'profiles')
+            return;
+        // The cards would look as they do (a profile moved here was saved,
+        // say): they stay, with what else changed.
+        const same = items.length === shown.length && items.every((item, i) =>
+            item.id === shown[i].id && item.name === shown[i].name && item.wallpaper === shown[i].wallpaper);
+        if (!same) {
             this._rebuild();
+            return;
+        }
+        this._items = items;
+        this._cards.forEach((card, i) => (card.item = items[i]));
+        this.setActive(activeId);
     }
 
     /**
@@ -319,6 +361,8 @@ export const SwitcherContent = GObject.registerClass({
         if (this._destroyed || !MODES.includes(mode) || mode === this._mode)
             return;
         const from = this._mode;
+        this._putDown();
+        this._firmed(true);
         this._finishTransition();
         // (The cards of the tab left, going off to its side.)
         const leaving = this._cards.length > 0 && this.mapped ? this._strip : null;
@@ -423,13 +467,15 @@ export const SwitcherContent = GObject.registerClass({
         const selectedId = this._items[this._selected]?.id;
         this._items = data.items;
 
+        this._firmed(true);
         this._strip.destroy_all_children();
         const scale = this._scale;
-        this._cards = this._items.map((item, index) => {
+        this._cards = this._items.map(item => {
             const card = new Card(item);
             card.set_size(CARD_WIDTH * scale, CARD_HEIGHT * scale);
             card.active = item.id === data.activeId;
-            card.connect('clicked', () => this._activate(index));
+            // (Where it is now: profiles move.)
+            card.connect('clicked', () => this._activate(this._cards.indexOf(card)));
             this._strip.add_child(card);
             return card;
         });
@@ -453,6 +499,10 @@ export const SwitcherContent = GObject.registerClass({
         this._destroyed = true;
         this._transition?.timeline.stop();
         this._transition = null;
+        if (this._hold?.timeout)
+            GLib.source_remove(this._hold.timeout);
+        this._hold = null;
+        this._melting = null;
         if (this._preloadId)
             GLib.source_remove(this._preloadId);
         this._preloadId = 0;
@@ -489,16 +539,21 @@ export const SwitcherContent = GObject.registerClass({
             this._updateFooter();
             return;
         }
+        // A profile held stays picked out.
+        const melted = this._melting?.card;
+        if (this._melting?.held)
+            index = this._cards.indexOf(melted);
         this._selected = Math.max(0, Math.min(index, this._cards.length - 1));
 
-        const scale = this._scale;
-        const step = (CARD_WIDTH + CARD_SPACING) * scale;
-        const target = Math.round(this._viewportWidth / 2 -
-            (this._selected * step + CARD_WIDTH * scale / 2));
         const duration = animate ? SCROLL_TIME : 0;
-
+        this._stripX = this._stripTarget();
         this._strip.ease({
-            translation_x: target,
+            translation_x: this._stripX,
+            duration,
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+        });
+        this._melting?.melt?.ease({
+            translation_x: this._stripX,
             duration,
             mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
         });
@@ -508,6 +563,9 @@ export const SwitcherContent = GObject.registerClass({
                 card.add_style_pseudo_class('selected');
             else
                 card.remove_style_pseudo_class('selected');
+            // (Liquid, it is drawn by itself.)
+            if (card === melted)
+                return;
             card.ease({
                 scale_x: selected ? 1 : UNSELECTED_SCALE,
                 scale_y: selected ? 1 : UNSELECTED_SCALE,
@@ -518,6 +576,20 @@ export const SwitcherContent = GObject.registerClass({
         });
         this._updateFooter();
         this._schedulePreload();
+    }
+
+    // Where the strip goes: with the card picked out in the middle. While a
+    // profile is held, it stays where it was as the profile moves, unless
+    // the profile would come too near its edges or past them.
+    _stripTarget() {
+        const scale = this._scale;
+        const width = CARD_WIDTH * scale;
+        const x = this._selected * (CARD_WIDTH + CARD_SPACING) * scale;
+        const middle = Math.round(this._viewportWidth / 2 - (x + width / 2));
+        if (!this._melting?.held || this._stripX === null)
+            return middle;
+        const margin = Math.min(KEEP_IN_VIEW * scale, (this._viewportWidth - width) / 2);
+        return Math.round(Math.max(margin - x, Math.min(this._stripX, this._viewportWidth - margin - width - x)));
     }
 
     _updateFooter() {
@@ -554,6 +626,7 @@ export const SwitcherContent = GObject.registerClass({
     _activate(index) {
         if (this._closing || !this._items[index])
             return;
+        this._putDown();
         this._select(index);
         if (this._items[index].id === NEW_PROFILE)
             this.emit('create');
@@ -566,24 +639,38 @@ export const SwitcherContent = GObject.registerClass({
      * @returns {boolean} whether the key was handled
      */
     handleKeyPress(event) {
+        // With Tab held on the Profiles tab, the arrows move the profile.
+        const moving = this._hold && !this._hold.switched && this._mode === 'profiles';
         switch (event.get_key_symbol()) {
         case Clutter.KEY_Left:
         case Clutter.KEY_KP_Left:
-            this._select(this._selected - 1);
+            if (moving)
+                this._moveHeld(this._selected - 1);
+            else
+                this._select(this._selected - 1);
             return true;
         case Clutter.KEY_Right:
         case Clutter.KEY_KP_Right:
-            this._select(this._selected + 1);
+            if (moving)
+                this._moveHeld(this._selected + 1);
+            else
+                this._select(this._selected + 1);
             return true;
         case Clutter.KEY_Home:
-            this._select(0);
+            if (moving)
+                this._moveHeld(0);
+            else
+                this._select(0);
             return true;
         case Clutter.KEY_End:
-            this._select(this._cards.length - 1);
+            if (moving)
+                this._moveHeld(this._cards.length - 1);
+            else
+                this._select(this._cards.length - 1);
             return true;
         case Clutter.KEY_Tab:
         case Clutter.KEY_ISO_Left_Tab:
-            this.setMode(this._mode === 'profiles' ? 'wallpapers' : 'profiles');
+            this._onTabPress(event);
             return true;
         case Clutter.KEY_Return:
         case Clutter.KEY_KP_Enter:
@@ -600,9 +687,200 @@ export const SwitcherContent = GObject.registerClass({
 
     /**
      * @param {Clutter.Event} event
+     * @returns {boolean} whether the key was handled
+     */
+    handleKeyRelease(event) {
+        const hold = this._hold;
+        if (!hold || event.get_key_code() !== hold.code)
+            return false;
+        this._hold = null;
+        if (hold.timeout)
+            GLib.source_remove(hold.timeout);
+        if (this._melting?.held)
+            this._putDown();
+        // A tap.
+        else if (!hold.switched && !hold.softened && !hold.moved)
+            this.setMode(this._mode === 'profiles' ? 'wallpapers' : 'profiles');
+        return true;
+    }
+
+    // Tab: on the Wallpapers tab, over to the profiles at once. On the
+    // Profiles tab, a tap goes over to the wallpapers once let go of; held,
+    // it softens the profile.
+    _onTabPress(event) {
+        // (Still held: the key repeating.)
+        if (this._hold)
+            return;
+        const hold = {code: event.get_key_code(), timeout: 0, switched: false, softened: false, moved: false};
+        this._hold = hold;
+        if (this._mode !== 'profiles') {
+            hold.switched = true;
+            this.setMode('profiles');
+            return;
+        }
+        hold.timeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOLD_DELAY, () => {
+            hold.timeout = 0;
+            this._soften();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // The profile picked out softens into a drop of itself (the "new
+    // profile" card stays as it is).
+    _soften() {
+        const card = this._cards[this._selected];
+        if (this._closing || this._mode !== 'profiles' || !card || card.item.id === NEW_PROFILE)
+            return;
+        if (this._hold)
+            this._hold.softened = true;
+        // (Another one, still firming up: a card again at once.)
+        if (this._melting && this._melting.card !== card)
+            this._firmed(true);
+        if (!this._melting) {
+            this._melting = {card, melt: null};
+            if (St.Settings.get().enable_animations) {
+                const scale = this._scale;
+                const melt = new ProfileMelt(card, this._placeOf(this._selected),
+                    {radius: CARD_RADIUS * scale, margin: MELT_MARGIN * scale, scale});
+                // Over the strip, in its pixels, moving with it.
+                const margin = MELT_MARGIN * scale;
+                melt.set_position(-margin, this._strip.y - margin);
+                melt.set_size(this._cards.length * (CARD_WIDTH + CARD_SPACING) * scale + margin * 2,
+                    CARD_HEIGHT * scale + margin * 2);
+                melt.translation_x = this._strip.translation_x;
+                if (this._strip.get_transition('translation-x')) {
+                    melt.ease({
+                        translation_x: this._stripX,
+                        duration: SCROLL_TIME,
+                        mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                    });
+                }
+                this._viewport.add_child(melt);
+                melt.connect('firm', () => this._firmed());
+                this._melting.melt = melt;
+                card.remove_transition('opacity');
+                card.opacity = 0;
+            }
+        }
+        this._melting.held = true;
+        this._melting.from = this._selected;
+        this._melting.melt?.hold(true);
+    }
+
+    // Where a card is laid out in the strip: [x, y, width, height].
+    _placeOf(index) {
+        const scale = this._scale;
+        return [index * (CARD_WIDTH + CARD_SPACING) * scale, 0, CARD_WIDTH * scale, CARD_HEIGHT * scale];
+    }
+
+    // The profile held pours over to another place in the row (or bumps
+    // into either end); the others between make room.
+    _moveHeld(index) {
+        const hold = this._hold;
+        hold.moved = true;
+        if (hold.timeout) {
+            GLib.source_remove(hold.timeout);
+            hold.timeout = 0;
+        }
+        if (!this._melting?.held)
+            this._soften();
+        const melting = this._melting?.held ? this._melting : null;
+        const from = this._selected;
+        const direction = Math.sign(index - from);
+        // (The "new profile" card stays last.)
+        const last = this._items.findLastIndex(item => item.id !== NEW_PROFILE);
+        const to = Math.max(0, Math.min(index, last));
+        if (!melting || to === from) {
+            if (melting)
+                melting.melt?.bump(direction);
+            else
+                this._bump(this._cards[from], direction);
+            return;
+        }
+        const step = (CARD_WIDTH + CARD_SPACING) * this._scale;
+        const between = from < to ? this._cards.slice(from + 1, to + 1) : this._cards.slice(to, from);
+        for (const card of between) {
+            const shown = card.translation_x;
+            card.remove_transition('translation-x');
+            card.translation_x = shown + Math.sign(to - from) * step;
+            card.ease({
+                translation_x: 0,
+                duration: MAKE_ROOM_TIME,
+                mode: Clutter.AnimationMode.EASE_IN_OUT_CUBIC,
+            });
+        }
+        this._cards.splice(to, 0, ...this._cards.splice(from, 1));
+        this._items.splice(to, 0, ...this._items.splice(from, 1));
+        this._strip.set_child_at_index(melting.card, to);
+        this._select(to);
+        melting.melt?.pourTo(this._placeOf(to));
+    }
+
+    // Let go of where it is now, which is saved; it firms up there.
+    _putDown() {
+        const melting = this._melting;
+        if (!melting?.held)
+            return;
+        melting.held = false;
+        const index = this._cards.indexOf(melting.card);
+        if (index !== melting.from)
+            this.emit('reorder', melting.card.item.id, index);
+        // (The strip with it in the middle again.)
+        this._select(this._selected);
+        if (melting.melt)
+            melting.melt.hold(false);
+        else
+            this._firmed(true);
+    }
+
+    // A card again, over its liquid, which then goes; or at once (the
+    // switcher changing, say).
+    _firmed(now = false) {
+        const melting = this._melting;
+        if (!melting)
+            return;
+        this._melting = null;
+        const {card, melt} = melting;
+        const selected = this._cards.indexOf(card) === this._selected;
+        const [opacity, scale] = selected ? [255, 1] : [UNSELECTED_OPACITY, UNSELECTED_SCALE];
+        card.set({scale_x: scale, scale_y: scale});
+        if (now || !melt) {
+            melt?.destroy();
+            card.opacity = opacity;
+            return;
+        }
+        card.ease({
+            opacity,
+            duration: FIRM_FADE_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onStopped: () => melt.destroy(),
+        });
+    }
+
+    // A card that can't move: a nudge that way and back.
+    _bump(card, direction) {
+        if (!card || !direction)
+            return;
+        card.ease({
+            translation_x: direction * 8 * this._scale,
+            duration: 70,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => card.ease({
+                translation_x: 0,
+                duration: 260,
+                mode: Clutter.AnimationMode.EASE_OUT_BACK,
+            }),
+        });
+    }
+
+    /**
+     * @param {Clutter.Event} event
      * @returns {boolean} whether the scroll was handled
      */
     handleScroll(event) {
+        // (Not while a profile is held.)
+        if (this._melting?.held)
+            return true;
         const direction = event.get_scroll_direction();
         if (direction === Clutter.ScrollDirection.SMOOTH) {
             // Touchpads send many small deltas; move one card per full unit.

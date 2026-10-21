@@ -5,9 +5,9 @@
 // A page is any widget that emits 'close-request' when it wants to go away.
 // The island follows its size when its content changes (a menu unfolding
 // in it, say); a page may also emit 'resized' to have the change animated.
-// It may implement handleKeyPress(event) and handleScroll(event), which
-// return whether they handled the event, and focus(), called when it opens
-// with the keyboard.
+// It may implement handleKeyPress(event), handleKeyRelease(event) and
+// handleScroll(event), which return whether they handled the event, and
+// focus(), called when it opens with the keyboard.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -426,6 +426,12 @@ export const Island = GObject.registerClass({
             this.close();
             return Clutter.EVENT_STOP;
         }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    vfunc_key_release_event(event) {
+        if (this._grab && this._page?.handleKeyRelease?.(event))
+            return Clutter.EVENT_STOP;
         return Clutter.EVENT_PROPAGATE;
     }
 

@@ -1,4 +1,4 @@
-import {gather, overflow, pour, spread} from '../lib/liquid.js';
+import {gather, overflow, pour, pourParts, spread} from '../lib/liquid.js';
 import {assert, assertEqual} from './util.js';
 
 const look = {radius: 22, blend: 18};
@@ -13,6 +13,17 @@ export function testPour() {
     const [, , w0] = pour(card, to, 0.3, look).boxes[0];
     const [, , w1] = pour(card, to, 0.5, look).boxes[0];
     assert(w1 < w0, 'it runs out where it was');
+}
+
+export function testPourParts() {
+    const to = [500, 20, 176, 176];
+    for (const t of [0, 0.3, 0.5, 0.8, 1]) {
+        const {source, drop, target, stream} = pourParts(card, to, t, look);
+        assertEqual(pour(card, to, t, look),
+            {boxes: [source, drop, target].filter(Boolean), capsules: stream ? [stream] : []}, `the same as pour at ${t}`);
+    }
+    assert(pourParts(card, to, 0, look).target === null, 'nothing where it goes yet');
+    assert(pourParts(card, to, 1, look).source === null, 'nothing left where it was');
 }
 
 export function testGatherAndSpread() {

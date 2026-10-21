@@ -138,6 +138,7 @@ export class ProfilesModule {
                 this._applyWallpaper(switcher, id);
         });
         switcher.connect('create', () => this._saveFromSwitcher(switcher));
+        switcher.connect('reorder', (_, id, index) => this._reorder(id, index));
         switcher.connect('mode-changed', (_, tab) => {
             if (tab === 'wallpapers' && !switcher.wallpapersLoaded)
                 this._loadWallpapers(switcher);
@@ -154,6 +155,18 @@ export class ProfilesModule {
         const island = this._modules?.get('island');
         if (!island?.showSwitcher(switcher))
             new SwitcherPopup(switcher).open();
+    }
+
+    /**
+     * A profile put elsewhere in the switcher's row.
+     *
+     * @param {string} id
+     * @param {number} index - where it is now among the profiles
+     */
+    _reorder(id, index) {
+        const from = this._store.getAll().findIndex(profile => profile.id === id);
+        if (from >= 0 && index !== from)
+            this._store.move(id, index - from);
     }
 
     async _loadWallpapers(switcher) {

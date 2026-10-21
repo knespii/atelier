@@ -62,6 +62,12 @@
   border-color: -st-accent-color;
 }
 
+/* A profile's picture, liquid while it is moved */
+.atelier-melt-picture {
+  background-color: #26262b;
+  background-size: cover;
+}
+
 .atelier-card-new {
   background-color: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.12);

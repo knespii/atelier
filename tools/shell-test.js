@@ -172,6 +172,18 @@ async function pressKeys(...keyvals) {
     }
 }
 
+// A key held down (keyDown), and let go of (keyUp).
+async function keyDown(keyval) {
+    virtualKeyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
+    await Scripting.sleep(60);
+}
+
+async function keyUp(keyval) {
+    virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
+    await Scripting.sleep(60);
+}
+
 // Away from the island and anything the tests open.
 const restPointer = () => pointerTo(global.stage.width / 2, global.stage.height - 200);
 
@@ -2550,6 +2562,279 @@ async function testWallpapersTab(atelier) {
     check(atelier._store.getAll().length === countBefore, 'no profile is created');
 }
 
+// Frames of a profile moved, slowed down, into $ATELIER_TEST_FRAMES (with
+// the real time of each), for a video.
+async function recordMoveProfiles(atelier, folder) {
+    const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
+    bar.set_string('surface', 'glass');
+    bar.set_string('island-shape', 'notch');
+    const before = atelier._store.getAll().map(profile => profile.id);
+    await Scripting.sleep(800);
+    atelier.toggleSwitcher('profiles');
+    await Scripting.sleep(1500);
+    const switcher = atelier._switcher;
+    switcher._select(1);
+    await Scripting.sleep(600);
+    const slow = 8;
+    const motion = St.Settings.get();
+    const times = [];
+    const start = GLib.get_monotonic_time();
+    let n = 0;
+    const shoot = async until => {
+        while (GLib.get_monotonic_time() < until) {
+            times.push((GLib.get_monotonic_time() - start) / 1000 / slow);
+            await screenshotArea(`../frames/${String(n++).padStart(4, '0')}`,
+                Math.round(global.stage.width / 2) - 520, 0, 1040, 250);
+        }
+    };
+    const after = ms => GLib.get_monotonic_time() + ms * slow * 1000;
+    GLib.mkdir_with_parents(folder, 0o755);
+    motion.slow_down_factor = slow;
+    try {
+        await shoot(after(150));
+        virtualKeyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Tab, Clutter.KeyState.PRESSED);
+        await shoot(after(900));
+        for (const key of [Clutter.KEY_Right, Clutter.KEY_Right]) {
+            virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
+            virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            await shoot(after(800));
+        }
+        virtualKeyboard.notify_keyval(GLib.get_monotonic_time(), Clutter.KEY_Tab, Clutter.KeyState.RELEASED);
+        await shoot(after(900));
+    } finally {
+        motion.slow_down_factor = 1;
+    }
+    GLib.file_set_contents(`${folder}/times.txt`, `${times.map(t => t.toFixed(1)).join('\n')}\n`);
+    switcher.close();
+    await waitFor(() => atelier._switcher === null, 2000);
+    atelier._store.setAll(before.map(id => atelier._store.get(id)));
+    bar.reset('surface');
+    bar.reset('island-shape');
+    await Scripting.sleep(500);
+}
+
+// As the session starts, Atelier may come before GNOME's system item in
+// the quick settings (the battery tile, the power button), which GNOME
+// makes a moment after the bar: the compact bar's battery and the power
+// button's menu come as soon as it is there.
+async function testSystemItemLater() {
+    const ext = () => Main.extensionManager.lookup(UUID);
+    const bar = ext().stateObj._settings.get_child('bar');
+    bar.set_string('style', 'island');
+    bar.set_boolean('compact', true);
+    const quickSettings = Main.panel.statusArea.quickSettings;
+    const system = quickSettings._system;
+    const powerToggle = system._systemItem.powerToggle;
+    const batteryShown = powerToggle.visible;
+    powerToggle.visible = true;
+    try {
+        quickSettings._system = undefined;
+        Main.extensionManager.disableExtension(UUID);
+        await Scripting.sleep(300);
+        Main.extensionManager.enableExtension(UUID);
+        await waitFor(() => ext().stateObj?.modules?.get('controlCentre'), 5000);
+        await Scripting.sleep(500);
+        check(Main.panel.statusArea['atelier-battery'] === undefined, 'before GNOME has its battery tile, no battery yet');
+        // GNOME makes it, and puts the quick settings' indicators in the bar.
+        quickSettings._system = system;
+        const indicator = new St.Widget();
+        quickSettings._indicators.add_child(indicator);
+        indicator.destroy();
+        const battery = Main.panel.statusArea['atelier-battery'];
+        await Scripting.sleep(300);
+        check(battery?.visible && battery.container.visible && battery.container.get_parent() === Main.panel._rightBox &&
+            battery.width > 0, 'then the compact bar has its battery');
+        const island = ext().stateObj.modules.get('island').island;
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000);
+        click(system._systemItem.child.get_last_child());
+        check(await waitFor(() => hasClass(island.page, 'atelier-power') && island.busy, 1000) &&
+            !system._systemItem.menu.isOpen, 'and its power button opens Atelier\'s power menu');
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => island.page === null && !island.busy, 1000);
+    } finally {
+        quickSettings._system = system;
+        powerToggle.visible = batteryShown;
+        bar.reset('style');
+        bar.reset('compact');
+        await Scripting.sleep(300);
+    }
+}
+
+async function testMoveProfiles(atelier) {
+    const frames = GLib.getenv('ATELIER_TEST_FRAMES');
+    if (frames)
+        await recordMoveProfiles(atelier, `${OUTPUT}/../frames`);
+
+    const order = () => atelier._store.getAll().map(profile => profile.id);
+    const before = order();
+    // (On glass, as the user has it.)
+    const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
+    bar.set_string('surface', 'glass');
+    bar.set_string('island-shape', 'notch');
+    await Scripting.sleep(500);
+    atelier.toggleSwitcher('profiles');
+    await Scripting.sleep(500);
+    const switcher = atelier._switcher;
+    if (!check(switcher?.mode === 'profiles' && before.length >= 4, 'the switcher is open on the profiles'))
+        return;
+    try {
+        switcher._select(1);
+        await Scripting.sleep(400);
+        const card = switcher._cards[1];
+        const id = card.item.id;
+
+        // Tab held softens the profile into a drop of itself, where it is;
+        // nothing else happens.
+        await keyDown(Clutter.KEY_Tab);
+        check(await waitFor(() => switcher._melting?.held && switcher._melting.card === card &&
+            card.opacity === 0 && switcher._melting.melt?._soft > 0.8, 2000),
+        `held, Tab softens the profile (${switcher._melting?.melt?._soft?.toFixed(2)})`);
+        const melt = switcher._melting?.melt;
+        const [meltX] = melt?._pictures[0].get_transformed_position() ?? [0];
+        const [cardX0] = card.get_transformed_position();
+        check(melt?._pictures[0].visible && !melt._pictures[1].visible && Math.abs(meltX - cardX0) < 12,
+            `a drop of its picture, in its place (${(meltX - cardX0).toFixed(1)})`);
+        check(switcher.mode === 'profiles', 'and stays on the Profiles tab');
+        await screenshotIsland('40-profile-softened', 320);
+
+        // To the right: it pours over; mid-way its picture leaves on one
+        // side and arrives on the other, a stream between.
+        const seen = {both: false, stream: false};
+        const sampler = GLib.timeout_add(GLib.PRIORITY_HIGH, 8, () => {
+            seen.both ||= melt._pictures.every(picture => picture.visible);
+            seen.stream ||= Boolean(melt._pour && melt._pour.t > 0.2 && melt._pour.t < 0.8);
+            return GLib.SOURCE_CONTINUE;
+        });
+        await pressKey(Clutter.KEY_Right);
+        check(switcher._cards[2] === card && switcher._items[2].id === id && switcher._selected === 2 &&
+            switcher._items[1].id === before[2] && switcher._strip.get_child_at_index(2) === card,
+        'it moves one place right, the one it passed one left');
+        check(await waitFor(() => !melt._pour, 2000) && melt._place[0] === switcher._placeOf(2)[0],
+            'pouring over to its new place');
+        GLib.source_remove(sampler);
+        check(seen.both && seen.stream, 'its picture leaving one place and filling the other, a stream between');
+        check(Boolean(card.style) && melt._pictures.every(picture => picture.style === card.style),
+            'the picture of its card (its thumbnail, whenever that comes)');
+        check(order().indexOf(id) === 1, 'not saved while still held');
+
+        // Slowed down, to look at: back to the start, and a bump there.
+        const motion = St.Settings.get();
+        motion.slow_down_factor = 6;
+        try {
+            await pressKey(Clutter.KEY_Left);
+            for (let n = 1; n <= 8; n++) {
+                await Scripting.sleep(300);
+                await screenshotIsland(`40b-profile-pouring-${n}`, 320);
+            }
+        } finally {
+            motion.slow_down_factor = 1;
+        }
+        await waitFor(() => !melt._pour, 2000);
+        await pressKey(Clutter.KEY_Left);
+        await pressKey(Clutter.KEY_Left);
+        await Scripting.sleep(200);
+        check(switcher._cards[0] === card && switcher._selected === 0, 'past the first place, it stays first');
+
+        // End: as far as the last profile ("new profile" stays last); the
+        // strip follows, keeping it in view.
+        await pressKey(Clutter.KEY_End);
+        await Scripting.sleep(900);
+        const last = before.length - 1;
+        const [viewX] = switcher._viewport.get_transformed_position();
+        const [cardX] = card.get_transformed_position();
+        check(switcher._cards[last] === card && switcher._items.at(-1).id === 'atelier-new-profile' &&
+            cardX >= viewX && cardX + card.width <= viewX + switcher._viewport.width,
+        `End takes it to the last profile, in view (${cardX - viewX}, view ${switcher._viewport.width})`);
+        await pressKey(Clutter.KEY_Left);
+        await waitFor(() => !melt._pour, 3000);
+        await screenshotIsland('40c-profile-moved', 320);
+
+        // Let go of: down there, saved; the switcher stays as it was.
+        await keyUp(Clutter.KEY_Tab);
+        const expected = before.filter(other => other !== id);
+        expected.splice(last - 1, 0, id);
+        check(switcher._melting && !switcher._melting.held && JSON.stringify(order()) === JSON.stringify(expected),
+        `let go of, Tab puts it down there, saved (${order().join(' ')})`);
+        check(atelier._switcher === switcher && switcher.mode === 'profiles' && switcher._cards.includes(card),
+            'the switcher stays open, on the profiles, with the same cards');
+        check(await waitFor(() => switcher._melting === null, 4000) &&
+            switcher._strip.get_children().every((child, i) => child === switcher._cards[i]),
+        'it firms up into its card, in its place in the row');
+        check(await waitFor(() => card.opacity === 255 && card.scale_x === 1, 1000) &&
+            !switcher._viewport.get_children().some(child => child === melt),
+        `the card itself again, its liquid gone (${card.opacity})`);
+
+        // A tap still switches tabs (once let go of); from the wallpapers, at once.
+        await pressKey(Clutter.KEY_Tab);
+        check(await waitFor(() => switcher.mode === 'wallpapers', 1000), 'a tap of Tab goes over to the wallpapers');
+        await keyDown(Clutter.KEY_Tab);
+        // (Before it is let go of.)
+        check(await waitFor(() => switcher.mode === 'profiles', 1000),
+            `and Tab back to the profiles at once (${switcher.mode}, held ${JSON.stringify(switcher._hold)})`);
+        await Scripting.sleep(400);
+        check(switcher._melting === null, 'nothing softens by that');
+        await keyUp(Clutter.KEY_Tab);
+        await Scripting.sleep(500);
+
+        // The "new profile" card stays where it is.
+        switcher._select(switcher._cards.length - 1);
+        await Scripting.sleep(300);
+        await keyDown(Clutter.KEY_Tab);
+        await Scripting.sleep(300);
+        await pressKey(Clutter.KEY_Left);
+        await keyUp(Clutter.KEY_Tab);
+        check(switcher._melting === null && switcher._items.at(-1).id === 'atelier-new-profile' &&
+            switcher.mode === 'profiles' && JSON.stringify(order()) === JSON.stringify(expected),
+        'the "new profile" card can\'t be moved');
+
+        // Held and moved, Esc puts it down, saved, and closes the switcher.
+        await Scripting.sleep(400);
+        switcher._select(0);
+        await Scripting.sleep(300);
+        const moved = switcher._items[0].id;
+        await keyDown(Clutter.KEY_Tab);
+        await pressKey(Clutter.KEY_Right);
+        await pressKey(Clutter.KEY_Escape);
+        await keyUp(Clutter.KEY_Tab);
+        check(await waitFor(() => atelier._switcher === null, 2000) && order().indexOf(moved) === 1,
+            'Esc puts it down where it is and closes the switcher');
+    } finally {
+        atelier._switcher?.close();
+        await waitFor(() => atelier._switcher === null, 2000);
+        atelier._store.setAll(before.map(other => atelier._store.get(other)));
+        bar.reset('surface');
+        bar.reset('island-shape');
+        await Scripting.sleep(500);
+    }
+
+    // Without the island, in the popup, the same.
+    const islandSettings = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('island');
+    islandSettings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    try {
+        atelier.toggleSwitcher('profiles');
+        await Scripting.sleep(400);
+        const popup = atelier._switcher;
+        popup._select(0);
+        await Scripting.sleep(300);
+        const id = popup._items[0].id;
+        await keyDown(Clutter.KEY_Tab);
+        await pressKey(Clutter.KEY_Right);
+        await keyUp(Clutter.KEY_Tab);
+        check(order().indexOf(id) === 1 && popup.mode === 'profiles', 'in the popup too, Tab held and an arrow move it');
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => atelier._switcher === null, 2000);
+    } finally {
+        atelier._switcher?.close();
+        await waitFor(() => atelier._switcher === null, 2000);
+        atelier._store.setAll(before.map(other => atelier._store.get(other)));
+        islandSettings.reset('enabled');
+        await Scripting.sleep(300);
+    }
+}
+
 async function testNewProfile(ext, atelier) {
     // What the desktop shows now (the picture from the Wallpapers tab).
     const count = atelier._store.getAll().length;
@@ -3338,9 +3623,11 @@ export async function run() {
         await part(testTerminal, ext);
         await part(testProfilesStayAsSaved, ext, atelier);
         await part(testWallpapersTab, atelier);
+        await part(testMoveProfiles, atelier);
         await part(testNewProfile, ext, atelier);
         await part(testDisableCleansUp, atelier);
         await part(testSwitcherPopupGoesWithAtelier);
+        await part(testSystemItemLater);
         // (After the parts that keep the modules they started with: this
         // turns Atelier off and on.)
         await part(testLockScreen, ext);
