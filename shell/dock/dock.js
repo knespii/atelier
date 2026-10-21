@@ -130,6 +130,10 @@ export class Dock extends EventEmitter {
             this._container.add_style_class_name('atelier-dock-glassy');
             for (const signal of ['notify::translation-x', 'notify::translation-y', 'notify::allocation'])
                 this._container.connect(signal, () => this.syncGlass());
+            // (The whole dock moved, its container where it was in it: the
+            // glass goes along – placed before it is laid out, it was left
+            // behind where the dock had been.)
+            this.actor.connect('notify::allocation', () => this.syncGlass());
             // (Away with the dock, as when a window is full screen.)
             this.actor.connect('notify::visible', () => this.syncGlass());
         }

@@ -196,6 +196,7 @@ export async function shell(t) {
     try {
         await inOverview(t, monitor);
         await magnification(t);
+        await glassFollows(t);
         await sides(t, monitor);
         await fixed(t, monitor);
         await fitting(t, installed);
@@ -470,6 +471,32 @@ async function inOverview(t, monitor) {
     Main.overview.hide();
     await t.waitFor(() => !Main.overview.visible, 4000);
     await setDock(t, {'show-in-overview': null});
+}
+
+// The dock moved as a whole (placed before it was laid out, say), its
+// glass goes along, under its icons.
+async function glassFollows(t) {
+    const {check} = t;
+    // (Glass under the dock: as the bar's.)
+    const bar = t.ext.stateObj._settings.get_child('bar');
+    const before = t.module.dock;
+    bar.set_string('surface', 'glass');
+    await t.waitFor(() => t.module.dock && t.module.dock !== before && t.module.dock._glass, 2000);
+    await t.sleep(900);
+    const dock = t.module.dock;
+    const shapeOf = () => dock._glass._shape?.slice(0, 4).map(Math.round) ?? [];
+    const containerRect = () => [...dock.container.get_transformed_position(),
+        ...dock.container.get_transformed_size()].map(Math.round);
+    dock.actor.set_position(dock.actor.x - 300, dock.actor.y - 20);
+    await t.sleep(100);
+    const moved = shapeOf();
+    check(JSON.stringify(moved) === JSON.stringify(containerRect()),
+        `moved as a whole, its glass goes along (${moved} for ${containerRect()})`);
+    dock.queuePlace();
+    await t.sleep(200);
+    check(JSON.stringify(shapeOf()) === JSON.stringify(containerRect()), 'and back');
+    bar.reset('surface');
+    await t.sleep(900);
 }
 
 // Along the dock, the icon under the pointer grows, those beside it less,
