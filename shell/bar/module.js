@@ -289,6 +289,12 @@ export class BarModule {
             const edge = EDGE * scale;
             const leftX = Math.max(edge, start - gap - left.width);
             const rightX = Math.min(panel.width - edge - right.width, end + gap);
+            // (Too early, as the shell starts: where the island is isn't
+            // known yet.)
+            if (!Number.isFinite(leftX - left.x) || !Number.isFinite(rightX - right.x)) {
+                this._queuePlace();
+                return;
+            }
             left.translation_x = Math.round(leftX - left.x);
             right.translation_x = Math.round(rightX - right.x);
         } else {
