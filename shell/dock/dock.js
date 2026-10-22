@@ -124,7 +124,8 @@ export class Dock extends EventEmitter {
             const monitor = this.monitor;
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
             const reach = horizontal || !monitor ? 0.25 : Math.min(1, SIDE_GLASS * scale / monitor.width);
-            this._glass = new GlassSurface({monitorIndex, side: this._side, reach});
+            // (Grey: the dock's colour is its own, not the wallpaper's.)
+            this._glass = new GlassSurface({monitorIndex, side: this._side, reach, neutral: true});
             this._glass.add_style_class_name('atelier-dock-glass');
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
             this._container.add_style_class_name('atelier-dock-glassy');

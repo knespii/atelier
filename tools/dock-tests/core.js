@@ -505,6 +505,13 @@ async function glassFollows(t) {
     await t.waitFor(() => t.module.dock && t.module.dock !== before && t.module.dock._glass, 2000);
     await t.sleep(900);
     const dock = t.module.dock;
+    // (Grey glass: none of the wallpaper's colours under the dock.)
+    const [gx, gy] = dock.container.get_transformed_position();
+    await t.screenshot('60-dock-glass-grey');
+    // (Beside the first icon, half way up: in the shape, not on an icon.)
+    const [r, g, b] = t.averageColor('60-dock-glass-grey', Math.round(gx) + 2, Math.round(gy + dock.container.height / 2) - 3, 3, 6);
+    check(Boolean(dock._glass.get_effect('atelier-glass-grey')) && Math.max(r, g, b) - Math.min(r, g, b) <= 6,
+        `its glass is grey, not the wallpaper's colours (${[r, g, b].map(Math.round)})`);
     const shapeOf = () => dock._glass._shape?.slice(0, 4).map(Math.round) ?? [];
     const containerRect = () => [...dock.container.get_transformed_position(),
         ...dock.container.get_transformed_size()].map(Math.round);

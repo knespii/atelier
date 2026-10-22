@@ -209,9 +209,11 @@ class AtelierGlassSurface extends St.Widget {
      * @param {boolean} [params.fromBottom] - the same as side 'BOTTOM'
      * @param {boolean} [params.solid] - black instead of glass: the same
      *   shapes, changing every frame without anything being laid out anew
+     * @param {boolean} [params.neutral] - grey glass: none of the
+     *   wallpaper's colours (nor the palette's in its tint)
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
-        solid = false} = {}) {
+        solid = false, neutral = false} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -233,6 +235,8 @@ class AtelierGlassSurface extends St.Widget {
 
         this._mask = new RoundedMaskEffect();
         this.add_effect_with_name('atelier-glass-mask', this._mask);
+        if (neutral)
+            this.add_effect_with_name('atelier-glass-grey', new Clutter.DesaturateEffect({factor: 1}));
 
         Main.layoutManager.connectObject('monitors-changed', () => this._build(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
