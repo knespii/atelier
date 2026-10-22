@@ -156,6 +156,7 @@ export class IslandModule {
             'notify::hover', () => this._onHover(),
             'clicked', (_, button) => this._onClicked(button),
             'page-closed', () => this._onPageClosed(),
+            'page-opened', () => this._raise(),
             'idle-resized', () => this._queueLayout(),
             this);
         this._slot.connectObject('notify::allocation', () => this._queueLayout(), this);
@@ -417,6 +418,41 @@ export class IslandModule {
     _controlCentre() {
         const module = this._modules?.get('control-centre');
         return module?.available ? module : null;
+    }
+
+    // Opening, over all other chrome, with what is drawn along with it (its
+    // glass, ears, a sheet's liquid) in the same order: chrome another
+    // extension added later (Tiling Shell's layout editor over the whole
+    // screen, say) would cover what opens.
+    _raise() {
+        const group = Main.layoutManager.uiGroup;
+        const top = global.top_window_group;
+        if (top?.get_parent() !== group)
+            return;
+        const children = group.get_children();
+        [this._glass, this._liquid, this._sheet, ...this._ears?.actors ?? [], this._island]
+            .filter(actor => actor?.get_parent() === group)
+            .sort((a, b) => children.indexOf(a) - children.indexOf(b))
+            .forEach(actor => group.set_child_below_sibling(actor, top));
+    }
+
+    /**
+     * Close the open page at once, unseen: something is about to take a
+     * picture of the screen (Color Picker, to pick from). It is back at
+     * rest a moment later.
+     */
+    closeUnseen() {
+        const island = this._island;
+        if (!island?.page)
+            return;
+        island.remove_transition('opacity');
+        island.opacity = 0;
+        this._syncShape();
+        island.close();
+        this._setTimeout('unseen', MORPH_TIME, () => {
+            island.opacity = 255;
+            this._syncShape();
+        });
     }
 
     _onPageClosed() {

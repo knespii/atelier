@@ -171,7 +171,7 @@ export class Dock extends EventEmitter {
         this._place();
         this.intellihide.check();
         if (main && horizontal)
-            services.musicPill.attach(this._box);
+            services.musicPill.attach(this._box, this);
     }
 
     /** @returns {St.BoxLayout} the row (or column) of apps */

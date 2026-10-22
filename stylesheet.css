@@ -718,39 +718,43 @@
   spacing-columns: 10px;
 }
 
-.atelier-cc .quick-toggle,
-.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button,
-.atelier-cc .quick-settings-system-item .icon-button {
-  background-color: rgba(255, 255, 255, 0.09);
+/* (In the island, over another extension's styles even when they are
+   !important: Blur my Shell's popup blur restyles GNOME's tiles, calendar
+   and entries with !important from a class on the whole UI, and wins ties
+   as its stylesheet loads first.) */
+.atelier-island .atelier-cc .quick-toggle,
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button,
+.atelier-island .atelier-cc .quick-settings-system-item .icon-button {
+  background-color: rgba(255, 255, 255, 0.09) !important;
   color: #ffffff;
-  box-shadow: none;
+  box-shadow: none !important;
 }
 
-.atelier-cc .quick-toggle:hover,
-.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:hover,
-.atelier-cc .quick-settings-system-item .icon-button:hover {
-  background-color: rgba(255, 255, 255, 0.16);
+.atelier-island .atelier-cc .quick-toggle:hover,
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:hover,
+.atelier-island .atelier-cc .quick-settings-system-item .icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.16) !important;
 }
 
-.atelier-cc .quick-toggle:active,
-.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:active,
-.atelier-cc .quick-settings-system-item .icon-button:active {
-  background-color: rgba(255, 255, 255, 0.22);
+.atelier-island .atelier-cc .quick-toggle:active,
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:active,
+.atelier-island .atelier-cc .quick-settings-system-item .icon-button:active {
+  background-color: rgba(255, 255, 255, 0.22) !important;
 }
 
-.atelier-cc .quick-toggle:focus,
-.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
-.atelier-cc .quick-settings-system-item .icon-button:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
+.atelier-island .atelier-cc .quick-toggle:focus,
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
+.atelier-island .atelier-cc .quick-settings-system-item .icon-button:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color !important;
 }
 
-.atelier-cc .quick-toggle:checked,
-.atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked {
-  background-color: -st-accent-color;
+.atelier-island .atelier-cc .quick-toggle:checked,
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked {
+  background-color: -st-accent-color !important;
   color: -st-accent-fg-color;
 }
 
-.atelier-cc .quick-toggle-has-menu .quick-toggle-separator {
+.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-separator {
   background-color: rgba(255, 255, 255, 0.18);
 }
 
@@ -997,22 +1001,27 @@
 }
 
 /* Opaque: grouped notifications lie on top of each other, and only the
-   edges of those below should show. */
-.atelier-cc .message {
-  background-color: #1d1d20;
+   edges of those below should show (GNOME hides the rest of them with the
+   card on top only). Whatever else styles them: Blur my Shell's popup blur
+   makes every .message-list .message see-through, with !important, from a
+   class it puts on the whole UI. */
+.atelier-island .atelier-cc .message-list .message {
+  background-color: #1d1d20 !important;
   color: #ffffff;
 }
 
-.atelier-cc .message:hover {
-  background-color: #27272a;
+.atelier-island .atelier-cc .message-list .message:hover,
+.atelier-island .atelier-cc .message-list .message:focus,
+.atelier-island .atelier-cc .message-list .message:active {
+  background-color: #27272a !important;
 }
 
-.atelier-cc .message:second-in-stack {
-  background-color: #161618;
+.atelier-island .atelier-cc .message-list .message:second-in-stack {
+  background-color: #161618 !important;
 }
 
-.atelier-cc .message:lower-in-stack {
-  background-color: #111113;
+.atelier-island .atelier-cc .message-list .message:lower-in-stack {
+  background-color: #111113 !important;
 }
 
 .atelier-cc .message .message-header,
@@ -1025,53 +1034,54 @@
   background-color: rgba(255, 255, 255, 0.15);
 }
 
-.atelier-cc .calendar,
-.atelier-cc .datemenu-today-button,
-.atelier-cc .events-button,
-.atelier-cc .world-clocks-button,
-.atelier-cc .weather-button {
-  background-color: rgba(255, 255, 255, 0.07);
+.atelier-island .atelier-cc .calendar,
+.atelier-island .atelier-cc .datemenu-today-button,
+.atelier-island .atelier-cc .events-button,
+.atelier-island .atelier-cc .world-clocks-button,
+.atelier-island .atelier-cc .weather-button {
+  background-color: rgba(255, 255, 255, 0.07) !important;
   color: #ffffff;
 }
 
-.atelier-cc .datemenu-today-button:hover,
-.atelier-cc .events-button:hover,
-.atelier-cc .world-clocks-button:hover,
-.atelier-cc .weather-button:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+.atelier-island .atelier-cc .datemenu-today-button:hover,
+.atelier-island .atelier-cc .events-button:hover,
+.atelier-island .atelier-cc .world-clocks-button:hover,
+.atelier-island .atelier-cc .weather-button:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 .atelier-cc .calendar .calendar-month-header .calendar-month-label {
   color: #ffffff !important;
 }
 
-.atelier-cc .calendar .calendar-day,
-.atelier-cc .calendar .calendar-day-heading,
-.atelier-cc .calendar .pager-button {
-  color: #ffffff;
-  background-color: transparent;
+.atelier-island .atelier-cc .calendar .calendar-day,
+.atelier-island .atelier-cc .calendar .calendar-day-heading,
+.atelier-island .atelier-cc .calendar .pager-button {
+  color: #ffffff !important;
+  background-color: transparent !important;
 }
 
-.atelier-cc .calendar .calendar-day:hover,
-.atelier-cc .calendar .pager-button:hover {
-  background-color: rgba(255, 255, 255, 0.1);
+.atelier-island .atelier-cc .calendar .calendar-day:hover,
+.atelier-island .atelier-cc .calendar .calendar-month-header .pager-button:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-.atelier-cc .calendar .calendar-day:selected {
-  background-color: rgba(255, 255, 255, 0.2);
+.atelier-island .atelier-cc .calendar .calendar-day:selected {
+  background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
-.atelier-cc .calendar .calendar-day.calendar-weekend {
-  color: rgba(255, 255, 255, 0.6);
+.atelier-island .atelier-cc .calendar .calendar-day.calendar-weekend {
+  color: rgba(255, 255, 255, 0.6) !important;
 }
 
-.atelier-cc .calendar .calendar-day.calendar-other-month {
-  color: rgba(255, 255, 255, 0.35);
+.atelier-island .atelier-cc .calendar .calendar-day.calendar-other-month,
+.atelier-island .atelier-cc .calendar .calendar-day.calendar-other-month.calendar-weekend {
+  color: rgba(255, 255, 255, 0.35) !important;
 }
 
-.atelier-cc .calendar .calendar-day.calendar-today {
-  background-color: -st-accent-color;
-  color: -st-accent-fg-color;
+.atelier-island .atelier-cc .calendar .calendar-day.calendar-today {
+  background-color: -st-accent-color !important;
+  color: -st-accent-fg-color !important;
 }
 
 /* The sides in capsules like the island, or in the one island */
@@ -1187,6 +1197,19 @@
 
 .atelier-profile-sheet-entry StLabel.hint-text {
   color: rgba(255, 255, 255, 0.4);
+}
+
+/* (Over Blur my Shell's popup blur, which restyles every StEntry with
+   !important, from a class on the whole UI, and wins ties.) */
+.atelier-profile-sheet StEntry.atelier-profile-sheet-entry,
+.atelier-profile-sheet StEntry.atelier-profile-sheet-entry:focus {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.atelier-profile-sheet StEntry.atelier-profile-sheet-entry StLabel.hint-text {
+  color: rgba(255, 255, 255, 0.4) !important;
 }
 
 .atelier-sheet-row {
@@ -1363,6 +1386,23 @@
   background-color: rgba(224, 27, 36, 0.35);
 }
 
+/* (Over Blur my Shell's StEntry styles, as above.) */
+.atelier-note-sheet StEntry.atelier-note-sheet-reminder-time {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.atelier-note-sheet StEntry.atelier-note-sheet-reminder-time:focus {
+  background-color: rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.atelier-note-sheet StEntry.atelier-note-sheet-reminder-time:error {
+  background-color: rgba(224, 27, 36, 0.35) !important;
+}
+
 /* On the paper: when it reminds of itself */
 .atelier-note-reminder {
   spacing: 4px;
@@ -1483,6 +1523,23 @@
 
 .atelier-lock-entry StLabel.hint-text {
   color: rgba(244, 244, 245, 0.5);
+}
+
+/* (Over Blur my Shell's StEntry styles, which stay on the lock screen.) */
+.atelier-lock-sheet StEntry.atelier-lock-entry {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #f4f4f5 !important;
+  box-shadow: none !important;
+}
+
+.atelier-lock-sheet StEntry.atelier-lock-entry:focus {
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  color: #f4f4f5 !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25) !important;
+}
+
+.atelier-lock-sheet StEntry.atelier-lock-entry StLabel.hint-text {
+  color: rgba(244, 244, 245, 0.5) !important;
 }
 
 .atelier-lock-message {
@@ -2400,6 +2457,21 @@
 .atelier-note-title-entry StLabel.hint-text,
 .atelier-note-text-entry StLabel.hint-text {
   color: rgba(0, 0, 0, 0.4);
+}
+
+/* (Over Blur my Shell's StEntry styles; the ink is set on the entries
+   themselves, which beats any stylesheet.) */
+.atelier-note-sheet StEntry.atelier-note-title-entry,
+.atelier-note-sheet StEntry.atelier-note-text-entry,
+.atelier-note-sheet StEntry.atelier-note-title-entry:focus,
+.atelier-note-sheet StEntry.atelier-note-text-entry:focus {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.atelier-note-sheet StEntry.atelier-note-title-entry StLabel.hint-text,
+.atelier-note-sheet StEntry.atelier-note-text-entry StLabel.hint-text {
+  color: rgba(0, 0, 0, 0.4) !important;
 }
 
 .atelier-note-actions {

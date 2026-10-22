@@ -165,6 +165,16 @@ export class ControlCentreModule {
         this._islandModule()?.island?.close(page);
     }
 
+    // At once, unseen: an extension's button is about to take a picture of
+    // the screen.
+    _closeUnseen() {
+        if (!this._page)
+            return;
+        this._page = null;
+        this._quickSettingsHost?.closeMenus();
+        this._islandModule()?.closeUnseen();
+    }
+
     _tabs() {
         const tabs = [{
             id: 'controls', label: 'Controls', icon: 'preferences-system-symbolic',
@@ -254,6 +264,7 @@ export class ControlCentreModule {
                 'changed', () => this._page?.sync(),
                 // An app was opened from its tray icon: its window comes up.
                 'opened', () => this.close(),
+                'covering', () => this._closeUnseen(),
                 this);
         } else if (!wanted && this._tray) {
             // An open control centre would lose its Extensions tab under it.

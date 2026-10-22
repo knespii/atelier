@@ -21,6 +21,11 @@ const KEEP = new Set(['activities', 'dateMenu', 'quickSettings', 'keyboard', 'a1
     'screenRecording', 'screenSharing']);
 const keeps = role => KEEP.has(role) || role.startsWith('atelier');
 
+// Extensions whose button starts something over the whole screen as it is
+// pressed: the control centre goes first, at once and unseen. (Color Picker
+// picks from a picture of the screen it takes then.)
+const COVERS_SCREEN = new Set(['color-picker@tuberry']);
+
 /**
  * An app's tray icon from the AppIndicator extension (Ubuntu's, or the same
  * from extensions.gnome.org) stands for the app behind it, on D-Bus.
@@ -59,7 +64,7 @@ function nameFor(role, indicator) {
 }
 
 const Tile = GObject.registerClass({
-    Signals: {'opened': {}},
+    Signals: {'opened': {}, 'covering': {}},
 }, class AtelierExtensionTile extends St.Widget {
     _init(role, indicator) {
         super._init({
@@ -130,6 +135,11 @@ const Tile = GObject.registerClass({
     // the bar the extension waits whether a second click comes first); the
     // right button still brings up its menu.
     vfunc_captured_event(event) {
+        const pressed = event.type() === Clutter.EventType.BUTTON_PRESS && event.get_button() === Clutter.BUTTON_PRIMARY;
+        if (pressed && COVERS_SCREEN.has(this.role) && this.indicator.contains(global.stage.get_event_actor(event))) {
+            this.emit('covering');
+            return Clutter.EVENT_PROPAGATE;
+        }
         const app = trayAppOf(this.role, this.indicator);
         if (!app || app.supportsActivation === false ||
             event.type() !== Clutter.EventType.BUTTON_PRESS || event.get_button() !== Clutter.BUTTON_PRIMARY)
@@ -153,7 +163,7 @@ const Tile = GObject.registerClass({
 const COLUMNS = 3;
 
 export const ExtensionTray = GObject.registerClass({
-    Signals: {'changed': {}, 'opened': {}},
+    Signals: {'changed': {}, 'opened': {}, 'covering': {}},
 }, class AtelierExtensionTray extends St.Widget {
     _init() {
         const layout = new Clutter.GridLayout({column_homogeneous: true});
@@ -217,6 +227,7 @@ export const ExtensionTray = GObject.registerClass({
             tile.connectObject(
                 'notify::visible', () => this._arrange(),
                 'opened', () => this.emit('opened'),
+                'covering', () => this.emit('covering'),
                 this);
             indicator.connectObject('destroy', () => this._forget(role), this);
             this.layout_manager.attach(tile, 0, 0, 1, 1);

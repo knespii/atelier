@@ -51,6 +51,11 @@ export class NotchEars {
             Main.layoutManager.uiGroup.insert_child_below(ear, sibling);
     }
 
+    /** @returns {Clutter.Actor[]} the two ears */
+    get actors() {
+        return this._ears;
+    }
+
     /**
      * Put the ears beside the top of a notch, in stage coordinates.
      *

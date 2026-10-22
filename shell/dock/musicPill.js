@@ -3,6 +3,12 @@
 // or the bottom of the screen) that handle leads to its box, and the pill
 // sits at the box's end. It is the pill's to keep: given back, never
 // destroyed.
+//
+// The pill holds Dash to Dock open itself while its popups (the player,
+// the list of players) are up; Atelier's dock it doesn't know, so the dock
+// stays while they show. And as GNOME takes its UI down, the row stops
+// telling the pill of its children going: it would come back to it,
+// already gone.
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -12,6 +18,9 @@ const HANDLE = 'dash-to-dock';
 export class MusicPill {
     constructor() {
         this._box = null;
+        this._dock = null;
+        this._popups = new Set();
+        this._holding = false;
     }
 
     /** @returns {St.BoxLayout|null} the row the pill is told to go to */
@@ -23,8 +32,10 @@ export class MusicPill {
      * Lead the pill to a row (unless something else has the handle).
      *
      * @param {St.BoxLayout} box
+     * @param {Dock} [dock] - the dock of the row, kept shown while the
+     *   pill's popups are up
      */
-    attach(box) {
+    attach(box, dock = null) {
         const statusArea = Main.panel.statusArea;
         if (this._box)
             this.detach(this._box);
@@ -36,7 +47,63 @@ export class MusicPill {
             enumerable: false,
         });
         this._box = box;
-        Main.extensionManager.lookup(MUSIC_PILL)?.stateObj?._controller?._queueInject?.();
+        this._dock = dock;
+        Main.layoutManager.uiGroup.connectObject(
+            // (The pill adds its popups as chrome.)
+            'child-added', (_, actor) => this._onChrome(actor),
+            'destroy', () => this._onShutdown(),
+            this);
+        this._controller()?._queueInject?.();
+    }
+
+    _controller() {
+        return Main.extensionManager.lookup(MUSIC_PILL)?.stateObj?._controller ?? null;
+    }
+
+    _onChrome(actor) {
+        const controller = this._controller();
+        if (!controller || this._popups.has(actor) ||
+            (actor !== controller._expandedPlayer && actor !== controller._playerMenu))
+            return;
+        this._popups.add(actor);
+        actor.connectObject(
+            'notify::visible', () => this._syncHold(),
+            'destroy', () => {
+                this._popups.delete(actor);
+                this._syncHold();
+            },
+            this);
+        this._syncHold();
+    }
+
+    _syncHold() {
+        const open = [...this._popups].some(popup => popup.visible);
+        if (open === this._holding)
+            return;
+        this._holding = open;
+        this._dock?.force(open);
+    }
+
+    _release() {
+        Main.layoutManager.uiGroup.disconnectObject(this);
+        this._popups.forEach(popup => popup.disconnectObject(this));
+        this._popups.clear();
+        if (this._holding)
+            this._dock?.force(false);
+        this._holding = false;
+        this._dock = null;
+    }
+
+    _onShutdown() {
+        const box = this._box;
+        this._release();
+        if (!box)
+            return;
+        const controller = this._controller();
+        if (controller)
+            box.disconnectObject(controller);
+        delete Main.panel.statusArea[HANDLE];
+        this._box = null;
     }
 
     /**
@@ -48,6 +115,7 @@ export class MusicPill {
      */
     detach(box, isOwn = null) {
         if (this._box === box) {
+            this._release();
             delete Main.panel.statusArea[HANDLE];
             this._box = null;
             try {

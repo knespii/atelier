@@ -99,6 +99,7 @@ export const Island = GObject.registerClass({
         // (Without the page: with animations off, it has faded out and gone
         // by then.)
         'page-closed': {},
+        'page-opened': {},
         'idle-resized': {},
     },
 }, class AtelierIsland extends St.Widget {
@@ -266,6 +267,7 @@ export const Island = GObject.registerClass({
             page.focus?.();
         if (old && old !== page)
             this.emit('page-closed');
+        this.emit('page-opened');
         return true;
     }
 
