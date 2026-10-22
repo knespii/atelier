@@ -1384,6 +1384,75 @@
   border-radius: 999px;
 }
 
+/* A photo widget's photos, picked from the gallery on a sheet */
+.atelier-photo-sheet {
+  width: 472px;
+  padding: 22px 24px 20px;
+  spacing: 10px;
+  color: #f4f4f5;
+  font-size: 10.5pt;
+}
+
+/* Two rows of tiles high (and a little of a third), whatever the gallery holds */
+.atelier-photo-scroll {
+  height: 216px;
+  margin-top: 4px;
+}
+
+.atelier-photo-grid,
+.atelier-photo-row {
+  spacing: 8px;
+}
+
+.atelier-photo-tile {
+  width: 72px;
+  height: 72px;
+  padding: 5px;
+  border-radius: 14px;
+  border: 3px solid transparent;
+  background-color: rgba(255, 255, 255, 0.08);
+  background-size: cover;
+}
+
+.atelier-photo-tile:hover,
+.atelier-photo-tile:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.atelier-photo-tile:checked {
+  border-color: -st-accent-color;
+}
+
+.atelier-photo-badge {
+  min-width: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+  font-size: 9pt;
+  font-weight: 800;
+  text-align: center;
+}
+
+.atelier-photo-add {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.atelier-photo-add StIcon {
+  icon-size: 20px;
+}
+
+.atelier-photo-add:insensitive {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.atelier-photo-add-label {
+  margin-top: 4px;
+  font-size: 8.5pt;
+  font-weight: bold;
+  text-align: center;
+}
+
 /* Notch: the island hangs from the top edge, which curves into its sides */
 
 .atelier-notch-ear {
