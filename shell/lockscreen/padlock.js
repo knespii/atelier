@@ -94,6 +94,25 @@ class AtelierPadlock extends St.DrawingArea {
         return this._look;
     }
 
+    /**
+     * Unlocked, at once: open in a full green ring, nothing moving – GNOME
+     * stops the shell a moment now, and a move caught half way looked
+     * broken; a still padlock looks done.
+     */
+    showUnlocked() {
+        this._timelines.forEach(timeline => timeline.stop());
+        this._timelines.clear();
+        this._look = {shackle: 'open', ring: 'fill', tone: 'green'};
+        this.add_style_pseudo_class('success');
+        this.remove_style_pseudo_class('failed');
+        this._ring = 'fill';
+        Object.assign(this, {
+            _shackle: 1, _swing: 0, _spread: 1, _hop: 0, _cramp: 0, _red: 0,
+            _color: 1, _from: null, _ticks: 1, _wave: 0,
+        });
+        this.queue_repaint();
+    }
+
     /** A failure: the ring cramps up, the padlock shakes. */
     shake() {
         this._cramp = 0;
@@ -130,6 +149,9 @@ class AtelierPadlock extends St.DrawingArea {
     /** @param {object} look - from lib/lockState.js look() */
     setLook({shackle, ring, tone}) {
         const before = this._look;
+        // (Shown unlocked already: it stays so.)
+        if (before.tone === 'green' && before.shackle === 'open' && tone === 'green' && shackle === 'open')
+            return;
         this._look = {shackle, ring, tone};
         // (From the colour shown, softly.)
         if (tone !== before.tone) {

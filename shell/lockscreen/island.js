@@ -22,7 +22,7 @@ import {SteadyTimeline} from '../core/steadyTimeline.js';
 import {Island} from '../island/island.js';
 import {Padlock} from './padlock.js';
 
-const AFTERGLOW = 750; // how long the open padlock stays once unlocked (its ring squeezed), ms
+const AFTERGLOW = 250; // how long the open padlock stays once unlocked, ms
 const RETRACT_TIME = 280; // going back up, once unlocked
 const PADDING = 5; // above and below the padlock's ring, logical pixels
 
@@ -76,6 +76,12 @@ export class LockIsland {
     setLook(look) {
         if (this.actor)
             this.padlock.setLook(look);
+    }
+
+    /** Unlocked, at once, nothing moving (see Padlock.showUnlocked()). */
+    showUnlocked() {
+        if (this.actor)
+            this.padlock.showUnlocked();
     }
 
     /**
@@ -171,7 +177,7 @@ export class LockIsland {
             return;
         }
         Main.layoutManager.uiGroup.set_child_above_sibling(this.actor, null);
-        this.setLook({shackle: 'open', ring: 'fill', tone: 'green'});
+        this.showUnlocked();
         // (Counted in frames that come, as the padlock's moves: GNOME stops
         // the shell a moment now, turning its other extensions on.)
         this._leaving = new SteadyTimeline(this.actor, AFTERGLOW, {onCompleted: () => this._retract()});

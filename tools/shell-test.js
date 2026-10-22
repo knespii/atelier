@@ -3128,23 +3128,9 @@ async function testLockScreen(ext) {
         check(phase() === 'success' && island.padlock.look.shackle === 'open' &&
             island.padlock.has_style_pseudo_class('success'), 'unlocked: the padlock opens in a green ring');
         const padlock = island.padlock;
-        let [jump, swing, hop, blend] = [0, 0, 0, 1];
-        let hopped = false;
-        await waitFor(() => {
-            jump = Math.max(jump, padlock._shackle);
-            swing = Math.max(swing, Math.abs(padlock._swing));
-            hop = Math.max(hop, padlock._hopping()[0]);
-            blend = Math.min(blend, padlock._color);
-            if (!hopped && padlock._hopping()[0] > 0.04) {
-                hopped = true;
-                screenshotIsland('82a-lock-hop', 160);
-            }
-            return ['open', 'hop', 'spread', 'color'].every(name => !padlock._timelines.has(name));
-        }, 3000);
-        check(jump > 1.02 && swing > 0.1, `springing open: the shackle jumps past and swings (${jump.toFixed(2)}, ${swing.toFixed(2)})`);
-        check(hop > 0.04 && blend < 0.5, `the padlock hops for joy, its ring turning green softly (${hop.toFixed(3)}, ${blend.toFixed(2)})`);
         check(padlock._shackle === 1 && padlock._swing === 0 && padlock._hop === 0 && padlock._spread === 1 &&
-            padlock._color === 1, 'and settles open, in its green ring spread out a little');
+            padlock._color === 1 && padlock._wave === 0 && padlock._timelines.size === 0,
+        'at once, open in its full green ring, nothing moving (GNOME stops the shell a moment now)');
         await screenshotIsland('82-lock-success', 160);
 
         // logind's Unlock, as GDM would have it sent.
@@ -3165,11 +3151,10 @@ async function testLockScreen(ext) {
         check(!findActor(Main.layoutManager.screenShieldGroup, a => a.style_class?.includes('atelier')),
             'nothing of Atelier is left in the lock screen');
 
-        // Unlocked as in a session with other extensions: logind's Unlock a
-        // moment after GDM's verification, and the shell stopped for 600 ms
-        // as GNOME turns them all on (one reloading the shell's theme). Here
-        // only after Atelier has handed the padlock over, its moment ticking
-        // already. The padlock plays all of its moves on the frames after.
+        // Unlocked as in a session with other extensions: the shell stopped
+        // for 600 ms as GNOME turns them all on (one reloading the shell's
+        // theme). By then the padlock has been drawn open, still – GNOME
+        // held up for a frame, no more – and after it, it goes back up.
         await Scripting.sleep(2000);
         shield.lock(false);
         await waitFor(() => lock()?.island?.actor, 5000);
@@ -3187,29 +3172,32 @@ async function testLockScreen(ext) {
             shown: Boolean(leaving.actor?.mapped && leaving.actor.opacity > 0),
         }));
         sampler.start();
-        verifiers.at(-1).emit('verification-complete');
-        await Scripting.sleep(50);
         let thawed = 0;
+        let stopped = 0;
         const stopper = Main.sessionMode.connect('updated', () => {
             Main.sessionMode.disconnect(stopper);
+            stopped = GLib.get_monotonic_time() / 1000;
             const until = GLib.get_monotonic_time() + 600000;
             while (GLib.get_monotonic_time() < until) {
                 // the shell stopped
             }
             thawed = GLib.get_monotonic_time() / 1000;
         });
+        // (As GNOME has it: verified, then the lock screen goes.)
+        const asked = GLib.get_monotonic_time() / 1000;
         shield.deactivate(false);
         check(await waitFor(() => !Main.sessionMode.isLocked && thawed > 0, 4000) && allBack(),
             'unlocked with the shell stopped a moment, all of Atelier is back at once');
         await waitFor(() => !leaving.actor, 4000);
         sampler.stop();
+        const before = samples.filter(sample => sample.time > asked && sample.time < stopped);
+        check(before.some(sample => sample.shackle === 1 && sample.spread === 1 && sample.hop === 0),
+            `before the shell stops, a frame with the padlock open and still (${before.length} frames)`);
+        check(stopped - asked < 150, `GNOME held up for a frame, no more (${Math.round(stopped - asked)} ms)`);
         const after = samples.filter(sample => sample.time > thawed);
-        const between = (key, low, high) => after.filter(sample => sample[key] > low && sample[key] < high).length;
         const shownFor = Math.max(0, ...after.filter(sample => sample.shown).map(sample => sample.time)) - thawed;
-        check(between('shackle', 1.02, 2) >= 2 && between('spread', 0.1, 0.9) >= 3 && between('hop', 0.1, 0.9) >= 5,
-            `after the stop the padlock still springs open, its ring spreads, it hops (frames: ${
-                between('shackle', 1.02, 2)}, ${between('spread', 0.1, 0.9)}, ${between('hop', 0.1, 0.9)})`);
-        check(shownFor > 700,`and it stays a moment before it goes back up (${Math.round(shownFor)} ms)`);
+        check(after.every(sample => sample.hop === 0 && sample.shackle === 1) && shownFor > 150 && shownFor < 1500,
+            `after it, still open, a moment, then back up (${Math.round(shownFor)} ms)`);
         check(await waitFor(() => atelier().modules.get('island')?.island?.opacity === 255 && atelier()._afterglow === null,
             2000), 'then the island comes out');
 
