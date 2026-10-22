@@ -341,6 +341,10 @@ export class PasswordField {
                 this._detach();
                 break;
             case 'complete':
+                // (Unlocked: gone at once, not caught half way as GNOME
+                // stops the shell a moment.)
+                this._popup?.destroy();
+                break;
             case 'cancelled':
                 this._close();
                 break;

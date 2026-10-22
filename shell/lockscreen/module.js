@@ -10,6 +10,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
+import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -23,6 +24,9 @@ import {AuthObserver} from './observer.js';
 import {PasswordField} from './password.js';
 
 const SETTLE_TIME = 900; // how long a failure shows, ms
+// Unlocked, GNOME goes on once the padlock is shown open – at most this
+// long after, ms (it is never held up longer, whatever happens).
+const SHOWN_WAIT = 100;
 const GAP = 20; // between a clock that goes up and the popup, or the island; logical pixels
 // How slowly the room made follows GNOME's prompt coming up (which takes
 // 300 ms): about half a second to get there, as the popup spreads out.
@@ -98,6 +102,45 @@ export class LockModule {
         this._syncClock();
         this._observer = new AuthObserver(this._dialog, event => this._dispatch(event));
         this._show();
+        // Unlocked, GNOME turns its other extensions on again and the shell
+        // stops a moment: by then the padlock shows open, still – drawn
+        // once before GNOME goes on (a frame later).
+        this._injections = new InjectionManager();
+        const module = this;
+        this._injections.overrideMethod(this._dialog, 'finish', original => function (onComplete) {
+            module._shownUnlocked(() => original.call(this, onComplete));
+        });
+    }
+
+    // The padlock open, drawn once; then go on – also if anything fails.
+    _shownUnlocked(goOn) {
+        let gone = false;
+        const proceed = () => {
+            if (gone)
+                return;
+            gone = true;
+            global.stage.disconnectObject(proceed);
+            goOn();
+        };
+        try {
+            this._dispatch({type: 'complete'});
+            global.stage.connectObject('after-paint', () => {
+                global.stage.disconnectObject(proceed);
+                GLib.idle_add(GLib.PRIORITY_HIGH, () => {
+                    proceed();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }, proceed);
+            global.stage.queue_redraw();
+        } catch (e) {
+            console.error('Atelier: showing the padlock open failed', e);
+            proceed();
+            return;
+        }
+        GLib.timeout_add(GLib.PRIORITY_HIGH, SHOWN_WAIT, () => {
+            proceed();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     /** @returns {number} GNOME's, from the clock (0) to the prompt (1) */
@@ -197,7 +240,11 @@ export class LockModule {
     }
 
     _show() {
-        this._island?.setLook(look(this.state));
+        // (Unlocked: at once, nothing moving.)
+        if (this.state.phase === Phase.SUCCESS)
+            this._island?.showUnlocked();
+        else
+            this._island?.setLook(look(this.state));
     }
 
     /**
@@ -222,6 +269,8 @@ export class LockModule {
     }
 
     disable() {
+        this._injections?.clear();
+        this._injections = null;
         if (this._settleId)
             GLib.source_remove(this._settleId);
         this._settleId = 0;
