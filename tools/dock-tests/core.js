@@ -159,6 +159,27 @@ export async function shell(t) {
     dock.box.add_child(pill);
     dock._redisplay();
     check(pill.get_parent() === dock.box && dock.box.get_last_child() === pill, 'the pill stays at its end');
+    // While the pill's popups are up (it holds only Dash to Dock open
+    // itself), the dock stays.
+    const extensions = Main.extensionManager;
+    const lookupPill = extensions.lookup;
+    const controller = {_expandedPlayer: null, _playerMenu: null};
+    extensions.lookup = uuid => (uuid === 'dynamic-music-pill@andbal'
+        ? {stateObj: {_controller: controller}} : lookupPill.call(extensions, uuid));
+    try {
+        const forced = dock.hider._forced;
+        const popup = new St.Widget({width: 300, height: 120});
+        controller._expandedPlayer = popup;
+        Main.layoutManager.addChrome(popup);
+        check(dock.hider._forced === forced + 1, 'while the pill\'s popup is up, the dock stays');
+        popup.hide();
+        const down = dock.hider._forced === forced;
+        popup.show();
+        popup.destroy();
+        check(down && dock.hider._forced === forced, 'and may go once it is down, or gone');
+    } finally {
+        extensions.lookup = lookupPill;
+    }
 
     // An app dropped on it is pinned.
     const app = installed.find(a => !AppFavorites.getAppFavorites().isFavorite(a.get_id()));

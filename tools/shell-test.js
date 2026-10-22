@@ -849,6 +849,267 @@ const dbusCall = (connection, ...args) => new Promise((resolve, reject) => {
  * @param {string} extensionPath - the AppIndicator extension's, for its interfaces
  * @returns {object} the app: title(), activations, menuEvents, stop()
  */
+// Grouped notifications in the control centre lie on top of each other:
+// the card on top hides those below it (all but their edges), whatever
+// else styles them – here, as Blur my Shell's popup blur does, every
+// .message-list .message see-through with !important, from a class on the
+// whole UI.
+async function testStackStaysOpaque(ext) {
+    const island = ext.stateObj.modules.get('island').island;
+    const banners = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
+    banners.set_boolean('show-banners', false);
+    const css = Gio.File.new_for_path(`${OUTPUT}/see-through-messages.css`);
+    css.replace_contents(new TextEncoder().encode(`
+.bms-popup-background-dark .message-list .message { background: rgba(255, 255, 255, 0.07) !important; }
+.bms-popup-background-dark .message-list .message:hover,
+.bms-popup-background-dark .message-list .message:focus,
+.bms-popup-background-dark .message-list .message:active { background: rgba(255, 255, 255, 0.12) !important; }
+.bms-popup-background-dark .message:second-in-stack { background: rgba(255, 255, 255, 0.05) !important; }
+.bms-popup-background-dark .message:lower-in-stack { background: rgba(255, 255, 255, 0.02) !important; }
+`), null, false, Gio.FileCreateFlags.NONE, null);
+    const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
+    theme.load_stylesheet(css);
+    Main.uiGroup.add_style_class_name('bms-popup-background-dark');
+    const source = appSource('Events and Tasks Reminders', 'org.gnome.Evolution-alarm-notify', 'appointment-soon-symbolic');
+    try {
+        for (const hour of [10, 12, 14])
+            await notify(source, 'Reminders', `Lunch with the team ${hour}:00`);
+        Main.panel.toggleCalendar();
+        check(await waitFor(() => island.page?.tab === 'notifications', 2000), 'the notifications, three from one app');
+        await Scripting.sleep(800);
+        const messages = [];
+        const collect = actor => actor.get_children().forEach(child => {
+            if (child.mapped && hasClass(child, 'message'))
+                messages.push(child);
+            collect(child);
+        });
+        collect(island.page);
+        const alphas = messages.map(message => message.get_theme_node().get_background_color().alpha);
+        check(messages.length === 3 && messages.some(message => message.has_style_pseudo_class('second-in-stack')) &&
+            alphas.every(alpha => alpha === 255),
+        `grouped, each card opaque under a see-through style, so those below hide (${alphas})`);
+        await screenshotIsland('23b-notifications-stacked', 360);
+    } finally {
+        Main.panel.closeCalendar();
+        Main.uiGroup.remove_style_class_name('bms-popup-background-dark');
+        theme.unload_stylesheet(css);
+        source.destroy();
+        banners.reset('show-banners');
+        await waitFor(() => island.page === null, 2000);
+        await Scripting.sleep(300);
+    }
+}
+
+// Other extensions in Atelier's way, as the user has them: Blur my Shell's
+// !important styles from a class on the whole UI, Tiling Shell's layout
+// editor over the whole screen, Color Picker's button taking a picture of
+// the screen as it is pressed.
+async function testOtherExtensions(ext) {
+    const modules = ext.stateObj.modules;
+    const islandModule = modules.get('island');
+    const island = islandModule.island;
+    const bar = ext.stateObj._settings.get_child('bar');
+    bar.set_string('surface', 'glass');
+    await Scripting.sleep(500);
+
+    // Blur my Shell's rules for entries, quick settings and the calendar,
+    // as it has them: Atelier's own look wins in the island and on its
+    // sheets. (Built as the island and the sheets are, to read the styles.)
+    const css = Gio.File.new_for_path(`${OUTPUT}/other-extension-styles.css`);
+    css.replace_contents(new TextEncoder().encode(`
+.bms-popup-background-dark StEntry { background-color: rgba(255, 255, 255, 0.1) !important; color: rgba(255, 255, 255, 0.7) !important; }
+.bms-popup-background-dark StEntry:focus { color: rgba(255, 255, 255, 0.9) !important; background-color: rgba(255, 255, 255, 0.1) !important; box-shadow: inset 0 0 0 2px rgba(53, 132, 228, 0.5) !important; }
+.bms-popup-background-dark StEntry StLabel.hint-text { color: rgba(255, 255, 255, 0.5) !important; }
+.bms-popup-background-dark .quick-toggle { background-color: rgba(255, 255, 255, 0.1) !important; }
+.bms-popup-background-dark .quick-toggle-has-menu .quick-toggle-menu-button { background-color: rgba(255, 255, 255, 0.14) !important; }
+.bms-popup-background-dark .datemenu-today-button { background-color: transparent !important; }
+.bms-popup-background-dark .calendar { background-color: transparent; }
+.bms-popup-background-dark .calendar .calendar-day { color: rgba(255, 255, 255, 0.9) !important; background-color: transparent !important; }
+.bms-popup-background-dark .calendar .calendar-day.calendar-other-month,
+.bms-popup-background-dark .calendar .calendar-day.calendar-other-month.calendar-weekend { color: rgba(255, 255, 255, 0.5) !important; }
+`), null, false, Gio.FileCreateFlags.NONE, null);
+    const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
+    theme.load_stylesheet(css);
+    Main.uiGroup.add_style_class_name('bms-popup-background-dark');
+    const nest = (...actors) => {
+        actors.reduce((parent, child) => {
+            parent.add_child(child);
+            return child;
+        });
+        Main.uiGroup.add_child(actors[0]);
+        return actors[0];
+    };
+    const toggle = new St.Button({style_class: 'quick-toggle'});
+    const arrow = new St.Button({style_class: 'quick-toggle-menu-button'});
+    const today = new St.Button({style_class: 'datemenu-today-button'});
+    const day = new St.Button({style_class: 'calendar-day calendar-other-month calendar-weekend'});
+    const title = new St.Entry({style_class: 'atelier-note-title-entry', hint_text: 'Title'});
+    const time = new St.Entry({style_class: 'atelier-note-sheet-reminder-time'});
+    const name = new St.Entry({style_class: 'atelier-profile-sheet-entry'});
+    const password = new St.PasswordEntry({style_class: 'atelier-lock-entry'});
+    const trees = [
+        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}), toggle),
+        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}),
+            new St.Widget({style_class: 'quick-toggle-has-menu'}), arrow),
+        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}), today),
+        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}),
+            new St.Widget({style_class: 'calendar'}), day),
+        nest(new St.BoxLayout({style_class: 'atelier-note-sheet'}), title),
+        nest(new St.BoxLayout({style_class: 'atelier-note-sheet'}), time),
+        nest(new St.BoxLayout({style_class: 'atelier-profile-sheet'}), name),
+        nest(new St.BoxLayout({style_class: 'atelier-lock-sheet'}), password),
+    ];
+    [title, name, password].forEach(entry => entry.add_style_pseudo_class('focus'));
+    time.add_style_pseudo_class('error');
+    try {
+        await Scripting.sleep(200);
+        const node = actor => actor.get_theme_node();
+        const rgba = color => [color.red, color.green, color.blue, color.alpha];
+        const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 1);
+        const seen = {
+            toggle: rgba(node(toggle).get_background_color()),
+            arrow: rgba(node(arrow).get_background_color()),
+            today: rgba(node(today).get_background_color()),
+            day: rgba(node(day).get_foreground_color()),
+            title: rgba(node(title).get_background_color()),
+            hint: rgba(node(title.get_hint_actor()).get_foreground_color()),
+            time: rgba(node(time).get_background_color()),
+            name: rgba(node(name).get_foreground_color()),
+            password: [...rgba(node(password).get_background_color()), ...rgba(node(password).get_foreground_color())],
+        };
+        check(near(seen.toggle, [255, 255, 255, 23]) && near(seen.arrow, [255, 255, 255, 23]),
+            `the control centre's tiles, one shade over another extension's styles (${seen.toggle} | ${seen.arrow})`);
+        check(near(seen.today, [255, 255, 255, 18]) && near(seen.day, [255, 255, 255, 89]),
+            `its calendar keeps its cards and dim days (${seen.today} | ${seen.day})`);
+        check(near(seen.title, [0, 0, 0, 0]) && near(seen.hint, [0, 0, 0, 102]) && near(seen.time, [224, 27, 36, 89]),
+            `a note's entries lie on its paper, its hints readable, a wrong time red (${seen.title} | ${seen.hint} | ${seen.time})`);
+        check(near(seen.name, [255, 255, 255, 255]) && !node(name).get_box_shadow() &&
+            near(seen.password, [255, 255, 255, 41, 244, 244, 245, 255]),
+        `a new profile's name and the lock screen's password look as Atelier has them (${seen.name} | ${seen.password})`);
+    } finally {
+        trees.forEach(tree => tree.destroy());
+        Main.uiGroup.remove_style_class_name('bms-popup-background-dark');
+        theme.unload_stylesheet(css);
+    }
+
+    // Opening, the island comes over chrome added after it (Tiling
+    // Shell's layout editor over the whole screen), with its glass under
+    // it: the control centre takes the clicks.
+    const cover = new St.Widget({reactive: true, x: 0, y: 0, width: global.stage.width, height: global.stage.height});
+    Main.layoutManager.addChrome(cover);
+    const module = modules.get('control-centre');
+    try {
+        module.open('controls');
+        check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 2000), 'the control centre opens over a later cover');
+        await Scripting.sleep(500);
+        const order = Main.uiGroup.get_children();
+        const [glass, top, over] = [islandModule._glass, island, cover].map(actor => order.indexOf(actor));
+        const [x, y] = centerOf(island.page);
+        const picked = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y + island.page.height / 4);
+        check(top > over && glass > over && glass < top && island.contains(picked),
+            `over it, its glass right under it, and it takes the clicks (cover ${over}, glass ${glass}, island ${top})`);
+    } finally {
+        module.close();
+        Main.layoutManager.removeChrome(cover);
+        cover.destroy();
+        await waitFor(() => island.page === null, 2000);
+    }
+
+    // Color Picker's button takes a picture of the screen as it is
+    // pressed: the control centre has gone by then, unseen.
+    const picker = new PanelMenu.Button(0.5, 'Color Picker', true);
+    picker.add_child(new St.Icon({icon_name: 'color-select-symbolic', style_class: 'system-status-icon'}));
+    let pressed = null;
+    picker.connect('button-press-event', () => {
+        pressed = {opacity: island.opacity, glass: islandModule._glass?.visible ?? false};
+        return Clutter.EVENT_STOP;
+    });
+    Main.panel.addToStatusArea('color-picker@tuberry', picker, 1, 'right');
+    try {
+        const tile = () => module.tray?.tiles.find(t => t.indicator === picker);
+        await waitFor(() => tile(), 2000);
+        module.open('extensions');
+        check(await waitFor(() => island.page?.tab === 'extensions' && tile()?.mapped, 2000), 'Color Picker\'s tile in the control centre');
+        await Scripting.sleep(500);
+        await clickAt(...centerOf(picker));
+        check(pressed?.opacity === 0 && !pressed.glass,
+            `pressed, its button finds the control centre gone, unseen (${JSON.stringify(pressed)})`);
+        check(await waitFor(() => island.page === null && island.opacity === 255, 2000),
+            'and the island is back at rest a moment later');
+    } finally {
+        picker.destroy();
+        module.close();
+        bar.reset('surface');
+        await Scripting.sleep(500);
+    }
+}
+
+// A setting of another extension kept out of Atelier's way: only once
+// asked for, what was there kept and put back, a change the user makes
+// themselves theirs, and one notification of a collision. (Blur my Shell
+// stands in with its lock screen key, in the test's data.)
+async function testOtherExtensionSettings(ext) {
+    const module = ext.stateObj.modules.get('other-extensions');
+    if (!check(module !== null, 'the other extensions module running'))
+        return;
+    const settings = ext.stateObj._settings;
+    const lib = await import(`file://${ext.path}/lib/otherExtensions.js`);
+    const rule = lib.RULES.find(r => r.id === 'blur-my-shell-lock-screen');
+    const dir = `${GLib.get_user_data_dir()}/gnome-shell/extensions/${rule.uuid}`;
+    GLib.mkdir_with_parents(`${dir}/schemas`, 0o755);
+    GLib.file_set_contents(`${dir}/metadata.json`, '{"uuid": "blur-my-shell@aunetx", "name": "Blur my Shell"}');
+    GLib.file_set_contents(`${dir}/schemas/org.gnome.shell.extensions.blur-my-shell.gschema.xml`, `<schemalist>
+  <schema id="${rule.schema}" path="/org/gnome/shell/extensions/blur-my-shell/lockscreen/">
+    <key type="b" name="blur"><default>true</default><summary>Blur</summary></key>
+  </schema>
+</schemalist>`);
+    GLib.spawn_command_line_sync(`glib-compile-schemas ${dir}/schemas`);
+    const blur = lib.settingsFor(rule);
+    if (!check(blur?.get_boolean('blur') === true, 'Blur my Shell\'s settings found in its folder'))
+        return;
+    const kept = () => settings.get_strv('other-extensions-kept');
+    const state = () => lib.parseState(settings.get_string('other-extensions-state'))[rule.id];
+    const banners = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
+    banners.set_boolean('show-banners', false);
+    const lookup = Main.extensionManager.lookup;
+    try {
+        check(blur.get_boolean('blur') === true && !state(), 'not asked for, it is left as it is');
+        settings.set_strv('other-extensions-kept', [rule.id]);
+        check(await waitFor(() => !blur.get_boolean('blur') && state()?.previous === true, 2000),
+            `asked for, it is kept out of the way, what was there kept (${JSON.stringify(state())})`);
+        // Changed back by the user in Blur my Shell: theirs.
+        blur.set_boolean('blur', true);
+        check(await waitFor(() => !kept().includes(rule.id) && state()?.overridden, 2000) && blur.get_boolean('blur'),
+            'changed back by the user, it is theirs: no longer kept, marked so');
+        settings.set_strv('other-extensions-kept', [rule.id]);
+        check(await waitFor(() => !blur.get_boolean('blur'), 2000), 'asked for again, kept again');
+        settings.set_strv('other-extensions-kept', []);
+        check(await waitFor(() => blur.get_boolean('blur') && !state(), 2000), 'no longer asked for, what was there comes back');
+
+        // Told of once, while Blur my Shell is on and in the way.
+        settings.set_strv('other-extensions-noticed', []);
+        Main.extensionManager.lookup = uuid => (uuid === rule.uuid ? {uuid, state: ExtensionState.ACTIVE}
+            : lookup.call(Main.extensionManager, uuid));
+        const told = () => Main.messageTray.getSources().filter(source => source.title === 'Atelier')
+            .flatMap(source => source.notifications)
+            .filter(notification => notification.title.startsWith('Blur my Shell'));
+        module._notice();
+        const [notice] = told();
+        check(told().length === 1 && settings.get_strv('other-extensions-noticed').includes(rule.id) &&
+            notice.actions.length === 1, `a collision told of, with a way to the settings (${notice?.title})`);
+        module._notice();
+        check(told().length === 1, 'and only once');
+    } finally {
+        Main.extensionManager.lookup = lookup;
+        Main.messageTray.getSources().filter(source => source.title === 'Atelier').forEach(source => source.destroy());
+        settings.reset('other-extensions-kept');
+        settings.reset('other-extensions-state');
+        settings.reset('other-extensions-noticed');
+        banners.reset('show-banners');
+        await Scripting.sleep(300);
+    }
+}
+
 async function startTrayApp(extensionPath) {
     // (Its files hold the bare interface, as the extension wraps them.)
     const xml = name => `<node>${new TextDecoder().decode(
@@ -3660,6 +3921,9 @@ export async function run() {
         await part(testIsland, ext, atelier);
         await part(testNotifications, ext, atelier);
         await part(testControlCentre, ext);
+        await part(testStackStaysOpaque, ext);
+        await part(testOtherExtensions, ext);
+        await part(testOtherExtensionSettings, ext);
         await part(testTrayApp, ext);
         await part(testOverviewBar);
         await part(testBarStyles, ext);

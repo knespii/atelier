@@ -119,7 +119,46 @@ function check(condition, message) {
         failures++;
 }
 
+// Stand-ins for Blur my Shell and Tiling Shell, installed for the user in
+// the test's data dir (their folders with their settings schemas), for the
+// Other Extensions section to list.
+function installStandIns() {
+    const standIns = [
+        ['blur-my-shell@aunetx', 'Blur my Shell', 'org.gnome.shell.extensions.blur-my-shell.lockscreen',
+            '/org/gnome/shell/extensions/blur-my-shell/lockscreen/', '<key type="b" name="blur"><default>true</default></key>'],
+        ['tilingshell@ferrarodomenico.com', 'Tiling Shell', 'org.gnome.shell.extensions.tilingshell',
+            '/org/gnome/shell/extensions/tilingshell/', '<key type="b" name="enable-snap-assist"><default>true</default></key>'],
+    ];
+    for (const [uuid, name, id, path, key] of standIns) {
+        const dir = GLib.build_filenamev([GLib.get_user_data_dir(), 'gnome-shell', 'extensions', uuid]);
+        GLib.mkdir_with_parents(`${dir}/schemas`, 0o755);
+        GLib.file_set_contents(`${dir}/metadata.json`, JSON.stringify({uuid, name}));
+        GLib.file_set_contents(`${dir}/schemas/${id}.gschema.xml`,
+            `<schemalist><schema id="${id}" path="${path}">${key}</schema></schemalist>`);
+        GLib.spawn_command_line_sync(`glib-compile-schemas ${dir}/schemas`);
+    }
+}
+
+async function checkOtherExtensions(window) {
+    const page = await section(window, 'other-extensions');
+    const settings = page._settings;
+    const blur = page._rows.get('blur-my-shell-lock-screen')?.row;
+    check(page._rows.size === 2 && blur && !blur.active && blur.subtitle.includes('Now: on'),
+        `Other Extensions lists the installed ones, each setting as it is now (${blur?.subtitle})`);
+    blur.active = true;
+    check(settings.get_strv('other-extensions-kept').includes('blur-my-shell-lock-screen'),
+        'switched on, Atelier is asked to keep it');
+    blur.active = false;
+    check(!settings.get_strv('other-extensions-kept').includes('blur-my-shell-lock-screen'), 'switched off, no longer');
+    findDescendant(page, w => w instanceof Gtk.Button && w.label === 'Keep the Recommended')?.emit('clicked');
+    const kept = settings.get_strv('other-extensions-kept');
+    check(kept.includes('blur-my-shell-lock-screen') && !kept.includes('tiling-shell-snap-assistant') && blur.active,
+        `Keep the Recommended: those that break something, not the snap assistant (${kept})`);
+    settings.reset('other-extensions-kept');
+}
+
 async function runSelftest(window) {
+    await checkOtherExtensions(window);
     const page = await section(window, 'profiles');
     const store = page._store;
     const before = store.getAll().length;
@@ -320,7 +359,7 @@ async function runSelftest(window) {
 
 async function takeScreenshots(window) {
     await sleep(2000);
-    for (const id of ['island', 'notifications', 'top-bar', 'lock-screen', 'desktop', 'dock', 'profiles', 'wallpapers', 'appearance', 'system']) {
+    for (const id of ['island', 'notifications', 'top-bar', 'lock-screen', 'desktop', 'dock', 'profiles', 'wallpapers', 'appearance', 'other-extensions', 'system']) {
         await section(window, id);
         await sleep(id === 'appearance' ? 1200 : 600);
         await render(window, id);
@@ -344,6 +383,7 @@ async function takeScreenshots(window) {
 
 async function automate(window, app) {
     try {
+        installStandIns();
         if (screenshotDir)
             await takeScreenshots(window);
         if (selftest)

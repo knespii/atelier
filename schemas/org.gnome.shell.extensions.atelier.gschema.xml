@@ -144,6 +144,22 @@
       <default>true</default>
       <summary>Show the button in the top bar</summary>
     </key>
+    <key name="other-extensions-kept" type="as">
+      <default>[]</default>
+      <summary>Settings of other extensions Atelier keeps out of its way, by rule (lib/otherExtensions.js)</summary>
+    </key>
+    <key name="other-extensions-state" type="s">
+      <default>''</default>
+      <summary>What each of those settings was before Atelier changed it, as JSON (written by the shell)</summary>
+    </key>
+    <key name="other-extensions-noticed" type="as">
+      <default>[]</default>
+      <summary>Rules Atelier has told of once, by id</summary>
+    </key>
+    <key name="prefs-section" type="s">
+      <default>''</default>
+      <summary>The section the preferences open on, once (asked for by the shell)</summary>
+    </key>
     <key name="atelier-open-switcher" type="as">
       <default><![CDATA[['<Super>w']]]></default>
       <summary>Open the profile switcher</summary>

@@ -13,6 +13,7 @@ import {DockPage} from './prefs/dockPage.js';
 import {IslandPage} from './prefs/islandPage.js';
 import {LockScreenPage} from './prefs/lockScreenPage.js';
 import {NotificationsPage} from './prefs/notificationsPage.js';
+import {OtherExtensionsPage} from './prefs/otherExtensionsPage.js';
 import {ProfilesPage} from './prefs/profilesPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
 import {WallpapersPage} from './prefs/wallpapersPage.js';
@@ -76,6 +77,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
                 create: () => new AppearancePage(settings),
             },
             {
+                id: 'other-extensions', title: 'Other Extensions', icon: 'application-x-addon-symbolic',
+                group: 'THE SESSION',
+                keywords: ['blur my shell', 'tiling shell', 'just perfection', 'music pill', 'conflict', 'compatibility'],
+                create: () => new OtherExtensionsPage(settings),
+            },
+            {
                 id: 'system', title: 'System', icon: 'preferences-system-symbolic', group: 'THE SESSION',
                 keywords: ['shortcut', 'keyboard', 'transition', 'animation', 'reset', 'top bar', 'about'],
                 create: () => new SettingsPage(settings),
@@ -87,6 +94,12 @@ export default class AtelierPreferences extends ExtensionPreferences {
         window.set_content(view);
         window.add_toast = toast => view.toastOverlay.add_toast(toast);
         window.atelierView = view;
+        // (Opened by the shell on a section: on that one, once.)
+        const section = settings.get_string('prefs-section');
+        if (section) {
+            view.showSection(section);
+            settings.set_string('prefs-section', '');
+        }
 
         window.connect('close-request', () => {
             view.disconnectPages();

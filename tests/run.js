@@ -14,6 +14,7 @@ import * as dockTheme from './dockTheme.test.js';
 import * as dockVisibility from './dockVisibility.test.js';
 import * as gtkCss from './gtkCss.test.js';
 import * as liquid from './liquid.test.js';
+import * as otherExtensions from './otherExtensions.test.js';
 import * as lockState from './lockState.test.js';
 import * as dockMagnify from './dockMagnify.test.js';
 import * as windowLiquid from './windowLiquid.test.js';
@@ -30,7 +31,7 @@ import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
 import * as widgets from './widgets.test.js';
 
-const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, dockMagnify, windowLiquid,
+const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime};
 
 let total = 0;

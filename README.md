@@ -46,6 +46,14 @@ screen and a **dock**.
   accent; *More in Settings…* opens the rest.
 - **Settings** live in the preferences: open *Extension Manager* (or
   *Extensions*) and click the gear next to Atelier.
+- **Other extensions**: a few get in Atelier's way – Blur my Shell's lock
+  screen blur, Tiling Shell's snap assistant, Just Perfection's banners,
+  pop-ups or bar at the bottom, Dynamic Music Pill in the top bar. Under
+  *Other Extensions* in the settings, Atelier can keep that one setting of
+  each out of its way: only once you switch it on, putting it back when you
+  switch it off, and leaving it to you if you change it there yourself. It
+  never turns an extension on or off. When one is in the way, a
+  notification says so, once.
 
 When Atelier starts for the first time it saves your current setup as a
 profile called **Original**, so there is always a way back.
