@@ -59,6 +59,13 @@ const CSS = `
 .atelier-swatch.neutral { background: alpha(currentColor, 0.1); color: inherit; }
 .atelier-swatch:checked { outline: 2px solid @accent_color; outline-offset: 2px; }
 .atelier-swatch image { -gtk-icon-size: 14px; }
+.atelier-photo-tile { padding: 3px; border-radius: 13px; }
+.atelier-photo-tile:checked { outline: 3px solid @accent_color; outline-offset: -3px; background: none; }
+.atelier-photo-badge {
+  min-width: 12px; padding: 1px 6px; border-radius: 999px;
+  background: @accent_bg_color; color: @accent_fg_color;
+  font-size: 9pt; font-weight: 800;
+}
 ${swatchCss}
 `;
 

@@ -1990,6 +1990,263 @@ async function testDesktop(ext) {
     await Scripting.sleep(1200);
 }
 
+// A window of an app of its own (a GTK 4 script in gjs), over the desktop;
+// closeTestWindows() closes them all.
+const testWindows = new Map(); // title → Gio.Subprocess
+
+async function openTestWindow(title) {
+    const code = `
+        imports.gi.versions.Gtk = '4.0';
+        const {Gio, Gtk} = imports.gi;
+        const app = new Gtk.Application({application_id: 'org.atelier.PhotoTest',
+            flags: Gio.ApplicationFlags.NON_UNIQUE});
+        app.connect('activate', () => new Gtk.ApplicationWindow({
+            application: app, title: '${title}', default_width: 600, default_height: 400,
+        }).present());
+        app.run([]);`;
+    testWindows.set(title, Gio.Subprocess.new(['gjs', '-c', code], Gio.SubprocessFlags.NONE));
+    const find = () => global.get_window_actors().map(actor => actor.meta_window)
+        .find(window => window?.get_title() === title) ?? null;
+    await waitFor(() => find()?.get_compositor_private()?.mapped, 15000);
+    await Scripting.sleep(300);
+    return find();
+}
+
+async function closeTestWindows() {
+    testWindows.forEach(process => process.force_exit());
+    const titles = [...testWindows.keys()];
+    testWindows.clear();
+    await waitFor(() => !global.get_window_actors().some(actor => titles.includes(actor.meta_window?.get_title())), 5000);
+}
+
+// A window moved over a rectangle of the stage (and a bit round it).
+async function moveTestWindow(window, [x, y, width, height]) {
+    window.move_resize_frame(false, x, y, width, height);
+    await waitFor(() => {
+        const frame = window.get_frame_rect();
+        return frame.x === x && frame.y === y && frame.width === width;
+    }, 3000);
+    await Scripting.sleep(300);
+}
+
+// The photos: Atelier's own gallery of them, and each photo widget's
+// choice, shown one after another (the next spreading over the one
+// before) while it can be seen – not under a window, nor in the overview.
+async function testPhotoGallery(ext) {
+    const desktop = ext.stateObj.modules.get('desktop');
+    const islandModule = ext.stateObj.modules.get('island');
+    const gallery = desktop?.gallery;
+    if (!check(Boolean(gallery), 'the photos\' gallery is there'))
+        return;
+    const atelierSettings = ext.stateObj._settings;
+    const settings = atelierSettings.get_child('desktop');
+    await pointerTo(global.stage.width / 2, global.stage.height / 2);
+    if (Main.overview.visible) {
+        await waitFor(() => !Main.overview.animationInProgress, 4000);
+        Main.overview.hide();
+        await waitFor(() => !Main.overview.visible, 4000);
+    }
+    await waitFor(() => !desktop._flowing, 3000);
+    const portal = desktop.portal;
+    let widget = null;
+    try {
+        // Pictures added: copies of Atelier's own, which stay when the
+        // pictures themselves go, and a small copy of each for the grids.
+        const originals = `${OUTPUT}/photo-originals`;
+        GLib.mkdir_with_parents(originals, 0o755);
+        const picture = (name, width, height, color) => {
+            const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
+            pixbuf.fill(color);
+            const path = `${originals}/${name}`;
+            pixbuf.savev(path, 'jpeg', [], []);
+            return path;
+        };
+        const colors = [0xd02020ff, 0x20b040ff, 0x2040d0ff];
+        const paths = [picture('Red Barn.jpg', 2400, 1600, colors[0]), picture('green.jpg', 800, 1200, colors[1]),
+            picture('blue.jpg', 1000, 1000, colors[2])];
+        const ids = await gallery.add(paths);
+        paths.forEach(path => GLib.unlink(path));
+        check(ids.length === 3 && gallery.ids().join() === ids.join() &&
+            ids.every(id => GLib.file_test(gallery.path(id), GLib.FileTest.EXISTS)) &&
+            gallery.dir === `${GLib.get_user_data_dir()}/atelier/photos` && ids[0].endsWith('-red-barn.jpg'),
+        `pictures added to the gallery are copied into it, and stay when they go (${ids.join(', ')})`);
+        const thumbnails = await Promise.all(ids.map(id => gallery.thumbnail(id)));
+        const sizes = thumbnails.map(path => {
+            const pixbuf = GdkPixbuf.Pixbuf.new_from_file(path);
+            return `${pixbuf.get_width()}×${pixbuf.get_height()}`;
+        });
+        check(sizes.every(size => size === '192×192') && thumbnails.every(path => path.includes('/atelier/pictures/')),
+            `with a small copy of each for the grids (${sizes.join(', ')})`);
+
+        // A photo widget with its own choice, each for a second (the
+        // choices offered are longer).
+        widget = desktop.addWidget('photo', {photos: ids, interval: 1});
+        const shown = () => /url\("([^"]+)"\)/.exec(widget?._picture?.style ?? '')?.[1] ?? null;
+        check(await waitFor(() => shown()?.includes('/atelier/pictures/'), 4000) && widget._current === ids[0],
+            `a photo widget shows the first of its photos, from a copy (${shown()})`);
+        const copy = shown() ? GdkPixbuf.Pixbuf.new_from_file(Gio.File.new_for_uri(shown()).get_path()) : null;
+        check(copy?.get_width() === widget.width && copy?.get_height() === widget.height,
+            `as big as its card (${copy?.get_width()}×${copy?.get_height()} for ${widget.width}×${widget.height})`);
+        const [wx, wy] = widget.get_transformed_position().map(Math.round);
+        const [ww, wh] = [Math.round(widget.width), Math.round(widget.height)];
+        const shot = name => screenshotArea(name, wx - 8, wy - 8, ww + 16, wh + 16);
+        // In the middle of the card, the photo it shows; at its corner,
+        // still the one before as the next spreads out of the middle.
+        const colorAt = async (name, fx, fy) => {
+            await screenshotArea(name, wx, wy, ww, wh);
+            return averageColor(name, Math.round(ww * fx) - 4, Math.round(wh * fy) - 4, 8, 8);
+        };
+        const rgb = color => [color >>> 24, (color >>> 16) & 0xff, (color >>> 8) & 0xff];
+        const near = (a, color) => colorDistance(a, rgb(color)) < 40;
+        await shot('80-photo-widget');
+
+        // Its turn: the next spreads over it, out of a drop in its middle.
+        // (Slowed down, to look at it on its way.)
+        const motion = St.Settings.get();
+        let spreading, middle, corner;
+        motion.slow_down_factor = 4;
+        try {
+            spreading = await waitFor(() => widget._spreading?.timeline?.progress > 0.06, 3000);
+            middle = spreading ? await colorAt('80b-photo-spreading', 0.5, 0.5) : null;
+            corner = spreading ? averageColor('80b-photo-spreading', 4, Math.round(wh / 2) - 4, 8, 8) : null;
+        } finally {
+            motion.slow_down_factor = 1;
+        }
+        check(spreading && widget._incoming.visible && widget._mask.enabled,
+            'a second later, the next photo spreads over it, through liquid');
+        check(middle && near(middle, colors[1]) && near(corner, colors[0]),
+            `out of its middle: the next one there, the one before still at its edge (${middle}, ${corner})`);
+        check(await waitFor(() => widget._current === ids[1] && !widget._spreading, 6000) && !widget._incoming.visible &&
+            near(await colorAt('80c-photo-next', 0.1, 0.5), colors[1]), 'and then shows all of the next one');
+        check(await waitFor(() => widget._current === ids[2], 4000) &&
+            await waitFor(() => widget._current === ids[0], 4000), 'one after another, the first after the last');
+
+        // Under a window, it doesn't take turns: its time doesn't run.
+        const window = await openTestWindow('Atelier photo test');
+        await moveTestWindow(window, [wx - 40, wy - 40, ww + 80, wh + 80]);
+        await waitFor(() => !widget._spreading, 3000);
+        const covered = widget._current;
+        await Scripting.sleep(2500);
+        check(widget._current === covered && !widget._turnId && !widget._spreading && desktop.sight.covered(widget),
+            `under a window, it doesn't take turns (${widget._current === covered}, timer ${widget._turnId})`);
+        // Over half of it, the rest still shows.
+        await moveTestWindow(window, [wx - 40, wy - 40, Math.round(ww / 2) + 40, wh + 80]);
+        check(await waitFor(() => widget._current !== covered, 4000),
+            'with the window over half of it, it does: the rest shows');
+        // Moved away, on it goes.
+        await moveTestWindow(window, [wx + ww + 200, wy, 600, 400]);
+        let before = widget._current;
+        check(await waitFor(() => widget._current !== before, 4000), 'with the window out of the way, on it goes');
+        // Minimized over it: on it goes too.
+        await moveTestWindow(window, [wx - 40, wy - 40, ww + 80, wh + 80]);
+        await waitFor(() => !widget._turnId && !widget._spreading, 3000);
+        window.minimize();
+        before = widget._current;
+        check(await waitFor(() => widget._current !== before, 4000), 'and with the window minimized');
+        await closeTestWindows();
+
+        // Nor in the overview (which has the desktop without its widgets).
+        await waitFor(() => !widget._spreading, 3000);
+        Main.overview.show();
+        await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+        before = widget._current;
+        await Scripting.sleep(2500);
+        check(widget._current === before && !widget._turnId, 'in the overview, it doesn\'t take turns');
+        Main.overview.hide();
+        await waitFor(() => !Main.overview.visible, 4000);
+        check(await waitFor(() => widget._current !== before, 5000), 'back on the desktop, on it goes');
+
+        // Its menu (right-click it) has Choose Photos…, which drips a sheet
+        // from the island with the gallery: those it shows numbered.
+        await waitFor(() => !widget._spreading, 3000);
+        desktop.portal = {available: () => Promise.resolve(false), choosePictures: () => Promise.resolve([])};
+        await clickAt(...centerOf(widget), Clutter.BUTTON_SECONDARY);
+        await Scripting.sleep(500);
+        const item = widget._menu?._getMenuItems().find(i => i.label?.text === 'Choose Photos…');
+        check(widget._menu?.isOpen && Boolean(item), 'its menu has Choose Photos…');
+        if (item)
+            await clickAt(...centerOf(item));
+        check(await waitFor(() => islandModule._sheet?.opened, 3000) && islandModule._sheet.form.tiles,
+            'which drips a sheet from the island');
+        let form = islandModule._sheet?.form;
+        const badges = () => form.tiles.map(tile => (tile.checked ? tile._badge.text : '-')).join(' ');
+        check(form?.tiles.length === 3 && badges() === '1 2 3' && form.tiles.map(t => t._id).join() === ids.join(),
+            `with the gallery's photos, those it shows numbered in their order (${form && badges()})`);
+        check(await waitFor(() => !form.addTile.reactive && form._addText.text === 'No file chooser', 2000),
+            'without the portal, the tile that adds photos says so');
+        await waitFor(() => form.tiles.every(tile => tile.style?.includes('background-image')), 2000);
+        await Scripting.sleep(300);
+        await screenshot('81-photo-sheet');
+        // A click takes one out; another puts it back, at the end.
+        await clickAt(...centerOf(form.tiles[1]));
+        const entry = () => JSON.parse(settings.get_string('widgets')).find(e => e.id === widget.entry.id);
+        check(await waitFor(() => entry()?.photos?.join() === [ids[0], ids[2]].join(), 1000) && badges() === '1 - 2' &&
+            desktop.widgets.get(widget.entry.id).entry.photos.length === 2,
+        `a click takes a photo out of its choice, kept with the widget (${badges()})`);
+        await clickAt(...centerOf(form.tiles[1]));
+        check(await waitFor(() => entry()?.photos?.join() === [ids[0], ids[2], ids[1]].join(), 1000) && badges() === '1 3 2',
+            `another puts it back, at the end (${badges()})`);
+        const thirty = form._intervals.find(segment => segment._seconds === 30);
+        await clickAt(...centerOf(thirty));
+        check(await waitFor(() => entry()?.interval === 30, 1000) && thirty.has_style_pseudo_class('checked'),
+            'how long each shows, too');
+        await screenshot('81b-photo-sheet-picked');
+
+        // With the file chooser: the sheet goes back into the island while
+        // it is open, and comes again with the pictures added, and picked.
+        await clickAt(...centerOf(form._done));
+        check(await waitFor(() => islandModule._sheet === null, 3000), 'Done takes the sheet back into the island');
+        const added = picture('yellow.jpg', 640, 480, 0xe0d020ff);
+        let asked = 0;
+        desktop.portal = {
+            available: () => Promise.resolve(true),
+            choosePictures: async () => {
+                asked++;
+                return islandModule._sheet ? [] : [added];
+            },
+        };
+        desktop.choosePhotos(widget.entry.id);
+        await waitFor(() => islandModule._sheet?.opened, 3000);
+        form = islandModule._sheet.form;
+        check(await waitFor(() => form.addTile.reactive && form._addText.text === 'Add', 2000),
+            'with the portal, a tile to add photos');
+        await clickAt(...centerOf(form.addTile));
+        check(await waitFor(() => asked === 1 && islandModule._sheet?.opened && islandModule._sheet.form !== form, 6000),
+            'which asks the file chooser with the sheet out of the way, and drips it again');
+        form = islandModule._sheet?.form;
+        const newId = gallery.ids().find(id => !ids.includes(id));
+        check(form?.tiles.length === 4 && Boolean(newId) && entry()?.photos?.at(-1) === newId && badges() === '1 3 2 4',
+            `with the picture added to the gallery, and picked (${form && badges()})`);
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => islandModule._sheet === null, 3000), 'Esc takes it back');
+
+        // A photo taken out of the gallery: out of every choice, with its copies.
+        widget = desktop.widgets.get(widget.entry.id);
+        const firstCopy = thumbnails[0];
+        await gallery.remove(ids[0], atelierSettings);
+        // (The layout changed from outside: the desktop takes it once the shell is calm.)
+        await waitFor(() => !desktop.widgets.get(widget.entry.id)?.entry.photos.includes(ids[0]), 4000);
+        widget = desktop.widgets.get(widget.entry.id);
+        check(!entry().photos.includes(ids[0]) && !widget.entry.photos.includes(ids[0]) && !gallery.has(ids[0]) &&
+            !GLib.file_test(gallery.path(ids[0]), GLib.FileTest.EXISTS) && !GLib.file_test(firstCopy, GLib.FileTest.EXISTS),
+        'a photo taken out of the gallery goes from every widget\'s choice, with its copies');
+        const profile = ext.stateObj.modules.get('profiles')._store.get(ext.stateObj.modules.get('profiles')._store.activeId);
+        check(!JSON.stringify(profile?.widgets ?? {}).includes(ids[0]), 'and from the profile\'s widgets');
+        await shot('82-photo-widget-after');
+    } finally {
+        desktop.portal = portal;
+        await closeTestWindows();
+        if (islandModule._sheet)
+            await islandModule._sheet.close();
+        if (widget)
+            desktop.removeWidget(widget.entry.id);
+        for (const id of gallery.ids())
+            await gallery.remove(id, atelierSettings);
+        settings.reset('widgets');
+        await Scripting.sleep(1200);
+    }
+}
+
 async function testNotes(ext) {
     const notes = ext.stateObj.modules.get('notes');
     if (!check(notes !== null, 'notes module running'))
@@ -3918,6 +4175,7 @@ export async function run() {
         await part(testFullscreen, ext);
         await part(testClaude, ext);
         await part(testDesktop, ext);
+        await part(testPhotoGallery, ext);
         await part(testNotes, ext);
         await part(testDock, ext);
         await part(testSwitcherAndReveal, atelier);

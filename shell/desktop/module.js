@@ -17,7 +17,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAnimation.js';
 
+import {PhotoGallery} from '../../lib/gallery.js';
 import {clamp01, gather, pour, spread} from '../../lib/liquid.js';
+import {addToSelection} from '../../lib/photos.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
     CLOCK_FACES, KINDS, cardGlass, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
@@ -31,6 +33,9 @@ import {CalendarWidget} from './kinds/calendar.js';
 import {ClaudeWidget} from './kinds/claude.js';
 import {GithubWidget} from './kinds/github.js';
 import {PhotoWidget} from './kinds/photo.js';
+import {PhotoSheet} from './photoSheet.js';
+import {FileChooserPortal} from './portal.js';
+import {Sight} from './sight.js';
 import {SlackWidget} from './kinds/slack.js';
 import {ClockWidget, DateWidget} from './kinds/time.js';
 import {WeatherWidget} from './kinds/weather.js';
@@ -149,12 +154,20 @@ export class DesktopModule {
     enable() {
         this._desktopSettings = this._settings.get_child('desktop');
         this.sources = {github: new GithubSource(this._desktopSettings), tasks: new TasksSource(), slack: new SlackSource()};
+        // The photos' gallery, and whether the desktop can be seen (photo
+        // widgets take turns only then).
+        this.gallery = new PhotoGallery();
+        this.sight = new Sight();
+        this.portal = new FileChooserPortal();
         this._context = {
             settings: this._desktopSettings,
             sources: this.sources,
+            gallery: this.gallery,
+            sight: this.sight,
             style: () => this._desktopSettings.get_string('style'),
             claude: () => this._modules.get('claude'),
             openSettings: () => this._extension.openPreferences(),
+            choosePhotos: id => this.choosePhotos(id),
         };
 
         // Above the wallpaper, under the windows: inside the wallpapers'
@@ -229,6 +242,9 @@ export class DesktopModule {
     }
 
     disable() {
+        // (Its sheet goes back into the island, which takes it away.)
+        this._photoSheet?.close();
+        this._photoSheet = null;
         this._cancelCalm();
         this._finishFlow();
         this._thaw(false);
@@ -256,6 +272,11 @@ export class DesktopModule {
         for (const source of Object.values(this.sources ?? {}))
             source.destroy();
         this.sources = null;
+        this.sight?.destroy();
+        this.sight = null;
+        this.gallery?.destroy();
+        this.gallery = null;
+        this.portal = null;
     }
 
     /** Put the layer where it lives: on the wallpaper, under the windows. */
@@ -1053,6 +1074,8 @@ export class DesktopModule {
             menu.addAction('Edit Widgets', () => this.edit());
             if (KINDS[widget.entry.kind].sizes.length > 1)
                 menu.addAction('Change Size', () => this.resizeWidget(widget.entry.id));
+            if (widget.entry.kind === 'photo')
+                menu.addAction('Choose Photos…', () => this.choosePhotos(widget.entry.id));
             if (widget.entry.kind === 'clock') {
                 const faces = new PopupMenu.PopupSubMenuMenuItem('Clock Face');
                 widget._faces = CLOCK_FACES.map(([id, name]) => {
@@ -1075,5 +1098,67 @@ export class DesktopModule {
                 ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NO_DOT);
         }
         widget._menu.open(BoxPointer.PopupAnimation.FULL);
+    }
+
+    /**
+     * Pick a photo widget's photos from the gallery (and how long each
+     * shows), on a sheet that drips from the island; what is picked is the
+     * widget's at once. (No island to drip from: Atelier's settings.)
+     *
+     * @param {string} id - of the widget
+     * @returns {LiquidSheet|null} the sheet
+     */
+    choosePhotos(id) {
+        const widget = this._widgets.get(id);
+        if (!widget || widget.entry.kind !== 'photo' || this._photoSheet)
+            return null;
+        this._closeMenus();
+        // (A page in the island goes back into it as the drop forms.)
+        this._modules.get('control-centre')?.close();
+        const form = new PhotoSheet(this.gallery, widget.entry, this.portal.available());
+        const sheet = this._modules.get('island')?.openSheet(form) ?? null;
+        if (!sheet) {
+            form.destroy();
+            this._extension.openPreferences();
+            return null;
+        }
+        this._photoSheet = sheet;
+        sheet.connect('destroy', () => {
+            if (this._photoSheet === sheet)
+                this._photoSheet = null;
+        });
+        const close = () => {
+            if (this._photoSheet === sheet)
+                this._photoSheet = null;
+            return sheet.close();
+        };
+        form.connect('photos-changed', () => this.setWidgetOption(id, 'photos', form.photos));
+        form.connect('interval-changed', () => this.setWidgetOption(id, 'interval', form.interval));
+        form.connect('done', () => close());
+        sheet.connect('dismissed', () => close());
+        form.connect('more', () => {
+            close();
+            this._extension.openPreferences();
+        });
+        // The file chooser is a window of its own, which the sheet would be
+        // in the way of: it goes back into the island meanwhile, and comes
+        // again with the pictures added (and picked).
+        form.connect('add', async () => {
+            await close();
+            let added = [];
+            try {
+                const paths = await this.portal.choosePictures('Add Photos');
+                added = paths.length > 0 && this.gallery ? await this.gallery.add(paths) : [];
+            } catch (e) {
+                Main.notifyError('Atelier', `Could not add the photos: ${e.message}`);
+            }
+            const entry = this._widgets.get(id)?.entry;
+            if (!entry)
+                return;
+            if (added.length > 0)
+                this.setWidgetOption(id, 'photos', addToSelection(entry.photos ?? [], added));
+            this.choosePhotos(id);
+        });
+        return sheet;
     }
 }

@@ -22,6 +22,7 @@ import * as migrate from './migrate.test.js';
 import * as notes from './notes.test.js';
 import * as notifications from './notifications.test.js';
 import * as palette from './palette.test.js';
+import * as photos from './photos.test.js';
 import * as terminal from './terminal.test.js';
 import * as profiles from './profiles.test.js';
 import * as profileTransfer from './profileTransfer.test.js';
@@ -32,7 +33,7 @@ import * as thumbnails from './thumbnails.test.js';
 import * as widgets from './widgets.test.js';
 
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
-    dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime};
+    dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, photos};
 
 let total = 0;
 let failures = 0;
