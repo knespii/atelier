@@ -26,7 +26,7 @@ const TILE = 96;
  *
  * @param {PhotoGallery} gallery
  * @param {string} id
- * @returns {Gtk.Picture}
+ * @returns {Gtk.Widget}
  */
 function photoPicture(gallery, id) {
     const picture = new Gtk.Picture({
@@ -40,7 +40,8 @@ function photoPicture(gallery, id) {
     gallery.thumbnail(id)
         .then(path => picture.set_filename(path))
         .catch(e => console.warn(`Atelier: no thumbnail of ${id}: ${e.message}`));
-    return picture;
+    // (Gtk.Picture asks for the picture's own size; the clamp keeps it a tile.)
+    return new Adw.Clamp({maximum_size: TILE, tightening_threshold: TILE, child: picture});
 }
 
 /**
