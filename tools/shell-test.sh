@@ -166,11 +166,12 @@ status=0
 # A private runtime dir keeps the helper services this session starts away
 # from the sockets of the real session (keyring, gvfs, document portal...).
 # gvfs mounts nothing in it, so that it can be removed.
+# (The main suite takes some 8 minutes here: room for a slower machine.)
 env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u SSH_AUTH_SOCK \
     WAYLAND_DISPLAY=atelier-test-0 XDG_RUNTIME_DIR="$RUNTIME" GVFS_DISABLE_FUSE=1 PATH="$ROOT/bin:$PATH" \
     XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data" XDG_CACHE_HOME="$CACHE" \
     CLAUDE_CONFIG_DIR="$CLAUDE" GSETTINGS_BACKEND=keyfile ATELIER_TEST_OUTPUT="$ROOT" ATELIER_TEST_SUITE="$SUITE" \
-    dbus-run-session -- timeout --kill-after=5 600 \
+    dbus-run-session -- timeout --kill-after=5 900 \
     gnome-shell --headless $MONITORS $NO_X11 $MODE \
         --wayland-display=atelier-test-0 --force-animations \
         --automation-script="$REPO/tools/shell-test.js" \
