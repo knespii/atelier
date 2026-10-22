@@ -177,6 +177,18 @@ Blur my Shell blurs the bar, turn that off.)
   on the corner gives the next one); drag more out of the gallery at the
   bottom – a click on its clock spills the clock's faces, to drag one out.
   Switching workspaces, they slide along with the wallpaper.
+- **Photos**: one gallery for all the photo widgets – Atelier keeps copies of
+  its own of the pictures added, so they stay when the pictures are moved.
+  Each photo widget shows those picked for it (up to 30) one after another,
+  each for 5 s to a minute, the next spreading over the one before; each
+  profile keeps its own choice. *Choose Photos…* in the widget's menu drips
+  a sheet from the island with the gallery to pick from (in the order they
+  take turns), and its **+** adds pictures through the system's file
+  chooser; Settings → Desktop adds and removes photos too, and picks them for
+  each photo widget. A widget takes turns only while it can be seen – not
+  under windows, in the overview, on a blank or dimmed screen – so it costs
+  nothing otherwise. Without photos picked, it shows a picture (or one of a
+  folder's, a different one every hour) chosen in the settings.
 - **Notes**: square papers in seven colors with a title, text and checkboxes
   (a line starting with `- [ ]`: <kbd>Enter</kbd> on one starts the next line
   with one too, *Checkbox* puts one on every line selected), pinned to the
@@ -337,7 +349,8 @@ gnome-extensions enable atelier@local
 | Profiles and settings | GSettings `org.gnome.shell.extensions.atelier` |
 | Copies of the wallpapers | `~/.local/share/atelier/wallpapers/` |
 | Notes | `~/.local/share/atelier/notes.json` |
-| Thumbnails, smaller copies of the photo widget's pictures, generated shell styles | `~/.cache/atelier/` |
+| Photos (the gallery's copies of them) | `~/.local/share/atelier/photos/` |
+| Thumbnails, smaller copies of the photos (for the grids, and as big as the widgets show them), generated shell styles | `~/.cache/atelier/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |
 
@@ -352,7 +365,7 @@ desktop is still showing them.
 | --- | --- |
 | `make check` | Validates the schemas and the syntax of every module |
 | `make test` | Unit tests for the shared modules (`tests/`) |
-| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell and checks the island, notifications, the control centre, the bar, widgets, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving and moving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
+| `make shell-test` | Runs the extension in a throwaway headless GNOME Shell and checks the island, notifications, the control centre, the bar, widgets, photos, notes, the dock, switching, the transition, the palette, GTK styles, terminal colors, saving and moving profiles and the Wallpapers tab; then, on two monitors (the second one to the right of the main one, then to its left), that the notes stay on the main one; screenshots land in `tests/output/shell` and `tests/output/shell-two-monitors` |
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make showcase` | Takes the pictures in `docs/screenshots` in a headless GNOME Shell on a 4K monitor at scale 2, with a few profiles of GNOME's own wallpapers (the settings pictures come from `make prefs-screenshots`); `ATELIER_SHOWCASE_FRAMES=<folder> tools/showcase.sh` also records a few moments in slow motion, frame by frame, for a video |
@@ -393,8 +406,8 @@ make uninstall
 
 Switch off *Color GTK apps* and *Color GNOME Terminal* first (or use Reset
 Appearance) to remove Atelier's GTK styles and terminal profile. The copied
-wallpapers and the notes stay in `~/.local/share/atelier` until you delete
-that folder.
+wallpapers, the photos and the notes stay in `~/.local/share/atelier` until
+you delete that folder.
 
 ## License
 

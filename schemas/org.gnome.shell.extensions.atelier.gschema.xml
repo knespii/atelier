@@ -333,7 +333,7 @@
     <key name="widgets" type="s">
       <default>'[{"id":"clock","kind":"clock","size":"square","x":0,"y":0},{"id":"date","kind":"date","size":"square","x":2,"y":0},{"id":"calendar","kind":"calendar","size":"large","x":0,"y":2}]'</default>
       <summary>The widgets and where they are</summary>
-      <description>JSON array of {id, kind, size, x, y}: kind is clock, date, calendar, weather, github, claude or photo; size square, card, large or wide; x and y are cells of the grid over the work area of the primary monitor.</description>
+      <description>JSON array of {id, kind, size, x, y}: kind is clock, date, calendar, weather, github, claude or photo; size square, card, large or wide; x and y are cells of the grid over the work area of the primary monitor. A photo widget may have photos (names of photos in the gallery, ~/.local/share/atelier/photos, in the order they take turns) and interval (seconds each shows).</description>
     </key>
     <key name="style" enum="org.gnome.shell.extensions.atelier.WidgetStyle">
       <default>'modern'</default>
@@ -358,8 +358,8 @@
     </key>
     <key name="photo" type="s">
       <default>''</default>
-      <summary>Picture of the photo widget</summary>
-      <description>A picture, or a folder whose pictures take turns every hour.</description>
+      <summary>Picture of the photo widgets without photos picked</summary>
+      <description>A picture, or a folder whose pictures take turns every hour, for photo widgets with none of the gallery's photos picked.</description>
     </key>
   </schema>
 
