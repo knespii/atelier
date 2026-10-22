@@ -10,6 +10,8 @@
 // the Makefile sets, because the Extensions app code imports Shew.
 
 import Adw from 'gi://Adw?version=1';
+import GdkPixbuf from 'gi://GdkPixbuf';
+import Graphene from 'gi://Graphene';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
@@ -300,6 +302,68 @@ async function runSelftest(window) {
     await sleep(50);
     check(desktop._photo.subtitle === '/tmp/pictures' && desktop._clearPhoto.visible, 'the photo shows where it is from');
     ['style', 'github-user', 'photo'].forEach(key => desktopSettings.reset(key));
+    // The photos: the gallery, and the photo widgets of the profile in use.
+    const photos = desktop._photos;
+    check(Boolean(findDescendant(photos, w => w instanceof Adw.ButtonRow && w.title === 'Add Photos…')) &&
+        Boolean(findDescendant(desktop, w => w instanceof Adw.PreferencesGroup && w.title === 'Without Photos Picked')),
+    'the Desktop page has the photos: Add Photos…, and the picture for widgets without any picked');
+    check(photos.tiles.length === 0 && photos._empty.visible, 'the gallery has no photos at first, and says so');
+    const originals = GLib.build_filenamev([GLib.get_user_cache_dir(), 'photo-originals']);
+    GLib.mkdir_with_parents(originals, 0o755);
+    const pictures = ['a', 'b', 'c'].map((name, i) => {
+        const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 1200, 800);
+        pixbuf.fill([0xd02020ff, 0x20b040ff, 0x2040d0ff][i]);
+        const path = GLib.build_filenamev([originals, `${name}.jpg`]);
+        pixbuf.savev(path, 'jpeg', [], []);
+        return path;
+    });
+    const ids = await photos.gallery.add(pictures);
+    await sleep(300);
+    check(photos.tiles.map(tile => tile.photoId).join() === ids.join() && !photos._empty.visible,
+        `photos added show in the gallery's grid (${photos.tiles.length})`);
+    check(desktop._photoWidgets._none.visible && desktop._photoWidgets.rows.length === 0,
+        'without photo widgets, it says how to add one');
+    desktopSettings.set_string('widgets', JSON.stringify([
+        {id: 'photo', kind: 'photo', size: 'square', x: 0, y: 0, fine: true},
+        {id: 'photo-2', kind: 'photo', size: 'large', x: 4, y: 0, photos: [ids[2]], interval: 30, fine: true},
+    ]));
+    await sleep(200);
+    const widgetRows = desktop._photoWidgets.rows;
+    check(widgetRows.length === 2 && widgetRows[0].subtitle.startsWith('No photos picked') &&
+        widgetRows[1].subtitle === '1 photo, each for 30 s', `a row for each photo widget (${widgetRows.map(r => r.subtitle)})`);
+    const chooser = desktop._photoWidgets.choose('photo');
+    await sleep(500);
+    check(chooser.tiles.length === 3 && chooser.tiles.every(tile => !tile.active) && chooser.intervals.active_name === '10',
+        'Choose… opens the gallery to pick from, nothing picked yet');
+    chooser.tiles[1].active = true;
+    chooser.tiles[0].active = true;
+    chooser.intervals.active_name = '5';
+    await sleep(200);
+    const photoEntry = id => JSON.parse(desktopSettings.get_string('widgets')).find(e => e.id === id);
+    check(photoEntry('photo').photos.join() === [ids[1], ids[0]].join() && photoEntry('photo').interval === 5 &&
+        chooser.tiles[1].badge.label === '1' && chooser.tiles[0].badge.label === '2',
+    'picked there, the widget\'s photos (numbered in the order picked) and how long each shows are kept');
+    await render(window, 'desktop-photos-chooser');
+    chooser.close();
+    await sleep(300);
+    // (The photos on the page, for a picture of it.)
+    const scrolled = findDescendant(desktop, w => w instanceof Gtk.ScrolledWindow);
+    const [, top] = photos.compute_point(scrolled.get_child(), new Graphene.Point({x: 0, y: 0}));
+    scrolled.vadjustment.value = top.y - 24;
+    await sleep(400);
+    await render(window, 'desktop-photos');
+    photos.tiles.find(tile => tile.photoId === ids[1]).removeButton.emit('clicked');
+    await sleep(500);
+    check(photos.tiles.map(tile => tile.photoId).join() === [ids[0], ids[2]].join() &&
+        !GLib.file_test(photos.gallery.path(ids[1]), GLib.FileTest.EXISTS),
+    'a photo can be taken out of the gallery');
+    check(photoEntry('photo').photos.join() === ids[0] && desktop._photoWidgets.rows.length === 2 &&
+        desktop._photoWidgets.rows[0].subtitle === '1 photo, each for 5 s',
+    'and out of the widgets\' choice');
+    for (const id of photos.gallery.ids())
+        await photos.gallery.remove(id, store.settings);
+    desktopSettings.reset('widgets');
+
     const notesSettings = store.settings.get_child('notes');
     desktop._notes.active = false;
     check(!notesSettings.get_boolean('enabled') && !desktop._edgesOnDesktop.sensitive,

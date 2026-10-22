@@ -1,5 +1,6 @@
 // "Desktop" section: the widgets on the desktop – their look, and what the
-// GitHub and photo widgets show. Where they are is edited on the desktop
+// GitHub and photo widgets show (the photos' gallery, and each photo
+// widget's choice of it). Where they are is edited on the desktop
 // itself (right-click it, Edit Widgets). While Ubuntu's Desktop Icons runs,
 // covering them, it says so.
 
@@ -14,6 +15,7 @@ import Gtk from 'gi://Gtk';
 import {validUser} from '../lib/github.js';
 import {ProfileStore, keepWidgets} from '../lib/profiles.js';
 import {OptionCards} from './optionCards.js';
+import {PhotoWidgetsGroup, PhotosGroup} from './photos.js';
 import {ShortcutRow} from './shortcutRow.js';
 
 Gio._promisify(Gtk.FileDialog.prototype, 'open', 'open_finish');
@@ -96,8 +98,8 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         const widgets = new Adw.PreferencesGroup({
             title: 'Widgets',
             description: 'Right-click the desktop and choose Edit Widgets to add, move, resize or remove them. ' +
-                'They lie on the wallpaper, under the windows. Each profile keeps its own widgets and look; ' +
-                'the GitHub user and the photo are the same for all.',
+                'They lie on the wallpaper, under the windows. Each profile keeps its own widgets and look ' +
+                '(and the photos each photo widget shows); the GitHub user and the photos\' gallery are the same for all.',
         });
         this.add(widgets);
         // Ubuntu's Desktop Icons lays a desktop of its own over the
@@ -243,7 +245,16 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
             this._bound.push(row, 'sensitive');
         }
 
-        const photo = new Adw.PreferencesGroup({title: 'Photo'});
+        this._photos = new PhotosGroup(settings);
+        this.add(this._photos);
+        this._photoWidgets = new PhotoWidgetsGroup(settings, this._profiles, this._photos.gallery);
+        this.add(this._photoWidgets);
+        // As photo widgets showed before they had photos picked, and still
+        // do without.
+        const photo = new Adw.PreferencesGroup({
+            title: 'Without Photos Picked',
+            description: 'What a photo widget shows while none of the gallery\'s photos are picked for it.',
+        });
         this.add(photo);
         this._photo = new Adw.ActionRow({title: 'Picture'});
         const choose = (folder, label) => {
@@ -343,6 +354,8 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
             Gio.DBus.session.signal_unsubscribe(this._desktopIconsId);
         this._desktopIconsId = 0;
         this._notesShortcut.disconnectSettings();
+        this._photoWidgets.disconnectSettings();
+        this._photos.disconnectSettings();
         for (let i = 0; i < this._bound.length; i += 2)
             Gio.Settings.unbind(this._bound[i], this._bound[i + 1]);
         this._bound = [];
