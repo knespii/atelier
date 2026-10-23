@@ -14,12 +14,15 @@ import * as dockIndicators from './dockIndicators.test.js';
 import * as dockLocations from './dockLocations.test.js';
 import * as dockTheme from './dockTheme.test.js';
 import * as dockVisibility from './dockVisibility.test.js';
+import * as glyphOutlines from './glyphOutlines.test.js';
+import * as glyphStretch from './glyphStretch.test.js';
 import * as gtkCss from './gtkCss.test.js';
 import * as liquid from './liquid.test.js';
 import * as otherExtensions from './otherExtensions.test.js';
 import * as lockColor from './lockColor.test.js';
 import * as lockLook from './lockLook.test.js';
 import * as lockState from './lockState.test.js';
+import * as lockType from './lockType.test.js';
 import * as dockMagnify from './dockMagnify.test.js';
 import * as windowLiquid from './windowLiquid.test.js';
 import * as migrate from './migrate.test.js';
@@ -38,7 +41,7 @@ import * as widgets from './widgets.test.js';
 
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
-    apca, lockColor};
+    apca, lockColor, lockType, glyphStretch, glyphOutlines};
 
 let total = 0;
 let failures = 0;
