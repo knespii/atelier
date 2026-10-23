@@ -34,11 +34,14 @@ const fontMap = PangoCairo.FontMap.get_default();
 for (const font of FONTS.filter(f => f.axes))
     fontMap.add_font_file?.(font.path);
 
-// The old way: Pango's path of the text, scaled as a whole.
-function drawAffine(cr, font, variations, text, size, scaleX, stretch, x, baseline) {
+// The old way: Pango's path of the text, scaled as a whole. (The weight
+// asked for too: where the static Inter is installed, Pango finds that one
+// at this size, which takes no notice of variations.)
+function drawAffine(cr, font, weight, variations, text, size, scaleX, stretch, x, baseline) {
     const layout = PangoCairo.create_layout(cr);
     const desc = Pango.FontDescription.from_string(font.family);
     desc.set_absolute_size(size * Pango.SCALE);
+    desc.set_weight(weight);
     desc.set_variations(variations);
     layout.set_font_description(desc);
     const attrs = new Pango.AttrList();
@@ -95,7 +98,7 @@ function sheet(font, weight, textKey) {
         cr.rectangle(0, baseline, 2 * width + GAP, 1);
         cr.fill();
         cr.setSourceRGB(0.08, 0.08, 0.1);
-        drawAffine(cr, font, glyphFont.variations, text, size, scaleX, stretch, GAP, baseline);
+        drawAffine(cr, font, weight, glyphFont.variations, text, size, scaleX, stretch, GAP, baseline);
         drawStretched(cr, glyphFont, text, size, scaleX, stretch, width + GAP + GAP, baseline);
         y += rowHeights[i];
     });
