@@ -150,4 +150,12 @@ export function testClockColors() {
     assertEqual(clockColors(two, [0, 0, 0.5, 1], {need}), typeColors(regionPixels(two, [0, 0, 0.5, 1]), {need}));
     assert(clockColors(two, [0, 0, 0.5, 1], {need}).every(c => !c.dark), 'on the dark half, light');
     assert(clockColors(two, [0.5, 0, 0.5, 1], {need}).every(c => c.dark), 'on the pale one, dark');
+    // The clock on the dark half, a red on the other: tinted only when the
+    // whole wallpaper's colours are wanted, and checked where the clock is.
+    const red = sample('#101418', RED);
+    const isRed = c => hueDistance(hexToOklch(c.color)[2], hexToOklch(RED)[2]) < 25 && hexToOklch(c.color)[1] > 0.05;
+    assert(!clockColors(red, [0, 0, 0.5, 1], {need}).some(isRed), 'the part\'s own colours: no red');
+    const whole = clockColors(red, [0, 0, 0.5, 1], {need, from: [0, 0, 1, 1]});
+    assert(whole.some(isRed) && whole.every(c => -contrastLc(c.color, '#101418') >= need),
+        `the whole wallpaper's: a red too, reading on the dark half (${whole.map(c => c.color)})`);
 }
