@@ -348,7 +348,7 @@ export function testProfilesKeepTheirLockScreen() {
 export function testDescribeLockscreen() {
     const said = lockscreen => describeProfile(normalizeProfile({id: 'x', lockscreen}))
         .find(p => p.label === 'Lock screen')?.value;
-    assertEqual(said({widgets: []}), 'GNOME\'s clock');
+    assertEqual(said({widgets: []}), undefined, 'GNOME\'s lock screen as it is: nothing to say');
     assertEqual(said({widgets: [], gnomeClock: false}), 'No clock');
     assertEqual(said({widgets: [GLASS_CLOCK, {id: 'battery', kind: 'battery', x: 13, y: 14, fine: true}]}),
         'Glass clock, Inter');
