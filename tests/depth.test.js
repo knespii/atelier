@@ -3,10 +3,11 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MODELS, SUBJECT_MODELS, chosenModel, chosenSubjectModel, coverage,
-    cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, lockWallpaper, modelPath, modelsTag, pictureState,
-    placement, pngText, subjectModelPath, subjectTop,
+    CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
+    chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, legibility,
+    lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath, subjectTop,
 } from '../lib/depth.js';
+import {STRETCH} from '../lib/lockLook.js';
 import {fakeDepthModel, fakeSubjectModel} from './fakeOnnx.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
@@ -204,6 +205,77 @@ export function testCoverage() {
     const share = coverage(big, {x: 0, y: 0, width: 1000, height: 1000}, {x: 0, y: 0, width: 1000, height: 1000});
     assert(near(share, 0.3) && share < MAX_COVER, `a third of it, still under the limit (${share})`);
     assert(MAX_COVER > 0.2 && MAX_COVER < 0.6, 'the limit lets a clock be partly covered, not hidden');
+}
+
+// Four digits of a clock, 100 × 200 each, side by side from (100, 100), on
+// a monitor of 800 × 400 the cutout covers one to one.
+const DIGITS = [100, 220, 340, 460].map(x => ({x, y: 100, width: 100, height: 200}));
+const MONITOR = {x: 0, y: 0, width: 800, height: 400};
+
+// A cutout of 800 × 400 with the subject where inside(x, y) says.
+function cutoutWhere(inside) {
+    const [width, height] = [800, 400];
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++)
+            pixels[(y * width + x) * 4 + 3] = inside(x, y) ? 255 : 0;
+    }
+    return {pixels, width, height, rowstride: width * 4};
+}
+
+export function testLegibilityGlassFeet() {
+    // A hill over the digits' feet: the bottom quarter of them, as the
+    // glass face has it on purpose.
+    const hill = cutoutWhere((x, y) => y >= 250);
+    const glass = legibility(hill, MONITOR, {glyphs: DIGITS, overlap: STRETCH.overlap, glass: true});
+    assert(glass.stays && glass.worst === 0 && glass.glyph === -1 && Math.abs(glass.whole - 0.25) < 0.01,
+        `the glass digits' feet behind the hill: on, nothing that should show covered (${JSON.stringify(glass)})`);
+    const plain = legibility(hill, MONITOR, {glyphs: DIGITS});
+    assert(plain.stays && Math.abs(plain.worst - 0.25) < 0.01,
+        `another face: a quarter of each digit gone still reads (${JSON.stringify(plain)})`);
+    // A little higher: a third of each.
+    const higher = cutoutWhere((x, y) => y >= 233);
+    const covered = legibility(higher, MONITOR, {glyphs: DIGITS});
+    assert(!covered.stays && covered.worst > MAX_GLYPH_COVER && covered.whole < MAX_COVER,
+        `a third of every digit gone: off, though the clock as a whole is under MAX_COVER (${JSON.stringify(covered)})`);
+    const tall = legibility(higher, MONITOR, {glyphs: DIGITS, overlap: STRETCH.overlap, glass: true});
+    assert(tall.stays && tall.worst < 0.15,
+        `the glass digits, standing behind it a quarter on purpose, keep enough (${JSON.stringify(tall)})`);
+}
+
+export function testLegibilityOneDigit() {
+    // A head rising into the second digit only, over 40 % of it: the clock
+    // as a whole is a tenth covered – on by the box alone, off digit by digit.
+    const head = cutoutWhere((x, y) => x >= 220 && x < 320 && y >= 180);
+    const box = {x: 100, y: 100, width: 460, height: 200};
+    assert(coverage(head, MONITOR, box) < MAX_COVER, 'little of the clock\'s box');
+    const verdict = legibility(head, MONITOR, {glyphs: DIGITS, box});
+    assert(!verdict.stays && verdict.glyph === 1 && Math.abs(verdict.worst - 0.6) < 0.02,
+        `one digit losing more than MAX_GLYPH_COVER is enough (${JSON.stringify(verdict)})`);
+    // A narrow subject between the digits: none of them loses anything.
+    const pole = cutoutWhere(x => x >= 202 && x < 218);
+    assertEqual(legibility(pole, MONITOR, {glyphs: DIGITS, box}).stays, true, 'between the digits: on');
+    const none = legibility(cutoutWhere(() => false), MONITOR, {glyphs: DIGITS, box});
+    assertEqual([none.stays, none.worst, none.glyph, none.whole], [true, 0, -1, 0], 'nothing in front: on');
+}
+
+export function testLegibilityWhole() {
+    // The subject over the clock's box all round its digits (none of them
+    // touched): the box over MAX_COVER is enough.
+    const around = cutoutWhere((x, y) => y < 100 || y >= 300);
+    const box = {x: 100, y: 0, width: 460, height: 400};
+    const verdict = legibility(around, MONITOR, {glyphs: DIGITS, box});
+    assert(!verdict.stays && verdict.worst === 0 && verdict.whole > MAX_COVER,
+        `the clock as a whole covered too much: off (${JSON.stringify(verdict)})`);
+    // The glass face may have more of it covered.
+    const half = cutoutWhere((x, y) => y >= 200);
+    const glass = legibility(half, MONITOR, {glyphs: DIGITS, overlap: 0.5, glass: true});
+    assert(glass.stays && glass.whole > MAX_COVER && glass.whole <= MAX_COVER_GLASS,
+        `glass digits half behind it on purpose: still on (${JSON.stringify(glass)})`);
+    // Digits off the picture count as uncovered; none at all, nothing covered.
+    const off = legibility(cutoutWhere(() => true), {x: 1000, y: 0, width: 800, height: 400}, {glyphs: DIGITS});
+    assertEqual([off.stays, off.worst], [true, 0], 'the cutout elsewhere: on');
+    assertEqual(legibility(around, MONITOR, {glyphs: []}).stays, true, 'no digits, no box: nothing to keep legible');
 }
 
 export function testSubjectTop() {
