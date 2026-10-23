@@ -76,6 +76,17 @@ async function waitFor(predicate, timeout = 5000) {
     return true;
 }
 
+// Whether so many frames are drawn within a while (a timeline asks for them).
+async function framesDrawn(count, timeout = 2000) {
+    let drawn = 0;
+    const timeline = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+    timeline.connect('new-frame', () => drawn++);
+    timeline.start();
+    const enough = await waitFor(() => drawn >= count, timeout);
+    timeline.stop();
+    return enough;
+}
+
 async function screenshot(name) {
     const file = Gio.File.new_for_path(`${OUTPUT}/${name}.png`);
     const stream = file.replace(null, false, Gio.FileCreateFlags.NONE, null);
@@ -828,6 +839,21 @@ async function testControlCentre(ext) {
     await Scripting.sleep(400);
     check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles') &&
         !Main.panel._rightBox.contains(button), 'and on again');
+    // Laid out in the control centre (anew: GNOME's menu had it meanwhile),
+    // GNOME's grid doesn't tell of its moves: GNOME's menu follows each with
+    // an update in the next frame, which reads the grid and the menu, and
+    // when the shell quit before that frame came, it ran on them gone
+    // (tools/shell-test.sh checks how the shell quits).
+    const gnomeGrid = quickSettings.menu._grid;
+    const heard = {allocation: 0, x: 0, y: 0};
+    const heardIds = Object.keys(heard).map(name => gnomeGrid.connect(`notify::${name}`, () => heard[name]++));
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000) && await framesDrawn(3) &&
+        heard.allocation > 0 && heard.x + heard.y === 0,
+    `laid out in the control centre, GNOME's grid doesn't tell of its moves (${JSON.stringify(heard)})`);
+    heardIds.forEach(id => gnomeGrid.disconnect(id));
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => island.page === null && !island.busy, 1000);
 
     button.destroy();
     await Scripting.sleep(100);
