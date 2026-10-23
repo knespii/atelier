@@ -1,122 +1,97 @@
 // The lock screen's clock: the desktop's (shell/desktop/kinds/time.js), its
 // stacked minutes as bright as its hours, and a face of its own – glass:
-// the time in one line of tall digits, a light tint the wallpaper shows
-// through, under a small date line, as an iPhone's. They stretch to the room
-// there is: from under the date line down to where the wallpaper's subject
-// starts under them (which passes in front of their feet, see board.js), or
-// as tall as the clock's box lets them; a change of it eases. Drawn anew
-// for a minute, a size, a tone or a font: nothing moves while it rests.
+// the time in one line of tall digits of Liquid Glass (liquidGlass.js), the
+// wallpaper showing through, under a small date line, as an iPhone's. The
+// digits are the font's own outlines (lib/glyphOutlines.js), in the
+// typeface, weight and width the settings give and as heavy as reading
+// them takes (lib/lockLook.js legibilityPlan()), and they grow tall as a
+// tall typeface draws them: their stems and the sides of their bowls
+// longer, their bars, the turns of their curves and their dots as they are
+// (lib/glyphStretch.js). They stretch to the room there is: from under the
+// date line down to where the wallpaper's subject starts under them (which
+// passes in front of their feet, see board.js), or as tall as the clock's
+// box lets them; a change of it eases. As the minute turns, the figures
+// that change – only they – go: the old one lifting as it fades, the new
+// one rising into its place (lib/glassClock.js), drawn on a layer of their
+// own while they move. Nothing is drawn while it rests.
+//
+// (St draws a drawing area the moment it is told to – queue_repaint() – and
+// whenever it is laid out: the face draws its layers as it is laid out,
+// once a frame however often it is asked, and nothing it does while one is
+// being drawn may lay it out, or St would throw away what it draws into.)
 
-import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {
+    CHANGE, FIGURES, FILL, SAMPLE, boxRound, changeAt, changedFigures, fitSize, glassInstance, heavier, learn,
+    placeLine, setLine, traceLine, unlearnt,
+} from '../../lib/glassClock.js';
+import {glassFor, tintShown} from '../../lib/glassBackdrop.js';
 import {glassDigits} from '../../lib/lockLook.js';
-import {splitClock} from '../../lib/widgets.js';
+import {labelFont, styleFor, typefaceFor} from '../../lib/lockType.js';
+import {hexToRgb, luminance} from '../../lib/palette.js';
+import {LOCK_KINDS, parseLayout, splitClock} from '../../lib/widgets.js';
+import {holdLabelFont} from '../core/fonts.js';
 import {ClockWidget} from '../desktop/kinds/time.js';
 import {label} from '../desktop/widget.js';
+import {LiquidGlass, prepareLockBackdrop} from './liquidGlass.js';
 
-const NARROW = 0.9; // the digits' width, of what the font has: a little condensed
-const FILL = 0.98; // of the clock's width the digits take, at most
-const SAMPLE = '00:00'; // the digits fit the width as this would: the size stays as the minutes go
 const DATE_GAP = 2; // between the date line and the digits, logical pixels
 const SETTLE_TIME = 450; // to a new height, ms
-// The glass: a light tint, more of it at the top, a bright rim, and a soft
-// shadow round it (outside it only).
-const TINT = [0.66, 0.44];
-const RIM = [0.6, 0.14];
-const SHADOW = [[16, 0.035], [9, 0.05], [4, 0.07]];
+// Type this light (WCAG luminance) or darker is dark type, as
+// lib/lockLook.js chosenTone() tells it: dark glass.
+const DARK = 0.18;
+// What the glass draws round the digits besides them – its rim and the
+// light on its edges – without a shadow, logical pixels.
+const RIM_REACH = 6;
 
 const scaleFactor = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
 
-// The digits, drawn in glass: one path of them, stretched as the face says.
-const Digits = GObject.registerClass(
+// The family of the shell's own font: the default typeface's.
+const shellFamily = () => St.ThemeContext.get_for_stage(global.stage).get_font()?.get_family() ?? null;
+
+// A planned shadow as St takes it: x y blur colour.
+const shadowStyle = ({color, alpha, blur, y}) =>
+    `0 ${y}px ${blur}px rgba(${hexToRgb(color).join(', ')}, ${Number(alpha.toFixed(2))})`;
+
+// Whether a type or a plan is the one there is (told again, as the lock
+// screen's type is worked out anew: nothing to do).
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** The typeface the glass digits are drawn in until they are told another: Inter, as its own. */
+function defaultType() {
+    const typeface = typefaceFor('inter');
+    return {typeface, style: styleFor(typeface, 'glass')};
+}
+
+// A layer of the digits: all of them, or – over them, while the minute
+// turns – the figures that change. The face draws it.
+const Layer = GObject.registerClass(
 class AtelierGlassDigits extends St.DrawingArea {
-    _init(face) {
-        super._init({style_class: 'atelier-widget-glass-digits'});
+    _init(face, params) {
+        super._init(params);
         this._face = face;
-        this.text = '';
+        /** How many times it has been drawn. */
+        this.repaints = 0;
     }
 
     vfunc_repaint() {
+        this.repaints++;
         const cr = this.get_context();
-        const face = this._face;
-        const metrics = face.metrics;
-        if (!metrics || !this.text) {
+        try {
+            this._face.paintLayer(this, cr);
+        } finally {
             cr.$dispose();
-            return;
         }
-        const [width, height] = this.get_surface_size();
-        const layout = PangoCairo.create_layout(cr);
-        face.setUpLayout(layout, this.text);
-        const [ink] = layout.get_pixel_extents();
-        const {stretch, level} = face;
-        const color = this.get_theme_node().get_foreground_color();
-        const [r, g, b] = [color.red, color.green, color.blue].map(v => v / 255);
-        const dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4;
-        const scale = scaleFactor();
-
-        // (Round joins: stretched, the digits' corners are sharp.)
-        cr.setLineJoin(Cairo.LineJoin.ROUND);
-        cr.save();
-        cr.translate(width / 2 - (ink.x + ink.width / 2) * NARROW, level - metrics.inkY * stretch);
-        cr.scale(NARROW, stretch);
-        PangoCairo.layout_path(cr, layout);
-        cr.restore();
-        const path = cr.copyPath();
-        const [top, bottom] = [level, level + metrics.inkHeight * stretch];
-
-        // The shadow, outside the digits only (the glass shows the
-        // wallpaper): drawn on its own, the digits then taken out of it –
-        // filled, so that where a font's outlines overlap inside a digit
-        // nothing shows.
-        cr.pushGroup();
-        cr.appendPath(path);
-        for (const [lineWidth, alpha] of SHADOW) {
-            if (dark)
-                cr.setSourceRGBA(1, 1, 1, alpha * 1.4);
-            else
-                cr.setSourceRGBA(0, 0, 0, alpha);
-            cr.setLineWidth(lineWidth * scale);
-            cr.strokePreserve();
-        }
-        cr.setOperator(Cairo.Operator.DEST_OUT);
-        cr.setSourceRGBA(0, 0, 0, 1);
-        cr.fill();
-        cr.popGroupToSource();
-        cr.paint();
-
-        cr.newPath();
-        cr.appendPath(path);
-        const tint = new Cairo.LinearGradient(0, top, 0, bottom);
-        tint.addColorStopRGBA(0, r, g, b, TINT[0] * color.alpha / 255);
-        tint.addColorStopRGBA(1, r, g, b, TINT[1] * color.alpha / 255);
-        cr.setSource(tint);
-        cr.fill();
-
-        // The rim: light along the digits' upper edges, as glass catches
-        // it – the digits, less themselves a little lower (again filled,
-        // not stroked: no lines where outlines overlap).
-        const rim = new Cairo.LinearGradient(0, top, 0, bottom);
-        rim.addColorStopRGBA(0, 1, 1, 1, RIM[0] * (dark ? 0.5 : 1));
-        rim.addColorStopRGBA(1, 1, 1, 1, RIM[1] * (dark ? 0.5 : 1));
-        cr.pushGroup();
-        cr.appendPath(path);
-        cr.setSource(rim);
-        cr.fill();
-        cr.setOperator(Cairo.Operator.DEST_OUT);
-        cr.translate(0, 1.6 * scale);
-        cr.appendPath(path);
-        cr.setSourceRGBA(0, 0, 0, 1);
-        cr.fill();
-        cr.identityMatrix();
-        cr.popGroupToSource();
-        cr.paint();
-        cr.$dispose();
     }
 });
 
@@ -125,27 +100,62 @@ const GlassFace = GObject.registerClass({
         // How much taller than they are the digits stand, and where their top is.
         'stretch': GObject.ParamSpec.double('stretch', null, null, GObject.ParamFlags.READWRITE, 0, 100, 1),
         'level': GObject.ParamSpec.double('level', null, null, GObject.ParamFlags.READWRITE, -1e6, 1e6, 0),
+        // How far the figures that change have gone (1 at rest).
+        'change': GObject.ParamSpec.double('change', null, null, GObject.ParamFlags.READWRITE, 0, 1, 1),
     },
 }, class AtelierGlassFace extends St.Widget {
-    _init() {
+    /**
+     * @param {string} size - the clock's size (lib/widgets.js SIZES): the
+     *   optical size its digits are drawn at
+     * @param {object} [kept] - what it was told before, by the clock it is
+     *   the face of (it keeps it for the face built anew for another size):
+     *   {type, plan, backdrop}
+     */
+    _init(size = 'large', kept = {}) {
         super._init({style_class: 'atelier-widget-glass', x_expand: true, y_expand: true});
+        this._sizeName = size;
+        this._kept = kept;
+        this._digits = new Layer(this, {style_class: 'atelier-widget-glass-digits'});
+        this._moving = new Layer(this, {visible: false});
         this._date = label('atelier-widget-glass-date');
-        this._digits = new Digits(this);
         this.add_child(this._digits);
+        this.add_child(this._moving);
         this.add_child(this._date);
+        this._glass = new LiquidGlass();
+        this._movingGlass = new LiquidGlass();
         this._stretch = 1;
         this._level = 0;
+        this._change = 1;
         this._subject = null;
         this._target = null;
         this._metrics = null;
         this._size = [0, 0];
+        this._text = '';
+        this._turning = null;
+        this._font = null;
+        this._wanted = null;
+        this._learning = 0;
+        this._outlines = new Map();
+        this._paintedAt = null;
+        this._dirty = false;
+        this._allocating = false;
+        /** How many figures it has worked out itself (none, when the session did ahead of it). */
+        this.workedOut = 0;
+        this._type = kept.type ?? defaultType();
+        this._plan = kept.plan ?? null;
         /** Called when the digits are measured anew (the depth effect follows them). */
         this.onMeasured = null;
-        // (Another font, or weight: measured anew.)
+        // (Another colour, or another font for Pango to find.)
         this._digits.connect('style-changed', () => {
-            this._metrics = null;
-            this.queue_relayout();
+            this._syncFont();
+            this._repaint();
         });
+        // (Out of sight, a change of the figures ends where it was going.)
+        this.connect('notify::mapped', () => !this.mapped && this._settle());
+        this.connect('destroy', () => this._stopLearning());
+        this.backdrop = kept.backdrop ?? null;
+        this._syncDate();
+        this._syncFont();
     }
 
     get stretch() {
@@ -172,9 +182,99 @@ const GlassFace = GObject.registerClass({
         this._moved();
     }
 
-    /** @returns {object|null} {fontSize, inkY, inkHeight, width} of the digits as they are, device pixels */
+    get change() {
+        return this._change;
+    }
+
+    set change(value) {
+        if (value === this._change)
+            return;
+        this._change = value;
+        this.notify('change');
+        // (A frame of the change: only the layer of the figures that change.)
+        if (this._turning)
+            this._moving.queue_repaint();
+    }
+
+    /**
+     * The typeface and style the digits are drawn in (the date line in the
+     * typeface's text weight), as the lock screen's settings have them.
+     * Until it is told, Inter, as the glass face has it.
+     *
+     * @param {object} type
+     * @param {object} type.typeface - lib/lockType.js typefaceFor() clock-font
+     * @param {object} type.style - styleFor(typeface, 'glass', {weight:
+     *   clock-weight, width: clock-width})
+     */
+    setType({typeface, style}) {
+        const type = {typeface, style};
+        if (same(type, this._type))
+            return;
+        this._type = type;
+        this._kept.type = type;
+        this._syncDate();
+        this._syncFont();
+    }
+
+    /**
+     * What it takes the digits and the date line to read where they are
+     * (lib/lockLook.js legibilityPlan()s; the digits' made with
+     * digitsMetrics): a heavier weight – in Roboto Flex a higher grade,
+     * which keeps them as wide –, a soft shadow round them only where it
+     * is planned, and the glass more opaque (lib/glassBackdrop.js
+     * glassFor()).
+     *
+     * @param {object|null} plan - null: nothing known (no shadow, the glass
+     *   as it is)
+     * @param {object|null} plan.digits - the digits' plan
+     * @param {object|null} [plan.date] - the date line's
+     * @param {object} [plan.tone] - {color, dark}: the tone they are
+     *   planned for (else the colour the digits' style has)
+     */
+    setPlan(plan) {
+        const planned = plan ? {digits: plan.digits ?? null, date: plan.date ?? null, tone: plan.tone ?? null} : null;
+        if (same(planned, this._plan))
+            return;
+        this._plan = planned;
+        this._kept.plan = planned;
+        this._syncDate();
+        this._syncFont();
+        this._repaint();
+    }
+
+    /** @returns {object|null} the frosted wallpaper behind the glass */
+    get backdrop() {
+        return this._glass.backdrop;
+    }
+
+    /**
+     * @param {object|null} backdrop - liquidGlass.js GlassBackdrop's
+     *   current, the frosted wallpaper the glass shows; null: tinted only
+     */
+    set backdrop(backdrop) {
+        this._glass.backdrop = backdrop;
+        this._movingGlass.backdrop = backdrop;
+        this._kept.backdrop = backdrop;
+        this._repaint();
+    }
+
+    /** @returns {object|null} {fontSize, inkY, inkHeight, width} of the digits as they are, pixels */
     get metrics() {
         return this._metrics;
+    }
+
+    /**
+     * @returns {object|null} what a legibility plan of the digits takes
+     *   (lib/lockLook.js legibilityPlan()): {size: their size before they
+     *   stretch, CSS pixels; weight: their own, before any plan; tintAlpha:
+     *   how much of the glass's tint shows where least, at rest – the
+     *   plan's `glass` (lib/glassBackdrop.js tintShown())}; null until
+     *   measured
+     */
+    get digitsMetrics() {
+        if (!this._metrics)
+            return null;
+        return {size: this._metrics.fontSize / scaleFactor(), weight: this._type.style.weight, tintAlpha: tintShown()};
     }
 
     /** @returns {object|null} {stretch, y} the digits are going to */
@@ -182,47 +282,242 @@ const GlassFace = GObject.registerClass({
         return this._target;
     }
 
+    /** @returns {St.Label} the date line over the digits (in front of the depth effect's subject, board.js) */
+    get dateLine() {
+        return this._date;
+    }
+
+    /** @returns {object} {x, y, width, height} where the date line goes, in the face */
+    get dateRect() {
+        const [, dateWidth] = this._date.get_preferred_width(-1);
+        const [, height] = this._date.get_preferred_height(-1);
+        const width = Math.min(this._size[0], dateWidth);
+        return {
+            x: Math.round((this._size[0] - width) / 2),
+            y: Math.max(0, Math.round(this._level - DATE_GAP * scaleFactor() - height)),
+            width,
+            height,
+        };
+    }
+
+    /** @returns {string|null} the font file the digits are drawn from; null: as Pango draws them */
+    get fontFile() {
+        return this._font?.file ?? null;
+    }
+
+    /** @returns {string|null} the instance of it ("wght=600,opsz=32") */
+    get variations() {
+        return this._font?.variations ?? null;
+    }
+
+    /** @returns {object|null} {leaving, coming}: the figures changing now (their places); null at rest */
+    get changing() {
+        return this._turning ? {leaving: [...this._turning.leaving], coming: [...this._turning.coming]} : null;
+    }
+
+    // (The date line follows, laid out anew; the digits are drawn then.)
     _moved() {
-        this.queue_relayout();
+        this._repaint();
+    }
+
+    // Draw the layers anew as the face is laid out next: once, however
+    // often it is asked before.
+    _repaint() {
+        this._dirty = true;
+        if (!this._allocating)
+            this.queue_relayout();
+    }
+
+    /** The clock moved (dragged in the editor): its glass shows what is behind it there. */
+    followMove() {
+        const at = this._paintedAt;
+        const now = this._onMonitor(this._digits);
+        if (at && now[0] === at[0] && now[1] === at[1])
+            return;
+        // (As the clock is laid out: at once.)
         this._digits.queue_repaint();
+        if (this._turning)
+            this._moving.queue_repaint();
     }
 
     /** @param {string} text - the clock as GNOME shows it, e.g. "9∶41 PM" */
     setClock(text) {
         const {hours, minutes} = splitClock(text);
-        this._digits.text = minutes ? `${hours}:${minutes}` : hours;
+        const digits = minutes ? `${hours}:${minutes}` : hours;
         this._date.text = GLib.DateTime.new_now_local().format('%A, %B %-d');
-        this._digits.queue_repaint();
+        if (digits === this._text)
+            return;
+        const before = this._text;
+        this._text = digits;
+        // (Figures besides the usual ones: has the font them, are they known?)
+        if ([...digits].some(char => !FIGURES.includes(char)))
+            this._syncFont();
+        this._turn(before);
     }
 
-    /**
-     * @param {Pango.Layout} layout
-     * @param {string} text
-     */
-    setUpLayout(layout, text) {
-        const font = this._digits.get_theme_node().get_font().copy();
-        font.set_absolute_size((this._metrics?.fontSize ?? 100) * Pango.SCALE);
-        layout.set_font_description(font);
-        // (Digits all as wide: the time doesn't wobble as it goes.)
-        const features = new Pango.AttrList();
-        features.insert(Pango.attr_font_features_new('tnum'));
-        layout.set_attributes(features);
-        layout.set_text(text, -1);
+    // The minute turned: the figures that change go – not the first time,
+    // nor out of sight (nor with GNOME's animations off: at once).
+    _turn(before) {
+        this._settle();
+        const {leaving, coming} = changedFigures(before, this._text);
+        const box = this.mapped && adjustAnimationTime(CHANGE.time) > 0 ? this._turningBox(before, leaving, coming) : null;
+        if (!box) {
+            this._repaint();
+            return;
+        }
+        const turning = {before, leaving, coming, box};
+        this._turning = turning;
+        this._change = 0;
+        this.notify('change');
+        this._moving.visible = true;
+        // (The layer of the figures that change laid over their columns,
+        // the rest drawn without them.)
+        this._repaint();
+        this.ease_property('change', 1, {
+            duration: CHANGE.time,
+            mode: Clutter.AnimationMode.LINEAR,
+            onStopped: () => {
+                if (this._turning === turning)
+                    this._settle();
+            },
+        });
+    }
+
+    // A change of the figures under way ends where it was going: all of
+    // them on one layer again.
+    _settle() {
+        if (!this._turning)
+            return;
+        this._turning = null;
+        this.remove_transition('change');
+        this._change = 1;
+        this.notify('change');
+        this._moving.visible = false;
+        this._repaint();
+    }
+
+    // Where the figures that change go, across (and as far round them as
+    // the glass draws), on whole pixels of the drawing's; null for none.
+    _turningBox(before, leaving, coming) {
+        if (!this._metrics || !this._font?.font || leaving.length + coming.length === 0)
+            return null;
+        const was = this._line(before, this._stretch, this._level).filter(g => leaving.includes(g.index));
+        const now = this._line(this._text, this._stretch, this._level).filter(g => coming.includes(g.index));
+        const ink = boxRound([...was, ...now].map(g => g.box));
+        if (!ink)
+            return null;
+        const shadow = this._material().shadow;
+        const reach = (shadow?.alpha > 0 ? 2.5 * (shadow.blur ?? 12) + Math.abs(shadow.y ?? 0) : RIM_REACH) * scaleFactor();
+        const density = this.get_resource_scale();
+        return {
+            x1: Math.max(0, Math.floor((ink.x - reach) * density) / density),
+            x2: Math.min(this._size[0], Math.ceil((ink.x + ink.width + reach) * density) / density),
+        };
+    }
+
+    // The instance the digits are to be drawn in now: the typeface and
+    // style given, the plan's weight or grade, a clock of its size's
+    // optical size. A font without a figure is left to Pango.
+    _wantedFont() {
+        const {typeface, style} = this._type;
+        const wanted = glassInstance(typeface, style,
+            {size: this._sizeName, plan: this._plan?.digits, shellFamily: shellFamily()});
+        const font = wanted.font;
+        if (font && [...FIGURES.replace(/\D/g, ''), ...this._text].some(char => !(font.glyphOf(char) > 0)))
+            return {...wanted, font: null, file: null, key: `pango:${wanted.key}`};
+        return wanted;
+    }
+
+    // Draw in the instance wanted once its figures' stretch is worked out:
+    // at once if it is known (worked out in the session ahead of time, see
+    // GlassWarmUp), else a figure at a time while the shell is idle (never
+    // in a frame) – the one before drawn meanwhile.
+    _syncFont() {
+        const wanted = this._wantedFont();
+        if (wanted.key === this._font?.key) {
+            this._stopLearning();
+            return;
+        }
+        if (!wanted.font || unlearnt(wanted.font, this._text).length === 0) {
+            this._stopLearning();
+            this._useFont(wanted);
+            return;
+        }
+        if (this._learning && this._wanted?.key === wanted.key)
+            return;
+        this._stopLearning();
+        this._wanted = wanted;
+        this._learning = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            const [glyph] = unlearnt(wanted.font, this._text);
+            if (glyph !== undefined) {
+                learn(wanted.font, glyph);
+                this.workedOut++;
+                return GLib.SOURCE_CONTINUE;
+            }
+            this._learning = 0;
+            this._wanted = null;
+            this._useFont(wanted);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopLearning() {
+        if (this._learning)
+            GLib.source_remove(this._learning);
+        this._learning = 0;
+        this._wanted = null;
+    }
+
+    _useFont(font) {
+        this._settle();
+        this._font = font;
+        this._outlines.clear();
+        this._metrics = null;
+        this._repaint();
+    }
+
+    // The date line: in the typeface, its text weight (heavier as its plan
+    // has it), a shadow round it only where one is planned.
+    _syncDate() {
+        const {typeface} = this._type;
+        const text = styleFor(typeface, 'text');
+        const plan = this._plan?.date ?? null;
+        const {weight, extra} = heavier(typeface.axes, text.weight, plan);
+        holdLabelFont(this._date, size => labelFont(typeface, {...text, weight, extra}, size));
+        this._date.style = plan ? `text-shadow: ${plan.shadow ? shadowStyle(plan.shadow) : 'none'};` : null;
+    }
+
+    // The line of a text as it is drawn, at a stretch and a level.
+    _line(text, stretch, level) {
+        const {font, scaleX} = this._font;
+        return placeLine(font, text, {
+            size: this._metrics.fontSize, scaleX, width: this._size[0], stretch, level, kept: this._outlines,
+        });
     }
 
     // The size the digits fit the width at, and how high they are then.
     _measure(width) {
-        if (!this._digits.get_stage() || width <= 0)
-            return;
-        const layout = this._digits.create_pango_layout(SAMPLE);
         this._metrics = null;
-        this.setUpLayout(layout, SAMPLE);
-        const [, logical] = layout.get_pixel_extents();
-        const fontSize = Math.max(8, Math.floor(100 * width * FILL / (Math.max(1, logical.width) * NARROW)));
-        this._metrics = {fontSize};
-        this.setUpLayout(layout, SAMPLE);
-        const [ink, wide] = layout.get_pixel_extents();
-        this._metrics = {fontSize, inkY: ink.y, inkHeight: Math.max(1, ink.height), width: wide.width * NARROW};
+        const font = this._font;
+        if (!font || width <= 0)
+            return;
+        if (font.font) {
+            const size = fitSize(font.font, width, font.scaleX);
+            const k = size / font.font.upem;
+            const {top, bottom} = font.font.figures;
+            const {advance} = setLine(font.font, SAMPLE);
+            this._metrics = {fontSize: size, inkY: 0, inkHeight: Math.max(1, (top - bottom) * k), width: advance * k * font.scaleX};
+        } else {
+            if (!this._digits.get_stage())
+                return;
+            const layout = this._digits.create_pango_layout(SAMPLE);
+            this._pangoLayout(layout, SAMPLE, 100);
+            const [, logical] = layout.get_pixel_extents();
+            const fontSize = Math.max(8, Math.floor(100 * width * FILL / (Math.max(1, logical.width) * font.scaleX)));
+            this._pangoLayout(layout, SAMPLE, fontSize);
+            const [ink, wide] = layout.get_pixel_extents();
+            this._metrics = {fontSize, inkY: ink.y, inkHeight: Math.max(1, ink.height), width: wide.width * font.scaleX};
+        }
         this.onMeasured?.();
     }
 
@@ -253,7 +548,7 @@ const GlassFace = GObject.registerClass({
             // (As it is laid out: not laid out anew for it.)
             this._stretch = target.stretch;
             this._level = target.y;
-            this._digits.queue_repaint();
+            this._repaint();
         }
     }
 
@@ -291,35 +586,245 @@ const GlassFace = GObject.registerClass({
             height: this._metrics.inkHeight * this._target.stretch};
     }
 
+    /**
+     * @returns {object[]|null} each digit's ink, {x, y, width, height} in
+     *   the face, where it stands (as tall as it is going: target), the
+     *   colon left out; null until measured
+     */
+    get glyphBoxes() {
+        if (!this._metrics || !this._target || !this._text)
+            return null;
+        const {stretch, y} = this._target;
+        const boxes = this._font.font
+            ? this._line(this._text, stretch, y).filter(g => g.box).map(g => ({char: g.char, ...g.box}))
+            : this._pangoBoxes(this._digits.create_pango_layout(this._text), stretch, y);
+        return boxes.filter(box => box.char !== ':').map(({x, y: top, width, height}) => ({x, y: top, width, height}));
+    }
+
     vfunc_allocate(box) {
+        this._allocating = true;
+        try {
+            this._allocate(box);
+        } finally {
+            this._allocating = false;
+        }
+    }
+
+    _allocate(box) {
         this.set_allocation(box);
         const [width, height] = [box.get_width(), box.get_height()];
         const resized = width !== this._size[0] || height !== this._size[1];
         this._size = [width, height];
+        // (First: laid out, it may be styled anew – another font.)
         this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
-        if (!this._metrics || resized) {
+        const measuring = !this._metrics || resized;
+        if (measuring) {
             this._measure(width);
             this._target = null;
-            this._retarget(false);
         }
-        // The date line just over the digits, in the middle.
-        const [, dateWidth] = this._date.get_preferred_width(-1);
-        const [, dateHeight] = this._date.get_preferred_height(-1);
-        const w = Math.min(width, dateWidth);
-        const x = Math.round((width - w) / 2);
-        const y = Math.max(0, Math.round(this._level - DATE_GAP * scaleFactor() - dateHeight));
-        this._date.allocate(new Clutter.ActorBox({x1: x, y1: y, x2: x + w, y2: y + dateHeight}));
+        // (Measured anew, or the date line over them set in another font.)
+        this._retarget(false);
+        // The layer of the figures that change over their columns while
+        // they do (where they are now, measured anew).
+        const turning = this._turning;
+        if (measuring && turning)
+            turning.box = this._turningBox(turning.before, turning.leaving, turning.coming) ?? turning.box;
+        const drawn = this._moving.repaints;
+        const columns = turning?.box;
+        this._moving.allocate(columns ? new Clutter.ActorBox({x1: columns.x1, y1: 0, x2: columns.x2, y2: height})
+            : new Clutter.ActorBox());
+        // Drawn anew, once (St has drawn the layer of the figures that
+        // change if it was laid out anew just now).
+        if (this._dirty) {
+            this._dirty = false;
+            this._digits.queue_repaint();
+            if (turning && this._moving.repaints === drawn)
+                this._moving.queue_repaint();
+        }
+        // The date line just over the digits, in the middle (unless it is
+        // held elsewhere, in front of the subject).
+        if (this._date.get_parent() === this) {
+            const {x, y, width: w, height: h} = this.dateRect;
+            this._date.allocate(new Clutter.ActorBox({x1: x, y1: y, x2: x + w, y2: y + h}));
+        }
+    }
+
+    // The tone of the type the glass is tinted with: as planned, or as the
+    // digits' style has it.
+    _tone() {
+        const planned = this._plan?.tone;
+        if (planned?.color)
+            return {color: planned.color, dark: Boolean(planned.dark)};
+        const c = this._digits.get_theme_node().get_foreground_color();
+        const color = `#${[c.red, c.green, c.blue].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+        return {color, dark: luminance(color) < DARK};
+    }
+
+    // The glass as the digits' plan has it: as opaque, with as much tint,
+    // and a shadow only if planned.
+    _material() {
+        const digits = this._plan?.digits;
+        return {...glassFor(digits?.glass ?? null), shadow: digits?.shadow ?? 0};
+    }
+
+    // Where a layer's drawing starts on the main monitor (where the
+    // backdrop lies behind it).
+    _onMonitor(layer) {
+        const [x, y] = layer.get_transformed_position();
+        const monitor = Main.layoutManager.primaryMonitor;
+        return [x - (monitor?.x ?? 0), y - (monitor?.y ?? 0)];
+    }
+
+    /**
+     * Draw a layer: the digits that stay where they are, or (while the
+     * minute turns) the figures that change, where they have got to.
+     *
+     * @param {St.DrawingArea} layer
+     * @param {Cairo.Context} cr - its, the matrix the identity
+     */
+    paintLayer(layer, cr) {
+        if (!this._metrics || !this._text || !this._font)
+            return;
+        const look = {tone: this._tone(), at: this._onMonitor(layer), scale: scaleFactor(), ...this._material()};
+        if (layer === this._digits)
+            this._paintedAt = look.at;
+        if (!this._font.font) {
+            if (layer === this._digits)
+                this._paintPango(cr, look);
+            return;
+        }
+        const line = this._line(this._text, this._stretch, this._level);
+        const bounds = boxRound(line.map(g => g.box));
+        if (!bounds)
+            return;
+        const boxes = line.map(g => g.box).filter(Boolean);
+        const turning = this._turning;
+        if (layer === this._digits) {
+            const staying = turning ? line.filter(g => !turning.coming.includes(g.index)) : line;
+            this._paintGlyphs(cr, this._glass, staying, {...look, bounds, glyphBoxes: boxes});
+            return;
+        }
+        if (!turning)
+            return;
+        // The figures that change, in the layer's own place: the old ones
+        // lifting as they fade, the new ones rising into place – never
+        // above the digits' top (the date line is there). (Where the layer
+        // is as it was laid out: asked of the layer while it is drawn, a
+        // layout pending would be done then and there, and its drawing
+        // thrown away under it.)
+        const {x1, x2} = turning.box;
+        const was = this._line(turning.before, this._stretch, this._level);
+        const {leaving, coming} = changeAt(this._change);
+        const travel = CHANGE.travel * bounds.height;
+        const top = bounds.y - 1;
+        cr.rectangle(0, top, x2 - x1, this._size[1] - top);
+        cr.clip();
+        const moving = [
+            [was.filter(g => turning.leaving.includes(g.index)), leaving],
+            [line.filter(g => turning.coming.includes(g.index)), coming],
+        ];
+        for (const [glyphs, {dy, alpha}] of moving) {
+            if (!(alpha > 0.004) || glyphs.length === 0)
+                continue;
+            const offset = dy * travel;
+            cr.pushGroup();
+            this._paintGlyphs(cr, this._movingGlass, glyphs, {
+                ...look,
+                bounds: {...bounds, x: bounds.x - x1},
+                glyphBoxes: glyphs.map(g => g.box).filter(Boolean).map(b => ({...b, x: b.x - x1, y: b.y + offset})),
+                dx: -x1,
+                dy: offset,
+            });
+            cr.popGroupToSource();
+            cr.paintWithAlpha(alpha);
+        }
+    }
+
+    // Glyphs in glass: their outlines, one path, the material over it.
+    _paintGlyphs(cr, glass, glyphs, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow, dx = 0, dy = 0}) {
+        if (glyphs.length === 0)
+            return;
+        const {font, scaleX} = this._font;
+        cr.newPath();
+        traceLine(cr, glyphs, {scale: this._metrics.fontSize / font.upem, scaleX, dx, dy});
+        const path = cr.copyPath();
+        cr.newPath();
+        glass.paint(cr, path, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow});
+    }
+
+    // Where the font has no file to draw from, Pango draws the digits,
+    // stretched as a whole (taller and the strokes across thicker, its "0"
+    // an ellipse): they change at once.
+
+    _pangoFont(size) {
+        const {typeface, style} = this._type;
+        const font = this._digits.get_theme_node().get_font().copy();
+        const {families, weight, variations} = labelFont(typeface,
+            {...style, weight: this._font.weight, extra: this._font.extra}, null);
+        if (families.length > 0)
+            font.set_family(families.join(','));
+        font.set_weight(weight);
+        font.set_variations(variations);
+        font.set_absolute_size(size * Pango.SCALE);
+        return font;
+    }
+
+    _pangoLayout(layout, text, size) {
+        layout.set_font_description(this._pangoFont(size));
+        // (Digits all as wide: the time doesn't wobble as it goes.)
+        const features = new Pango.AttrList();
+        features.insert(Pango.attr_font_features_new('tnum'));
+        layout.set_attributes(features);
+        layout.set_text(text, -1);
+    }
+
+    // Each character's box, as Pango lays it out: across, its logical
+    // width; up and down, the digits'.
+    _pangoBoxes(layout, stretch, level) {
+        this._pangoLayout(layout, this._text, this._metrics.fontSize);
+        const [ink] = layout.get_pixel_extents();
+        const scaleX = this._font.scaleX;
+        const left = this._size[0] / 2 - (ink.x + ink.width / 2) * scaleX;
+        const height = this._metrics.inkHeight * stretch;
+        const encoder = new TextEncoder();
+        let index = 0;
+        return [...this._text].map(char => {
+            const pos = layout.index_to_pos(index);
+            index += encoder.encode(char).length;
+            return {char, x: left + pos.x / Pango.SCALE * scaleX, y: level, width: pos.width / Pango.SCALE * scaleX, height};
+        });
+    }
+
+    _paintPango(cr, {tone, at, scale, tintAlpha, opacity, shadow}) {
+        const layout = PangoCairo.create_layout(cr);
+        const boxes = this._pangoBoxes(layout, this._stretch, this._level);
+        const [ink] = layout.get_pixel_extents();
+        const scaleX = this._font.scaleX;
+        const {stretch, level} = this;
+        cr.save();
+        cr.translate(this._size[0] / 2 - (ink.x + ink.width / 2) * scaleX, level - this._metrics.inkY * stretch);
+        cr.scale(scaleX, stretch);
+        PangoCairo.layout_path(cr, layout);
+        cr.restore();
+        const path = cr.copyPath();
+        cr.newPath();
+        const bounds = boxRound(boxes);
+        this._glass.paint(cr, path, {bounds, glyphBoxes: boxes, tone, at, scale, tintAlpha, opacity, shadow});
     }
 });
 
 export const LockClockWidget = GObject.registerClass(
 class AtelierLockClockWidget extends ClockWidget {
-    buildFace(design, box) {
+    buildFace(design, box, size) {
         if (design !== 'glass')
             return null;
-        const face = new GlassFace();
+        // (What its glass face is told, kept for one built anew: for another size.)
+        this._glassKept ??= {};
+        const face = new GlassFace(size, this._glassKept);
         face.onMeasured = () => this._context.depthChanged?.();
         box.add_child(face);
+        // (Moved – dragged in the editor –, the glass shows what is behind it there.)
+        this.connectObject('notify::allocation', () => face.followMove(), face);
         return face;
     }
 
@@ -333,3 +838,123 @@ class AtelierLockClockWidget extends ClockWidget {
         return 255;
     }
 });
+
+// The font families there are, listed once (fonts installed meanwhile are
+// there next time the shell starts).
+let families = null;
+
+function installedFamilies() {
+    if (!families) {
+        try {
+            families = PangoCairo.FontMap.get_default().list_families().map(family => family.get_name());
+        } catch {
+            families = [];
+        }
+    }
+    return families.length > 0 ? families : null;
+}
+
+// The lock screen's settings the glass clocks' digits follow.
+const DIGITS_KEYS = ['enabled', 'widgets', 'clock-font', 'clock-weight', 'clock-width'];
+
+/**
+ * Ready in the session, while it is idle, what the lock screen's glass
+ * clocks take to draw: how their figures stretch in the instance they are
+ * drawn in (the slow part, kept in this process: on the lock screen the
+ * first paint then costs no more than any other), and the frosted
+ * wallpaper their glass shows (liquidGlass.js, kept in the cache). Only
+ * while the lock screen has a glass clock; anew as its font or the
+ * wallpaper changes.
+ */
+export class GlassWarmUp {
+    /** @param {Gio.Settings} settings - the lockscreen ones */
+    constructor(settings) {
+        this._settings = settings;
+        this._idle = 0;
+        this._backdropIdle = 0;
+        this._gone = false;
+        this._background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+        this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        settings.connectObject('changed', (_, key) => {
+            if (DIGITS_KEYS.includes(key)) {
+                this._queueFigures();
+                this._queueBackdrop();
+            }
+        }, this);
+        this._background.connectObject('changed', () => this._queueBackdrop(), this);
+        this._interface.connectObject('changed::color-scheme', () => this._queueBackdrop(), this);
+        Main.layoutManager.connectObject('monitors-changed', () => this._queueBackdrop(), this);
+        this._queueFigures();
+        this._queueBackdrop();
+    }
+
+    // The glass clocks on the lock screen, when it is Atelier's.
+    _clocks() {
+        if (!this._settings.get_boolean('enabled'))
+            return [];
+        return parseLayout(this._settings.get_string('widgets'), LOCK_KINDS)
+            .filter(entry => entry.kind === 'clock' && entry.face === 'glass');
+    }
+
+    // The instances the clocks draw in (as their faces work them out), a
+    // figure at a time.
+    _queueFigures() {
+        if (this._idle)
+            GLib.source_remove(this._idle);
+        this._idle = 0;
+        const typeface = typefaceFor(this._settings.get_string('clock-font'), installedFamilies());
+        const style = styleFor(typeface, 'glass', {
+            weight: this._settings.get_int('clock-weight'), width: this._settings.get_int('clock-width'),
+        });
+        const family = shellFamily();
+        const fonts = [...new Set(this._clocks().map(entry =>
+            glassInstance(typeface, style, {size: entry.size, shellFamily: family}).font))]
+            .filter(Boolean);
+        if (fonts.length === 0)
+            return;
+        this._idle = GLib.idle_add(GLib.PRIORITY_LOW, () => {
+            for (const font of fonts) {
+                const [glyph] = unlearnt(font);
+                if (glyph !== undefined) {
+                    learn(font, glyph);
+                    return GLib.SOURCE_CONTINUE;
+                }
+            }
+            this._idle = 0;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // The frosted wallpaper of the main monitor, once things settle (a
+    // wallpaper changes several settings at once).
+    _queueBackdrop() {
+        if (this._backdropIdle)
+            GLib.source_remove(this._backdropIdle);
+        this._backdropIdle = GLib.idle_add(GLib.PRIORITY_LOW, () => {
+            this._backdropIdle = 0;
+            const monitor = Main.layoutManager.primaryMonitor;
+            if (!monitor || this._clocks().length === 0)
+                return GLib.SOURCE_REMOVE;
+            prepareLockBackdrop({
+                background: this._background,
+                iface: this._interface,
+                monitor: [monitor.width, monitor.height],
+                scale: scaleFactor(),
+            }).catch(e => !this._gone && console.warn(`Atelier: the glass clock's frosted wallpaper isn't ready: ${e.message}`));
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    destroy() {
+        this._gone = true;
+        for (const id of [this._idle, this._backdropIdle]) {
+            if (id)
+                GLib.source_remove(id);
+        }
+        this._idle = this._backdropIdle = 0;
+        this._settings.disconnectObject(this);
+        this._background.disconnectObject(this);
+        this._interface.disconnectObject(this);
+        Main.layoutManager.disconnectObject(this);
+    }
+}

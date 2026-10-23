@@ -79,6 +79,17 @@ async function waitFor(predicate, timeout = 5000) {
     return true;
 }
 
+// Whether so many frames are drawn within a while (a timeline asks for them).
+async function framesDrawn(count, timeout = 2000) {
+    let drawn = 0;
+    const timeline = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+    timeline.connect('new-frame', () => drawn++);
+    timeline.start();
+    const enough = await waitFor(() => drawn >= count, timeout);
+    timeline.stop();
+    return enough;
+}
+
 async function screenshot(name) {
     const file = Gio.File.new_for_path(`${OUTPUT}/${name}.png`);
     const stream = file.replace(null, false, Gio.FileCreateFlags.NONE, null);
@@ -831,6 +842,21 @@ async function testControlCentre(ext) {
     await Scripting.sleep(400);
     check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles') &&
         !Main.panel._rightBox.contains(button), 'and on again');
+    // Laid out in the control centre (anew: GNOME's menu had it meanwhile),
+    // GNOME's grid doesn't tell of its moves: GNOME's menu follows each with
+    // an update in the next frame, which reads the grid and the menu, and
+    // when the shell quit before that frame came, it ran on them gone
+    // (tools/shell-test.sh checks how the shell quits).
+    const gnomeGrid = quickSettings.menu._grid;
+    const heard = {allocation: 0, x: 0, y: 0};
+    const heardIds = Object.keys(heard).map(name => gnomeGrid.connect(`notify::${name}`, () => heard[name]++));
+    Main.panel.toggleQuickSettings();
+    check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000) && await framesDrawn(3) &&
+        heard.allocation > 0 && heard.x + heard.y === 0,
+    `laid out in the control centre, GNOME's grid doesn't tell of its moves (${JSON.stringify(heard)})`);
+    heardIds.forEach(id => gnomeGrid.disconnect(id));
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => island.page === null && !island.busy, 1000);
 
     button.destroy();
     await Scripting.sleep(100);
@@ -4328,16 +4354,49 @@ function fakeBattery() {
     };
 }
 
-// The lock screen's glass clock: the time in tall digits the wallpaper
-// shows through, stretched from under the date line down into what stands
-// in front (a hill, here), which passes in front of their feet; as tall as
-// the box lets them without it. In the one tone of the other widgets.
+// A screenshot's pixels, read once: at(x, y) gives [r, g, b].
+function pixelsOf(name) {
+    const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
+    const [pixels, stride, channels] = [pixbuf.get_pixels(), pixbuf.get_rowstride(), pixbuf.get_n_channels()];
+    return {
+        at(x, y) {
+            const i = Math.round(y) * stride + Math.round(x) * channels;
+            return [pixels[i], pixels[i + 1], pixels[i + 2]];
+        },
+    };
+}
+
+// How much two screenshots differ over a rectangle: the mean of each
+// pixel's largest difference in a channel.
+function differenceOf(a, b, {x, y, width, height}) {
+    let [sum, count] = [0, 0];
+    for (let row = Math.round(y); row < y + height; row++) {
+        for (let col = Math.round(x); col < x + width; col++) {
+            sum += colorDistance(a.at(col, row), b.at(col, row));
+            count++;
+        }
+    }
+    return count > 0 ? sum / count : 0;
+}
+
+// The lock screen's glass clock: the time in tall digits of glass the
+// wallpaper shows through, drawn from the font's own outlines (Inter, until
+// told another) and stretched as a tall typeface draws them – stems
+// longer, a "0" with straight sides, not an ellipse – from under the date
+// line down into what stands in front (a hill, here), which passes in front
+// of their feet; as tall as the box lets them without it. In the one tone of
+// the other widgets; heavier, with a shadow, as a legibility plan has it,
+// only then. As the minute turns, only the figures that change move, on a
+// layer of their own; nothing is drawn while it rests.
 async function testLockGlassClock() {
     const shield = Main.screenShield;
     if (!shield) {
         results.push('INFO  no lock screen here (no GDM): the glass clock untested');
         return;
     }
+    const {GlassBackdrop} = await import('../shell/lockscreen/liquidGlass.js');
+    const {tintShown} = await import('../lib/glassBackdrop.js');
+    const {styleFor, typefaceFor} = await import('../lib/lockType.js');
     const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
     const lock = () => atelier().lockModules?.get('lockscreen');
     const lockSettings = atelier()._settings.get_child('lockscreen');
@@ -4373,14 +4432,31 @@ async function testLockGlassClock() {
     const realBattery = fakeBattery();
     await wallpapersSettled();
     const locked = await lockForTest();
+    let backdrop = null;
+    let clock = null;
     try {
         check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.widgets[0]?.glass?.target, 5000),
             'locked: the glass clock, the cutout of the hill there');
         const board = lock().board;
-        const clock = board.widgets.find(w => w.entry.id === 'clock');
+        clock = board.widgets.find(w => w.entry.id === 'clock');
         const glass = clock.glass;
-        check(/^\d{1,2}:\d{2}$/.test(glass._digits.text) && /\w+, \w+ \d+/.test(glass._date.text),
-            `the time in one line, the date over it (${glass._digits.text}, ${glass._date.text})`);
+        check(/^\d{1,2}:\d{2}$/.test(glass._text) && /\w+, \w+ \d+/.test(glass.dateLine.text),
+            `the time in one line, the date over it (${glass._text}, ${glass.dateLine.text})`);
+        check(glass.fontFile?.endsWith('/fonts/Inter.ttf') && glass.variations === 'wght=600,opsz=32',
+            `drawn from Inter's own outlines, at its display size (${glass.fontFile}, ${glass.variations})`);
+        check(glass.workedOut === 0, `how its figures stretch worked out in the session, ahead: none on the lock screen (${glass.workedOut})`);
+        // (The time as the test sets it: the clock's own minutes kept out.)
+        clock._sync = () => {};
+        glass.setClock('10:08');
+        await waitFor(() => !glass.changing, 2000);
+        // The frosted wallpaper, as the board gives the glass (unless it does).
+        if (!glass.backdrop) {
+            backdrop = new GlassBackdrop();
+            backdrop.setMonitor(size, scale);
+            await waitFor(() => backdrop.current, 10000);
+            glass.backdrop = backdrop.current;
+        }
+        check(Boolean(glass.backdrop), 'the glass frosts the wallpaper behind it');
         // (Where the digits go on the monitor.)
         const digitsNow = () => {
             const rect = board._followSubject(clock, clock.get_allocation_box());
@@ -4391,17 +4467,31 @@ async function testLockGlassClock() {
             Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03,
         `stretched down into the hill, their feet behind it (×${glass.target.stretch.toFixed(2)}, ${intoHill(digitsNow()).toFixed(2)} of them)`);
         check(!board.depth.tooMuch && board.depth.actor.visible, 'the hill in front of them');
-        const [, faceY] = glass.get_transformed_position();
-        const [, dateY] = glass._date.get_transformed_position();
-        check(dateY < faceY + glass.target.y && dateY + glass._date.height <= faceY + glass.target.y + 1,
+        const [faceX, faceY] = glass.get_transformed_position();
+        const [, dateY] = glass.dateLine.get_transformed_position();
+        check(dateY < faceY + glass.target.y && dateY + glass.dateLine.height <= faceY + glass.target.y + 1,
             'the date line just over them');
         const battery = board.widgets.find(w => w.entry.id === 'battery');
         const ink = actor => hexOf(actor.get_theme_node().get_foreground_color());
-        check(ink(glass._digits) === ink(glass._date) && ink(glass._digits) === ink(battery._value) &&
+        check(ink(glass._digits) === ink(glass.dateLine) && ink(glass._digits) === ink(battery._value) &&
             ink(battery._value) === ink(battery._caption) && luminance(ink(glass._digits)) > 0.7,
         `in the one light tone of the other widgets (${ink(glass._digits)}, ${ink(battery._value)})`);
+        // What a legibility plan of them takes, and each digit's box.
+        const metrics = glass.digitsMetrics;
+        check(metrics?.size > 60 && metrics.weight === 600 && metrics.tintAlpha === tintShown(),
+            `what their plan takes: ${JSON.stringify(metrics)}`);
+        const boxes = glass.glyphBoxes;
+        const tall = glass.metrics.inkHeight * glass.target.stretch;
+        check(boxes?.length === 4 && boxes.every(b => b.height > tall * 0.97 && b.height < tall * 1.08 && b.width > 10),
+            `each digit's box, the colon left out, as tall as they stand (${boxes?.map(b => `${Math.round(b.width)}×${Math.round(b.height)}`)} of ${Math.round(tall)})`);
+
+        // At rest, nothing is drawn.
         await restPointer();
         await Scripting.sleep(600);
+        const painted = () => [glass._digits.repaints, glass._moving.repaints];
+        const resting = painted();
+        await Scripting.sleep(1500);
+        check(JSON.stringify(painted()) === JSON.stringify(resting), `at rest, nothing is drawn (${resting} → ${painted()})`);
         await screenshot('91-lock-glass');
         // The glass: lighter than the sky behind it, the sky showing through.
         const digits = digitsNow();
@@ -4414,22 +4504,139 @@ async function testLockGlassClock() {
         }
         check(lightOf(lit) > lightOf(sky) + 40 && lightOf(lit) < 250 && lit[2] > lit[0],
             `the digits a light glass the sky shows through (${lit} over ${sky})`);
+        // Taller on their stems: the "0" as wide a quarter of the way down
+        // as halfway and three quarters (an ellipse narrows), its sides
+        // straight.
+        const rest = pixelsOf('91-lock-glass');
+        const zero = boxes[1];
+        const [top, bottom] = [faceY + zero.y, Math.min(faceY + zero.y + zero.height, hill)];
+        const widthAt = share => {
+            const y = top + (bottom - top) * share;
+            // (Its middle: the sky through its counter.)
+            const behind = lightOf(rest.at(faceX + zero.x + zero.width / 2, y));
+            let [left, right] = [null, null];
+            for (let x = Math.round(faceX + zero.x - 6); x <= faceX + zero.x + zero.width + 6; x++) {
+                if (lightOf(rest.at(x, y)) > behind + 20) {
+                    left ??= x;
+                    right = x;
+                }
+            }
+            return left === null ? 0 : right - left + 1;
+        };
+        const widths = [0.25, 0.5, 0.75].map(widthAt);
+        check(widths[1] > zero.width * 0.8 && Math.min(widths[0], widths[2]) / widths[1] > 0.96,
+            `a "0" with straight sides, not an ellipse (${widths} px wide a quarter, half and three quarters down)`);
+
+        // The minute turns: only its figure goes, the old one lifting as it
+        // fades, the new one rising into place.
+        glass.setClock('10:09');
+        check(JSON.stringify(glass.changing) === JSON.stringify({leaving: [4], coming: [4]}),
+            `the minute turns: only its figure changes (${JSON.stringify(glass.changing)})`);
+        check(await waitFor(() => glass.change >= 0.3, 1000), `under way (${glass.change.toFixed(2)})`);
+        const transition = glass.get_transition('change');
+        transition?.pause();
+        const halfway = glass.change;
+        await Scripting.sleep(300);
+        await screenshot('91b-lock-glass-turning');
+        transition?.start();
+        const turning = pixelsOf('91b-lock-glass-turning');
+        // (The middle of each digit's box, above the hill.)
+        const middleOf = box => ({x: faceX + box.x + box.width * 0.25, y: faceY + box.y + 8,
+            width: box.width * 0.5, height: Math.max(1, hill - faceY - box.y - 16)});
+        const changes = boxes.map(box => differenceOf(rest, turning, middleOf(box)));
+        check(changes.slice(0, 3).every(d => d < 1) && changes[3] > 8,
+            `${halfway.toFixed(2)} of the way, the other figures as they were, only it moves (${changes.map(d => d.toFixed(1))})`);
+        check(await waitFor(() => !glass.changing && glass.change === 1, 2000), 'and comes to rest');
+        // Drawn on a layer of its own, while it goes; then nothing again.
+        const before = painted();
+        glass.setClock('10:10');
+        check(await waitFor(() => !glass.changing, 2000), 'another minute');
+        const after = painted();
+        check(after[0] - before[0] <= 3 && after[1] - before[1] >= 8,
+            `while the figures that change go, they are drawn ${after[1] - before[1]} times, the rest ${after[0] - before[0]}`);
+        await Scripting.sleep(1500);
+        check(JSON.stringify(painted()) === JSON.stringify(after), `and then nothing (${after} → ${painted()})`);
+        // Out of sight, at once.
+        clock.hide();
+        glass.setClock('10:11');
+        check(!glass.changing && glass._text === '10:11', 'out of sight, the time changes at once');
+        clock.show();
+
+        // In Roboto Flex when told: on its width axis, at the clock's
+        // optical size; a plan grades it (as wide as it was) and casts a
+        // shadow round it and the date line, and only then.
+        const flex = typefaceFor('flex');
+        glass.setType({typeface: flex, style: styleFor(flex, 'glass')});
+        check(await waitFor(() => glass.fontFile?.endsWith('/fonts/RobotoFlex.ttf'), 3000) &&
+            /wdth=90/.test(glass.variations) && /opsz=\d+/.test(glass.variations) && glass.workedOut > 0,
+        `Roboto Flex, as told (${glass.variations}; its ${glass.workedOut} figures worked out while the shell was idle)`);
+        await waitFor(() => glass.stretch === glass.target.stretch, 2000);
+        await Scripting.sleep(400);
+        await screenshot('91c-lock-glass-flex');
+        const wide = glass.metrics.width;
+        const one = glass.glyphBoxes[0];
+        glass.setPlan({
+            digits: {boldness: 0.5, weight: 700, shadow: {color: '#000000', alpha: 0.5, blur: 10, y: 1}, glass: 0.4},
+            date: {boldness: 0, weight: 600, shadow: {color: '#000000', alpha: 0.3, blur: 6, y: 1}},
+        });
+        check(await waitFor(() => /GRAD=75/.test(glass.variations), 3000) && /wght=600/.test(glass.variations) &&
+            Math.abs(glass.metrics.width - wide) < 0.5,
+        `a plan's boldness on Roboto Flex's grade, the line as wide (${glass.variations})`);
+        check(/text-shadow: 0 1px 6px rgba\(0, 0, 0, 0.3\)/.test(glass.dateLine.style ?? ''),
+            `the date line's shadow as planned (${glass.dateLine.style})`);
+        await Scripting.sleep(400);
+        await screenshot('91d-lock-glass-planned');
+        // (Just right of the "1"'s stem, outside it.)
+        const [sx, sy] = [Math.round(faceX + one.x + one.width + 4), Math.round(faceY + one.y + one.height * 0.3)];
+        const [plain, shaded] = ['91c-lock-glass-flex', '91d-lock-glass-planned'].map(name => averageColor(name, sx, sy, 2, 2));
+        const skyThere = averageColor('91c-lock-glass-flex', sx + 6, sy, 2, 2);
+        check(colorDistance(plain, skyThere) <= 4 && lightOf(shaded) < lightOf(plain) - 6,
+            `a shadow round them only as planned (${plain} beside them without, ${shaded} with)`);
+        const inter = typefaceFor('inter');
+        glass.setType({typeface: inter, style: styleFor(inter, 'glass')});
+        check(await waitFor(() => glass.variations === 'wght=700,opsz=32', 3000),
+            `in Inter, heavier on its weight (${glass.variations})`);
+        glass.setPlan(null);
+        check(await waitFor(() => glass.variations === 'wght=600,opsz=32', 3000) && !glass.dateLine.style,
+            'no plan: as it was, no shadow');
+        // A typeface with no file known to draw from: as Pango draws it,
+        // stretched as a whole.
+        glass.setType({typeface: {...typefaceFor('serif'), family: 'Noto Serif', file: null, axes: null},
+            style: {weight: 600, width: 90}});
+        check(await waitFor(() => glass.fontFile === null && glass.metrics && glass.glyphBoxes?.length === 4, 3000),
+            `no file known: Pango draws it (${glass.variations}, ${glass.glyphBoxes?.length} digits' boxes)`);
+        await Scripting.sleep(300);
+        await screenshot('91e-lock-glass-pango');
+        const drawnByPango = pixelsOf('91e-lock-glass-pango');
+        const across = digitsNow();
+        let brightest = [0, 0, 0];
+        for (let x = Math.round(across.x); x < across.x + across.width; x += 2) {
+            const at = drawnByPango.at(monitor.x + x, monitor.y + across.y + across.height * 0.3);
+            if (lightOf(at) > lightOf(brightest))
+                brightest = at;
+        }
+        check(lightOf(brightest) > lightOf(sky) + 30, `and in glass (${brightest} over ${sky})`);
+        glass.setType({typeface: inter, style: styleFor(inter, 'glass')});
+        check(await waitFor(() => glass.fontFile?.endsWith('/fonts/Inter.ttf'), 3000), 'Inter again');
 
         // The hill higher: the digits shorter, easing there.
         hill = Math.round(boxTop + side * 0.45);
         writeCutout();
         board.depth._load();
-        const before = glass.target.stretch;
-        check(await waitFor(() => glass.target.stretch < before - 0.1, 3000) &&
+        const was = glass.target.stretch;
+        check(await waitFor(() => glass.target.stretch < was - 0.1, 3000) &&
             await waitFor(() => glass.stretch === glass.target.stretch, 2000),
-        `the hill higher, they ease shorter (×${before.toFixed(2)} → ×${glass.target.stretch.toFixed(2)})`);
+        `the hill higher, they ease shorter (×${was.toFixed(2)} → ×${glass.target.stretch.toFixed(2)})`);
         check(Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03, 'their feet in it again');
 
         // Without the depth effect: as tall as the box lets them.
         lockSettings.set_boolean('depth-effect', false);
-        check(await waitFor(() => !board.depth && glass.target.stretch > before - 0.01, 3000),
+        check(await waitFor(() => !board.depth && glass.target.stretch > was - 0.01, 3000),
             `without it, as tall as the box lets them (×${glass.target.stretch.toFixed(2)})`);
     } finally {
+        if (clock)
+            delete clock._sync;
+        backdrop?.destroy();
         await locked.unlock();
         realBattery();
     }
@@ -4493,6 +4700,7 @@ async function testLockOnOwnWallpaper() {
             lockSettings.set_string('widgets', layout(n === 0 ? 'stacked' : 'glass'));
             await wallpapersSettled();
             const locked = await lockForTest();
+            let backdrop = null;
             try {
                 check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.typography.sample, 5000),
                     `locked on ${GLib.path_get_basename(source)}, its cutout there`);
@@ -4508,13 +4716,23 @@ async function testLockOnOwnWallpaper() {
                 check(await waitFor(() => lock().board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 3000),
                     'the glass clock in its place');
                 const glass = lock().board.widgets.find(w => w.entry.id === 'clock').glass;
+                // (The frosted wallpaper, as the board gives the glass, unless it does.)
+                if (!glass.backdrop) {
+                    const {GlassBackdrop} = await import('../shell/lockscreen/liquidGlass.js');
+                    backdrop = new GlassBackdrop();
+                    backdrop.setMonitor(size, scale);
+                    await waitFor(() => backdrop.current, 10000);
+                    glass.backdrop = backdrop.current;
+                }
                 await waitFor(() => glass.stretch === glass.target.stretch, 2000);
                 await Scripting.sleep(600);
                 const name = n === 0 ? '93-lock-own-glass' : `94-lock-own-glass-${n}`;
                 await screenshot(name);
                 results.push(`INFO  ${name} (${GLib.path_get_basename(source)}): glass ×${glass.target.stretch.toFixed(2)}, ` +
+                    `${GLib.path_get_basename(glass.fontFile ?? 'Pango')} ${glass.variations}, ` +
                     `the cutout ${depth.actor.visible ? 'shown' : `off${depth.tooMuch ? ' (covers too much)' : ''}`}`);
             } finally {
+                backdrop?.destroy();
                 await locked.unlock();
             }
         }
