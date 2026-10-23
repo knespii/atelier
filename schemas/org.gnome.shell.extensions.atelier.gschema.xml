@@ -430,6 +430,21 @@
       <summary>Request to edit the lock screen</summary>
       <description>Set by the preferences: the shell shows a mock lock screen to place the widgets on.</description>
     </key>
+    <key name="depth-effect" type="b">
+      <default>false</default>
+      <summary>Depth effect</summary>
+      <description>The subject in front of the wallpaper stands over the lock screen's own clocks, as if they were behind it. A small model (u2netp, downloaded in the settings when asked) finds the subject, in the session; the lock screen only shows the cutout made then. Off for a clock the subject would cover too much of.</description>
+    </key>
+    <key name="depth-request" type="s">
+      <default>''</default>
+      <summary>Request to make the wallpaper's cutout now</summary>
+      <description>Set by the preferences: the shell makes the cutout of the wallpaper anew.</description>
+    </key>
+    <key name="depth-status" type="s">
+      <default>''</default>
+      <summary>How the cutout of the wallpaper is coming on</summary>
+      <description>Written by the shell for the preferences: empty, “working”, “ready”, “none” (no wallpaper it can be made of) or “failed: ” and why.</description>
+    </key>
   </schema>
 
   <schema id="org.gnome.shell.extensions.atelier.notes"
