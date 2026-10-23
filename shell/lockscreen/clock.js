@@ -14,6 +14,11 @@
 // that change – only they – go: the old one lifting as it fades, the new
 // one rising into its place (lib/glassClock.js), drawn on a layer of their
 // own while they move. Nothing is drawn while it rests.
+//
+// (St draws a drawing area the moment it is told to – queue_repaint() – and
+// whenever it is laid out: the face draws its layers as it is laid out,
+// once a frame however often it is asked, and nothing it does while one is
+// being drawn may lay it out, or St would throw away what it draws into.)
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -23,6 +28,7 @@ import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import St from 'gi://St';
 
+import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
@@ -131,6 +137,8 @@ const GlassFace = GObject.registerClass({
         this._learning = 0;
         this._outlines = new Map();
         this._paintedAt = null;
+        this._dirty = false;
+        this._allocating = false;
         /** How many figures it has worked out itself (none, when the session did ahead of it). */
         this.workedOut = 0;
         this._type = kept.type ?? defaultType();
@@ -183,7 +191,9 @@ const GlassFace = GObject.registerClass({
             return;
         this._change = value;
         this.notify('change');
-        this._moving.queue_repaint();
+        // (A frame of the change: only the layer of the figures that change.)
+        if (this._turning)
+            this._moving.queue_repaint();
     }
 
     /**
@@ -305,23 +315,29 @@ const GlassFace = GObject.registerClass({
         return this._turning ? {leaving: [...this._turning.leaving], coming: [...this._turning.coming]} : null;
     }
 
+    // (The date line follows, laid out anew; the digits are drawn then.)
     _moved() {
-        this.queue_relayout();
         this._repaint();
     }
 
+    // Draw the layers anew as the face is laid out next: once, however
+    // often it is asked before.
     _repaint() {
-        this._digits.queue_repaint();
-        if (this._turning)
-            this._moving.queue_repaint();
+        this._dirty = true;
+        if (!this._allocating)
+            this.queue_relayout();
     }
 
     /** The clock moved (dragged in the editor): its glass shows what is behind it there. */
     followMove() {
         const at = this._paintedAt;
         const now = this._onMonitor(this._digits);
-        if (!at || now[0] !== at[0] || now[1] !== at[1])
-            this._repaint();
+        if (at && now[0] === at[0] && now[1] === at[1])
+            return;
+        // (As the clock is laid out: at once.)
+        this._digits.queue_repaint();
+        if (this._turning)
+            this._moving.queue_repaint();
     }
 
     /** @param {string} text - the clock as GNOME shows it, e.g. "9∶41 PM" */
@@ -344,18 +360,19 @@ const GlassFace = GObject.registerClass({
     _turn(before) {
         this._settle();
         const {leaving, coming} = changedFigures(before, this._text);
-        const box = this.mapped ? this._turningBox(before, leaving, coming) : null;
+        const box = this.mapped && adjustAnimationTime(CHANGE.time) > 0 ? this._turningBox(before, leaving, coming) : null;
         if (!box) {
             this._repaint();
             return;
         }
         const turning = {before, leaving, coming, box};
         this._turning = turning;
+        this._change = 0;
+        this.notify('change');
         this._moving.visible = true;
-        this.change = 0;
-        // (The layer of the figures that change, over their columns.)
-        this.queue_relayout();
-        this._digits.queue_repaint();
+        // (The layer of the figures that change laid over their columns,
+        // the rest drawn without them.)
+        this._repaint();
         this.ease_property('change', 1, {
             duration: CHANGE.time,
             mode: Clutter.AnimationMode.LINEAR,
@@ -373,9 +390,10 @@ const GlassFace = GObject.registerClass({
             return;
         this._turning = null;
         this.remove_transition('change');
-        this.change = 1;
+        this._change = 1;
+        this.notify('change');
         this._moving.visible = false;
-        this._digits.queue_repaint();
+        this._repaint();
     }
 
     // Where the figures that change go, across (and as far round them as
@@ -455,7 +473,6 @@ const GlassFace = GObject.registerClass({
         this._font = font;
         this._outlines.clear();
         this._metrics = null;
-        this.queue_relayout();
         this._repaint();
     }
 
@@ -585,10 +602,20 @@ const GlassFace = GObject.registerClass({
     }
 
     vfunc_allocate(box) {
+        this._allocating = true;
+        try {
+            this._allocate(box);
+        } finally {
+            this._allocating = false;
+        }
+    }
+
+    _allocate(box) {
         this.set_allocation(box);
         const [width, height] = [box.get_width(), box.get_height()];
         const resized = width !== this._size[0] || height !== this._size[1];
         this._size = [width, height];
+        // (First: laid out, it may be styled anew – another font.)
         this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
         const measuring = !this._metrics || resized;
         if (measuring) {
@@ -597,14 +624,23 @@ const GlassFace = GObject.registerClass({
         }
         // (Measured anew, or the date line over them set in another font.)
         this._retarget(false);
-        // (Figures changing meanwhile: where they are now.)
+        // The layer of the figures that change over their columns while
+        // they do (where they are now, measured anew).
         const turning = this._turning;
         if (measuring && turning)
             turning.box = this._turningBox(turning.before, turning.leaving, turning.coming) ?? turning.box;
-        // (Over the columns of the figures that change, while they do.)
-        const columns = this._turning?.box;
+        const drawn = this._moving.repaints;
+        const columns = turning?.box;
         this._moving.allocate(columns ? new Clutter.ActorBox({x1: columns.x1, y1: 0, x2: columns.x2, y2: height})
             : new Clutter.ActorBox());
+        // Drawn anew, once (St has drawn the layer of the figures that
+        // change if it was laid out anew just now).
+        if (this._dirty) {
+            this._dirty = false;
+            this._digits.queue_repaint();
+            if (turning && this._moving.repaints === drawn)
+                this._moving.queue_repaint();
+        }
         // The date line just over the digits, in the middle (unless it is
         // held elsewhere, in front of the subject).
         if (this._date.get_parent() === this) {
