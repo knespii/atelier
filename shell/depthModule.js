@@ -20,7 +20,7 @@ Gio._promisify(Gio.FileEnumerator.prototype, 'next_files_async');
 Gio._promisify(Gio.File.prototype, 'delete_async');
 
 const DELAY = 3000; // after a change, before the worker starts, ms
-const KEPT = 12; // cutouts kept, the newest
+const KEPT = 1; // cutouts kept: the wallpaper's now (the one before goes)
 
 export class DepthModule {
     /**
@@ -149,8 +149,8 @@ export class DepthModule {
         }
     }
 
-    // The newest few cutouts kept (for the wallpapers switched between),
-    // the one just made among them.
+    // Only the cutout just made kept: the one before (another wallpaper's)
+    // goes, to save the room.
     async _prune(keep) {
         const dir = Gio.File.new_for_path(depthDir());
         const enumerator = await dir.enumerate_children_async('standard::name,time::modified',

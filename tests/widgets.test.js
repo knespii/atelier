@@ -205,7 +205,8 @@ export function testLockScreenKinds() {
     assertEqual(lock[0].size, 'large', 'a clock may be big there');
     assertEqual(lock[0].face, 'stacked', 'with its face');
     assertEqual(parseLayout(json).find(e => e.id === 'clock').size, 'square', 'not on the desktop');
-    assertEqual(nextSize('clock', 'large', LOCK_KINDS), 'square');
+    assertEqual(nextSize('clock', 'large', LOCK_KINDS), 'tall');
+    assertEqual(nextSize('clock', 'tall', LOCK_KINDS), 'square');
     assertEqual(nextSize('clock', 'card', LOCK_KINDS), 'large');
     const grid = [36, 20];
     assertEqual(nearestSize([], {id: 'c', kind: 'clock', size: 'square', x: 0, y: 0}, grid, 8, 8, LOCK_KINDS), 'large');
