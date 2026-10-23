@@ -372,8 +372,9 @@ export async function testGlassPainted() {
     // on the monitor, over the red and the blue.
     const shape = cr => cr.rectangle(40, 30, 120, 40);
     const bounds = {x: 40, y: 30, width: 120, height: 40};
-    const draw = (options, name, withBackdrop = true) => {
-        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, 200, 100);
+    const draw = (options, name, withBackdrop = true, density = 1) => {
+        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, Math.ceil(200 * density), Math.ceil(100 * density));
+        surface.setDeviceScale(density, density);
         const cr = new Cairo.Context(surface);
         const glass = new LiquidGlass();
         glass.backdrop = withBackdrop ? backdrop : null;
@@ -398,4 +399,13 @@ export async function testGlassPainted() {
     assertEqual(glass(100, 72), [0, 0, 0, 0], 'none unless asked');
     const bare = draw({opacity: 1}, 'bare', false);
     assert(bare(60, 50)[3] > 100, 'without a backdrop, the tint alone');
+
+    // At 150 % (the screen's pixels half again as many as the stage's), the
+    // same, in its pixels.
+    const dense = draw({opacity: 1}, 'dense', true, 1.5);
+    const [denseLeft, denseRight] = [dense(90, 75), dense(210, 75)];
+    assert(denseLeft[3] === 255 && denseRight[3] === 255 && denseLeft[0] > denseLeft[2] && denseRight[2] > denseRight[0],
+        `at 150 %: red behind its left, blue behind its right (${denseLeft} | ${denseRight})`);
+    assertEqual(dense(15, 15), [0, 0, 0, 0], 'at 150 %: nothing far from it');
+    assert(dense(150, 45)[1] > dense(150, 75)[1] + 40, `at 150 %: light along its top (${dense(150, 45)})`);
 }

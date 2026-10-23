@@ -623,8 +623,8 @@ export class LiquidGlass {
 
     /**
      * Draw the shape in glass. The context's matrix is the identity (as an
-     * St.DrawingArea gives it): all is in its pixels, which are the
-     * stage's.
+     * St.DrawingArea gives it): all is in its coordinates, the stage's
+     * pixels (its surface may have more: at 150 %, half again as many).
      *
      * @param {Cairo.Context} cr
      * @param {Function|Cairo.Path} path - (cr) => adds the shape to cr's
