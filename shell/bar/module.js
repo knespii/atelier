@@ -17,7 +17,7 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
+import {COME_OUT_TIME, EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {GlassSurface} from '../core/glass.js';
 import {ContentPage} from '../island/page.js';
 import {CompactBar} from './compact.js';
@@ -94,9 +94,47 @@ export class BarModule {
         this._overview = null;
         this._laterId = 0;
         this._stopped = false;
+        this._tucked = false;
+        this._comingOut = {}; // (whose handler follows the bar as it comes out)
         this._indicators = new Map();
         this._preview = null;
         this._timeouts = new Map();
+    }
+
+    /**
+     * Hidden, with its capsules or its one island, until it comes out:
+     * while the lock screen's padlock goes back up.
+     */
+    tuckAway() {
+        this._tucked = true;
+        Main.panel.remove_transition('opacity');
+        Main.panel.opacity = 0;
+        this._updateSurfaces();
+    }
+
+    /** Out of the top edge, with the island (once the padlock has gone). */
+    comeOut() {
+        // (Not once the shell has taken its UI down as it quits.)
+        if (!this._tucked || this._stopped)
+            return;
+        this._tucked = false;
+        const panel = Main.panel;
+        const [, panelY] = panel.get_transformed_position();
+        panel.remove_all_transitions();
+        panel.translation_y = -Math.ceil(panelY - panel.translation_y + panel.height);
+        // Its capsules or its one island with it.
+        panel.connectObject('notify::translation-y', () => this._updateSurfaces(), this._comingOut);
+        panel.ease({
+            translation_y: 0,
+            opacity: 255,
+            duration: COME_OUT_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            onStopped: () => {
+                panel.disconnectObject(this._comingOut);
+                this._updateSurfaces();
+            },
+        });
+        this._updateSurfaces();
     }
 
     /** @returns {Map<string, PanelMenu.Button>} the modules shown, by id */
@@ -134,6 +172,14 @@ export class BarModule {
     }
 
     disable() {
+        // (Back as it was, out or not.)
+        if (this._tucked || Main.panel.translation_y !== 0) {
+            Main.panel.disconnectObject(this._comingOut);
+            Main.panel.remove_all_transitions();
+            Main.panel.translation_y = 0;
+            Main.panel.opacity = 255;
+        }
+        this._tucked = false;
         this._modules.disconnectObject(this);
         this._island?.setMinPageWidth(0);
         this._island?.disconnectObject(this);
@@ -308,7 +354,7 @@ export class BarModule {
         if (this._surfaces.length === 0 || this._stopped)
             return;
         const panel = Main.panel;
-        if (!Main.layoutManager.panelBox.visible || !panel.visible) {
+        if (!Main.layoutManager.panelBox.visible || !panel.visible || this._tucked) {
             this._surfaces.forEach(surface => surface.hide());
             return;
         }
@@ -316,10 +362,11 @@ export class BarModule {
         const [panelX, panelY] = panel.get_transformed_position();
         const monitor = Main.layoutManager.primaryMonitor;
         const [minX, maxX] = [monitor.x + EDGE * scale, monitor.x + monitor.width - EDGE * scale];
-        // As tall as the island at rest, and at its height (floating).
+        // As tall as the island at rest, and at its height (floating). (Out
+        // of the top edge with the bar, as it comes out.)
         const rest = this._look.notch ? null : this._island?.restRect();
         const height = rest?.[3] ?? capsuleHeight(panel.height, scale);
-        const y = rest?.[1] ?? Math.round(panelY + (panel.height - height) / 2);
+        const y = rest ? rest[1] + panel.translation_y : Math.round(panelY + (panel.height - height) / 2);
         // [start, end] of a side's icons on the stage, if it shows any
         const extent = box => {
             if (!box.get_children().some(child => child.visible && child.width > 0))

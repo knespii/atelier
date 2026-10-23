@@ -7,14 +7,16 @@
 // and starts again once it is unlocked; only shell/lockscreen runs then,
 // and it neither launches anything nor takes the keyboard.
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
+import {onTime} from './lib/steadyTime.js';
 import {ProfileStore} from './lib/profiles.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {releaseKeptStyles} from './shell/core/theme.js';
@@ -32,6 +34,11 @@ import {NotificationsModule} from './shell/notifications/module.js';
 import {OtherExtensionsModule} from './shell/otherExtensions.js';
 import {PaletteModule} from './shell/paletteModule.js';
 import {ProfilesModule} from './shell/profilesModule.js';
+
+// Unlocked, the lock screen goes once the shell is calm again: so many
+// frames in a row on time – or after this long at most, ms.
+const CALM_FRAMES = 6;
+const CALM_LONGEST = 2500;
 
 export default class AtelierExtension extends Extension {
     enable() {
@@ -95,6 +102,7 @@ export default class AtelierExtension extends Extension {
     disable() {
         Main.sessionMode.disconnectObject(this);
         this._cancelUnlockLater();
+        this._slideAway();
         this.lockModules.disable();
         this._afterglow?.destroy();
         this._afterglow = null;
@@ -116,6 +124,7 @@ export default class AtelierExtension extends Extension {
             this._cancelUnlockLater();
             modules.disable();
             this.lockModules.enable();
+            this._holdSlideAway();
             return;
         }
         if (!this.lockModules.enabled) {
@@ -133,9 +142,14 @@ export default class AtelierExtension extends Extension {
             if (this._afterglow === afterglow)
                 this._afterglow = null;
             this.modules?.get('island')?.comeOut();
+            this.modules?.get('bar')?.comeOut();
         }) ?? null;
         this._afterglow = afterglow?.actor ? afterglow : null;
         this.lockModules.disable();
+        // Meanwhile GNOME's bar shows as plain GNOME's, the other
+        // extensions' buttons coming into it as they go on (the shell
+        // stopped for a while): out of sight until Atelier is built.
+        this._veilPanel(true);
         // All of it at once, before the first frame after the unlock (in
         // turn, plain GNOME showed for a moment) – but after GNOME has
         // turned its other extensions on again, in this same turn of the
@@ -144,19 +158,140 @@ export default class AtelierExtension extends Extension {
         // with every one.
         this._unlockLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._unlockLater = 0;
-            if (this.modules !== modules || Main.sessionMode.isLocked)
+            if (this.modules !== modules || Main.sessionMode.isLocked) {
+                this._veilPanel(false);
+                this._slideAway();
                 return GLib.SOURCE_REMOVE;
-            modules.enable();
-            if (this._afterglow)
-                modules.get('island')?.tuckAway();
+            }
+            try {
+                modules.enable();
+                this._veilPanel(false);
+                // (Out of the top edge, the bar and the island, once the
+                // padlock has gone back up.)
+                if (this._afterglow) {
+                    modules.get('island')?.tuckAway();
+                    modules.get('bar')?.tuckAway();
+                }
+            } finally {
+                this._veilPanel(false);
+                this._slideAway();
+            }
             return GLib.SOURCE_REMOVE;
         });
+    }
+
+    // Unlocked, GNOME turns its other extensions on again in one go, and
+    // the shell stops a while – over the bare desktop, the lock screen gone
+    // at once. It stays instead, the padlock open, until that is over,
+    // Atelier is built under it and the shell is calm again, and then goes
+    // at once, as GNOME has it go (no slide: the user found it jerky, and
+    // not Atelier's); GNOME finishes with it as it would have.
+    _holdSlideAway() {
+        const shield = Main.screenShield;
+        if (!shield || this._shieldInjections)
+            return;
+        this._shieldInjections = new InjectionManager();
+        const extension = this;
+        this._shieldInjections.overrideMethod(shield, '_continueDeactivate', original => function (...args) {
+            const group = this._lockDialogGroup;
+            const moves = [];
+            group.ease = params => moves.push(params);
+            try {
+                original.call(this, ...args);
+            } finally {
+                delete group.ease;
+            }
+            extension._slide = () => extension._dropCurtain(group, moves);
+            // (Atelier built at once, no stop to wait for.)
+            if (!extension._unlockLater)
+                extension._slideAway();
+        });
+    }
+
+    _slideAway() {
+        const slide = this._slide;
+        this._slide = null;
+        this._shieldInjections?.clear();
+        this._shieldInjections = null;
+        slide?.();
+    }
+
+    /**
+     * @param {Clutter.Actor} group - GNOME's lock screen
+     * @param {object[]} moves - its eases GNOME asked for, held back
+     */
+    _dropCurtain(group, moves) {
+        let done = false;
+        const finish = () => {
+            if (done)
+                return;
+            done = true;
+            this._curtain?.stop();
+            this._curtain = null;
+            for (const {onStopped, onComplete, ...params} of moves) {
+                // (Each as GNOME asked, at once.)
+                group.ease({...params, duration: 0, delay: 0});
+                onStopped?.(true);
+                onComplete?.();
+            }
+        };
+        // Calm: frames on time, as the monitor has them.
+        const rate = group.peek_stage_views()[0]?.get_refresh_rate?.() || 60;
+        let calm = 0;
+        const timeline = new Clutter.Timeline({actor: group, duration: 1000, repeat_count: -1});
+        timeline.connect('new-frame', () => {
+            calm = onTime(timeline.get_delta(), 1000 / rate) ? calm + 1 : 0;
+            if (calm >= CALM_FRAMES)
+                finish();
+        });
+        let timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, CALM_LONGEST, () => {
+            timeoutId = 0;
+            finish();
+            return GLib.SOURCE_REMOVE;
+        });
+        // (Gone with the UI as the shell quits: nothing of it may go on.)
+        const destroyId = group.connect('destroy', () => this._curtain?.stop());
+        this._curtain = {
+            finish,
+            stop: () => {
+                timeline.stop();
+                if (timeoutId)
+                    GLib.source_remove(timeoutId);
+                timeoutId = 0;
+                group.disconnect(destroyId);
+                this._curtain = null;
+            },
+        };
+        timeline.start();
+    }
+
+    // (Locked again, or Atelier turned off, while it waits: gone at once.)
+    _finishCurtain() {
+        this._curtain?.finish();
     }
 
     _cancelUnlockLater() {
         if (this._unlockLater)
             global.compositor.get_laters().remove(this._unlockLater);
         this._unlockLater = 0;
+        this._veilPanel(false);
+        // (A lock screen held back goes now: GNOME finishes with it.)
+        if (this._slide)
+            this._slideAway();
+        this._finishCurtain();
+    }
+
+    /** @param {boolean} veiled - GNOME's bar out of sight (or back as it was) */
+    _veilPanel(veiled) {
+        if (veiled === (this._panelOpacity !== undefined))
+            return;
+        if (veiled) {
+            this._panelOpacity = Main.panel.opacity;
+            Main.panel.opacity = 0;
+        } else {
+            Main.panel.opacity = this._panelOpacity;
+            this._panelOpacity = undefined;
+        }
     }
 
     _legacySettings() {

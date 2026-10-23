@@ -674,6 +674,9 @@
 
 #panel.atelier-bar-clean {
   background-color: transparent;
+  /* (At once: GNOME's bar fades to its black in 250 ms, and fading from
+     that, it flashed black as the screen unlocked.) */
+  transition-duration: 0ms;
 }
 
 #panel.atelier-bar-clean .panel-button {

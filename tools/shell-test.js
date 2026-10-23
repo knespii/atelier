@@ -3591,6 +3591,8 @@ async function testLockScreen(ext) {
         check(!findActor(Main.uiGroup, a => a.name === 'atelier-dock' || a.name === 'atelier-desktop'),
             'nothing else of it shows');
         check(phase() === 'locked' && island.padlock.look.shackle === 'closed', 'the padlock is closed');
+        const status = Main.panel.statusArea.quickSettings.container;
+        check(!status.visible, 'GNOME\'s status icons are not in its corner');
 
         // A click on the lock screen brings up the password prompt, and the
         // island comes out of the top edge.
@@ -3652,9 +3654,18 @@ async function testLockScreen(ext) {
         await screenshotIsland('82-lock-success', 160);
 
         // logind's Unlock, as GDM would have it sent.
+        const veil = [];
+        Main.panel.connectObject('notify::opacity', () => veil.push(Main.panel.opacity), veil);
         shield.deactivate(false);
         check(await waitFor(() => !Main.sessionMode.isLocked && atelier().modules.get('island')?.island, 4000),
             'unlocked, the rest of Atelier is back');
+        Main.panel.disconnectObject(veil);
+        check(veil[0] === 0 && Main.panel.opacity === 0,
+            `GNOME's bar out of sight till then, as plain GNOME's (${veil})`);
+        const panelNode = Main.panel.get_theme_node();
+        check(panelNode.get_transition_duration() === 0 && panelNode.get_background_color().alpha === 0,
+            'and clear at once, not fading from GNOME\'s black');
+        check(status.visible, 'and the bar its status icons, as its style has them');
         const allBack = () => atelier().modules._entries.every(entry => entry.instance || !atelier().modules._wanted(entry));
         check(allBack(), 'all of it in one go, not one module after another');
         const afterglow = atelier()._afterglow;
@@ -3662,10 +3673,13 @@ async function testLockScreen(ext) {
             'the padlock stays a moment over the island');
         const sessionIsland = atelier().modules.get('island').island;
         check(sessionIsland.opacity === 0, 'which waits, tucked away');
+        check(Main.panel.opacity === 0, 'and the bar with it');
         check(await waitFor(() => !afterglow.actor, 2000), 'the padlock goes back up');
         check(await waitFor(() => sessionIsland.translation_y === 0 && sessionIsland.opacity === 255 &&
             !sessionIsland.get_transition('translation_y'), 2000) && atelier()._afterglow === null,
         'then the island comes out of the top edge');
+        check(await waitFor(() => Main.panel.opacity === 255 && Main.panel.translation_y === 0, 1000),
+            'and the bar with it');
         check(!findActor(Main.layoutManager.screenShieldGroup, a => a.style_class?.includes('atelier')),
             'nothing of Atelier is left in the lock screen');
 
@@ -3703,9 +3717,20 @@ async function testLockScreen(ext) {
         });
         // (As GNOME has it: verified, then the lock screen goes.)
         const asked = GLib.get_monotonic_time() / 1000;
+        const curtain = shield._lockDialogGroup;
+        let moved = 0;
+        let firstPlace = null;
+        const mover = curtain.connect('notify::translation-y', () => {
+            moved ||= GLib.get_monotonic_time() / 1000;
+            firstPlace ??= curtain.translation_y;
+        });
         shield.deactivate(false);
         check(await waitFor(() => !Main.sessionMode.isLocked && thawed > 0, 4000) && allBack(),
             'unlocked with the shell stopped a moment, all of Atelier is back at once');
+        check(await waitFor(() => moved > 0 && !shield._dialog, 4000) && moved >= thawed &&
+            firstPlace === -global.stage.height,
+        `the lock screen goes once the shell is calm again, at once (${Math.round(moved - thawed)} ms after, to ${firstPlace})`);
+        curtain.disconnect(mover);
         await waitFor(() => !leaving.actor, 4000);
         sampler.stop();
         const before = samples.filter(sample => sample.time > asked && sample.time < stopped);

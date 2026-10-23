@@ -20,3 +20,9 @@ export const NOTCH_RADIUS = 14;
 
 /** Radius of a notch's ears, where it curves into the top edge. */
 export const EAR_RADIUS = 9;
+
+/**
+ * How long the bar and the island take to come out of the top edge after
+ * the lock screen's padlock has gone back up, ms.
+ */
+export const COME_OUT_TIME = 380;

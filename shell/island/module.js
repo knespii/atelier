@@ -15,7 +15,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 import {effectiveWallpaper} from '../../lib/profiles.js';
-import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
+import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
 import {switcherWidth} from '../switcherContent.js';
@@ -35,7 +35,6 @@ const GLANCE_DELAY = 300;
 const GLANCE_HIDE_DELAY = 250;
 // How far down the screen the island may grow, for its glass.
 const GLASS_REACH = 0.9;
-const COME_OUT_TIME = 380; // out of the top edge, after the lock screen's padlock
 
 // Keeps the island's place in the center of the top bar.
 const IslandSlot = GObject.registerClass(
