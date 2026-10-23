@@ -96,10 +96,11 @@ export function testGlassDigits() {
     assertEqual(glassDigits(ink, 40, 600, null).stretch, STRETCH.max, 'never taller than the most');
     assertEqual(glassDigits(ink, 40, 100, null).stretch, STRETCH.min, 'never squashed');
     // A subject under them: down into it, its top a little above their feet.
-    const {stretch, y} = glassDigits(ink, 40, 400, 184);
+    const subject = 40 + 2 * ink * (1 - STRETCH.overlap);
+    const {stretch, y} = glassDigits(ink, 40, 400, subject);
     const feet = y + stretch * ink;
     assert(y === 40 && Math.abs(stretch - 2) < 1e-9, `from under the date (${y}, ${stretch})`);
-    assert(Math.abs((feet - 184) / (stretch * ink) - STRETCH.overlap) < 1e-9, `their feet in it (${feet})`);
+    assert(Math.abs((feet - subject) / (stretch * ink) - STRETCH.overlap) < 1e-9, `their feet in it (${feet})`);
     // Far below: as tall as they get, moved down to meet it.
     const low = glassDigits(ink, 40, 500, 350);
     assert(low.stretch === STRETCH.max && low.y > 40 &&

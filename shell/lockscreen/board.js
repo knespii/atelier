@@ -31,6 +31,9 @@ const DIMMED = 0.25; // what is left of the widgets while the prompt is up
 const SMALLEST = 0.35; // how small a clock gets to go up over the popup
 const SHIFT_TIME = 250; // moving on when the popup changes size
 const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
+// How much of a glass clock's width the subject has to stand across, for
+// its digits to end there.
+const ACROSS = 0.97;
 
 export class LockBoard {
     /**
@@ -213,15 +216,18 @@ export class LockBoard {
         return {x, y, width: own.get_width(), height: own.get_height()};
     }
 
-    // A glass clock's digits stretch down to where the subject starts under
-    // them; what it covers of them is what counts then.
+    // A glass clock's digits stretch down to where the subject stands
+    // right across them (a hill sloping under them: its lowest point there),
+    // so that it hides the feet of every digit – not a straight edge above
+    // the ground where it is lower; what it covers of them counts then.
     _followSubject(widget, box) {
         const glass = widget.glass;
         const strip = glass?.strip;
         if (!strip)
             return null;
         const {x, y} = this._rectIn(glass, widget, box);
-        const top = this._depth.subjectTop({x: x + strip.x, width: strip.width, from: y + strip.top, to: y + strip.bottom});
+        const span = {x: x + strip.x, width: strip.width, from: y + strip.top, to: y + strip.bottom};
+        const top = this._depth.subjectTop(span, ACROSS) ?? this._depth.subjectTop(span);
         glass.setSubject(top === null ? null : top - y);
         const digits = glass.digitsRect;
         return digits ? {...digits, x: x + digits.x, y: y + digits.y} : null;

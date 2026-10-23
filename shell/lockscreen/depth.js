@@ -175,11 +175,13 @@ export class DepthCutout {
     /**
      * @param {object} strip - {x, width, from, to} on the monitor (see
      *   lib/depth.js subjectTop())
+     * @param {number} [share] - of the strip's width the subject has to
+     *   stand across (see there)
      * @returns {number|null} where what stands in front starts in it; null
      *   without a cutout, or nothing there
      */
-    subjectTop(strip) {
-        return this._shown && this._sample ? subjectTop(this._sample, this._shown, strip) : null;
+    subjectTop(strip, share = undefined) {
+        return this._shown && this._sample ? subjectTop(this._sample, this._shown, strip, share) : null;
     }
 
     /**
