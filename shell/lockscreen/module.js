@@ -51,7 +51,31 @@ export class LockModule {
         this._unlocking = false;
         this._room = 0;
         this._following = null;
+        this._status = null;
         this.state = initialState();
+    }
+
+    // GNOME's status icons in the corner (network, battery, sound): not on
+    // Atelier's lock screen. (Accessibility and the keyboard layout stay,
+    // when GNOME shows them: they can be needed to get in.)
+    _hideStatus() {
+        const container = Main.panel.statusArea.quickSettings?.container;
+        if (!container)
+            return;
+        this._status = container;
+        container.hide();
+        container.connectObject('notify::visible', () => {
+            if (container.visible)
+                container.hide();
+        }, this);
+    }
+
+    // (Unlocked, the session's bar has them as it does.)
+    _showStatus() {
+        const container = this._status;
+        this._status = null;
+        container?.disconnectObject(this);
+        container?.show();
     }
 
     /** @returns {number} how much room is made for the prompt: 0 … 1 */
@@ -75,6 +99,7 @@ export class LockModule {
         if (!this._dialog)
             return;
         this._lockSettings = this._settings.get_child('lockscreen');
+        this._hideStatus();
         if (this._lockSettings.get_boolean('island')) {
             this._island = new LockIsland(this._settings.get_child('bar'));
             this._island.actor.connectObject('clicked', () => showPrompt(this._dialog), this);
@@ -269,6 +294,7 @@ export class LockModule {
     }
 
     disable() {
+        this._showStatus();
         this._injections?.clear();
         this._injections = null;
         if (this._settleId)
