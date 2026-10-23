@@ -106,7 +106,8 @@ profile called **Original**, so there is always a way back.
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.
 - **Lock screen**: the wallpaper stays sharp until the password is asked.
-  Then it blurs, the island comes out of the top edge with a padlock in a
+  Then it turns to glass – blurred as GNOME blurs it, but its colours kept,
+  a little richer, darker only towards the corners – the island comes out of the top edge with a padlock in a
   ring of ticks, and a popup of its own – the user's picture and name over
   the field, Enter sends it – spreads out of a drop in the middle of the
   screen, while a clock of hours over minutes puts its minutes beside its
@@ -118,9 +119,14 @@ profile called **Original**, so there is always a way back.
   hops for joy in a green ring that spreads out a little. What is typed goes
   to GNOME, which still does all the checking (and its own prompt shows
   whenever GNOME asks for something else). Clocks – a stacked one too, the
-  date over big hours over dimmer minutes – and the date can be placed
-  anywhere on it, on a mock lock screen opened from the settings' Lock
-  Screen page. Nothing on the lock screen opens an app, reads the network or
+  date over big hours over dimmer minutes – the date, and the weather and
+  the battery in a line can be placed anywhere on it, on a mock lock screen
+  opened from the settings' Lock Screen page. Their type is in a tone of the
+  palette's hue, light or dark, picked for each from the wallpaper behind
+  it so that it is legible there (or in a color of one's own), with a soft
+  halo of the other tone behind it, in a font of one's choice: the shell's,
+  Rounded, Serif (the first such font installed), Thin or Heavy. The weather
+  is GNOME's as it last had it, never fetched anew. Nothing on the lock screen opens an app, reads the network or
   shows notifications; everything else of Atelier stops while it is locked.
 - **Claude Code**: a ring in the bar shows how far the current 5-hour block
   is, with the tokens Claude wrote in it; resting the pointer on it (or the

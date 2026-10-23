@@ -8,7 +8,7 @@ import GLib from 'gi://GLib';
 import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
+import {paletteForWallpaper, readPaletteOptions, wallpaperShown} from '../lib/wallpaperPalette.js';
 import {GtkStyles} from './core/gtkStyles.js';
 import {TerminalStyles} from './core/terminalStyles.js';
 import {ThemeManager} from './core/theme.js';
@@ -92,10 +92,7 @@ export class PaletteModule extends Signals.EventEmitter {
 
     /** @returns {string|null} path of the wallpaper on screen */
     _currentWallpaper() {
-        const dark = this._interface.get_string('color-scheme') === 'prefer-dark';
-        const uri = (dark && this._background.get_string('picture-uri-dark')) ||
-            this._background.get_string('picture-uri');
-        return uri ? Gio.File.new_for_uri(uri).get_path() : null;
+        return wallpaperShown(this._background, this._interface);
     }
 
     _queue(delay = RECOMPUTE_DELAY) {

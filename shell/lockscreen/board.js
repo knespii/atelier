@@ -1,6 +1,8 @@
-// The widgets on the lock screen: clocks (and the date) placed anywhere on
-// the main monitor, on the same grid as the desktop's widgets, laid out in
-// the lockscreen settings' widgets. On the lock screen they only show – a
+// The widgets on the lock screen: clocks, the date, the weather and the
+// battery placed anywhere on the main monitor, on the same grid as the
+// desktop's widgets, laid out in the lockscreen settings' widgets. Their
+// type is in a tone legible on the wallpaper behind each (typography.js),
+// in the font chosen for them. On the lock screen they only show – a
 // click goes through to GNOME's lock screen, which brings up the prompt;
 // in the editor (a mock lock screen in the session, see preview.js) they
 // are moved and stretched as on the desktop. When the password is asked,
@@ -13,11 +15,13 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
     LOCK_KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
-    nearestSize, nearestSpot, newId, nextSize, parseLayout, placeAt, serializeLayout,
+    nearestSize, nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {ClockWidget, DateWidget} from '../desktop/kinds/time.js';
+import {LockTypography} from './typography.js';
+import {LockBatteryWidget, LockWeatherWidget} from './widgets.js';
 
-const WIDGETS = {clock: ClockWidget, date: DateWidget};
+const WIDGETS = {clock: ClockWidget, date: DateWidget, weather: LockWeatherWidget, battery: LockBatteryWidget};
 const DIMMED = 0.25; // what is left of the widgets while the prompt is up
 const SMALLEST = 0.35; // how small a clock gets to go up over the popup
 const SHIFT_TIME = 250; // moving on when the popup changes size
@@ -28,8 +32,9 @@ export class LockBoard {
      * @param {Gio.Settings} settings - the lockscreen ones
      * @param {object} [options]
      * @param {boolean} [options.interactive] - the widgets take clicks (in the editor)
+     * @param {Gio.Settings} [options.palette] - Atelier's palette settings
      */
-    constructor(settings, {interactive = false} = {}) {
+    constructor(settings, {interactive = false, palette = null} = {}) {
         this._settings = settings;
         this._interactive = interactive;
         /** The kinds there are here, with their sizes (the editor's catalog). */
@@ -40,6 +45,8 @@ export class LockBoard {
         this._saving = false;
         this._gone = false;
         this._look = null;
+        this._typography = new LockTypography(settings, palette);
+        this._typography.connectObject('changed', () => this._tone(), this);
         this.layer = new St.Widget({reactive: false});
         // (On the lock screen, it goes with the lock screen's dialog.)
         this.layer.connect('destroy', () => {
@@ -103,6 +110,11 @@ export class LockBoard {
         this.layer.set_size(monitor.width, monitor.height);
     }
 
+    /** @returns {LockTypography} the widgets' type */
+    get typography() {
+        return this._typography;
+    }
+
     // Bare (just the clocks' faces on the wallpaper), or cards as on the
     // desktop. The widgets are built anew: a clock's face may follow it.
     _syncLook() {
@@ -111,6 +123,7 @@ export class LockBoard {
             return;
         this._look = look;
         const cards = look === 'modern' || look === 'analogue';
+        this._bare = !cards;
         this.layer.set_style_class_name(
             `atelier-desktop atelier-lock-widgets ${cards ? `atelier-desktop-${look}` : 'atelier-lock-bare'}`);
         this._load();
@@ -132,6 +145,7 @@ export class LockBoard {
         const widget = new Kind(entry, this._context);
         // (On the lock screen a click goes through to GNOME's.)
         widget.reactive = this._interactive;
+        widget.connectObject('filled', () => this._tone(widget), this);
         this.layer.add_child(widget);
         this._widgets.set(entry.id, widget);
         this._editor?.adopt(widget);
@@ -221,6 +235,36 @@ export class LockBoard {
             widget.entry = {...widget.entry, x: entry.x, y: entry.y};
             const [x, y] = cellOrigin(entry.x, entry.y, this._origin).map(v => v * scale);
             widget.set_position(x, y);
+        }
+        this._tone();
+    }
+
+    // Each widget's type in a tone legible on the wallpaper behind it (on
+    // a card, the card's colours) and in the font chosen: on it, and on
+    // the parts of it that have their own (not on the editor's buttons).
+    _tone(only = null) {
+        if (!this._grid || this._gone)
+            return;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [width, height] = [this._area.width / scale, this._area.height / scale];
+        for (const widget of only ? [only] : this.widgets) {
+            const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
+            const [w, h] = pixelSize(widget.entry.size);
+            const style = this._typography.styleOf([x / width, y / height, w / width, h / height],
+                width / height, this._bare);
+            widget.style = style.widget || null;
+            const parts = widget.get_children().filter(child => !child.corner);
+            while (parts.length > 0) {
+                const part = parts.pop();
+                parts.push(...part.get_children());
+                if (!(part instanceof St.Widget))
+                    continue;
+                const own = style.part(part.get_style_class_name()?.split(' ') ?? []);
+                // (Left as it is, unless it was toned before.)
+                if (own || part._atelierToned)
+                    part.style = own || null;
+                part._atelierToned = Boolean(own);
+            }
         }
     }
 
@@ -392,6 +436,8 @@ export class LockBoard {
         this._keep({...entry, x, y});
         const widget = this._widgets.get(id);
         widget.entry = {...widget.entry, x, y};
+        // (Over another part of the wallpaper.)
+        this._tone(widget);
         return true;
     }
 
@@ -401,6 +447,8 @@ export class LockBoard {
      *   them (the lock screen sliding away once unlocked)
      */
     destroy({keepLayer = false} = {}) {
+        this._typography.disconnectObject(this);
+        this._typography.destroy();
         this._settings.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         if (!this._gone && !keepLayer)

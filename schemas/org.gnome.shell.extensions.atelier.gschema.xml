@@ -408,7 +408,7 @@
     <key name="widgets" type="s">
       <default>'[]'</default>
       <summary>Widgets on the lock screen</summary>
-      <description>Clocks and the date on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
+      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
     </key>
     <key name="style" type="s">
       <choices>
@@ -424,6 +424,23 @@
       <default>true</default>
       <summary>GNOME's clock on the lock screen</summary>
       <description>Off when the lock screen's own clocks take its place (with the hint under it, how to unlock: the island's padlock is there to click).</description>
+    </key>
+    <key name="clock-color" type="s">
+      <default>'auto'</default>
+      <summary>Color of the lock screen's widgets</summary>
+      <description>“auto”: a tone of the palette's hue, light or dark, picked for each widget from the wallpaper behind it so that it is legible there; or a color, '#rrggbb'. On the wallpaper only (the Bare look): cards keep their own.</description>
+    </key>
+    <key name="clock-font" type="s">
+      <choices>
+        <choice value="default"/>
+        <choice value="rounded"/>
+        <choice value="serif"/>
+        <choice value="thin"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'default'</default>
+      <summary>Font of the lock screen's widgets</summary>
+      <description>Default: the shell's font as the widgets have it; Rounded and Serif: the first such font installed (the shell's own otherwise); Thin and Heavy: the shell's font, thin or heavy.</description>
     </key>
     <key name="edit-request" type="s">
       <default>''</default>
