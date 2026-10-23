@@ -33,7 +33,9 @@ import * as dockCore from './dock-tests/core.js';
 import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
 import * as dockWindows from './dock-tests/windows.js';
-import {chosenModel, cutoutPath, modelPath, pictureState, workerPath} from '../lib/depth.js';
+import {
+    MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutPath, modelPath, pictureState, workerPath,
+} from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
 import {fakeDepthModel} from '../tests/fakeOnnx.js';
@@ -4069,6 +4071,20 @@ function discPicture(path, [width, height], [cx, cy, r], disc, around, text = {}
 
 const isGreen = ([r, g, b]) => g > 200 && r < 90 && b < 90;
 
+// A cutout of rectangles, [x1, y1, x2, y2] in its pixels, of a colour, the
+// rest of another (see-through).
+function rectsPicture(path, [width, height], rects, color, around, text = {}) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, true, 8, width, height);
+    pixbuf.fill(around);
+    for (const [x1, y1, x2, y2] of rects) {
+        const [left, top] = [Math.max(0, Math.round(x1)), Math.max(0, Math.round(y1))];
+        const [right, bottom] = [Math.min(width, Math.round(x2)), Math.min(height, Math.round(y2))];
+        if (right > left && bottom > top)
+            pixbuf.new_subpixbuf(left, top, right - left, bottom - top).fill(color);
+    }
+    pixbuf.savev(path, 'png', Object.keys(text).map(key => `tEXt::${key}`), Object.values(text));
+}
+
 // The depth effect: what stands near in the wallpaper over the lock
 // screen's clocks. The cutout is made in the session (here by hand: a green disc
 // over the wallpaper's light one, so it shows where it is drawn); the lock
@@ -4109,8 +4125,12 @@ async function testLockDepth() {
     // (Half as big as the wallpaper: stretched over it.)
     const cutout = cutoutPath(pictureState(wallpaper), [monitor.width, monitor.height]);
     GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
-    discPicture(cutout, [800, 600], [cx / zoom / 2, (cy + 180) / zoom / 2, r / zoom / 2], 0x00ff00ff, 0x00000000,
-        {'atelier-width': '1600', 'atelier-height': '1200'});
+    const cutoutText = {'atelier-width': '1600', 'atelier-height': '1200'};
+    const discCutout = () => discPicture(cutout, [800, 600], [cx / zoom / 2, (cy + 180) / zoom / 2, r / zoom / 2],
+        0x00ff00ff, 0x00000000, cutoutText);
+    discCutout();
+    // (Monitor pixels on the cutout: 800 × 600 over 1920 × 1440, 180 above the monitor.)
+    const onCutout = ([x1, y1, x2, y2]) => [x1, y1 + 180, x2, y2 + 180].map(v => v * 800 / 1920);
     lockSettings.set_string('widgets', JSON.stringify([
         {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
         {id: 'date', kind: 'date', size: 'square', x: 2, y: 12, fine: true},
@@ -4134,7 +4154,8 @@ async function testLockDepth() {
         check(JSON.stringify(depth.shown) === JSON.stringify({x: 0, y: -180, width: 1920, height: 1440}) &&
             depth.actor.x === 0 && depth.actor.y === -180 && depth.actor.width === 1920,
         `over the wallpaper as GNOME zooms it (${JSON.stringify(depth.shown)})`);
-        check(!depth.tooMuch && !depth.actor.reactive, 'a part of the clock covered: on; it takes no clicks');
+        check(!depth.tooMuch && !depth.actor.reactive && depth.legibility.length === 1 && depth.legibility[0].stays,
+            `a part of the clock covered, none of its digits much: on; it takes no clicks (${JSON.stringify(depth.legibility)})`);
         await restPointer();
         await Scripting.sleep(500);
         await screenshot('88-lock-depth');
@@ -4167,9 +4188,50 @@ async function testLockDepth() {
         await Scripting.sleep(300);
         await screenshot('89-lock-depth-covered');
         check(!isGreen(at('89-lock-depth-covered', mx + cx, my + cy)), 'nothing of the cutout shows');
+
+        // Digit by digit: a post over one digit of the minutes hides more
+        // of it than a digit may lose – the effect off, though it covers
+        // little of the clock (as a share of its box it stayed on).
+        lockSettings.set_string('widgets', JSON.stringify([
+            {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
+        ]));
+        await waitFor(() => lock().board.widgets[0]?._minutes?.mapped, 3000);
+        await Scripting.sleep(300);
+        const stacked = lock().board.widgets[0];
+        const digits = lock().board._legible(stacked, stacked.get_allocation_box()).glyphs;
+        const minute = digits.at(-2);
+        rectsPicture(cutout, [800, 600], [onCutout([minute.x, minute.y - 10, minute.x + minute.width * 0.6,
+            minute.y + minute.height + 10])], 0x00ff00ff, 0x00000000, cutoutText);
+        lock().board.depth._load();
+        check(await waitFor(() => lock().board.depth.loaded && lock().board.depth.tooMuch, 3000) &&
+            !lock().board.depth.actor.visible, `a post over a digit of the minutes: the effect off (${digits.length} digits)`);
+        const verdict = lock().board.depth.legibility[0];
+        check(verdict?.worst > MAX_GLYPH_COVER && verdict.whole < MAX_COVER && verdict.glyph === digits.length - 2,
+            `that digit hidden too much, the clock as a whole not (${JSON.stringify(verdict)})`);
+
+        // The date over the clock stays in front of the subject, as on an
+        // iPhone: a band of it over the date line only, its digits clear –
+        // on, and the date shows over it.
+        const line = stacked.dateLine;
+        const [lx, ly] = line.get_transformed_position().map(v => Math.round(v));
+        const [lw, lh] = line.get_transformed_size().map(v => Math.round(v));
+        const digitsTop = Math.min(...digits.map(d => d.y));
+        rectsPicture(cutout, [800, 600], [onCutout([0, ly - my - 40, monitor.width,
+            Math.min(ly - my + lh + 6, digitsTop - 2)])], 0x00ff00ff, 0x00000000, cutoutText);
+        lock().board.depth._load();
+        check(await waitFor(() => lock().board.depth.loaded && lock().board.depth.actor.visible &&
+            !lock().board.depth.tooMuch, 3000) && lock().board.depth._inFront[0]?.actor === line,
+        'the subject over the date line only: on, the date kept in front of it');
+        await restPointer();
+        await Scripting.sleep(300);
+        await screenshot('89b-lock-depth-date');
+        const inside = averageColor('89b-lock-depth-date', lx + 2, ly + 2, lw - 4, lh - 4);
+        const beside = at('89b-lock-depth-date', lx - 60, ly + lh / 2);
+        check(!isGreen(inside) && isGreen(beside), `the date over it, the subject beside it (${inside}, ${beside})`);
     } finally {
         await locked.unlock();
     }
+    discCutout();
 
     // On the mock lock screen too, to place the clock with it.
     lockSettings.set_string('widgets', JSON.stringify([
@@ -4190,11 +4252,12 @@ async function testLockDepth() {
         const children = previewBoard.layer.get_children();
         return children.indexOf(previewBoard.widgets[0]) > children.indexOf(previewBoard.depth.actor);
     };
-    check(!order(), 'the clock behind it');
+    const inFront = () => previewBoard.depth._inFront.map(entry => entry.actor);
+    check(!order() && inFront()[0] === previewBoard.widgets[0].dateLine, 'the clock behind it, its date in front');
     await pointerTo(monitor.x + left + 40, monitor.y + top + 40);
-    check(await waitFor(order, 1000), 'pointed at, in front, to be moved');
+    check(await waitFor(order, 1000) && inFront().length === 0, 'pointed at, in front, to be moved');
     await restPointer();
-    check(await waitFor(() => !order(), 1000), 'and behind it again');
+    check(await waitFor(() => !order(), 1000) && inFront().length === 1, 'and behind it again');
     await pressKey(Clutter.KEY_Escape);
     await waitFor(() => !editor.preview, 3000);
 

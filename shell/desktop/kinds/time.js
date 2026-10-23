@@ -225,6 +225,23 @@ class AtelierClockWidget extends DesktopWidget {
         return this._stacked ? [this._hours, this._minutesBox] : [];
     }
 
+    /** @returns {St.Label[]} the labels with the time's digits (not AM or PM): what has to stay legible */
+    get timeLabels() {
+        if (this._stacked)
+            return [this._hours, this._minutes];
+        return this._time ? [this._time] : [];
+    }
+
+    /** @returns {St.DrawingArea|null} its face with hands, when it has one */
+    get dial() {
+        return this._face ?? null;
+    }
+
+    /** @returns {St.Label|null} the date over the hours, when stacked (the lock screen keeps it in front) */
+    get dateLine() {
+        return this._stacked ? this._date : null;
+    }
+
     /** @returns {St.BoxLayout|null} the date, hours and minutes, when stacked */
     get stacked() {
         return this._stacked ?? null;

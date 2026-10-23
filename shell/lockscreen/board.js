@@ -10,8 +10,9 @@
 // prompt; in the editor (a mock lock screen in the session, see
 // preview.js) they are moved and stretched as on the desktop. When the
 // password is asked, they make room for the prompt. With the depth effect,
-// the wallpaper's subject stands over the clocks (depth.js), under the
-// other widgets.
+// the wallpaper's subject stands over the clocks (depth.js) – but not over
+// the date over a clock – under the other widgets, while it leaves each of
+// their digits legible.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -25,7 +26,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {minimumLc} from '../../lib/apca.js';
 import {tintShown} from '../../lib/glassBackdrop.js';
 import {
-    TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
+    STRETCH, TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
 } from '../../lib/lockLook.js';
 import {labelFont} from '../../lib/lockType.js';
 import {
@@ -48,6 +49,10 @@ const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
 // How much of a glass clock's width the subject has to stand across, for
 // its digits to end there.
 const ACROSS = 0.97;
+// A clock's date line, kept in front of the subject: this much round it
+// too (logical pixels), besides its shadow's reach.
+const IN_FRONT_PAD = 2;
+
 const scaleFactor = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
 
 /**
@@ -238,6 +243,7 @@ export class LockBoard {
         if (!depth?.actor || this._gone)
             return;
         const clocks = [];
+        const inFront = [];
         for (const widget of this.widgets) {
             // (One being dragged in the editor is over everything until it lands.)
             if (widget.get_parent() !== this.layer || widget.has_style_pseudo_class('dragged'))
@@ -246,31 +252,86 @@ export class LockBoard {
             if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
                 this.layer.set_child_below_sibling(widget, depth.actor);
                 const box = widget.get_allocation_box();
-                // (Stacked, each of its lines: the subject over most of the
-                // minutes would hide them, however little of the box it covers.)
-                const lines = widget.stackedLines?.map(line => this._rectIn(line, widget, box)) ?? [];
-                const glass = this._followSubject(widget, box);
-                if (glass) {
-                    // (Its digits stretched anew: what they take to read there.)
+                if (this._followSubject(widget, box))
                     this._planGlass(widget);
-                    clocks.push(glass);
-                } else if (lines.length > 0) {
-                    clocks.push(...lines);
-                } else {
-                    clocks.push({x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()});
-                }
+                clocks.push(this._legible(widget, box));
+                // The date over it in front of the subject, as on an iPhone:
+                // the clock goes behind it, the date never does.
+                const line = this._dateLineOf(widget);
+                if (line)
+                    inFront.push({actor: line, pad: IN_FRONT_PAD * scaleFactor() + this._reachOf(line)});
             } else {
                 this.layer.set_child_above_sibling(widget, depth.actor);
             }
         }
         depth.cover(clocks);
+        depth.keepInFront(inFront);
     }
 
-    // A clock's date line: a glass face's, or a stacked clock's.
+    // A clock's date line, which stays in front of the subject: a glass
+    // face's, or a stacked clock's.
     _dateLineOf(widget) {
         const glass = widget.glass;
         // (glass._date: until the glass face says which its date line is.)
         return glass ? glass.dateLine ?? glass._date ?? null : widget.dateLine ?? null;
+    }
+
+    // How far round a label its planned shadow reaches, pixels.
+    _reachOf(label) {
+        const shadow = label._atelierPlan?.shadow;
+        return shadow ? (shadow.blur + Math.abs(shadow.y)) * scaleFactor() : 0;
+    }
+
+    // What of a clock has to stay legible, on the monitor (lib/depth.js
+    // legibility()): each of its digits' ink – a glass face's as it draws
+    // them, their feet into the subject on purpose (STRETCH.overlap), its
+    // digits' box the clock as a whole; another face's as its labels lay
+    // them out (no colon, no AM or PM), a face with hands as a whole.
+    _legible(widget, box) {
+        const glass = widget.glass;
+        if (glass) {
+            const {x, y} = this._rectIn(glass, widget, box);
+            const at = rect => ({x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height});
+            const digits = glass.digitsRect;
+            // (Each digit's, once the face measures them; till then all of them as one.)
+            const glyphs = glass.glyphBoxes ?? (digits ? [digits] : []);
+            return {glyphs: glyphs.map(at), box: digits ? at(digits) : null, overlap: STRETCH.overlap, glass: true};
+        }
+        const glyphs = (widget.timeLabels ?? []).flatMap(label => this._digitBoxes(label, widget, box));
+        if (widget.dial)
+            glyphs.push(this._rectIn(widget.dial, widget, box));
+        if (glyphs.length > 0)
+            return {glyphs};
+        // (Nothing laid out yet: the clock as a whole.)
+        return {glyphs: [], box: {x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()}};
+    }
+
+    // The ink of each digit of a label where it is laid out, as Pango lays
+    // the label out.
+    _digitBoxes(label, widget, box) {
+        const text = label.clutter_text;
+        if (!label.visible || !text.text)
+            return [];
+        const layout = text.get_layout();
+        const {x, y} = this._rectIn(text, widget, box);
+        const [dx, dy] = text.get_layout_offsets();
+        // (Pango counts in UTF-8's bytes; the digits are ASCII's.)
+        const bytes = new TextEncoder().encode(layout.get_text());
+        const boxes = [];
+        const iter = layout.get_iter();
+        do {
+            const byte = bytes[iter.get_index()];
+            const [ink] = iter.get_cluster_extents();
+            if (byte >= 0x30 && byte <= 0x39 && ink.width > 0 && ink.height > 0) {
+                boxes.push({
+                    x: x + dx + ink.x / Pango.SCALE,
+                    y: y + dy + ink.y / Pango.SCALE,
+                    width: ink.width / Pango.SCALE,
+                    height: ink.height / Pango.SCALE,
+                });
+            }
+        } while (iter.next_cluster());
+        return boxes;
     }
 
     // Where a part of a widget is in the layer, as it is laid out.

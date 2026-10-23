@@ -126,18 +126,25 @@ profile called **Original**, so there is always a way back.
   date over big hours over dimmer minutes – the date, and the weather and
   the battery in a line can be placed anywhere on it, on a mock lock screen
   opened from the settings' Lock Screen page. Their type is in a tone of the
-  palette's hue, light or dark, picked for each from the wallpaper behind
-  it so that it is legible there (or in a color of one's own), with a soft
-  halo of the other tone behind it, in a font of one's choice: the shell's,
-  Rounded, Serif (the first such font installed), Thin or Heavy. The weather
-  is GNOME's as it last had it, never fetched anew. Nothing on the lock screen opens an app, reads the network or
-  shows notifications; everything else of Atelier stops while it is locked.
+  palette's hue, light or dark, picked from the wallpaper behind them so
+  that it is legible there (contrast as APCA measures it), or in a color
+  of one's own; a part that would not read as it is is set a little
+  heavier, or gets a soft shadow round its letters, and only that part.
+  Its font is Inter or Roboto Flex (variable fonts that come with Atelier,
+  loaded into the shell only), the shell's, or a rounded or serif one
+  installed, the clocks' digits in the weight and width of one's choice.
+  The weather is GNOME's as it last had it, never fetched anew. Nothing on
+  the lock screen opens an app, reads the network or shows notifications;
+  everything else of Atelier stops while it is locked.
   With the **depth effect** (off at first), what stands near in the
   wallpaper – a hill, a town, a person, the frame of a window – stands in
-  front of the lock screen's own clocks, as on an iPhone, under the date,
-  and the sky, distant mountains or the view out of a window stay behind
-  them; it goes as the prompt comes up and the wallpaper blurs, and stays
-  off where what stands in front would cover more than 40 % of a clock. A
+  front of the lock screen's own clocks, as on an iPhone, but never in
+  front of the date over a clock, and the sky, distant mountains or the
+  view out of a window stay behind them; it goes as the prompt comes up and
+  the wallpaper blurs, and stays off where what stands in front would hide
+  more than a quarter of any digit of a clock, or 40 % of a clock as a
+  whole (a glass clock's digits stand behind it a quarter of their height
+  on purpose: the rest of each counts, and 60 % of the clock). A
   depth model, Depth Anything V2, sees how near each part of the wallpaper
   is, on this computer, in a background process of the session at the
   lowest priority, a moment after the wallpaper changes; the lock screen
