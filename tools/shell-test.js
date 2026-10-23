@@ -23,6 +23,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
+import {contrastRatio, luminance} from '../lib/palette.js';
+
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
 import * as dockBehaviour from './dock-tests/behaviour.js';
@@ -3833,8 +3835,8 @@ async function testLockWidgets() {
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
         check(await waitFor(() => board.layer.opacity < 100, 2000), 'and the widgets make room for it');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness < 0.7), 2000),
-            `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
     } finally {
         await locked.unlock();
     }
@@ -3930,8 +3932,8 @@ async function testLockPasswordField() {
         check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the popup (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
         check(!findActor(form, a => a instanceof St.Button), 'no buttons: Enter sends it, Escape goes back');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness < 0.7), 2000),
-            `the wallpaper blurs as GNOME has it (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
         check(await waitFor(() => lock().room === 1 && !clock.get_transition('translation_y'), 2000),
             'the prompt is up, room made for it');
         const box = actor => {
@@ -4010,6 +4012,210 @@ async function testLockPasswordField() {
         lockSettings.reset('widgets');
         lockSettings.reset('gnome-clock');
     }
+}
+
+// A picture for the wallpaper: one colour, or the left half one and the
+// right half another.
+function makePicture(name, left, right = left) {
+    const [width, height] = [320, 200];
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
+    const rgba = hex => (parseInt(hex.slice(1), 16) << 8 | 0xff) >>> 0;
+    pixbuf.fill(rgba(left));
+    const half = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width / 2, height);
+    half.fill(rgba(right));
+    half.copy_area(0, 0, width / 2, height, pixbuf, width / 2, 0);
+    const path = `${OUTPUT}/${name}.png`;
+    pixbuf.savev(path, 'png', [], []);
+    return path;
+}
+
+// GNOME's weather as it last had it; asked anew, it would go to the network.
+class CountingWeather extends FakeWeather {
+    updates = 0;
+
+    update() {
+        this.updates++;
+    }
+}
+
+const chromaOf = rgb => Math.max(...rgb) - Math.min(...rgb);
+const lightOf = rgb => rgb.reduce((sum, v) => sum + v, 0) / 3;
+
+// The lock screen's look: the wallpaper as glass (its colours kept) while
+// the password is asked, the widgets' type in a tone legible on the
+// wallpaper behind each, in the font chosen, and the weather and the
+// battery in a line – from what GNOME has, nothing asked anew.
+async function testLockLook() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the lock screen\'s look untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = [background.get_string('picture-uri'), background.get_string('picture-uri-dark')];
+    const showWallpaper = path => ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(path)));
+    const LIGHT = '#efe6d2';
+    const DARK = '#141a24';
+    const light = makePicture('lock-light', LIGHT);
+    const dark = makePicture('lock-dark', DARK);
+    const colourful = makePicture('lock-colourful', '#e0402a', '#2a9d8f');
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
+        {id: 'date', kind: 'date', size: 'square', x: 30, y: 2, fine: true},
+        {id: 'weather', kind: 'weather', size: 'small', x: 28, y: 16, fine: true},
+        {id: 'battery', kind: 'battery', size: 'line', x: 28, y: 18, fine: true},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    // GNOME's weather and battery, made up.
+    const weatherItem = Main.panel.statusArea.dateMenu?._weatherItem;
+    const realWeather = weatherItem?._weatherClient;
+    const weather = new CountingWeather();
+    if (weatherItem)
+        weatherItem._weatherClient = weather;
+    const systemItem = Main.panel.statusArea.quickSettings._system?._systemItem;
+    const realToggle = systemItem?._powerToggle;
+    const toggle = new QuickSettings.QuickToggle({title: '64 %'});
+    toggle._proxy = {IsPresent: true, Percentage: 64, State: 1};
+    if (systemItem)
+        systemItem._powerToggle = toggle;
+    showWallpaper(light);
+    await wallpapersSettled();
+    const widget = id => lock()?.board?.widgets.find(w => w.entry.id === id);
+    const ink = actor => hexOf(actor.get_theme_node().get_foreground_color());
+    let locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.board?.widgets.length === 4 && lock().board.typography.sample &&
+            widget('clock')._hours?.mapped, 5000), 'locked: the clock, the date, the weather and the battery');
+        const board = lock().board;
+        const hours = () => widget('clock')._hours;
+        // On a light wallpaper, dark type.
+        check(await waitFor(() => contrastRatio(ink(hours()), LIGHT) >= 4.5 && luminance(ink(hours())) < 0.2, 3000),
+            `on a light wallpaper, the clock in a dark tone, legible on it (${ink(hours())}, ${contrastRatio(ink(hours()), LIGHT).toFixed(1)}:1)`);
+        check(contrastRatio(ink(widget('date')._day), LIGHT) >= 4.5, `the date too (${ink(widget('date')._day)})`);
+        await restPointer();
+        await Scripting.sleep(400);
+        await screenshot('88-lock-look-light');
+        // The wallpaper changed while locked: light type on a dark one.
+        showWallpaper(dark);
+        check(await waitFor(() => contrastRatio(ink(hours()), DARK) >= 4.5 && luminance(ink(hours())) > 0.5, 5000),
+            `on a dark wallpaper, in a light one (${ink(hours())}, ${contrastRatio(ink(hours()), DARK).toFixed(1)}:1)`);
+        // A colour of one's own.
+        lockSettings.set_string('clock-color', '#ffcc00');
+        check(ink(hours()) === '#ffcc00' && ink(widget('battery')._value) === '#ffcc00', 'a colour chosen, on all of them');
+        lockSettings.reset('clock-color');
+        check(contrastRatio(ink(hours()), DARK) >= 4.5, 'Auto again');
+
+        // The font chosen.
+        const font = actor => actor.get_theme_node().get_font();
+        lockSettings.set_string('clock-font', 'heavy');
+        check(font(hours()).get_weight() === 900 && font(widget('clock')._date).get_weight() === 800,
+            `heavy: the big digits in the heaviest weight (${font(hours()).get_weight()})`);
+        lockSettings.set_string('clock-font', 'thin');
+        check(font(hours()).get_weight() === 200, `thin: in a thin one (${font(hours()).get_weight()})`);
+        lockSettings.set_string('clock-font', 'serif');
+        const serif = board.typography.font.family;
+        check(Boolean(serif) && font(hours()).get_family().includes(serif) &&
+            font(widget('weather')._value).get_family().includes(serif),
+        `serif: the first serif installed (${font(hours()).get_family()})`);
+        await Scripting.sleep(300);
+        await screenshot('88b-lock-look-dark-serif');
+        lockSettings.reset('clock-font');
+        check(!font(hours()).get_family().includes(serif ?? '-') && font(hours()).get_weight() === 800,
+            'and back as it was');
+
+        // The weather and the battery, in a line, from what GNOME has.
+        const [weatherWidget, batteryWidget] = [widget('weather'), widget('battery')];
+        check(weatherWidget.visible && weatherWidget._value.text === '14°' && weatherWidget._caption.text === 'Partly cloudy' &&
+            weatherWidget._icon.icon_name === 'weather-few-clouds-symbolic', `the weather (${weatherWidget._value.text})`);
+        check(batteryWidget.visible && batteryWidget._value.text === '64 %' && batteryWidget._caption.text === 'Charging' &&
+            batteryWidget._ring._fraction === 0.64 && batteryWidget._ring._charging, 'the battery, charging');
+        check(weather.updates === 0, 'the weather never asked anew (that would go to the network)');
+        const [wx, wy] = weatherWidget.get_transformed_position().map(Math.round);
+        const [, by] = batteryWidget.get_transformed_position();
+        await screenshotArea('88c-lock-weather-battery', wx, wy, Math.round(batteryWidget.width),
+            Math.round(by + batteryWidget.height) - wy);
+        check(contrastRatio(ink(batteryWidget._value), DARK) >= 4.5, 'in the lock screen\'s tone');
+        weather.info = {...weather.info, get_temp_summary: () => '15 °C'};
+        weather.emit('changed');
+        check(weatherWidget._value.text === '15°', 'as GNOME has it anew');
+        toggle._proxy = {IsPresent: false};
+        toggle.title = '';
+        check(!batteryWidget.visible, 'no battery: it doesn\'t show');
+        weather.available = false;
+        weather.emit('changed');
+        check(!weatherWidget.visible, 'no weather: nor does the weather');
+    } finally {
+        await locked.unlock();
+    }
+
+    // The glass: the wallpaper's colours kept as the password is asked.
+    showWallpaper(colourful);
+    await wallpapersSettled();
+    locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.board?.widgets.length > 0, 3000), 'locked again, on a colourful wallpaper');
+        const dialog = shield._dialog;
+        const wallpapers = () => dialog._backgroundGroup.get_children();
+        // (Away from the widgets, the popup and the island: the red half –
+        // once the lock screen shows its wallpaper: locked by hand, GNOME
+        // fades to black until the pointer moves.)
+        await restPointer();
+        const patch = [150, 640, 200, 180];
+        let sharp = [0, 0, 0];
+        for (let tries = 0; tries < 10 && lightOf(sharp) < 20; tries++) {
+            await Scripting.sleep(500);
+            await screenshot('89-lock-glass-sharp');
+            sharp = averageColor('89-lock-glass-sharp', ...patch);
+        }
+        await clickAt(300, 800);
+        check(await waitFor(() => lock().room === 1 && lock()._glass.progress === 1, 3000), 'the prompt is up');
+        const glass = wallpapers().map(w => w.get_effect('atelier-glass'));
+        check(glass.length > 0 && glass.every(e => e?.enabled && e.look[0] > 1.2),
+            'the wallpaper turns to glass, its colours a little richer');
+        check(wallpapers().every(w => w.get_effect('blur').radius >= 80 && w.get_effect('blur').brightness > 0.8),
+            `blurred as GNOME has it, darkened far less (${wallpapers().map(w => w.get_effect('blur').brightness)})`);
+        await restPointer();
+        await Scripting.sleep(300);
+        await screenshot('89b-lock-glass');
+        const blurred = averageColor('89b-lock-glass', ...patch);
+        check(chromaOf(sharp) > 100 && chromaOf(blurred) >= 0.85 * chromaOf(sharp) && lightOf(blurred) >= 0.7 * lightOf(sharp),
+            `its colours kept (chroma ${chromaOf(sharp)} → ${chromaOf(blurred)}, light ${Math.round(lightOf(sharp))} → ${Math.round(lightOf(blurred))})`);
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => lock().room === 0 && wallpapers().every(w => !w.get_effect('atelier-glass').enabled &&
+            !w.get_effect('blur').enabled), 3000), 'Escape: sharp again, no glass');
+        // Unlocked: sharp again as the lock screen goes, by itself.
+        await clickAt(300, 800);
+        await waitFor(() => lock().room === 1 && lock()._field?.form, 3000);
+        await typeText('right');
+        await pressKey(Clutter.KEY_Return);
+        await waitFor(() => locked.verifiers.at(-1)?.answers.includes('right'), 2000);
+        locked.verifiers.at(-1).emit('verification-complete');
+        const progress = [];
+        check(await waitFor(() => {
+            progress.push(lock()._glass.progress);
+            return lock()._glass.progress === 0;
+        }, 2000) && progress.some(p => p > 0 && p < 1) && wallpapers().every(w => !w.get_effect('blur').enabled),
+        `unlocked, the wallpaper comes sharp again, step by step (${progress.length} steps)`);
+    } finally {
+        await locked.unlock();
+        if (weatherItem)
+            weatherItem._weatherClient = realWeather;
+        if (systemItem)
+            systemItem._powerToggle = realToggle;
+        toggle.destroy();
+        background.set_string('picture-uri', uris[0]);
+        background.set_string('picture-uri-dark', uris[1]);
+        lockSettings.reset('widgets');
+        lockSettings.reset('gnome-clock');
+        lockSettings.reset('clock-color');
+        lockSettings.reset('clock-font');
+        await wallpapersSettled();
+    }
+    const desktop = atelier().modules.get('desktop');
+    check(!desktop || [...desktop.widgets.values()].every(w => !w.style), 'the desktop\'s widgets as they were');
 }
 
 async function testDisableCleansUp(atelier) {
@@ -4197,6 +4403,7 @@ export async function run() {
         await part(testLockScreen, ext);
         await part(testLockWidgets);
         await part(testLockPasswordField);
+        await part(testLockLook);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);

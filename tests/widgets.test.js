@@ -211,6 +211,16 @@ export function testLockScreenKinds() {
     assertEqual(nearestSize([], {id: 'c', kind: 'clock', size: 'square', x: 0, y: 0}, grid, 8, 8, LOCK_KINDS), 'large');
     assertEqual(nearestSize([], {id: 'c', kind: 'clock', size: 'square', x: 0, y: 0}, grid, 8, 8), 'card',
         'the desktop\'s clock comes in no large square');
+
+    const small = parseLayout(JSON.stringify([
+        {id: 'weather', kind: 'weather', size: 'square', x: 0, y: 0, fine: true},
+        {id: 'battery', kind: 'battery', size: 'line', x: 0, y: 4, fine: true},
+    ]), LOCK_KINDS);
+    assertEqual(small.map(e => `${e.kind} ${e.size}`), ['weather small', 'battery line'],
+        'the weather and the battery in a line there, small or long');
+    assertEqual(parseLayout(JSON.stringify([{kind: 'battery'}])), [], 'the battery not on the desktop');
+    assertEqual(pixelSize('small'), [180, 84]);
+    assert(fits([], {id: 'b', size: 'line', x: 30, y: 18}, [38, 20]), 'a line fits two rows');
 }
 
 export function testSplitClock() {
