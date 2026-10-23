@@ -4564,7 +4564,11 @@ async function testLockGlassClock() {
 
         // In Roboto Flex when told: on its width axis, at the clock's
         // optical size; a plan grades it (as wide as it was) and casts a
-        // shadow round it and the date line, and only then.
+        // shadow round it and the date line, and only then. (The face on
+        // its own: the board, which tells it the settings' type and what it
+        // takes to read there, holds off meanwhile.)
+        const planGlass = board._planGlass;
+        board._planGlass = () => {};
         const flex = typefaceFor('flex');
         glass.setType({typeface: flex, style: styleFor(flex, 'glass')});
         check(await waitFor(() => glass.fontFile?.endsWith('/fonts/RobotoFlex.ttf'), 3000) &&
@@ -4618,6 +4622,7 @@ async function testLockGlassClock() {
         check(lightOf(brightest) > lightOf(sky) + 30, `and in glass (${brightest} over ${sky})`);
         glass.setType({typeface: inter, style: styleFor(inter, 'glass')});
         check(await waitFor(() => glass.fontFile?.endsWith('/fonts/Inter.ttf'), 3000), 'Inter again');
+        board._planGlass = planGlass;
 
         // The hill higher: the digits shorter, easing there.
         hill = Math.round(boxTop + side * 0.45);

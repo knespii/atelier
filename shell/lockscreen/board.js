@@ -24,7 +24,6 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {minimumLc} from '../../lib/apca.js';
-import {tintShown} from '../../lib/glassBackdrop.js';
 import {
     STRETCH, TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
 } from '../../lib/lockLook.js';
@@ -99,8 +98,8 @@ export class LockBoard {
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
         // The glass clocks' frosted wallpaper: made in the session ahead of
-        // time (shell/glassBackdropModule.js), or here, in the background,
-        // when it isn't there yet.
+        // time (clock.js GlassWarmUp), or here, in the background, when it
+        // isn't there yet.
         this._backdrop = new GlassBackdrop({make: true});
         this._backdrop.onChanged = () => this._queueGlass();
         this._glassLater = 0;
@@ -271,9 +270,7 @@ export class LockBoard {
     // A clock's date line, which stays in front of the subject: a glass
     // face's, or a stacked clock's.
     _dateLineOf(widget) {
-        const glass = widget.glass;
-        // (glass._date: until the glass face says which its date line is.)
-        return glass ? glass.dateLine ?? glass._date ?? null : widget.dateLine ?? null;
+        return widget.glass?.dateLine ?? widget.dateLine ?? null;
     }
 
     // How far round a label its planned shadow reaches, pixels.
@@ -586,10 +583,10 @@ export class LockBoard {
 
     // The parts of a widget styled here – each St.Widget in it, with its
     // style classes – but the editor's buttons in its corners, and a glass
-    // face that sets its own type (it is given its plan).
+    // face, which sets its own type (it is given its plan: _planGlass()).
     _partsOf(widget) {
         const parts = [];
-        const own = widget.glass?.setPlan ? widget.glass : null;
+        const own = widget.glass ?? null;
         const todo = widget.get_children().filter(child => !child.corner);
         while (todo.length > 0) {
             const actor = todo.pop();
@@ -644,7 +641,7 @@ export class LockBoard {
     // its date line take to read where they are – its digits measured as
     // their material comes out over the wallpaper (lib/lockLook.js
     // glassInk()), their glass at rest to start with. The face applies it
-    // (shell/lockscreen/clock.js); nothing is said again unless it changes.
+    // (shell/lockscreen/clock.js), nothing when it is told what it has.
     _planGlass(widget) {
         const glass = widget.glass;
         if (!glass || this._gone)
@@ -653,69 +650,53 @@ export class LockBoard {
         if (glass.backdrop !== backdrop)
             glass.backdrop = backdrop;
         const typography = this._typography;
-        const type = {typeface: typography.typeface, style: typography.styleFor('glass')};
-        const typeKey = JSON.stringify(type);
-        if (glass._atelierType !== typeKey && typeof glass.setType === 'function') {
-            glass._atelierType = typeKey;
-            glass.setType(type);
-        }
-        if (typeof glass.setPlan !== 'function')
-            return;
+        glass.setType({typeface: typography.typeface, style: typography.styleFor('glass')});
         const tone = this._toneNow;
-        const plan = tone ? {digits: this._digitsPlan(widget, tone), date: this._datePlan(widget, tone)} : {digits: null, date: null};
-        const line = this._dateLineOf(widget);
-        if (line)
-            line._atelierPlan = plan.date;
-        const planKey = JSON.stringify(plan);
-        if (glass._atelierPlanKey === planKey)
-            return;
-        glass._atelierPlanKey = planKey;
+        const plan = tone ? {
+            digits: this._digitsPlan(widget, tone),
+            date: this._datePlan(widget, tone),
+            tone: {color: tone.color, dark: tone.dark},
+        } : null;
+        // (How far round it the date line's shadow reaches, in front of the subject.)
+        glass.dateLine._atelierPlan = plan?.date ?? null;
         glass.setPlan(plan);
     }
 
     // What a glass clock's digits take to read: on the wallpaper behind
-    // them (where they stand; the clock's place until they are measured),
-    // their glass as it comes out there.
+    // them (where they stand), their glass as it comes out there; null
+    // until they are measured.
     _digitsPlan(widget, tone) {
         const glass = widget.glass;
-        const typography = this._typography;
-        const metrics = glass.digitsMetrics ?? null;
-        // (Until the face says: its digits' size as it measures them,
-        // device pixels, and their weight as set.)
-        const size = metrics?.size ?? (glass.metrics?.fontSize ? glass.metrics.fontSize / scaleFactor() : null);
-        if (!size)
-            return null;
-        const weight = metrics?.weight ?? typography.styleFor('glass').weight;
+        const metrics = glass.digitsMetrics;
         const digits = glass.digitsRect;
-        const aspect = this._area.width / this._area.height;
-        let rect = this._cellRect(widget);
-        let frosted = null;
-        if (digits && widget.get_parent()) {
-            const {x, y} = this._rectIn(glass, widget, widget.get_allocation_box());
-            const onMonitor = {x: x + digits.x, y: y + digits.y, width: digits.width, height: digits.height};
-            rect = this._monitorRect(onMonitor);
-            frosted = this._frostedBehind(onMonitor);
-        }
+        if (!metrics || !digits || !widget.get_parent())
+            return null;
+        const {x, y} = this._rectIn(glass, widget, widget.get_allocation_box());
+        const onMonitor = {x: x + digits.x, y: y + digits.y, width: digits.width, height: digits.height};
+        const typography = this._typography;
         return legibilityPlan({
-            size, weight, tone,
-            stats: typography.statsOf(rect, aspect),
-            glass: tintShown(metrics?.material),
-            ink: glassInk(tone, frosted),
+            size: metrics.size,
+            weight: metrics.weight,
+            tone,
+            stats: typography.statsOf(this._monitorRect(onMonitor), this._area.width / this._area.height),
+            glass: metrics.tintAlpha,
+            ink: glassInk(tone, this._frostedBehind(onMonitor)),
             dim: typography.dim,
         });
     }
 
     // What a glass clock's date line takes to read, on the wallpaper
-    // behind it.
+    // behind it (where the face puts it).
     _datePlan(widget, tone) {
-        const line = this._dateLineOf(widget);
-        const type = line ? this._typeOf(line) : null;
-        if (!type)
+        const glass = widget.glass;
+        const type = this._typeOf(glass.dateLine);
+        if (!type || !widget.get_parent())
             return null;
-        const aspect = this._area.width / this._area.height;
-        const rect = widget.get_parent()
-            ? this._monitorRect(this._rectIn(line, widget, widget.get_allocation_box())) : this._cellRect(widget);
-        return legibilityPlan({...type, tone, stats: this._typography.statsOf(rect, aspect), dim: this._typography.dim});
+        const {x, y} = this._rectIn(glass, widget, widget.get_allocation_box());
+        const line = glass.dateRect;
+        const rect = this._monitorRect({x: x + line.x, y: y + line.y, width: line.width, height: line.height});
+        return legibilityPlan({...type, tone, stats: this._typography.statsOf(rect, this._area.width / this._area.height),
+            dim: this._typography.dim});
     }
 
     // The frosted wallpaper behind a part of the monitor (pixels): what is
