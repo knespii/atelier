@@ -61,10 +61,11 @@ const RIM = {width: 1.6, light: [-0.45, -1], alpha: [0.9, 0.4], exit: {width: 0.
 // Inside the lower edges, a little further in, a darker line (the glass
 // is thick there), faint.
 const INNER = {width: 2.6, alpha: 0.08};
-// A soft shadow round the shape (outside it only), at its fullest: the
-// shape blurred this much (logical pixels), black this dark round light
-// glass; dark glass a light glow.
-const SHADOW = {blur: 10, alpha: 0.5, glow: 0.5};
+// A soft shadow round the shape (outside it only), at its fullest – as a
+// plan's is given (lib/lockLook.js legibilityPlan()): its alpha, its blur
+// (as CSS's, logical pixels) and how far down it falls; black round light
+// glass, a light glow round dark glass, as dark again as plain.
+const SHADOW = {alpha: 0.6, blur: 12, y: 1, glow: 1.2};
 // The tint's alpha, without a backdrop to frost (none made yet): more of
 // it, in place of the frost.
 const BARE_TINT = 1.35;
@@ -639,8 +640,9 @@ export class LiquidGlass {
      * @param {number} [options.tintAlpha] - how much of the tint covers the frost
      * @param {number} [options.opacity] - how much the membrane covers the
      *   sharp wallpaper (the material's alpha: a contrast plan raises it)
-     * @param {number} [options.shadow] - a soft shadow round the shape:
-     *   0 none … 1 at its fullest
+     * @param {number|object} [options.shadow] - a soft shadow round the
+     *   shape: 0 none … 1 at its fullest; or as a plan gives it, {alpha,
+     *   blur, y} (blur and y logical pixels; legibilityPlan()'s); null none
      * @param {number} [options.scale] - the shell's scale factor
      * @param {object[]} [options.glyphBoxes] - each glyph's {x, y, width,
      *   height}, for the lens to bend light about each one's middle
@@ -655,9 +657,12 @@ export class LiquidGlass {
         const masks = this._masks;
         const append = typeof path === 'function' ? path : c => c.appendPath(path);
         const light = !tone.dark;
+        const halo = typeof shadow === 'number'
+            ? shadow > 0 && {...SHADOW, alpha: SHADOW.alpha * Math.min(1, shadow)}
+            : shadow?.alpha > 0 && {y: 0, ...shadow, blur: Math.max(1, shadow.blur ?? SHADOW.blur)};
         // What is drawn round the shape (the shadow's reach, or the rim's),
         // as far as the drawing is clipped (only some glyphs drawn anew).
-        const reach = Math.ceil((shadow > 0 ? 2.5 * SHADOW.blur : 2 * RIM.width + 2) * scale);
+        const reach = Math.ceil((halo ? 2.5 * halo.blur + Math.abs(halo.y) : 2 * RIM.width + 2) * scale);
         cr.save();
         cr.identityMatrix();
         const [cx1, cy1, cx2, cy2] = cr.clipExtents();
@@ -695,19 +700,24 @@ export class LiquidGlass {
         cr.rectangle(area.x, area.y, area.width, area.height);
         cr.clip();
 
-        if (shadow > 0) {
-            // (Outside the shape only: under the glass it would show through.)
-            const halo = masks.blurred('halo', shape, area, density, SHADOW.blur * scale);
-            const cut = new Cairo.Context(halo);
-            cut.setOperator(Cairo.Operator.DEST_OUT);
-            cut.setSourceSurface(shape, 0, 0);
-            cut.paint();
-            cut.$dispose();
+        if (halo) {
+            // The shape blurred (by about the blur, as CSS blurs a shadow),
+            // a little lower, outside the shape only: under the glass it
+            // would show through.
+            const blurred = masks.blurred('halo', shape, area, density, halo.blur * scale);
+            const outside = masks.over('halo:outside', area, density, c => {
+                c.setOperator(Cairo.Operator.SOURCE);
+                c.setSourceSurface(blurred, area.x, area.y + step(halo.y * scale));
+                c.paint();
+                c.setOperator(Cairo.Operator.DEST_OUT);
+                c.setSourceSurface(shape, area.x, area.y);
+                c.paint();
+            }, false);
             if (light)
-                cr.setSourceRGBA(0, 0, 0, SHADOW.alpha * shadow);
+                cr.setSourceRGBA(0, 0, 0, Math.min(1, halo.alpha));
             else
-                cr.setSourceRGBA(1, 1, 1, SHADOW.glow * shadow);
-            cr.maskSurface(halo, area.x, area.y);
+                cr.setSourceRGBA(1, 1, 1, Math.min(1, halo.alpha * SHADOW.glow));
+            cr.maskSurface(outside, area.x, area.y);
         }
 
         cr.pushGroup();
@@ -772,7 +782,9 @@ export class LiquidGlass {
         }
         const tint = hexToRgb(glassTint(tone, this.behind({x: at[0] + x, y: at[1] + y, width, height})))
             .map(v => v / 255);
-        const alpha = Math.min(1, tintAlpha * (backdrop ? 1 : BARE_TINT));
+        // (Each end as opaque as it gets at most: a plan's most opaque glass
+        // has the tint whole at the top.)
+        const alpha = tintAlpha * (backdrop ? 1 : BARE_TINT);
         const gradient = new Cairo.LinearGradient(0, y, 0, y + height);
         gradient.addColorStopRGBA(0, ...tint, Math.min(1, alpha * TINT_GRADIENT[0]));
         gradient.addColorStopRGBA(1, ...tint, Math.min(1, alpha * TINT_GRADIENT[1]));

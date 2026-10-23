@@ -4,10 +4,12 @@ import GLib from 'gi://GLib';
 
 import {placement} from '../lib/depth.js';
 import {
-    BACKDROP_VERSION, DIM, FROST, GLASS, LEGIBLE_STEPS, backdropKey, backdropSize, backdropTransform, backgroundPixels,
-    boxWidths, frost, frostSteps, glassColor, glassTint, glyphCells, legibleGlass, meanColor, parseColor, pictureArea,
+    BACKDROP_VERSION, DIM, FROST, GLASS, TINT_GRADIENT, backdropKey, backdropSize, backdropTransform, backgroundPixels,
+    boxWidths, frost, frostSteps, glassColor, glassFor, glassTint, glyphCells, meanColor, parseColor, pictureArea,
+    tintShown,
 } from '../lib/glassBackdrop.js';
-import {contrastRatio, hexToOklch, hexToRgb} from '../lib/palette.js';
+import {legibilityPlan} from '../lib/lockLook.js';
+import {hexToOklch, hexToRgb} from '../lib/palette.js';
 import {LiquidGlass, backdropDir, backdropSpec, loadBackdrop, makeBackdrop} from '../shell/lockscreen/liquidGlass.js';
 import {assert, assertEqual, freshDir} from './util.js';
 
@@ -251,23 +253,31 @@ export function testGlassColor() {
     assert(opaque > less, 'more opaque, less of what is behind');
 }
 
-export function testLegibleGlass() {
-    assertEqual(LEGIBLE_STEPS[0], {...GLASS, shadow: 0}, 'first, the glass at rest');
-    for (let i = 1; i < LEGIBLE_STEPS.length; i++) {
-        const [before, step] = [LEGIBLE_STEPS[i - 1], LEGIBLE_STEPS[i]];
-        assert(['tintAlpha', 'opacity', 'shadow'].every(key => step[key] >= before[key]) &&
-            ['tintAlpha', 'opacity', 'shadow'].some(key => step[key] > before[key]), `step ${i}: more legible`);
-        assert(step.shadow === 0 || step.opacity === 1, `step ${i}: opaque before it casts a shadow`);
+export function testPlanBridge() {
+    // What a plan is told of the glass at rest: how much of its tint
+    // shows over what is behind it, at its feet, through its transparency.
+    near(tintShown(), GLASS.tintAlpha * TINT_GRADIENT[1] * GLASS.opacity, 1e-9, 'the glass at rest');
+    assertEqual(glassFor(null), GLASS, 'nothing asked: at rest');
+    assertEqual(glassFor(tintShown() / 2), GLASS, 'never less than at rest');
+    let before = {...GLASS};
+    for (const shown of [0.25, 0.27, 0.3, 0.45, 0.7, 0.92]) {
+        const material = glassFor(shown);
+        near(tintShown(material), shown, 1e-9, `${shown}: as much of the tint as asked`);
+        assert(material.opacity >= before.opacity && material.tintAlpha >= before.tintAlpha, `${shown}: more, not less`);
+        assert(material.tintAlpha === GLASS.tintAlpha || material.opacity === 1,
+            `${shown}: opaque first, then more tint (${JSON.stringify(material)})`);
+        before = material;
     }
-    // As a contrast plan would ask: light glass on a light blue sky.
+    // As the lock screen's plan has it: light glass digits over a light
+    // part of the wallpaper (small digits: large ones read with a shadow
+    // alone) ask for more opaque glass, which is that much more of the tint.
+    const stats = {tenths: {dark: '#a0b0c0', middle: '#a0b0c0', light: '#a0b0c0'}};
     const tone = {color: '#f4f4f4', dark: false};
-    const [frosted, around] = ['#6098ff', '#638ad7'];
-    const tint = glassTint(tone, frosted);
-    const reads = target => step => contrastRatio(glassColor({frosted, tint, behind: around, ...step}), around) >= target;
-    assertEqual(legibleGlass(reads(1.2)), LEGIBLE_STEPS[0], 'readable at rest: as it is');
-    const more = LEGIBLE_STEPS.indexOf(legibleGlass(reads(1.8)));
-    assert(more > 0 && more < LEGIBLE_STEPS.length - 1, `harder to read: further up (${more})`);
-    assertEqual(legibleGlass(() => false), LEGIBLE_STEPS.at(-1), 'never enough: as legible as it gets');
+    const plan = legibilityPlan({size: 60, weight: 600, tone, stats, glass: tintShown(), dim: 0.86});
+    assert(plan.glass > tintShown() && plan.shadow, `the plan wants more of the tint, and a shadow (${plan.glass})`);
+    const material = glassFor(plan.glass);
+    near(tintShown(material), plan.glass, 1e-9, 'and the glass shows it');
+    assert(material.opacity === 1, 'all of the membrane first');
 }
 
 // A picture: its left half red, its right half blue (16:9).
@@ -416,6 +426,11 @@ export async function testGlassPainted() {
     assert(close[3] > further[3] && further[3] > 0 && close[0] < 40,
         `a dark shadow under it, fading (${close} | ${further})`);
     assertEqual(glass(100, 72), [0, 0, 0, 0], 'none unless asked');
+    // As a plan gives it: CSS's blur, falling a few pixels down.
+    const planned = draw({opacity: 1, shadow: {alpha: 0.6, blur: 8, y: 3}}, 'planned');
+    assert(planned(100, 73)[3] > planned(100, 27)[3] + 10, `lower under it than over it (${planned(100, 73)} | ` +
+        `${planned(100, 27)})`);
+    assertEqual(draw({opacity: 1, shadow: null}, 'none')(100, 72), [0, 0, 0, 0], 'a plan without one: none');
     const bare = draw({opacity: 1}, 'bare', false);
     assert(bare(60, 50)[3] > 100, 'without a backdrop, the tint alone');
 

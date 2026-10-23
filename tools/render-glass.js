@@ -6,7 +6,9 @@
 // its digits a stand-in for the clock's ("10:52" in Inter, stretched tall
 // as the glass face stretches them). Each picture: before, the glass at
 // rest, and the glass as a contrast plan may raise it (more opaque, more
-// tint, a shadow). The backdrops are made as the shell makes them, and
+// tint, a shadow) – as the lock screen's legibility plan has it (its
+// APCA, lib/lockLook.js legibilityPlan(): a heavier weight, a shadow, more
+// opaque glass). The backdrops are made as the shell makes them, and
 // timed, as is drawing the digits. With no arguments, the wallpapers in
 // Atelier's library and a synthetic one; or the pictures given.
 //
@@ -23,8 +25,8 @@ import PangoCairo from 'gi://PangoCairo';
 import System from 'system';
 
 import {placement} from '../lib/depth.js';
-import {GLASS, LEGIBLE_STEPS, glassColor, glassTint} from '../lib/glassBackdrop.js';
-import {glassDigits, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
+import {GLASS, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
+import {glassDigits, legibilityPlan, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
 import {contrastRatio} from '../lib/palette.js';
 import {wallpaperDir} from '../lib/paths.js';
 import {cellOrigin, gridOrigin, pixelSize} from '../lib/widgets.js';
@@ -54,8 +56,6 @@ const TEXT = '10:52';
 const FAMILY = 'Inter';
 const WEIGHT = 600;
 const DATE_SIZE = 20; // 15pt, pixels
-// The glass as legible as a contrast plan may make it.
-const RAISED = LEGIBLE_STEPS.at(-1);
 const REPAINTS = 120; // to time drawing the digits
 
 const ms = since => (GLib.get_monotonic_time() - since) / 1000;
@@ -135,13 +135,13 @@ function sharpRegion(path, file) {
 
 // The stand-in for the glass face's digits, laid out as clock.js lays
 // them out in the clock's box.
-function digits() {
+function digitShape(weight = WEIGHT) {
     const surface = surfaceOf(CLOCK.width, CLOCK.height);
     const cr = new Cairo.Context(surface);
     const layoutAt = (size, text) => {
         const layout = PangoCairo.create_layout(cr);
         const font = Pango.FontDescription.from_string(FAMILY);
-        font.set_weight(WEIGHT);
+        font.set_weight(weight);
         font.set_absolute_size(size * Pango.SCALE);
         layout.set_font_description(font);
         const features = new Pango.AttrList();
@@ -310,11 +310,18 @@ function closeUp(look, file) {
 async function renderWallpaper(path, {cache, work}, shape) {
     const name = GLib.path_get_basename(path).replace(/\.[^.]+$/, '');
     const sharp = sharpRegion(path, GLib.build_filenamev([work, `${name}-sharp.png`]));
-    // The tone as the lock screen picks it for the clock (dimmed as its
-    // glass dims the wallpaper while the password is asked: 0.86).
-    const rect = [CLOCK.x / MONITOR[0], CLOCK.y / MONITOR[1], CLOCK.width / MONITOR[0], CLOCK.height / MONITOR[1]];
+    // What is behind the digits, as the lock screen samples the wallpaper
+    // (its thumbnail), the tone for them and what it takes them to read
+    // there (dimmed as the prompt dims the wallpaper: 0.86).
+    const ink = {x: CLOCK.x + shape.bounds.x, y: CLOCK.y + shape.bounds.y, width: shape.bounds.width,
+        height: shape.bounds.height};
+    const rect = [ink.x / MONITOR[0], ink.y / MONITOR[1], ink.width / MONITOR[0], ink.height / MONITOR[1]];
     const stats = regionStats(sharp.sample, regionIn(rect, MONITOR[0] / MONITOR[1], 400 / 250));
-    const tone = lockTone(stats, {dim: 0.86});
+    const text = {size: shape.fontSize, weight: WEIGHT};
+    const tone = lockTone(stats, {dim: 0.86, text});
+    const plan = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86});
+    const planned = {...glassFor(plan.glass), shadow: plan.shadow};
+    const plannedShape = plan.weight === WEIGHT ? shape : digitShape(plan.weight);
 
     const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, dir: cache});
     let start = GLib.get_monotonic_time();
@@ -329,11 +336,19 @@ async function renderWallpaper(path, {cache, work}, shape) {
     const options = {bounds: shape.bounds, tone, at: [CLOCK.x, CLOCK.y], scale: SCALE, glyphBoxes: shape.glyphBoxes};
     const before = render(sharp.surface, shape, cr => paintBefore(cr, shape.path, tone, shape.bounds), tone);
     const rest = render(sharp.surface, shape, cr => glass.paint(cr, shape.path, options), tone);
-    const raised = render(sharp.surface, shape, cr => glass.paint(cr, shape.path, {...options, ...RAISED}), tone);
+    const plannedOptions = {...options, ...planned, bounds: plannedShape.bounds, glyphBoxes: plannedShape.glyphBoxes};
+    const raised = render(sharp.surface, plannedShape, cr => glass.paint(cr, plannedShape.path, plannedOptions), tone);
+    const said = [
+        plan.weight !== WEIGHT && `weight ${plan.weight}`,
+        plan.shadow && `shadow ${plan.shadow.alpha} blur ${plan.shadow.blur}`,
+        planned.opacity !== GLASS.opacity && `opacity ${planned.opacity.toFixed(2)}`,
+        planned.tintAlpha !== GLASS.tintAlpha && `tint ${planned.tintAlpha.toFixed(2)}`,
+    ].filter(Boolean);
     sideBySide([
         {name: 'before', surface: before.surface},
-        {name: `glass (tint ${GLASS.tintAlpha}, opacity ${GLASS.opacity})`, surface: rest.surface},
-        {name: `raised (tint ${RAISED.tintAlpha}, opacity ${RAISED.opacity}, shadow)`, surface: raised.surface},
+        {name: `glass at rest (tint ${GLASS.tintAlpha}, opacity ${GLASS.opacity})`, surface: rest.surface},
+        {name: `as the plan has it (Lc ${plan.lc?.toFixed(0)} of ${plan.need?.toFixed(0)}): ` +
+            `${said.join(', ') || 'as at rest'}`, surface: raised.surface},
     ], GLib.build_filenamev([OUTPUT, `${name}.png`]), name);
     closeUp(rest.surface, GLib.build_filenamev([OUTPUT, `${name}-close.png`]));
 
@@ -353,21 +368,21 @@ async function renderWallpaper(path, {cache, work}, shape) {
     };
     const paintBeforeMs = repaint(cr => paintBefore(cr, shape.path, tone, shape.bounds));
     const paintGlassMs = repaint(cr => glass.paint(cr, shape.path, options));
-    const paintRaisedMs = repaint(cr => glass.paint(cr, shape.path, {...options, ...RAISED}));
+    const paintRaisedMs = repaint(cr => glass.paint(cr, plannedShape.path, plannedOptions));
 
     const frosted = glass.behind({x: CLOCK.x + shape.bounds.x, y: CLOCK.y + shape.bounds.y,
         width: shape.bounds.width, height: shape.bounds.height});
     const tint = glassTint(tone, frosted);
     const around = stats.mean;
     const color = glassColor({frosted, tint, dark: tone.dark, behind: around});
-    const raisedColor = glassColor({frosted, tint, dark: tone.dark, behind: around, ...RAISED});
     print(`${name}: tone ${tone.color}${tone.dark ? ' (dark)' : ''}, frosted ${frosted}, tint ${tint}; ` +
-        `glass ${color} (WCAG contrast ${contrastRatio(color, around).toFixed(2)} with ${around}), ` +
-        `raised ${raisedColor} (${contrastRatio(raisedColor, around).toFixed(2)})`);
+        `glass ${color} (WCAG contrast ${contrastRatio(color, around).toFixed(2)} with ${around}); ` +
+        `the plan: Lc ${plan.lc?.toFixed(1)} of ${plan.need?.toFixed(1)}, ${said.join(', ') || 'nothing'}, ` +
+        `reaches ${plan.reaches?.toFixed(1)}`);
     print(`    backdrop ${spec.size.width}×${spec.size.height}: made in ${making.toFixed(1)} ms` +
         `${made ? '' : ' (there already)'}, loaded in ${loaded.toFixed(1)} ms; ` +
         `drawing the digits: before ${paintBeforeMs.toFixed(2)} ms, glass ${paintGlassMs.toFixed(2)} ms, ` +
-        `raised ${paintRaisedMs.toFixed(2)} ms`);
+        `as planned ${paintRaisedMs.toFixed(2)} ms`);
 }
 
 // The files in a folder.
@@ -392,7 +407,7 @@ const pictures = ARGV.length > 0 ? [...ARGV]
     : [...filesIn(wallpaperDir()).map(file => file.get_path()),
         syntheticWallpaper(GLib.build_filenamev([work, 'synthetic.png']))];
 
-const shape = digits();
+const shape = digitShape();
 print(`digits: ${FAMILY} ${WEIGHT} at ${shape.fontSize} px, ${shape.stretch.toFixed(2)}× as tall, ` +
     `${Math.round(shape.bounds.width)}×${Math.round(shape.bounds.height)} px in a ${CLOCK.width}×${CLOCK.height} clock ` +
     `at ${CLOCK.x}, ${CLOCK.y} of a ${MONITOR.join('×')} monitor (logical pixels; drawn ${DENSITY.toFixed(2)}× as dense)`);
