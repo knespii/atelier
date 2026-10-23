@@ -1,8 +1,9 @@
+import {blend, contrastLc, minimumLc} from '../lib/apca.js';
 import {
-    FONTS, LEGIBLE, LIGHT_ENOUGH, STRETCH, batteryState, chosenTone, fontFor, glassDigits, isColor, lockTone,
+    FONTS, REACH, STRETCH, TYPE, batteryState, chosenTone, fontFor, glassDigits, isColor, legibilityPlan, lockTone,
     mergeStats, partStyle, pickTone, regionIn, regionStats, shortTemperature, widgetStyle,
 } from '../lib/lockLook.js';
-import {contrastRatio, hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
+import {hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {assert, assertEqual} from './util.js';
 
 // A sample as sampleWallpaper() has it: width × height pixels, the left
@@ -18,6 +19,12 @@ function sample(left, right = left, width = 16, height = 10) {
 
 const statsOf = hex => regionStats(sample(hex), [0, 0, 1, 1]);
 const hueDistance = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+// What the date line needs: Lc 57 (15 pt, 600, read off APCA's font lookup).
+const LINE = minimumLc(TYPE.line.size, TYPE.line.weight);
+// Type's |Lc| on a flat wallpaper, in its own polarity (dark type on it
+// dimmed as much as asked).
+const lcOn = (tone, wallpaper, dim = 1) =>
+    (tone.dark ? 1 : -1) * contrastLc(tone.color, tone.dark ? blend('#000000', 1 - dim, wallpaper) : wallpaper);
 
 export function testRegion() {
     // A 16:10 sample on a 16:9 screen: a little of its top and bottom is cut.
@@ -33,6 +40,7 @@ export function testRegion() {
     assertEqual(regionStats(two, [0.5, 0, 0.5, 1]).mean, '#ffffff', 'the right half white');
     const both = regionStats(two, [0, 0, 1, 1]);
     assert(both.low === 0 && both.high === 1, 'its darker tenth black, its lighter one white');
+    assertEqual(both.tenths, {dark: '#000000', middle: '#ffffff', light: '#ffffff'}, 'and their colours');
     assert(regionStats(two, [0.99, 0.99, 0.001, 0.001]) !== null, 'even a tiny part has a pixel');
 }
 
@@ -41,8 +49,8 @@ export function testToneOnLightAndDark() {
         ['#3a6ea5', false], ['#e9b949', true]]) {
         const tone = pickTone(statsOf(wallpaper), {tint: '#2f8fb0'});
         assertEqual(tone.dark, dark, `${wallpaper}: ${dark ? 'dark' : 'light'} type`);
-        assert(contrastRatio(tone.color, wallpaper) >= LEGIBLE,
-            `${wallpaper}: legible (${contrastRatio(tone.color, wallpaper).toFixed(2)})`);
+        assert(lcOn(tone, wallpaper) >= LINE && Math.abs(tone.contrast - lcOn(tone, wallpaper)) < 1e-9,
+            `${wallpaper}: it reads (Lc ${lcOn(tone, wallpaper).toFixed(1)})`);
     }
 }
 
@@ -57,15 +65,21 @@ export function testToneIsTinted() {
 }
 
 export function testToneOnMiddleGray() {
-    // Neither light nor dark type stands out much: it goes as far as it takes.
+    // Light type stands out more on a middle gray than dark type, as APCA
+    // sees it (WCAG had the two even): light, and it reads.
     for (const wallpaper of ['#777777', '#8a8a8a', '#6f7f8f']) {
         const tone = pickTone(statsOf(wallpaper), {tint: '#2f8fb0'});
-        assert(tone.contrast >= 3.5, `${wallpaper}: as legible as it gets (${tone.contrast.toFixed(2)})`);
+        assert(!tone.dark && tone.contrast >= LINE, `${wallpaper}: light, it reads (Lc ${tone.contrast.toFixed(1)})`);
     }
-    // Dimmed by the glass, dark type on a light part must be legible still.
+    // Dimmed by the glass, dark type on a light part must read still.
     const dimmed = pickTone(statsOf('#d8d8d8'), {dim: 0.85});
-    assert(!dimmed.dark || contrastRatio(dimmed.color, '#b8b8b8') >= LEGIBLE, 'legible dimmed too');
-    // A busy part (half black, half white): light type, for its darker half.
+    assert(dimmed.dark && lcOn(dimmed, '#d8d8d8', 0.85) >= LINE, `it reads dimmed too (${dimmed.color})`);
+    // Small type needs more: darker for the battery's caption than for the
+    // date line (as dark as it goes, here).
+    const [line, caption] = [TYPE.line, TYPE.caption].map(text => pickTone(statsOf('#c4c4c4'), {text}));
+    assert(line.dark && caption.dark && line.contrast >= LINE && caption.contrast > line.contrast &&
+        luminance(caption.color) < luminance(line.color), `${line.color}, ${caption.color}`);
+    // A busy part (half black, half white): a tone still.
     assert(pickTone(regionStats(sample('#000000', '#ffffff'), [0, 0, 1, 1])) !== null);
     assertEqual(pickTone(null).dark, false, 'nothing known: light, as GNOME\'s');
 }
@@ -75,18 +89,105 @@ export function testOneToneForAll() {
     // grass: one light tone for both, as an iPhone has it.
     const sky = regionStats(sample('#3b6fd8', '#8fb3ee'), [0, 0, 1, 1]);
     const grass = statsOf('#3f8a2a');
-    const both = mergeStats([{stats: sky, weight: 3}, {stats: grass, weight: 1}]);
-    const tone = lockTone(both, {tint: '#2f8fb0'});
+    const tone = lockTone(mergeStats([{stats: sky, weight: 3}, {stats: grass, weight: 1}]), {tint: '#2f8fb0'});
     assert(!tone.dark && luminance(tone.color) > 0.8, `light over the sky and the grass (${tone.color})`);
-    assert(contrastRatio(tone.color, '#3b6fd8') >= LIGHT_ENOUGH, 'and it reads there, with its shadow');
+    // On the sky's lighter half it falls short of what the date line needs,
+    // but less than dark type would: light, with a shadow round it.
+    assert(tone.contrast < LINE && tone.plan.shadow?.color === '#000000' && tone.plan.short === 0,
+        `it reads there with a shadow (Lc ${tone.contrast.toFixed(1)}, ${JSON.stringify(tone.plan.shadow)})`);
+    // Over a dark one: light, and nothing more – no shadow at all.
+    const night = lockTone(mergeStats([{stats: statsOf('#16202c'), weight: 3}, {stats: statsOf('#202830'), weight: 1}]));
+    assert(!night.dark && night.contrast >= LINE && night.plan.shadow === null && night.plan.boldness === 0,
+        `no shadow where it reads (${JSON.stringify(night.plan)})`);
     // Where light would not read (a pale wallpaper): dark, for all of them.
     const pale = lockTone(mergeStats([{stats: statsOf('#efe6d2'), weight: 3}, {stats: statsOf('#e9e2d0'), weight: 1}]));
-    assert(pale.dark && contrastRatio(pale.color, '#efe6d2') >= LEGIBLE, `dark on a pale one (${pale.color})`);
+    assert(pale.dark && lcOn(pale, '#efe6d2') >= LINE, `dark on a pale one (${pale.color})`);
+    // Each part with its type: the battery's caption needs more than the
+    // clock's date line, on the same part of the wallpaper.
+    const gray = statsOf('#a2a2a2');
+    const parts = [{stats: gray, weight: 3}, {stats: gray, weight: 1, text: TYPE.caption}];
+    const merged = mergeStats(parts);
+    assertEqual(merged.parts.map(part => part.text), [TYPE.line, TYPE.caption], 'the date line unless said');
+    const [plain, withCaption] = [lockTone(mergeStats([parts[0]])), lockTone(merged)];
+    assert(withCaption.plan.shadow && (plain.plan.shadow?.alpha ?? 0) < withCaption.plan.shadow.alpha,
+        `the caption takes more (${JSON.stringify(plain.plan)}, ${JSON.stringify(withCaption.plan)})`);
     // Weighed: the clock counts more than a small widget.
-    const merged = mergeStats([{stats: statsOf('#000000'), weight: 3}, {stats: statsOf('#ffffff'), weight: 1}]);
-    assert(Math.abs(merged.middle - 0.25) < 1e-9 && merged.mean === '#404040', `weighed (${merged.middle}, ${merged.mean})`);
+    const weighed = mergeStats([{stats: statsOf('#000000'), weight: 3}, {stats: statsOf('#ffffff'), weight: 1}]);
+    assert(Math.abs(weighed.middle - 0.25) < 1e-9 && weighed.mean === '#404040' && weighed.tenths.light === '#404040',
+        `weighed (${weighed.middle}, ${weighed.mean})`);
     assertEqual(mergeStats([{stats: null, weight: 1}]), null, 'nothing known: nothing merged');
-    assertEqual(lockTone(null).dark, false, 'and the type light');
+    const blind = lockTone(null);
+    assert(!blind.dark && blind.contrast === null, 'and the type light');
+    assertEqual(blind.plan.shadow, {color: '#000000', alpha: 0.32, blur: 6, y: 1}, 'with the soft shadow it always had');
+}
+
+export function testLegibilityPlan() {
+    const white = {color: '#ffffff', dark: false};
+    const plan = (wallpaper, options = {}) => legibilityPlan({...TYPE.line, tone: white, stats: statsOf(wallpaper), ...options});
+    // It reads as it is: nothing.
+    const night = plan('#16202c');
+    assertEqual([night.boldness, night.weight, night.shadow, night.short], [0, 600, null, 0]);
+    assert(night.lc >= night.need && night.need === LINE && night.reaches === night.lc, JSON.stringify(night));
+    // A little short: a heavier weight is enough (700 needs less at 20 px).
+    const heavy = minimumLc(TYPE.line.size, 700);
+    const gray = Array.from({length: 48}, (_, i) => `#${(0x90 + i).toString(16).repeat(3)}`).find(hex => {
+        const lc = -contrastLc('#ffffff', hex);
+        return lc >= heavy && lc < LINE;
+    });
+    const bolder = plan(gray);
+    assert(bolder.boldness > 0 && bolder.boldness <= 0.5 && bolder.weight > 600 && bolder.shadow === null && bolder.short === 0,
+        `${gray}: heavier, no shadow (${JSON.stringify(bolder)})`);
+    assertEqual(bolder.boldness, (bolder.weight - 600) / REACH.full.bolder);
+    // Shorter: a shadow of the other polarity too, the more the shorter.
+    const [sky, cloud] = [plan('#a8b8d0'), plan('#c8d2e0')];
+    assert(sky.shadow && cloud.shadow && sky.shadow.color === '#000000', JSON.stringify([sky, cloud]));
+    assert(cloud.shadow.alpha > sky.shadow.alpha && cloud.shadow.blur >= sky.shadow.blur, 'more, and wider');
+    assert(sky.short === 0 && sky.reaches >= minimumLc(TYPE.line.size, sky.weight), 'and then it reads');
+    assert(cloud.shadow.alpha <= REACH.full.shadow, 'never more than the most');
+    // Shortest (white type on white): as far as it goes – as heavy as needs
+    // least (800 needs no less than 700 at 20 px), the most shadow – and
+    // what it still lacks.
+    const snow = plan('#ffffff');
+    assert(snow.lc === 0 && snow.shadow.alpha === REACH.full.shadow && snow.weight === 700 && snow.short > 0,
+        JSON.stringify(snow));
+    // Less help allowed, less given.
+    const soft = plan('#c8d2e0', {reach: REACH.soft});
+    assert(soft.shadow.alpha <= REACH.soft.shadow && soft.weight <= 700, JSON.stringify(soft));
+    // Dark type: a light halo, and on the darker tenth of what is behind it, dimmed.
+    const ink = {color: '#1c1e22', dark: true};
+    const halo = legibilityPlan({...TYPE.line, tone: ink, stats: statsOf('#9a9a9a'), dim: 0.86});
+    assert(halo.shadow?.color === '#ffffff' && Math.abs(halo.lc - lcOn(ink, '#9a9a9a', 0.86)) < 1e-9, JSON.stringify(halo));
+    // Type in the wrong polarity there (light type on lighter): none of it counts.
+    assertEqual(legibilityPlan({...TYPE.line, tone: {color: '#e0e0e0', dark: false}, stats: statsOf('#ffffff')}).lc, 0);
+    // The big digits need far less than the date line, on the same sky.
+    const digits = legibilityPlan({...TYPE.digits, tone: white, stats: statsOf('#a8b8d0')});
+    assert(digits.need < 30 && digits.shadow === null && digits.short === 0, JSON.stringify(digits));
+    // Nothing known: the soft shadow solid type always had; type too small to read: all there is.
+    assertEqual(plan('#000000', {stats: null}).shadow, {color: '#000000', alpha: 0.32, blur: 6, y: 1});
+    const tiny = legibilityPlan({size: 9, weight: 400, tone: white, stats: statsOf('#000000')});
+    assert(tiny.need === Infinity && tiny.short === Infinity && tiny.shadow.alpha === REACH.full.shadow, JSON.stringify(tiny));
+    assertEqual(legibilityPlan({...TYPE.line, tone: null, stats: statsOf('#000000')}).shadow, null, 'no tone: nothing');
+}
+
+export function testLegibilityPlanForGlass() {
+    // Glass digits: their tint shows 0.44 over a middle gray – lighter than
+    // it, not much.
+    const tone = {color: '#f4f6f8', dark: false};
+    const glassy = {size: 140, weight: 600, tone, stats: statsOf('#8c8c8c'), glass: 0.44};
+    const ink = blend(tone.color, 0.44, '#8c8c8c');
+    const plan = legibilityPlan(glassy);
+    assert(Math.abs(plan.lc + contrastLc(ink, '#8c8c8c')) < 1e-9 && plan.lc < plan.need, `as the glass shows (${plan.lc})`);
+    assert(plan.shadow && plan.short === 0 && plan.glass === 0.44, `a shadow first (${JSON.stringify(plan)})`);
+    // Without a shadow to give: more opaque glass, as much as it takes.
+    const opaque = legibilityPlan({...glassy, reach: {bolder: 0, shadow: 0, glass: 0.92}});
+    assert(opaque.shadow === null && opaque.glass > 0.44 && opaque.glass <= 0.92 && opaque.short === 0,
+        JSON.stringify(opaque));
+    const solid = blend(tone.color, opaque.glass, '#8c8c8c');
+    assert(-contrastLc(solid, '#8c8c8c') >= opaque.need, `it reads then (${solid})`);
+    // Reading as it is: the glass as it is.
+    assertEqual(legibilityPlan({...glassy, stats: statsOf('#202428')}).glass, 0.44);
+    // Nothing known: glass draws its own shadow; nothing planned.
+    assertEqual(legibilityPlan({...glassy, stats: null}).shadow, null);
 }
 
 export function testGlassDigits() {
@@ -113,8 +214,16 @@ export function testGlassDigits() {
 }
 
 export function testChosenTone() {
-    assertEqual(chosenTone('#FFCC00'), {color: '#ffcc00', dark: false, contrast: null});
+    const yellow = chosenTone('#FFCC00');
+    assert(yellow.color === '#ffcc00' && !yellow.dark && yellow.contrast === null, JSON.stringify(yellow));
+    assertEqual(yellow.plan.shadow?.alpha, 0.32, 'nothing known: the soft shadow');
     assertEqual(chosenTone('#202020').dark, true);
+    // Known where it is: what it takes there – nothing on a dark wallpaper,
+    // a shadow on a light one.
+    const onDark = chosenTone('#ffcc00', statsOf('#141a24'));
+    assert(onDark.contrast >= LINE && onDark.plan.shadow === null, JSON.stringify(onDark));
+    const onLight = chosenTone('#ffcc00', statsOf('#f4efe4'));
+    assert(onLight.contrast < LINE && onLight.plan.shadow?.color === '#000000', JSON.stringify(onLight.plan));
     assert(isColor('#a1b2c3') && !isColor('auto') && !isColor('#abc') && !isColor(null));
 }
 
@@ -135,12 +244,25 @@ export function testFonts() {
 export function testStyles() {
     const light = {color: '#f4f6f8', dark: false};
     const font = fontFor('serif', ['DejaVu Serif']);
-    const widget = widgetStyle(light, font);
-    assert(widget.includes('color: #f4f6f8') && widget.includes('rgba(0, 0, 0,') &&
-        widget.includes('font-family: "DejaVu Serif"'), widget);
-    assert(widgetStyle({color: '#202428', dark: true}, fontFor('default')).includes('rgba(255, 255, 255,'),
-        'dark type: a light halo');
+    // A shadow only where one is planned: none at all where the type reads
+    // (not the stylesheet's either).
+    assertEqual(widgetStyle(light, font), 'color: #f4f6f8; text-shadow: none; font-family: "DejaVu Serif";');
+    const shadowed = legibilityPlan({...TYPE.line, tone: light, stats: statsOf('#a8b8d0')});
+    const {alpha, blur, y} = shadowed.shadow;
+    const shadow = `text-shadow: 0 ${y}px ${blur}px rgba(0, 0, 0, ${alpha});`;
+    assertEqual(widgetStyle(light, font, shadowed), `color: #f4f6f8; ${shadow} font-family: "DejaVu Serif";`,
+        'as St takes it: x y blur colour');
+    const dark = {color: '#202428', dark: true};
+    const halo = legibilityPlan({...TYPE.line, tone: dark, stats: statsOf('#9a9a9a')});
+    assert(widgetStyle(dark, fontFor('default'), halo).includes('rgba(255, 255, 255,'), 'dark type: a light halo');
+    assertEqual(widgetStyle(dark, fontFor('default'), legibilityPlan({...TYPE.line, tone: dark, stats: statsOf('#ffffff')})),
+        'color: #202428; text-shadow: none;', 'none where it reads');
     assertEqual(widgetStyle(null, fontFor('default')), '', 'on a card, as it is');
+    // A part with a plan of its own: its shadow, and heavier where it is to be.
+    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('default'), {...shadowed, boldness: 0.5, weight: 700}),
+        `font-weight: 700; ${shadow}`);
+    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('heavy'), {...shadowed, boldness: 0, shadow: null}),
+        'font-weight: 800;', 'nothing planned: as the font has it');
     assertEqual(partStyle(['atelier-widget-caption'], light, fontFor('default')), 'color: #f4f6f8;',
         'the quieter parts in the one tone too, solid');
     assertEqual(partStyle(['atelier-widget-time-suffix'], light, fontFor('default')), 'color: #f4f6f8;');

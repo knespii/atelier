@@ -9,7 +9,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
-import {ProfileStore, describeProfile, readCurrentAppearance} from '../lib/profiles.js';
+import {ProfileStore, describeProfile, readCurrentAppearance, readLockscreen} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, prettyName} from '../lib/paths.js';
 import {exportProfile, readExportedProfile} from '../lib/profileTransfer.js';
 import {getUserThemeSettings, isUserThemeEnabled, scanThemes} from '../lib/themes.js';
@@ -167,7 +167,9 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
         card.append(top);
 
         const bottom = new Gtk.Box({spacing: 4});
-        const parts = describeProfile(profile).map(({value}) => value);
+        // (The lock screen's clock said as that, not as one on the desktop.)
+        const parts = describeProfile(profile).map(({label, value}) =>
+            (label === 'Lock screen' ? `${label}: ${value}` : value));
         bottom.append(new Gtk.Label({
             label: parts.join(' · ') || 'Wallpaper only',
             xalign: 0,
@@ -323,11 +325,13 @@ class AtelierProfilesPage extends Adw.PreferencesPage {
             if (profile[key])
                 profile[key] = await importWallpaper(profile[key]);
         }
-        // (Without widgets of its own, it keeps those on the desktop now.)
+        // (Without widgets of its own, it keeps those on the desktop now,
+        // and without a lock screen, the one there is now.)
         const added = this._store.add({
             ...profile,
             id: '',
             widgets: profile.widgets ?? readWidgets(this._settings.get_child('desktop')),
+            lockscreen: profile.lockscreen ?? readLockscreen(this._settings.get_child('lockscreen')),
         });
         if (profile.wallpaper)
             ensureThumbnail(profile.wallpaper).catch(() => {});

@@ -2,7 +2,9 @@
 // wallpaper folder), its top bar button, shortcuts, requests from the
 // preferences, saving the current setup and the first-run "Original".
 // Profiles stay as they were saved: a wallpaper picked for now, or anything
-// changed in GNOME Settings, leaves them alone.
+// changed in GNOME Settings, leaves them alone. Only the desktop's widgets
+// and the lock screen, edited, are kept in the profile in use: each profile
+// has its own.
 
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
@@ -15,7 +17,10 @@ import {LEGACY_UUID} from '../lib/migrate.js';
 import {
     deleteWallpaperIfUnused, importWallpaper, listWallpapers, prettyName, wallpaperFolder,
 } from '../lib/paths.js';
-import {giveWidgets, normalizeProfile, readCurrentAppearance} from '../lib/profiles.js';
+import {
+    POSTER_KEYS, giveLockscreen, giveWidgets, keepLockscreen, normalizeProfile, readCurrentAppearance,
+    readLockscreen,
+} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings} from '../lib/themes.js';
 import {ensureThumbnail} from '../lib/thumbnails.js';
 import {readPaletteOptions} from '../lib/wallpaperPalette.js';
@@ -62,6 +67,15 @@ export class ProfilesModule {
         // Each profile keeps its widgets: those from before get a copy of
         // the ones on the desktop now.
         giveWidgets(this._store, this._settings.get_child('desktop'));
+        // And its lock screen. What is changed of it while a profile is in
+        // use – on the mock lock screen, in the settings, or while Atelier
+        // was off – is kept in that profile; what applying a profile writes
+        // is that profile's already.
+        this._lockSettings = this._settings.get_child('lockscreen');
+        giveLockscreen(this._store, this._lockSettings);
+        keepLockscreen(this._store, this._lockSettings);
+        this._lockSettings.connectObject(
+            ...POSTER_KEYS.flatMap(key => [`changed::${key}`, () => this._keepLockscreen()]), this);
 
         this._settings.connectObject(
             'changed::show-indicator', () => this._syncIndicator(),
@@ -107,6 +121,8 @@ export class ProfilesModule {
         this._applier.destroy();
         this._applier = null;
         this._settings.disconnectObject(this);
+        this._lockSettings?.disconnectObject(this);
+        this._lockSettings = null;
     }
 
     /**
@@ -312,6 +328,13 @@ export class ProfilesModule {
         });
     }
 
+    // (Not while a profile is being written: the one in use is still the
+    // one before, which would get the new one's lock screen.)
+    _keepLockscreen() {
+        if (this._applier && !this._applier.writing)
+            keepLockscreen(this._store, this._lockSettings);
+    }
+
     _step(delta) {
         const profiles = this._store.getAll();
         if (profiles.length === 0)
@@ -388,6 +411,7 @@ export class ProfilesModule {
             ...current,
             palette: readPaletteOptions(this._settings.get_child('palette')),
             widgets: readWidgets(this._settings.get_child('desktop')),
+            lockscreen: readLockscreen(this._lockSettings),
             name: this._nameFor(current.wallpaper),
         };
     }

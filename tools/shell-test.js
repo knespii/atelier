@@ -4766,6 +4766,194 @@ async function testLockLook() {
     check(!desktop || [...desktop.widgets.values()].every(w => !w.style), 'the desktop\'s widgets as they were');
 }
 
+// Each profile keeps its own lock screen (as an iPhone keeps each of its
+// lock screens): switching profiles switches it, only what differs written;
+// what is changed of it, on the mock lock screen or in the settings, goes
+// into the profile in use and no other, never into the one before while a
+// profile is being written; a wallpaper for now changes neither.
+async function testLockPerProfile(atelier) {
+    const {POSTER_KEYS, readLockscreen} = await import('../lib/profiles.js');
+    const store = atelier._store;
+    const settings = atelier._settings;
+    const lockSettings = settings.get_child('lockscreen');
+    const editor = Main.extensionManager.lookup(UUID).stateObj.modules.get('lockscreen-editor');
+    const before = {active: store.activeId, profiles: store.getAll()};
+    check(before.profiles.length > 0 && before.profiles.every(profile => profile.lockscreen),
+        'every profile has a lock screen of its own');
+    check(JSON.stringify(atelier._readCurrentSetup().lockscreen) === JSON.stringify(readLockscreen(lockSettings)),
+        'a profile saved now keeps the lock screen there is');
+    // (The same lock screen, whatever order its widgets' keys are in.)
+    const sorted = value => JSON.stringify(value, (_, v) => (v && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v));
+    const shows = id => sorted(readLockscreen(lockSettings)) === sorted(store.get(id).lockscreen);
+    const changed = [];
+    const changedId = lockSettings.connect('changed', (_, key) => POSTER_KEYS.includes(key) && changed.push(key));
+    let writes = 0;
+    const writesId = settings.connect('changed::profiles', () => writes++);
+    try {
+        store.update('amber', {lockscreen: {
+            widgets: [{id: 'clock', kind: 'clock', size: 'tall', x: 13, y: 2, fine: true, face: 'glass'}],
+            style: 'bare', clockColor: 'auto', clockFont: 'inter', clockWeight: 0, clockWidth: 0,
+            gnomeClock: false, depthEffect: false,
+        }});
+        store.update('glass', {lockscreen: {
+            widgets: [{id: 'clock', kind: 'clock', size: 'square', x: 2, y: 2, fine: true, face: 'digital'},
+                {id: 'date', kind: 'date', size: 'square', x: 6, y: 2, fine: true}],
+            style: 'modern', clockColor: '#ffcc00', clockFont: 'serif', clockWeight: 700, clockWidth: 120,
+            gnomeClock: true, depthEffect: false,
+        }});
+        await atelier._applier.apply(store.get('amber'), {animate: false});
+        check(store.activeId === 'amber' && shows('amber'), 'switched to a profile, its lock screen shows');
+
+        changed.length = 0;
+        const amber = JSON.stringify(store.get('amber'));
+        const glass = JSON.stringify(store.get('glass'));
+        settings.set_string('apply-request', JSON.stringify({id: 'glass', nonce: GLib.uuid_string_random()}));
+        check(await waitFor(() => store.activeId === 'glass' && !atelier._applier.busy, 8000),
+            'switched to another (as the preferences ask)');
+        check(shows('glass'), 'its lock screen follows: the widgets, look, colour, font, weight, width, GNOME\'s clock');
+        check([...changed].sort().join() === ['clock-color', 'clock-font', 'clock-weight', 'clock-width',
+            'gnome-clock', 'style', 'widgets'].join(), `written in one go, what differs only (${changed})`);
+        check(JSON.stringify(store.get('amber')) === amber && JSON.stringify(store.get('glass')) === glass,
+            'the profile before keeps its own, the new one as it was saved');
+        changed.length = 0;
+        await atelier._applier.apply(store.get('glass'), {animate: false});
+        check(changed.length === 0, `the same profile again: nothing written (${changed})`);
+
+        // Changed on the mock lock screen.
+        lockSettings.set_string('edit-request', GLib.uuid_string_random());
+        check(await waitFor(() => editor?.preview, 3000), 'the mock lock screen open');
+        writes = 0;
+        const battery = editor.preview._board.addWidget('battery');
+        check(Boolean(battery) && store.get('glass').lockscreen.widgets.some(e => e.kind === 'battery'),
+            'a widget placed on the mock lock screen is kept in the profile in use');
+        check(!store.get('amber').lockscreen.widgets.some(e => e.kind === 'battery'), 'and in no other');
+        editor.preview.close();
+        check(await waitFor(() => !editor.preview, 3000), 'the mock lock screen gone');
+        // Changed as the settings window changes it.
+        lockSettings.set_string('clock-font', 'rounded');
+        lockSettings.set_string('clock-color', '#33aaff');
+        check(store.get('glass').lockscreen.clockFont === 'rounded' && store.get('glass').lockscreen.clockColor === '#33aaff' &&
+            store.get('amber').lockscreen.clockFont === 'inter', 'a font and a colour chosen in the settings too');
+        const settled = writes;
+        await Scripting.sleep(1000);
+        check(writes === settled && settled <= 3, `kept once for each change, and then nothing (${settled} writes)`);
+
+        // Back: the first one's, as it was; the other keeps what was changed of its.
+        await atelier._applier.apply(store.get('amber'), {animate: false});
+        check(shows('amber') && JSON.stringify(store.get('amber')) === amber, 'back, the first one\'s lock screen as it was');
+        const kept = store.get('glass').lockscreen;
+        check(kept.widgets.some(e => e.kind === 'battery') && kept.clockFont === 'rounded',
+            'the other keeps what was changed of its');
+
+        // A wallpaper for now.
+        const profiles = settings.get_string('profiles');
+        changed.length = 0;
+        await atelier._applyWallpaper({setActive() {}, close() {}}, `${GLib.get_user_data_dir()}/Wallpapers/pills.jxl`);
+        check(changed.length === 0 && settings.get_string('profiles') === profiles && store.activeId === 'amber',
+            `a wallpaper for now: the lock screen and the profiles as they were (${changed})`);
+    } finally {
+        lockSettings.disconnect(changedId);
+        settings.disconnect(writesId);
+        editor?.preview?.destroy();
+        store.setAll(before.profiles);
+        if (store.get(before.active))
+            await atelier._applier.apply(store.get(before.active), {animate: false});
+        await wallpapersSettled();
+    }
+    check(!before.active || shows(before.active), 'and as it was before');
+}
+
+// The lock screen's own fonts (shell/core/fonts.js): Inter and Roboto Flex
+// in St's font map and in Cairo's as Atelier starts, a label's variations
+// kept over St's style, and which Inter "Inter" finds where the static one
+// is installed too (lib/lockType.js labelFont()). And the digits' outlines
+// through HarfBuzz in the shell, stretched (lib/glyphOutlines.js).
+async function testLockFonts() {
+    const {default: PangoCairo} = await import('gi://PangoCairo');
+    const {holdLabelFont, registerFonts} = await import('../shell/core/fonts.js');
+    const {bundledFile, fontAt, traceOutline} = await import('../lib/glyphOutlines.js');
+    const {labelFont, styleFor, typefaceFor} = await import('../lib/lockType.js');
+    const stMap = global.stage.get_pango_context().get_font_map();
+    const cairoMap = PangoCairo.FontMap.get_default();
+    check(Boolean(stMap.get_family('Roboto Flex') && cairoMap.get_family('Roboto Flex') && stMap.get_family('Inter')),
+        'the lock screen\'s fonts in St\'s font map and in Cairo\'s, from the start');
+    check(registerFonts(), 'asked again: there');
+
+    const label = new St.Label({text: '0000', style: 'font-family: "Roboto Flex"; font-size: 60px; font-weight: 600;'});
+    Main.uiGroup.add_child(label);
+    const width = () => label.clutter_text.get_preferred_width(-1)[1];
+    // (What Pango found for it: never ask such a font its face, see fonts.js.)
+    const found = () => label.clutter_text.get_layout().get_iter().get_run_readonly()?.item.analysis.font.describe().to_string() ?? '';
+    try {
+        await Scripting.sleep(100);
+        const plain = width();
+        holdLabelFont(label, size => ({families: ['Roboto Flex'], weight: 600, variations: `wght=600,wdth=25,opsz=${Math.round(size)}`}));
+        const narrow = width();
+        check(narrow < plain * 0.7, `a label on Roboto Flex's width axis, which St can't set (${plain} → ${narrow}, ${found()})`);
+        label.set_style('font-family: "Roboto Flex"; font-size: 60px; font-weight: 600; color: #ffcc00;');
+        await Scripting.sleep(100);
+        check(Math.abs(width() - narrow) < 1, `kept as St sets its style anew (${width()})`);
+        check(found().includes('opsz=60'), `its optical size its size in pixels (${found()})`);
+        holdLabelFont(label, null);
+        await Scripting.sleep(100);
+        check(Math.abs(width() - plain) < 1, `and St's own again (${width()})`);
+
+        // "Inter": the static one (fonts-inter) where it is installed, at
+        // sizes outside the variable one's optical sizes (14 to 32 points:
+        // fontconfig matches them as its sizes); the variable one otherwise.
+        const staticInter = Boolean(stMap.get_family('Inter Display'));
+        const interAt = async (px, weight) => {
+            label.set_style(`font-family: Inter; font-size: ${px}px; font-weight: ${weight};`);
+            await Scripting.sleep(50);
+            return found();
+        };
+        const within = await interAt(24, 450);
+        check(within.includes('wght=450'), `at 18 points, "Inter" is this one, at weight 450 (${within})`);
+        for (const px of [16, 80]) {
+            const outside = await interAt(px, 450);
+            results.push(`INFO  the static Inter ${staticInter ? 'is' : 'isn\'t'} installed; "Inter" at ${px}px, weight 450: ${outside}`);
+            check(staticInter ? !outside.includes('@') : outside.includes('wght=450'),
+                `at ${px}px, "Inter" is ${staticInter ? 'the static one (its weights in hundreds)' : 'this one'} (${outside})`);
+        }
+        const inter = typefaceFor('inter');
+        label.set_style('font-size: 80px;');
+        holdLabelFont(label, size => labelFont(inter, styleFor(inter, 'digits'), size));
+        await Scripting.sleep(50);
+        check(staticInter ? found().startsWith('Inter Display') : found().includes('opsz=32'),
+            `large, in labelFont() its display cut (${found()})`);
+        holdLabelFont(label, null);
+    } finally {
+        label.destroy();
+    }
+
+    // The glass digits: shaped and outlined by HarfBuzz here too, stretched.
+    const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const {glyphs, advance} = font.shape('10:52', ['tnum', 'case']);
+    check(glyphs.length === 5 && [0, 1, 3, 4].every(i => glyphs[i].advance === glyphs[0].advance),
+        `"10:52" shaped, its figures all as wide (${glyphs.map(g => g.advance)})`);
+    const area = new St.DrawingArea({width: 700, height: 420, x: 100, y: 100});
+    let drawn = false;
+    area.connect('repaint', () => {
+        const cr = area.get_context();
+        const scale = 120 / (font.figures.top - font.figures.bottom);
+        cr.setSourceRGBA(1, 1, 1, 1);
+        for (const g of glyphs)
+            traceOutline(cr, font.stretched(g.glyph, 2.8), {x: 20 + g.x * scale * 0.9, y: 380, scale, scaleX: 0.9});
+        cr.fill();
+        cr.$dispose();
+        drawn = true;
+    });
+    Main.uiGroup.add_child(area);
+    try {
+        check(await waitFor(() => drawn, 3000) && advance > 0, 'drawn in an St.DrawingArea, 2.8 times as tall');
+        await Scripting.sleep(200);
+        await screenshotArea('95-lock-fonts', 100, 100, 700, 420);
+    } finally {
+        area.destroy();
+    }
+}
+
 export async function run() {
     // GNOME's helper for these scripts quits after a while without calls,
     // and the shell then exits at once instead of shutting down as at the
@@ -4827,6 +5015,8 @@ export async function run() {
             await part(testLockLook);
             await part(testLockGlassClock);
             await part(testLockOnOwnWallpaper);
+            await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
+            await part(testLockFonts);
             // (GNOME's wallpapers made anew as it quits would touch what is gone.)
             await wallpapersSettled();
             testQuitWithWorkQueued(ext);
@@ -4877,6 +5067,8 @@ export async function run() {
         await part(testLockLook);
         await part(testLockGlassClock);
         await part(testLockOnOwnWallpaper);
+        await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
+        await part(testLockFonts);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);

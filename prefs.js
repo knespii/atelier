@@ -18,9 +18,12 @@ import {ProfilesPage} from './prefs/profilesPage.js';
 import {SettingsPage} from './prefs/settingsPage.js';
 import {WallpapersPage} from './prefs/wallpapersPage.js';
 import {installCss} from './prefs/widgets.js';
+import {registerFonts} from './shell/core/fonts.js';
 
 export default class AtelierPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
+        // (The lock screen's fonts, for its previews: in this process only.)
+        registerFonts();
         const settings = this.getSettings();
         installCss(window);
         window.set_default_size(980, 780);

@@ -1,5 +1,6 @@
 import GLib from 'gi://GLib';
 
+import {normalizeLockscreen} from '../lib/profiles.js';
 import {exportProfile, folderName, readExportedProfile} from '../lib/profileTransfer.js';
 import {assert, assertEqual, freshDir} from './util.js';
 
@@ -12,9 +13,14 @@ export async function testExportAndRead() {
     const dir = freshDir('transfer');
     const wallpaper = GLib.build_filenamev([dir, 'sea.png']);
     GLib.file_set_contents(wallpaper, 'not really a png');
+    const lockscreen = {
+        widgets: [{id: 'clock', kind: 'clock', size: 'tall', x: 13, y: 2, fine: true, face: 'glass', grid: [38, 20]}],
+        style: 'bare', clockColor: '#ffcc00', clockFont: 'flex', clockWeight: 700, clockWidth: 80,
+        gnomeClock: false, depthEffect: true,
+    };
     const profile = {
         id: 'abc', name: 'Sea', wallpaper, wallpaperDark: null, colorScheme: 'prefer-dark',
-        accentColor: 'teal', iconTheme: 'Papirus', palette: {source: 'wallpaper', variant: 'tonal'},
+        accentColor: 'teal', iconTheme: 'Papirus', palette: {source: 'wallpaper', variant: 'tonal'}, lockscreen,
     };
     const exported = await exportProfile(profile, dir);
     assertEqual(GLib.path_get_basename(exported), 'Sea (Atelier)');
@@ -28,6 +34,7 @@ export async function testExportAndRead() {
     assertEqual([read.name, read.colorScheme, read.accentColor, read.iconTheme],
         ['Sea', 'prefer-dark', 'teal', 'Papirus']);
     assertEqual(read.wallpaper, GLib.build_filenamev([exported, 'wallpaper.png']), 'its wallpaper, from the folder');
+    assertEqual(read.lockscreen, normalizeLockscreen(lockscreen), 'and its lock screen');
 
     let error = null;
     try {

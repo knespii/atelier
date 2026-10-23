@@ -18,6 +18,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {LEGACY_SCHEMA, migrateFromBgChanger} from './lib/migrate.js';
 import {onTime} from './lib/steadyTime.js';
 import {ProfileStore} from './lib/profiles.js';
+import {registerFonts} from './shell/core/fonts.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {releaseKeptStyles} from './shell/core/theme.js';
 import {BarModule} from './shell/bar/module.js';
@@ -43,6 +44,8 @@ const CALM_LONGEST = 2500;
 
 export default class AtelierExtension extends Extension {
     enable() {
+        // (The lock screen's fonts, in this process only: once in its life.)
+        registerFonts();
         this._settings = this.getSettings();
         const context = {
             extension: this,

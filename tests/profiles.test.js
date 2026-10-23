@@ -2,9 +2,9 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    ProfileStore, describeProfile, effectiveWallpaper, giveWidgets, keepWidgets, normalizePaletteOptions,
-    normalizeProfile,
-    readCurrentAppearance,
+    LOCK_FONTS, LOCK_STYLES, POSTER_KEYS, ProfileStore, describeProfile, effectiveWallpaper, giveLockscreen,
+    giveWidgets, keepLockscreen, keepWidgets, normalizeLockscreen, normalizePaletteOptions, normalizeProfile,
+    readCurrentAppearance, readLockscreen, writeLockscreen,
 } from '../lib/profiles.js';
 import {
     deleteWallpaperIfUnused, importWallpaper, isInLibrary, listWallpapers, prettyName, wallpaperFolder,
@@ -219,4 +219,144 @@ export function testProfilesFromBeforeGetTheirOwnWidgets() {
     assertEqual(store.get(b.id).widgets.style, 'analogue', 'the other keeps its own');
     assertEqual(giveWidgets(store, desktop), 0, 'once');
     desktop.reset('widgets');
+}
+
+// The lockscreen settings as they come, but for what a test sets.
+function lockSettingsOf(store) {
+    const lock = store.settings.get_child('lockscreen');
+    lock.settings_schema.list_keys().forEach(key => lock.reset(key));
+    return lock;
+}
+
+const GLASS_CLOCK = {id: 'clock', kind: 'clock', size: 'tall', x: 13, y: 2, fine: true, face: 'glass'};
+
+export function testLockscreenKeptValid() {
+    assertEqual(normalizeLockscreen(null), null);
+    assertEqual(normalizeLockscreen({style: 'modern'}), null, 'without a layout, none');
+    const odd = normalizeLockscreen({
+        widgets: [GLASS_CLOCK, {id: 'g', kind: 'github', size: 'card', x: 0, y: 0}],
+        style: 'neon', clockColor: 'red', clockFont: 'comic', clockWeight: 1200, clockWidth: -5,
+        gnomeClock: 'no', depthEffect: 1, enabled: false, island: false, depthModel: 'large',
+    });
+    assertEqual(odd.widgets.map(e => [e.kind, e.size, e.face]), [['clock', 'tall', 'glass']],
+        'only what the lock screen has');
+    assertEqual([odd.style, odd.clockColor, odd.clockFont, odd.clockWeight, odd.clockWidth],
+        ['bare', 'auto', 'inter', 1000, 0], 'what is not valid, as it comes');
+    assertEqual([odd.gnomeClock, odd.depthEffect], [true, false]);
+    assertEqual(Object.keys(odd),
+        ['widgets', 'style', 'clockColor', 'clockFont', 'clockWeight', 'clockWidth', 'gnomeClock', 'depthEffect'],
+        'nothing that holds for every profile');
+    const fine = normalizeLockscreen({widgets: '[{"kind":"battery","x":1,"y":1}]', style: 'analogue',
+        clockColor: '#FFcc00', clockFont: 'thin', clockWeight: 650, clockWidth: 120, gnomeClock: false,
+        depthEffect: true});
+    assertEqual(fine.widgets.map(e => [e.id, e.size, e.x]), [['battery', 'small', 2]],
+        'the layout as the settings keep it, JSON, will do');
+    assertEqual([fine.style, fine.clockColor, fine.clockFont, fine.clockWeight, fine.clockWidth, fine.gnomeClock,
+        fine.depthEffect], ['analogue', '#FFcc00', 'thin', 650, 120, false, true], 'valid values, as they are');
+    assertEqual(normalizeLockscreen(fine), fine, 'the same, cleaned up again');
+    assertEqual(normalizeProfile({id: 'p', lockscreen: fine}).lockscreen, fine, 'in a profile');
+    assertEqual(normalizeProfile({id: 'p'}).lockscreen, null, 'none: the lock screen is left as it is');
+}
+
+export function testLockscreenAsTheSchemaHasIt() {
+    const lock = lockSettingsOf(makeStore());
+    const schema = lock.settings_schema;
+    const range = key => schema.get_key(key).get_range().recursiveUnpack();
+    assertEqual(range('clock-font'), ['enum', LOCK_FONTS], 'the fonts');
+    assertEqual(range('style'), ['enum', LOCK_STYLES], 'the looks');
+    assertEqual([range('clock-weight'), range('clock-width')], [['range', [0, 1000]], ['range', [0, 200]]]);
+    assert(POSTER_KEYS.every(key => schema.has_key(key)), 'every key there');
+    assertEqual(POSTER_KEYS.filter(key => ['enabled', 'island', 'password-field', 'depth-model', 'subject-model',
+        'edit-request', 'depth-request', 'depth-status'].includes(key)), [], 'none of those for every profile');
+    assertEqual(readLockscreen(lock), normalizeLockscreen({widgets: []}), 'as it comes, as a profile has it');
+}
+
+export function testLockscreenWrittenWhereItDiffers() {
+    const lock = lockSettingsOf(makeStore());
+    lock.set_boolean('island', false);
+    lock.set_string('depth-model', 'large');
+    lock.set_string('subject-model', 'lite');
+    const changed = [];
+    const id = lock.connect('changed', (_, key) => changed.push(key));
+    const poster = normalizeLockscreen({widgets: [GLASS_CLOCK], clockFont: 'flex', clockWeight: 700,
+        gnomeClock: false, depthEffect: true});
+    try {
+        assertEqual(writeLockscreen(lock, poster), ['widgets', 'clock-font', 'clock-weight', 'gnome-clock',
+            'depth-effect'], 'only what differs');
+        assertEqual(readLockscreen(lock), poster, 'read back as written');
+        changed.length = 0;
+        assertEqual(writeLockscreen(lock, poster), [], 'nothing again');
+        // The same layout, its JSON written otherwise.
+        lock.set_string('widgets', JSON.stringify([{face: 'glass', x: 13, y: 2, id: 'clock', kind: 'clock',
+            size: 'tall', fine: true}]));
+        changed.length = 0;
+        assertEqual(writeLockscreen(lock, poster), [], 'the same layout, however its JSON is written');
+        assertEqual(changed, [], 'and no key changed');
+        assertEqual([lock.get_boolean('island'), lock.get_string('depth-model'), lock.get_string('subject-model'),
+            lock.get_boolean('enabled'), lock.get_boolean('password-field')], [false, 'large', 'lite', true, true],
+        'what holds for every profile left as it is');
+        assertEqual(writeLockscreen(lock, null), [], 'no lock screen: nothing written');
+    } finally {
+        lock.disconnect(id);
+        lockSettingsOf(makeStore());
+    }
+}
+
+export function testProfilesKeepTheirLockScreen() {
+    const store = makeStore();
+    const lock = lockSettingsOf(store);
+    lock.set_string('widgets', JSON.stringify([GLASS_CLOCK]));
+    const a = store.add({name: 'A'});
+    const b = store.add({name: 'B', lockscreen: {widgets: [], style: 'modern', gnomeClock: true}});
+    assertEqual(giveLockscreen(store, lock), 1, 'only the one without');
+    assertEqual(store.get(a.id).lockscreen.widgets.map(e => e.face), ['glass'], 'a copy of the one there is');
+    assertEqual(store.get(b.id).lockscreen.style, 'modern', 'the other keeps its own');
+    assertEqual(giveLockscreen(store, lock), 0, 'once');
+
+    let writes = 0;
+    const id = store.settings.connect('changed::profiles', () => writes++);
+    try {
+        assert(!keepLockscreen(store, lock), 'none in use: kept nowhere');
+        store.activeId = a.id;
+        assert(!keepLockscreen(store, lock) && writes === 0, 'as the profile has it: not written again');
+        lock.set_string('clock-font', 'serif');
+        lock.set_boolean('depth-effect', true);
+        assert(keepLockscreen(store, lock), 'edited: kept');
+        assertEqual([store.get(a.id).lockscreen.clockFont, store.get(a.id).lockscreen.depthEffect], ['serif', true],
+            'in the profile in use');
+        assertEqual(store.get(b.id).lockscreen.clockFont, 'inter', 'and only there');
+        assertEqual(describeProfile(store.get(a.id)).find(p => p.label === 'Lock screen')?.value,
+            'Glass clock, Serif, depth effect');
+
+        // Switched to the other: its own lock screen, and the first keeps its.
+        writeLockscreen(lock, store.get(b.id).lockscreen);
+        store.activeId = b.id;
+        assertEqual(readLockscreen(lock), store.get(b.id).lockscreen, 'the other\'s lock screen shows');
+        assert(!keepLockscreen(store, lock), 'which it has already');
+        assertEqual(store.get(a.id).lockscreen.clockFont, 'serif', 'the first as it was');
+
+        // A new profile of the setup there is now has it too.
+        const c = store.add({name: 'C', lockscreen: readLockscreen(lock)});
+        assertEqual(store.get(c.id).lockscreen, store.get(b.id).lockscreen);
+    } finally {
+        store.settings.disconnect(id);
+        store.settings.reset('active-profile');
+        lockSettingsOf(store);
+    }
+}
+
+export function testDescribeLockscreen() {
+    const said = lockscreen => describeProfile(normalizeProfile({id: 'x', lockscreen}))
+        .find(p => p.label === 'Lock screen')?.value;
+    assertEqual(said({widgets: []}), undefined, 'GNOME\'s lock screen as it is: nothing to say');
+    assertEqual(said({widgets: [], gnomeClock: false}), 'No clock');
+    assertEqual(said({widgets: [GLASS_CLOCK, {id: 'battery', kind: 'battery', x: 13, y: 14, fine: true}]}),
+        'Glass clock, Inter');
+    assertEqual(said({widgets: [{id: 'c', kind: 'clock', size: 'square', x: 0, y: 0, fine: true, face: 'digital'},
+        GLASS_CLOCK], clockFont: 'flex', clockWeight: 700, depthEffect: true}),
+    'Glass clock, Roboto Flex 700, depth effect', 'the biggest clock');
+    assertEqual(said({widgets: [{id: 'c', kind: 'clock', size: 'large', x: 0, y: 0, fine: true}], clockFont: 'default'}),
+        'Clock, Default font', 'a clock of no face of its own');
+    assertEqual(said({widgets: [{id: 'battery', kind: 'battery', x: 0, y: 0, fine: true}]}), '1 widget, Inter');
+    assertEqual(said(null), undefined, 'none: not said');
 }
