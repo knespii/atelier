@@ -6,7 +6,7 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 import Pango from 'gi://Pango';
 
-import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS} from '../lib/profiles.js';
+import {ACCENT_COLORS, AUTO_ACCENT, PICTURE_OPTIONS, readLockscreen} from '../lib/profiles.js';
 import {deleteWallpaperIfUnused, importWallpaper, isInLibrary, prettyName} from '../lib/paths.js';
 import {ensureThumbnail, removeThumbnail} from '../lib/thumbnails.js';
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
@@ -384,11 +384,15 @@ class AtelierProfileEditor extends Adw.Dialog {
             };
 
             // A profile saved from the current setup keeps its palette too;
-            // a new profile keeps the widgets on the desktop.
+            // a new profile keeps the widgets on the desktop, and the lock
+            // screen there is now.
             if (!this._profile && this._draft.palette)
                 fields.palette = this._draft.palette;
-            if (!this._profile)
+            if (!this._profile) {
                 fields.widgets = this._draft.widgets ?? readWidgets(this._store.settings.get_child('desktop'));
+                fields.lockscreen = this._draft.lockscreen ??
+                    readLockscreen(this._store.settings.get_child('lockscreen'));
+            }
 
             if (this._profile) {
                 const {wallpaper: previous, wallpaperDark: previousDark} = this._profile;
