@@ -8,9 +8,10 @@
 // rest, and the glass as a contrast plan may raise it (more opaque, more
 // tint, a shadow) – as the lock screen's legibility plan has it (its
 // APCA, lib/lockLook.js legibilityPlan(): a heavier weight, a shadow, more
-// opaque glass). The backdrops are made as the shell makes them, and
-// timed, as is drawing the digits. With no arguments, the wallpapers in
-// Atelier's library and a synthetic one; or the pictures given.
+// opaque glass; the digits measured as their glass comes out, glassInk()).
+// The backdrops are made as the shell makes them, and timed, as is drawing
+// the digits. With no arguments, the wallpapers in Atelier's library and a
+// synthetic one; or the pictures given.
 //
 //   gjs -m tools/render-glass.js [picture…]
 //
@@ -26,7 +27,7 @@ import System from 'system';
 
 import {placement} from '../lib/depth.js';
 import {GLASS, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
-import {glassDigits, legibilityPlan, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
+import {glassDigits, glassInk, legibilityPlan, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
 import {contrastRatio} from '../lib/palette.js';
 import {wallpaperDir} from '../lib/paths.js';
 import {cellOrigin, gridOrigin, pixelSize} from '../lib/widgets.js';
@@ -319,9 +320,6 @@ async function renderWallpaper(path, {cache, work}, shape) {
     const stats = regionStats(sharp.sample, regionIn(rect, MONITOR[0] / MONITOR[1], 400 / 250));
     const text = {size: shape.fontSize, weight: WEIGHT};
     const tone = lockTone(stats, {dim: 0.86, text});
-    const plan = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86});
-    const planned = {...glassFor(plan.glass), shadow: plan.shadow};
-    const plannedShape = plan.weight === WEIGHT ? shape : digitShape(plan.weight);
 
     const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, dir: cache});
     let start = GLib.get_monotonic_time();
@@ -330,6 +328,17 @@ async function renderWallpaper(path, {cache, work}, shape) {
     start = GLib.get_monotonic_time();
     const backdrop = await loadBackdrop(spec, null);
     const loaded = ms(start);
+    // The digits measured as their glass comes out there, as the lock
+    // screen's board plans them (lib/lockLook.js glassInk(): the frosted
+    // wallpaper behind them, where it is lightest, under the tint); and,
+    // to compare, as a flat tint over the wallpaper.
+    const {monitor: [mw, mh], factor: [fx, fy], shift: [sx, sy]} = backdrop;
+    const frostedStats = regionStats(backdrop.sample,
+        [(ink.x + sx / fx) / mw, (ink.y + sy / fy) / mh, ink.width / mw, ink.height / mh]);
+    const plan = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86, ink: glassInk(tone, frostedStats)});
+    const flat = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86});
+    const planned = {...glassFor(plan.glass), shadow: plan.shadow};
+    const plannedShape = plan.weight === WEIGHT ? shape : digitShape(plan.weight);
 
     const glass = new LiquidGlass();
     glass.backdrop = backdrop;
@@ -378,7 +387,8 @@ async function renderWallpaper(path, {cache, work}, shape) {
     print(`${name}: tone ${tone.color}${tone.dark ? ' (dark)' : ''}, frosted ${frosted}, tint ${tint}; ` +
         `glass ${color} (WCAG contrast ${contrastRatio(color, around).toFixed(2)} with ${around}); ` +
         `the plan: Lc ${plan.lc?.toFixed(1)} of ${plan.need?.toFixed(1)}, ${said.join(', ') || 'nothing'}, ` +
-        `reaches ${plan.reaches?.toFixed(1)}`);
+        `reaches ${plan.reaches?.toFixed(1)} (a flat tint: Lc ${flat.lc?.toFixed(1)}, ` +
+        `${flat.shadow ? `shadow ${flat.shadow.alpha}` : 'no shadow'})`);
     print(`    backdrop ${spec.size.width}×${spec.size.height}: made in ${making.toFixed(1)} ms` +
         `${made ? '' : ' (there already)'}, loaded in ${loaded.toFixed(1)} ms; ` +
         `drawing the digits: before ${paintBeforeMs.toFixed(2)} ms, glass ${paintGlassMs.toFixed(2)} ms, ` +
