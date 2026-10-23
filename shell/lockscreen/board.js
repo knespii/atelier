@@ -1,25 +1,35 @@
 // The widgets on the lock screen: clocks, the date, the weather and the
 // battery placed anywhere on the main monitor, on the same grid as the
 // desktop's widgets, laid out in the lockscreen settings' widgets. Their
-// type is in a tone legible on the wallpaper behind each (typography.js),
-// in the font chosen for them. On the lock screen they only show – a
-// click goes through to GNOME's lock screen, which brings up the prompt;
-// in the editor (a mock lock screen in the session, see preview.js) they
-// are moved and stretched as on the desktop. When the password is asked,
-// they make room for the prompt. With the depth effect, the wallpaper's
-// subject stands over the clocks (depth.js), under the other widgets.
+// type is in a tone legible on the wallpaper behind them (typography.js),
+// in the typeface chosen for them; each part of it as it takes to read
+// where it is – nothing where it reads as it is, else heavier, or a soft
+// shadow round its letters. On the lock screen they only show – a click
+// goes through to GNOME's lock screen, which brings up the prompt; in the
+// editor (a mock lock screen in the session, see preview.js) they are
+// moved and stretched as on the desktop. When the password is asked, they
+// make room for the prompt. With the depth effect, the wallpaper's subject
+// stands over the clocks (depth.js), under the other widgets.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Pango from 'gi://Pango';
+import PangoCairo from 'gi://PangoCairo';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {minimumLc} from '../../lib/apca.js';
+import {
+    TYPE, legibilityPlan, partStyle, roleOf, styleWithPlan, widgetStyle,
+} from '../../lib/lockLook.js';
+import {labelFont} from '../../lib/lockType.js';
 import {
     LOCK_CLOCK_FACES, LOCK_KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
     nearestSize, nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout,
 } from '../../lib/widgets.js';
+import {holdLabelFont} from '../core/fonts.js';
 import {DateWidget} from '../desktop/kinds/time.js';
 import {LockClockWidget} from './clock.js';
 import {DepthCutout} from './depth.js';
@@ -34,6 +44,24 @@ const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
 // How much of a glass clock's width the subject has to stand across, for
 // its digits to end there.
 const ACROSS = 0.97;
+const scaleFactor = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
+
+/**
+ * @param {St.Label} label - on the stage
+ * @returns {number} how big its type is in CSS pixels, as APCA's sizes
+ *   are (points × 4/3): its size as St sets it, at Clutter's resolution
+ *   (the text scaled as the user has it), in logical pixels
+ */
+function cssPixels(label) {
+    const font = label.get_theme_node().get_font();
+    const size = font.get_size() / Pango.SCALE;
+    if (font.get_size_is_absolute())
+        return size / scaleFactor();
+    const context = label.clutter_text.get_pango_context();
+    const resolution = [PangoCairo.context_get_resolution(context), context.get_font_map().get_resolution?.()]
+        .find(dpi => dpi > 0) ?? 96;
+    return size * resolution / 72 / scaleFactor();
+}
 
 export class LockBoard {
     /**
@@ -58,6 +86,7 @@ export class LockBoard {
         this._depth = null;
         this._depthLater = 0;
         this._progress = 0;
+        this._toneNow = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
         this.layer = new St.Widget({reactive: false});
@@ -67,6 +96,8 @@ export class LockBoard {
             this._gone = true;
             this._cancelDepthLater();
         });
+        // (Each label's size is known once it is styled, on the stage.)
+        this.layer.connect('notify::mapped', () => this.layer.mapped && this._tone());
         // What the widgets read: nothing here opens an app or the network.
         this._context = {
             style: () => (this._look === 'analogue' ? 'analogue' : 'modern'),
@@ -127,7 +158,7 @@ export class LockBoard {
         if (!monitor)
             return;
         this._area = {x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height};
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const scale = scaleFactor();
         this._grid = gridSize(monitor.width / scale, monitor.height / scale);
         this._origin = gridOrigin(monitor.width / scale, monitor.height / scale);
         this.layer.set_size(monitor.width, monitor.height);
@@ -369,38 +400,131 @@ export class LockBoard {
     }
 
     // The widgets' type in one tone, legible on the wallpaper behind all of
-    // them (the clocks counting most; on cards, the cards' colours) and in
-    // the font chosen: on each, and on the parts of it that have their own
-    // (not on the editor's buttons). A widget moved or filled anew may
-    // change the tone of all of them.
+    // them (the clocks counting most, each widget with the type on it that
+    // needs most; on cards, the cards' colours), in the typeface chosen.
+    // Then each part of each as it takes to read on the wallpaper behind
+    // that widget (lib/lockLook.js legibilityPlan()): nothing where it reads
+    // as it is – no shadow at all – else heavier, then a soft shadow round
+    // its letters (not on the editor's buttons). A widget moved or filled
+    // anew may change the tone of all of them.
     _tone() {
         if (!this._grid || this._gone)
             return;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const [width, height] = [this._area.width / scale, this._area.height / scale];
-        const parts = this.widgets.map(widget => {
-            const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
-            const [w, h] = pixelSize(widget.entry.size);
-            return {rect: [x / width, y / height, w / width, h / height], weight: widget.entry.kind === 'clock' ? 3 : 1};
-        });
-        const tone = this._bare ? this._typography.toneFor(parts, width / height) : null;
+        const typography = this._typography;
+        const typeface = typography.typeface;
+        const aspect = this._area.width / this._area.height;
+        const shown = this.widgets.map(widget => ({widget, rect: this._cellRect(widget), type: this._typeOn(widget)}));
+        const tone = this._bare ? typography.toneFor(shown.map(({widget, rect, type}) => ({
+            rect,
+            weight: widget.entry.kind === 'clock' ? 3 : 1,
+            text: type,
+        })), aspect) : null;
         this._toneNow = tone;
-        const style = this._typography.styleOf(tone);
-        for (const widget of this.widgets) {
-            widget.style = style.widget || null;
-            const parts = widget.get_children().filter(child => !child.corner);
-            while (parts.length > 0) {
-                const part = parts.pop();
-                parts.push(...part.get_children());
-                if (!(part instanceof St.Widget))
-                    continue;
-                const own = style.part(part.get_style_class_name()?.split(' ') ?? []);
-                // (Left as it is, unless it was toned before.)
-                if (own || part._atelierToned)
-                    part.style = own || null;
-                part._atelierToned = Boolean(own);
-            }
+        for (const {widget, rect} of shown) {
+            widget.style = widgetStyle(tone, typeface) || null;
+            const stats = tone ? typography.statsOf(rect, aspect) : null;
+            for (const part of this._partsOf(widget))
+                this._setPart(part, {typeface, tone, stats});
         }
+    }
+
+    // Where a widget is placed on the main monitor: [x, y, width, height],
+    // 0 … 1 (as placed: the editor moves it there).
+    _cellRect(widget) {
+        const scale = scaleFactor();
+        const [width, height] = [this._area.width / scale, this._area.height / scale];
+        const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
+        const [w, h] = pixelSize(widget.entry.size);
+        return [x / width, y / height, w / width, h / height];
+    }
+
+    // The type on a widget that needs most to read (APCA's font lookup):
+    // its labels' that show, as they are set; none known (not styled yet,
+    // off the stage): the date line's.
+    _typeOn(widget) {
+        let most = null;
+        for (const label of this._labelsOf(widget)) {
+            const type = this._typeOf(label);
+            if (type && (!most || minimumLc(type.size, type.weight) > minimumLc(most.size, most.weight)))
+                most = type;
+        }
+        return most ?? TYPE.line;
+    }
+
+    // The labels of a widget that show, its glass face's date line among
+    // them (not the editor's buttons in its corners).
+    _labelsOf(widget) {
+        const labels = [];
+        const todo = widget.get_children().filter(child => !child.corner);
+        while (todo.length > 0) {
+            const actor = todo.pop();
+            if (!actor.visible)
+                continue;
+            todo.push(...actor.get_children());
+            if (actor instanceof St.Label && actor.text)
+                labels.push(actor);
+        }
+        return labels;
+    }
+
+    // A label's type as it is set: its size (CSS pixels) and its weight
+    // (as its role has it); null while it isn't styled (off the stage).
+    _typeOf(label) {
+        if (!label.get_stage())
+            return null;
+        const style = this._typography.styleFor(roleOf(label.get_style_class_name()?.split(' ') ?? []));
+        return {size: cssPixels(label), weight: style.weight};
+    }
+
+    // The parts of a widget styled here – each St.Widget in it, with its
+    // style classes – but the editor's buttons in its corners.
+    _partsOf(widget) {
+        const parts = [];
+        const todo = widget.get_children().filter(child => !child.corner);
+        while (todo.length > 0) {
+            const actor = todo.pop();
+            todo.push(...actor.get_children());
+            if (actor instanceof St.Widget)
+                parts.push({actor, classes: actor.get_style_class_name()?.split(' ') ?? []});
+        }
+        return parts;
+    }
+
+    // A part as it is set (lib/lockType.js styleFor() of its role) and as
+    // it takes to read where it is: a label held in its typeface (St can't
+    // set a variable font's axes from CSS: shell/core/fonts.js), heavier
+    // where planned, its shadow only where planned. (A width the typeface
+    // has no axis for stays a label's own: St lays a label out at its
+    // font's width; only the glass face draws its digits narrower.)
+    _setPart({actor, classes}, {typeface, tone, stats}) {
+        const role = roleOf(classes);
+        let style = this._typography.styleFor(role);
+        let plan = null;
+        if (actor instanceof St.Label) {
+            const type = this._typeOf(actor);
+            plan = tone && type ? legibilityPlan({...type, tone, stats, dim: this._typography.dim}) : null;
+            style = styleWithPlan(typeface, style, plan);
+            this._holdFont(actor, typeface, style);
+        } else if (role === 'text') {
+            // (A box, an icon or a drawing: its labels have their own weight.)
+            style = null;
+        }
+        actor._atelierPlan = plan;
+        const css = partStyle(classes, tone, style, plan);
+        // (Left as it is, unless it was styled before.)
+        if (css || actor._atelierToned)
+            actor.style = css || null;
+        actor._atelierToned = Boolean(css);
+    }
+
+    // A label kept in a typeface and a style: anew only when they change
+    // (St keeps it in them as it restyles it, shell/core/fonts.js).
+    _holdFont(label, typeface, style) {
+        const key = JSON.stringify([typeface.id, typeface.family, style]);
+        if (label._atelierFont === key)
+            return;
+        label._atelierFont = key;
+        holdLabelFont(label, size => labelFont(typeface, style, size));
     }
 
     /** @returns {object|null} the one tone of the widgets' type (lib/lockLook.js lockTone()); null on cards */

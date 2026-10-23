@@ -23,7 +23,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
-import {contrastRatio, luminance} from '../lib/palette.js';
+import {contrastLc, minimumLc} from '../lib/apca.js';
+import {luminance} from '../lib/palette.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
@@ -4601,6 +4602,7 @@ async function testLockLook() {
     const light = makePicture('lock-light', LIGHT);
     const dark = makePicture('lock-dark', DARK);
     const colourful = makePicture('lock-colourful', '#e0402a', '#2a9d8f');
+    const middling = makePicture('lock-middling', '#9aa8b8');
     lockSettings.set_string('widgets', JSON.stringify([
         {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
         {id: 'date', kind: 'date', size: 'square', x: 30, y: 2, fine: true},
@@ -4630,48 +4632,93 @@ async function testLockLook() {
             widget('clock')._hours?.mapped, 5000), 'locked: the clock, the date, the weather and the battery');
         const board = lock().board;
         const hours = () => widget('clock')._hours;
+        // What a tone reads at on a flat wallpaper (APCA's |Lc|), against
+        // what the date line needs (15 pt, 600).
+        const LINE = minimumLc(20, 600);
+        const lc = (actor, wallpaper) => Math.abs(contrastLc(ink(actor), wallpaper));
         // On a light wallpaper, dark type.
-        check(await waitFor(() => contrastRatio(ink(hours()), LIGHT) >= 4.5 && luminance(ink(hours())) < 0.2, 3000),
-            `on a light wallpaper, the clock in a dark tone, legible on it (${ink(hours())}, ${contrastRatio(ink(hours()), LIGHT).toFixed(1)}:1)`);
-        check(contrastRatio(ink(widget('date')._day), LIGHT) >= 4.5, `the date too (${ink(widget('date')._day)})`);
+        check(await waitFor(() => lc(hours(), LIGHT) >= LINE && luminance(ink(hours())) < 0.2, 3000),
+            `on a light wallpaper, the clock in a dark tone, legible on it (${ink(hours())}, Lc ${lc(hours(), LIGHT).toFixed(0)})`);
+        check(lc(widget('date')._day, LIGHT) >= LINE, `the date too (${ink(widget('date')._day)})`);
         const everything = () => [hours(), widget('clock')._minutes, widget('clock')._suffix, widget('clock')._date,
             widget('date')._day, widget('date')._month, widget('weather')._value, widget('weather')._caption,
             widget('battery')._value, widget('battery')._caption];
         const inks = () => new Set(everything().map(ink));
         check(inks().size === 1, `one tone for all of it, solid (${[...inks()]})`);
-        const families = () => new Set(everything().map(actor => actor.get_theme_node().get_font().get_family()));
-        check(families().size === 1, `in one family (${[...families()]})`);
+        // A shadow round a part's letters only where its plan has one, none
+        // on the clock and the date lines where they read as they are.
+        const shadowOf = actor => actor.get_theme_node().get_text_shadow();
+        const asPlanned = () => everything().every(actor => Boolean(shadowOf(actor)) === Boolean(actor._atelierPlan?.shadow));
+        const clockParts = () => [hours(), widget('clock')._minutes, widget('clock')._date, widget('date')._day];
+        check(asPlanned() && clockParts().every(actor => !shadowOf(actor)),
+            `no shadow where the type reads (${everything().filter(shadowOf).map(actor => actor.text)})`);
+        // Set as it is drawn: in Inter (Inter Display large), the font
+        // variations St can't set held over its own (shell/core/fonts.js).
+        // (Its property, a copy: get_font_description() says it gives away
+        // the text's own, which JS then frees.)
+        const drawn = actor => actor.clutter_text.font_description;
+        const families = () => new Set(everything().map(actor => drawn(actor).get_family()));
+        check([...families()].every(family => family.split(',').includes('Inter')),
+            `in Inter, all of it (${[...families()]})`);
+        const variations = actor => drawn(actor).get_variations() ?? '';
+        check(variations(hours()).includes('wght=800') && variations(widget('clock')._date).includes('wght=600'),
+            `the digits at 800, the date line at 600 (${variations(hours())}; ${variations(widget('clock')._date)})`);
         await restPointer();
         await Scripting.sleep(400);
         await screenshot('88-lock-look-light');
         // The wallpaper changed while locked: light type on a dark one.
         showWallpaper(dark);
-        check(await waitFor(() => contrastRatio(ink(hours()), DARK) >= 4.5 && luminance(ink(hours())) > 0.5, 5000),
-            `on a dark wallpaper, in a light one (${ink(hours())}, ${contrastRatio(ink(hours()), DARK).toFixed(1)}:1)`);
-        check(inks().size === 1, `all of it (${[...inks()]})`);
+        check(await waitFor(() => lc(hours(), DARK) >= LINE && luminance(ink(hours())) > 0.5, 5000),
+            `on a dark wallpaper, in a light one (${ink(hours())}, Lc ${lc(hours(), DARK).toFixed(0)})`);
+        check(inks().size === 1 && asPlanned() && clockParts().every(actor => !shadowOf(actor)),
+            `all of it, no shadow where it reads (${[...inks()]})`);
+        // A grey-blue one: light type a little short there – the date line
+        // a little heavier, the small captions a shadow round their letters
+        // – and the big digits, which need far less, as they are.
+        showWallpaper(middling);
+        const caption = () => widget('weather')._caption;
+        check(await waitFor(() => shadowOf(caption()) && !shadowOf(hours()), 5000) && asPlanned(),
+            `on a grey-blue one, a shadow round the small caption, none round the big digits (${shadowOf(caption())?.blur})`);
+        const line = widget('clock')._date;
+        check(line._atelierPlan?.boldness > 0 && !shadowOf(line) &&
+            variations(line).includes(`wght=${line._atelierPlan.weight}`),
+        `the date line a little heavier, no shadow (${variations(line)})`);
+        await Scripting.sleep(300);
+        await screenshot('88a-lock-look-middling');
+        showWallpaper(dark);
+        check(await waitFor(() => lc(hours(), DARK) >= LINE && !shadowOf(caption()), 5000) && asPlanned(),
+            'back on the dark one, no shadow again');
         // A colour of one's own.
         lockSettings.set_string('clock-color', '#ffcc00');
         check(ink(hours()) === '#ffcc00' && ink(widget('battery')._value) === '#ffcc00', 'a colour chosen, on all of them');
         lockSettings.reset('clock-color');
-        check(contrastRatio(ink(hours()), DARK) >= 4.5, 'Auto again');
+        check(lc(hours(), DARK) >= LINE, 'Auto again');
 
-        // The font chosen.
-        const font = actor => actor.get_theme_node().get_font();
+        // The font chosen: the clocks' digits in the weight and width set.
         lockSettings.set_string('clock-font', 'heavy');
-        check(font(hours()).get_weight() === 900 && font(widget('clock')._date).get_weight() === 800,
-            `heavy: the big digits in the heaviest weight (${font(hours()).get_weight()})`);
+        check(variations(hours()).includes('wght=900') && variations(widget('clock')._date).includes('wght=800'),
+            `heavy: the big digits in the heaviest weight (${variations(hours())})`);
         lockSettings.set_string('clock-font', 'thin');
-        check(font(hours()).get_weight() === 200, `thin: in a thin one (${font(hours()).get_weight()})`);
+        check(variations(hours()).includes('wght=200'), `thin: in a thin one (${variations(hours())})`);
+        lockSettings.set_string('clock-font', 'flex');
+        lockSettings.set_int('clock-weight', 350);
+        lockSettings.set_int('clock-width', 75);
+        check(drawn(hours()).get_family() === 'Roboto Flex' && variations(hours()).includes('wght=350') &&
+            variations(hours()).includes('wdth=75') && variations(widget('clock')._date).includes('wght=600') &&
+            variations(widget('clock')._date).includes('wdth=100'),
+        `Roboto Flex: the digits at the weight and on the width set, the date line as it is (${variations(hours())}; ${variations(widget('clock')._date)})`);
+        await Scripting.sleep(300);
+        await screenshot('88d-lock-look-flex');
+        lockSettings.reset('clock-weight');
+        lockSettings.reset('clock-width');
         lockSettings.set_string('clock-font', 'serif');
-        const serif = board.typography.font.family;
-        check(families().size === 1, `the font chosen on all of it (${[...families()]})`);
-        check(Boolean(serif) && font(hours()).get_family().includes(serif) &&
-            font(widget('weather')._value).get_family().includes(serif),
-        `serif: the first serif installed (${font(hours()).get_family()})`);
+        const serif = board.typography.typeface.family;
+        check(Boolean(serif) && everything().every(actor => drawn(actor).get_family().includes(serif)),
+            `serif: the first serif installed, on all of it (${[...families()]})`);
         await Scripting.sleep(300);
         await screenshot('88b-lock-look-dark-serif');
         lockSettings.reset('clock-font');
-        check(!font(hours()).get_family().includes(serif ?? '-') && font(hours()).get_weight() === 800,
+        check(!drawn(hours()).get_family().includes(serif ?? '-') && variations(hours()).includes('wght=800'),
             'and back as it was');
 
         // The weather and the battery, in a line, from what GNOME has.
@@ -4685,7 +4732,7 @@ async function testLockLook() {
         const [, by] = batteryWidget.get_transformed_position();
         await screenshotArea('88c-lock-weather-battery', wx, wy, Math.round(batteryWidget.width),
             Math.round(by + batteryWidget.height) - wy);
-        check(contrastRatio(ink(batteryWidget._value), DARK) >= 4.5, 'in the lock screen\'s tone');
+        check(lc(batteryWidget._value, DARK) >= LINE, 'in the lock screen\'s tone');
         weather.info = {...weather.info, get_temp_summary: () => '15 °C'};
         weather.emit('changed');
         check(weatherWidget._value.text === '15°', 'as GNOME has it anew');
@@ -4760,6 +4807,8 @@ async function testLockLook() {
         lockSettings.reset('gnome-clock');
         lockSettings.reset('clock-color');
         lockSettings.reset('clock-font');
+        lockSettings.reset('clock-weight');
+        lockSettings.reset('clock-width');
         await wallpapersSettled();
     }
     const desktop = atelier().modules.get('desktop');

@@ -1,8 +1,9 @@
 import {blend, contrastLc, minimumLc} from '../lib/apca.js';
 import {
-    FONTS, REACH, STRETCH, TYPE, batteryState, chosenTone, fontFor, glassDigits, isColor, legibilityPlan, lockTone,
-    mergeStats, partStyle, pickTone, regionIn, regionStats, shortTemperature, widgetStyle,
+    REACH, STRETCH, TYPE, batteryState, chosenTone, glassDigits, isColor, legibilityPlan, lockTone, mergeStats,
+    partStyle, pickTone, regionIn, regionStats, roleOf, shortTemperature, styleWithPlan, widgetStyle,
 } from '../lib/lockLook.js';
+import {labelFont, styleFor, typefaceFor} from '../lib/lockType.js';
 import {hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {assert, assertEqual} from './util.js';
 
@@ -227,53 +228,67 @@ export function testChosenTone() {
     assert(isColor('#a1b2c3') && !isColor('auto') && !isColor('#abc') && !isColor(null));
 }
 
-export function testFonts() {
-    assertEqual(FONTS.map(f => f.id), ['default', 'rounded', 'serif', 'thin', 'heavy']);
-    assertEqual(fontFor('default', ['Cantarell']), {id: 'default', family: null, display: null, text: null, missing: false});
-    assertEqual(fontFor('serif', ['Cantarell', 'DejaVu Serif', 'Noto Serif']).family, 'Noto Serif',
-        'the first of its families installed');
-    assertEqual(fontFor('rounded', ['quicksand']).family, 'Quicksand', 'whatever the case');
-    const none = fontFor('rounded', ['Cantarell', 'DejaVu Sans']);
-    assert(none.family === null && none.missing && none.display === 700, 'none installed: the shell\'s font, in its weights');
-    assertEqual(fontFor('thin', []).display, 200, 'thin: the shell\'s own font, thin');
-    assertEqual(fontFor('heavy').display, 900);
-    assertEqual(fontFor('nonsense').id, 'default');
-    assertEqual(fontFor('serif').family, 'Noto Serif Display', 'not knowing what is there: the first');
-}
-
 export function testStyles() {
     const light = {color: '#f4f6f8', dark: false};
-    const font = fontFor('serif', ['DejaVu Serif']);
-    // A shadow only where one is planned: none at all where the type reads
-    // (not the stylesheet's either).
-    assertEqual(widgetStyle(light, font), 'color: #f4f6f8; text-shadow: none; font-family: "DejaVu Serif";');
+    const serif = typefaceFor('serif', ['DejaVu Serif']);
+    // No shadow on the widget, whatever its parts need (not the
+    // stylesheet's either): each part has the one planned for it.
+    assertEqual(widgetStyle(light, serif), 'color: #f4f6f8; text-shadow: none; font-family: "DejaVu Serif";');
     const shadowed = legibilityPlan({...TYPE.line, tone: light, stats: statsOf('#a8b8d0')});
     const {alpha, blur, y} = shadowed.shadow;
     const shadow = `text-shadow: 0 ${y}px ${blur}px rgba(0, 0, 0, ${alpha});`;
-    assertEqual(widgetStyle(light, font, shadowed), `color: #f4f6f8; ${shadow} font-family: "DejaVu Serif";`,
+    assertEqual(widgetStyle(light, serif, shadowed), `color: #f4f6f8; ${shadow} font-family: "DejaVu Serif";`,
         'as St takes it: x y blur colour');
     const dark = {color: '#202428', dark: true};
     const halo = legibilityPlan({...TYPE.line, tone: dark, stats: statsOf('#9a9a9a')});
-    assert(widgetStyle(dark, fontFor('default'), halo).includes('rgba(255, 255, 255,'), 'dark type: a light halo');
-    assertEqual(widgetStyle(dark, fontFor('default'), legibilityPlan({...TYPE.line, tone: dark, stats: statsOf('#ffffff')})),
+    assert(widgetStyle(dark, typefaceFor('default'), halo).includes('rgba(255, 255, 255,'), 'dark type: a light halo');
+    assertEqual(widgetStyle(dark, typefaceFor('default'), legibilityPlan({...TYPE.line, tone: dark, stats: statsOf('#ffffff')})),
         'color: #202428; text-shadow: none;', 'none where it reads');
-    assertEqual(widgetStyle(null, fontFor('default')), '', 'on a card, as it is');
-    // A part with a plan of its own: its shadow, and heavier where it is to be.
-    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('default'), {...shadowed, boldness: 0.5, weight: 700}),
-        `font-weight: 700; ${shadow}`);
-    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('heavy'), {...shadowed, boldness: 0, shadow: null}),
-        'font-weight: 800;', 'nothing planned: as the font has it');
-    assertEqual(partStyle(['atelier-widget-caption'], light, fontFor('default')), 'color: #f4f6f8;',
+    assertEqual(widgetStyle(null, typefaceFor('default')), '', 'on a card, as it is');
+    assertEqual(widgetStyle(null, typefaceFor('inter')), 'font-family: "Inter";', 'in its typeface there too');
+    // A part: as it is set, its shadow where planned and nowhere else.
+    assertEqual(partStyle(['atelier-lock-value'], light, {weight: 700}, shadowed), `font-weight: 700; ${shadow}`);
+    const night = legibilityPlan({...TYPE.line, tone: light, stats: statsOf('#16202c')});
+    assertEqual(partStyle(['atelier-lock-value'], light, styleFor(typefaceFor('heavy'), 'text'), night),
+        'font-weight: 800;', 'reading as it is: as its role has it, no shadow');
+    assertEqual(partStyle(['atelier-widget-caption'], light), 'color: #f4f6f8;',
         'the quieter parts in the one tone too, solid');
-    assertEqual(partStyle(['atelier-widget-time-suffix'], light, fontFor('default')), 'color: #f4f6f8;');
-    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('heavy')), 'font-weight: 800;',
-        'the battery\'s and the weather\'s values in the weight of the date line');
-    assertEqual(partStyle(['atelier-widget-glass-digits'], light, fontFor('thin')), 'font-weight: 200;',
-        'the glass clock\'s digits in the display one');
-    assertEqual(partStyle(['atelier-widget-stacked-hours'], light, fontFor('thin')), 'font-weight: 200;');
-    assertEqual(partStyle(['atelier-widget-stacked-date'], light, fontFor('thin')), 'font-weight: 400;');
-    assertEqual(partStyle(['atelier-widget-face'], light, fontFor('default')), 'color: #f4f6f8;');
-    assertEqual(partStyle(['atelier-widget-caption'], null, fontFor('default')), '');
+    assertEqual(partStyle(['atelier-widget-time-suffix'], light), 'color: #f4f6f8;');
+    assertEqual(partStyle(['atelier-widget-face'], light), 'color: #f4f6f8;');
+    assertEqual(partStyle(['atelier-widget-caption'], null), '');
+    assertEqual(partStyle(['atelier-widget-caption'], null, {weight: 450.4}, shadowed), 'font-weight: 450;',
+        'on a card: its weight, never a shadow');
+}
+
+export function testRoles() {
+    assertEqual(roleOf(['atelier-widget-glass-digits']), 'glass', 'the glass clock\'s digits');
+    for (const name of ['atelier-widget-time', 'atelier-widget-stacked-hours', 'atelier-widget-stacked-minutes',
+        'atelier-widget-day'])
+        assertEqual(roleOf(['atelier-widget-big', name]), 'digits', `${name}: the big digits`);
+    for (const name of ['atelier-widget-stacked-date', 'atelier-widget-glass-date', 'atelier-lock-value',
+        'atelier-widget-caption', 'atelier-widget-time-suffix', 'atelier-widget-weekday'])
+        assertEqual(roleOf([name]), 'text', `${name}: text`);
+    assertEqual(roleOf([]), 'text');
+    // Thin, from before the weight could be set: its digits thin, its text regular.
+    const thin = typefaceFor('thin');
+    assertEqual(styleFor(thin, roleOf(['atelier-widget-stacked-hours'])).weight, 200);
+    assertEqual(styleFor(thin, roleOf(['atelier-widget-stacked-date'])).weight, 400);
+}
+
+export function testStyleWithPlan() {
+    const bolder = {boldness: 0.5, weight: 700};
+    const text = {weight: 600, width: 100};
+    assertEqual(styleWithPlan(typefaceFor('inter'), text, bolder), {weight: 700, width: 100}, 'heavier on its weight');
+    assertEqual(styleWithPlan(typefaceFor('default'), text, bolder), {weight: 700, width: 100},
+        'axes not known: on its weight');
+    const flex = typefaceFor('flex');
+    const graded = styleWithPlan(flex, text, bolder);
+    assertEqual(graded, {weight: 600, width: 100, extra: {GRAD: 75}},
+        'Roboto Flex: on its grade, as wide as it was');
+    assertEqual(labelFont(flex, graded, 20).variations, 'wght=600,wdth=100,opsz=20,GRAD=75', 'as a label takes it');
+    assertEqual(styleWithPlan(flex, text, {boldness: 1, weight: 800}).extra.GRAD, flex.axes.GRAD.max, 'its most');
+    assertEqual(styleWithPlan(flex, text, {boldness: 0, weight: 600}), text, 'not heavier: as it is');
+    assertEqual(styleWithPlan(flex, text, null), text);
 }
 
 export function testBattery() {

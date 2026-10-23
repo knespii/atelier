@@ -1958,15 +1958,12 @@
   font-size: 100pt;
 }
 
-/* On the lock screen, bare: just what the widgets show, on the wallpaper */
-.atelier-lock-bare .atelier-widget {
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
 /* On the lock screen: one family (the font chosen) and one tone (set on each
    widget) for all of it – a small date line over a big clock, the weather
    and the battery in a line as the date line is, their icons as tall as
-   its capitals */
+   its capitals. Bare, just what the widgets show is on the wallpaper, with
+   a shadow round a part's letters only where it would not read without
+   one (set on the part, shell/lockscreen/board.js) */
 .atelier-lock-column {
   spacing: 1px;
 }

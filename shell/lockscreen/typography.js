@@ -1,17 +1,18 @@
 // The lock screen's type: one tone for all its widgets – picked from the
 // parts of the wallpaper behind them together (lib/lockLook.js), unless a
-// colour is chosen – and the font chosen for them. The wallpaper is sampled from its
-// thumbnail (made on the desktop already, most likely), anew when it
-// changes; nothing here reads the network or starts anything.
+// colour is chosen – what is behind each part, and the typeface chosen for
+// them, the clocks' digits in the weight and width set (lib/lockType.js).
+// The wallpaper is sampled from its thumbnail (made on the desktop already,
+// most likely), anew when it changes; nothing here reads the network or
+// starts anything.
 
 import Gio from 'gi://Gio';
 import PangoCairo from 'gi://PangoCairo';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {
-    chosenTone, fontFor, isColor, lockTone, mergeStats, partStyle, regionIn, regionStats, widgetStyle,
-} from '../../lib/lockLook.js';
+import {chosenTone, isColor, lockTone, mergeStats, regionIn, regionStats} from '../../lib/lockLook.js';
+import {styleFor, typefaceFor} from '../../lib/lockType.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
 import {wallpaperShown} from '../../lib/wallpaperPalette.js';
 import {GLASS} from './glass.js';
@@ -57,6 +58,8 @@ export class LockTypography extends EventEmitter {
         settings.connectObject(
             'changed::clock-color', () => this.emit('changed'),
             'changed::clock-font', () => this.emit('changed'),
+            'changed::clock-weight', () => this.emit('changed'),
+            'changed::clock-width', () => this.emit('changed'),
             this);
         palette?.connectObject('changed::current', () => {
             this._syncTint();
@@ -66,14 +69,43 @@ export class LockTypography extends EventEmitter {
         this._load();
     }
 
-    /** @returns {object} the font chosen, as there is (lib/lockLook.js fontFor()) */
-    get font() {
-        return fontFor(this._settings.get_string('clock-font'), installedFamilies());
+    /** @returns {object} the typeface chosen, as there is (lib/lockType.js typefaceFor()) */
+    get typeface() {
+        return typefaceFor(this._settings.get_string('clock-font'), installedFamilies());
+    }
+
+    /**
+     * @param {string} role - 'glass', 'digits' or 'text' (lib/lockType.js
+     *   ROLES; lib/lockLook.js roleOf() tells a part's)
+     * @returns {{weight: number, width: number}} how a part of it is set:
+     *   the clocks' digits in the weight and width the settings say
+     */
+    styleFor(role) {
+        return styleFor(this.typeface, role, {
+            weight: this._settings.get_int('clock-weight'),
+            width: this._settings.get_int('clock-width'),
+        });
+    }
+
+    /** @returns {number} how much of the wallpaper's light is left at most while the prompt is up */
+    get dim() {
+        return GLASS.brightness;
     }
 
     /** @returns {object|null} the wallpaper's sample, once it is there */
     get sample() {
         return this._sample;
+    }
+
+    /**
+     * @param {number[]} rect - [x, y, width, height] on the main monitor, 0 … 1
+     * @param {number} aspect - the monitor's width over its height
+     * @returns {object|null} what is behind it (lib/lockLook.js
+     *   regionStats()); null until the wallpaper is sampled
+     */
+    statsOf(rect, aspect) {
+        const sample = this._sample;
+        return sample ? regionStats(sample, regionIn(rect, aspect, sample.width / sample.height)) : null;
     }
 
     /**
@@ -86,30 +118,15 @@ export class LockTypography extends EventEmitter {
      *   read (lib/lockLook.js lockTone(), chosenTone())
      */
     toneFor(parts, aspect) {
-        const sample = this._sample;
-        const stats = sample ? mergeStats(parts.map(({rect, weight, text}) => ({
-            stats: regionStats(sample, regionIn(rect, aspect, sample.width / sample.height)),
+        const stats = this._sample ? mergeStats(parts.map(({rect, weight, text}) => ({
+            stats: this.statsOf(rect, aspect),
             weight,
             text,
         }))) : null;
         const chosen = this._settings.get_string('clock-color');
         if (isColor(chosen))
-            return chosenTone(chosen, stats, {dim: GLASS.brightness});
-        return lockTone(stats, {tint: this._tint, dim: GLASS.brightness});
-    }
-
-    /**
-     * @param {object|null} tone - toneFor(); null: on a card, the card's colours
-     * @returns {{widget: string, part: Function}} the inline style of a
-     *   widget (with the shadow its type takes to read, if any), and of a
-     *   part of it (given its style classes)
-     */
-    styleOf(tone) {
-        const font = this.font;
-        return {
-            widget: widgetStyle(tone, font, tone?.plan ?? null),
-            part: classes => partStyle(classes, tone, font),
-        };
+            return chosenTone(chosen, stats, {dim: this.dim});
+        return lockTone(stats, {tint: this._tint, dim: this.dim});
     }
 
     // The palette's colour, unless it is to have none.
