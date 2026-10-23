@@ -3,8 +3,9 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    DEFAULT_MODEL, MAX_COVER, MODELS, chosenModel, coverage, cutoutKey, cutoutOpacity, cutoutPath, depthDir,
-    lockWallpaper, modelPath, pictureState, placement, subjectTop,
+    CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MODELS, SUBJECT_MODELS, chosenModel, chosenSubjectModel, coverage,
+    cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, lockWallpaper, modelPath, modelsTag, pictureState,
+    placement, pngText, subjectModelPath, subjectTop,
 } from '../lib/depth.js';
 import {fakeDepthModel, fakeSubjectModel} from './fakeOnnx.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
@@ -56,6 +57,62 @@ export function testChosenModel() {
     assertEqual(chosenModel('', having(['small', 'large'])), 'large', 'none chosen: the biggest one there');
     assertEqual(chosenModel('', having(['small'])), 'small');
     assertEqual(chosenModel('toString', having(['base'])), 'base', 'one that isn\'t a model counts as none');
+}
+
+export function testSubjectModels() {
+    assertEqual(Object.keys(SUBJECT_MODELS), ['lite'], 'BiRefNet lite');
+    const lite = SUBJECT_MODELS.lite;
+    assertEqual(lite.url, 'https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/' +
+        'de15b22ba131738a16dff04aab8bdf8dc32e3ac1/onnx/model.onnx', 'from Hugging Face, at its revision, in full precision');
+    assertEqual([lite.sha256, lite.bytes], ['5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333', 224005088],
+        'its SHA-256 and size, as Hugging Face gives them');
+    assertEqual([lite.license, lite.label], ['MIT', '224 MB']);
+    assert(lite.title && lite.time, 'what the settings say of it');
+    assert(!Object.values(MODELS).some(model => model.name === lite.name), 'in a file of its own');
+    assert(subjectModelPath('lite').startsWith(GLib.get_user_data_dir()) &&
+        subjectModelPath('lite').endsWith('/atelier/models/birefnet-lite.onnx'),
+    `with the depth models (${subjectModelPath('lite')})`);
+}
+
+export function testChosenSubjectModel() {
+    const having = ids => id => ids.includes(id);
+    assertEqual(chosenSubjectModel('', having([])), 'none', 'none chosen, none there: none');
+    assertEqual(chosenSubjectModel('', having(['lite'])), 'lite', 'none chosen: the one downloaded');
+    assertEqual(chosenSubjectModel('lite', having([])), 'lite', 'the one chosen, downloaded or not');
+    assertEqual(chosenSubjectModel('none', having(['lite'])), 'none', 'none, on purpose, downloaded or not');
+    assertEqual(chosenSubjectModel('toString', having(['lite'])), 'lite', 'what isn\'t a model counts as nothing chosen');
+}
+
+export function testCutoutModels() {
+    const having = ids => path => ids.some(id => path.endsWith(`/${id}`));
+    const [large, base, lite] = [modelPath('large'), modelPath('base'), subjectModelPath('lite')];
+    assertEqual(cutoutModels('', '', having(['depth-anything-v2-large.onnx', 'birefnet-lite.onnx'])),
+        {model: large, subject: lite}, 'the ones downloaded');
+    assertEqual(cutoutModels('', 'none', having(['depth-anything-v2-large.onnx', 'birefnet-lite.onnx'])),
+        {model: large, subject: null}, 'not the subject model when none is chosen');
+    assertEqual(cutoutModels('base', 'lite', having(['depth-anything-v2-large.onnx'])),
+        {model: null, subject: null}, 'none of them when the ones chosen aren\'t downloaded');
+    assertEqual(cutoutModels('', '', having(['birefnet-lite.onnx'])), {model: null, subject: lite},
+        'the subject model alone');
+    assertEqual(cutoutModels('base', '', having(['depth-anything-v2-base.onnx'])), {model: base, subject: null});
+    assertEqual(modelsTag({model: large, subject: lite}), 'depth-anything-v2-large.onnx birefnet-lite.onnx',
+        'what the worker writes in a cutout of them');
+    assertEqual(modelsTag({model: null, subject: lite}), '- birefnet-lite.onnx');
+    assertEqual(modelsTag({model: base, subject: null}), 'depth-anything-v2-base.onnx -');
+    assert(CUTOUT_VERSION >= 5, 'cutouts from before the subject made anew');
+}
+
+export function testPngText() {
+    const path = GLib.build_filenamev([freshDir('depth-png'), 'cutout.png']);
+    const picture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, true, 8, 64, 32);
+    picture.fill(0x20406080);
+    picture.savev(path, 'png', ['tEXt::atelier-models', 'tEXt::atelier-width'],
+        ['depth-anything-v2-large.onnx birefnet-lite.onnx', '1920']);
+    const [, bytes] = GLib.file_get_contents(path);
+    assertEqual(pngText(bytes), {'atelier-models': 'depth-anything-v2-large.onnx birefnet-lite.onnx',
+        'atelier-width': '1920'}, 'the text a PNG keeps');
+    assertEqual(pngText(bytes.subarray(0, 60))['atelier-models'], undefined, 'not what was cut off');
+    assertEqual(pngText(new TextEncoder().encode('not a picture at all')), {}, 'nothing of what isn\'t a PNG');
 }
 
 export function testPictureState() {
