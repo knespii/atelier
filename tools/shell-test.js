@@ -4509,6 +4509,25 @@ async function testLockGlassClock() {
         glass.setPlan(null);
         check(await waitFor(() => glass.variations === 'wght=600,opsz=32', 3000) && !glass.dateLine.style,
             'no plan: as it was, no shadow');
+        // A typeface with no file known to draw from: as Pango draws it,
+        // stretched as a whole.
+        glass.setType({typeface: {...typefaceFor('serif'), family: 'Noto Serif', file: null, axes: null},
+            style: {weight: 600, width: 90}});
+        check(await waitFor(() => glass.fontFile === null && glass.metrics && glass.glyphBoxes?.length === 4, 3000),
+            `no file known: Pango draws it (${glass.variations}, ${glass.glyphBoxes?.length} digits' boxes)`);
+        await Scripting.sleep(300);
+        await screenshot('91e-lock-glass-pango');
+        const drawnByPango = pixelsOf('91e-lock-glass-pango');
+        const across = digitsNow();
+        let brightest = [0, 0, 0];
+        for (let x = Math.round(across.x); x < across.x + across.width; x += 2) {
+            const at = drawnByPango.at(monitor.x + x, monitor.y + across.y + across.height * 0.3);
+            if (lightOf(at) > lightOf(brightest))
+                brightest = at;
+        }
+        check(lightOf(brightest) > lightOf(sky) + 30, `and in glass (${brightest} over ${sky})`);
+        glass.setType({typeface: inter, style: styleFor(inter, 'glass')});
+        check(await waitFor(() => glass.fontFile?.endsWith('/fonts/Inter.ttf'), 3000), 'Inter again');
 
         // The hill higher: the digits shorter, easing there.
         hill = Math.round(boxTop + side * 0.45);
