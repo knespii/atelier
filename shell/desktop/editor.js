@@ -511,7 +511,7 @@ export class DesktopEditor {
         }
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const row = new St.BoxLayout({style_class: 'atelier-widget-spill-row'});
-        CLOCK_FACES.filter(([id]) => id !== 'auto').forEach(([face, name]) => {
+        (this._desktop.clockFaces ?? CLOCK_FACES).filter(([id]) => id !== 'auto').forEach(([face, name]) => {
             const item = new St.BoxLayout({style_class: 'atelier-widget-spill-item', orientation: Clutter.Orientation.VERTICAL,
                 reactive: true, track_hover: true, accessible_name: name});
             // (Square, whatever size a clock first gets here: on the lock

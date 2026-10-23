@@ -1963,33 +1963,55 @@
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* On the lock screen: the weather and the battery, in a line of light type
-   (in the lock screen's tone, set on each widget) */
+/* On the lock screen: one family (the font chosen) and one tone (set on each
+   widget) for all of it – a small date line over a big clock, the weather
+   and the battery in a line as the date line is, their icons as tall as
+   its capitals */
 .atelier-lock-column {
   spacing: 1px;
 }
 
 .atelier-lock-line {
-  spacing: 9px;
+  spacing: 6px;
 }
 
 .atelier-lock-icon {
-  icon-size: 22px;
+  icon-size: 15px;
 }
 
 .atelier-lock-ring {
-  width: 24px;
-  height: 24px;
+  width: 15px;
+  height: 15px;
+}
+
+.atelier-lock-widgets .atelier-widget-stacked-date,
+.atelier-lock-widgets .atelier-widget-glass-date,
+.atelier-lock-value,
+.atelier-lock-widgets .atelier-lock-quiet {
+  font-size: 15pt;
+  font-weight: 600;
 }
 
 .atelier-lock-value {
-  font-size: 18pt;
-  font-weight: 600;
   font-feature-settings: "tnum";
+}
+
+.atelier-lock-widgets .atelier-widget-small .atelier-lock-quiet {
+  font-size: 11pt;
 }
 
 .atelier-widget-line .atelier-lock-quiet {
   padding-left: 3px;
+}
+
+/* The glass clock: tall digits the wallpaper shows through (drawn, in the
+   tone and the font chosen), under the date line */
+.atelier-widget-glass-digits {
+  font-weight: 600;
+}
+
+.atelier-lock-widgets .atelier-widget-square .atelier-widget-glass-date {
+  font-size: 10pt;
 }
 
 /* Date */

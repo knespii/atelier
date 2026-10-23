@@ -1,6 +1,6 @@
-// The lock screen's type: the tone of each widget – picked from the part
-// of the wallpaper behind it (lib/lockLook.js), unless a colour is chosen –
-// and the font chosen for them. The wallpaper is sampled from its
+// The lock screen's type: one tone for all its widgets – picked from the
+// parts of the wallpaper behind them together (lib/lockLook.js), unless a
+// colour is chosen – and the font chosen for them. The wallpaper is sampled from its
 // thumbnail (made on the desktop already, most likely), anew when it
 // changes; nothing here reads the network or starts anything.
 
@@ -10,7 +10,7 @@ import PangoCairo from 'gi://PangoCairo';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
 import {
-    chosenTone, fontFor, isColor, partStyle, pickTone, regionIn, regionStats, widgetStyle,
+    chosenTone, fontFor, isColor, lockTone, mergeStats, partStyle, regionIn, regionStats, widgetStyle,
 } from '../../lib/lockLook.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
 import {wallpaperShown} from '../../lib/wallpaperPalette.js';
@@ -77,29 +77,30 @@ export class LockTypography extends EventEmitter {
     }
 
     /**
-     * @param {number[]} rect - [x, y, width, height] of a widget on the
-     *   main monitor, 0 … 1
+     * @param {object[]} parts - {rect, weight} of each widget: rect its
+     *   [x, y, width, height] on the main monitor, 0 … 1; weight how much
+     *   it counts (the clock more than the small widgets)
      * @param {number} aspect - the monitor's width over its height
-     * @returns {object} the tone of its type (lib/lockLook.js pickTone())
+     * @returns {object} the one tone of their type (lib/lockLook.js lockTone())
      */
-    toneFor(rect, aspect) {
+    toneFor(parts, aspect) {
         const chosen = this._settings.get_string('clock-color');
         if (isColor(chosen))
             return chosenTone(chosen);
         const sample = this._sample;
-        const stats = sample ? regionStats(sample, regionIn(rect, aspect, sample.width / sample.height)) : null;
-        return pickTone(stats, {tint: this._tint, dim: GLASS.brightness});
+        const stats = sample ? mergeStats(parts.map(({rect, weight}) => ({
+            stats: regionStats(sample, regionIn(rect, aspect, sample.width / sample.height)),
+            weight,
+        }))) : null;
+        return lockTone(stats, {tint: this._tint, dim: GLASS.brightness});
     }
 
     /**
-     * @param {number[]} rect - as for toneFor()
-     * @param {number} aspect
-     * @param {boolean} toned - on the wallpaper (on a card, the card's colours)
-     * @returns {{widget: string, part: Function}} the inline style of the
+     * @param {object|null} tone - toneFor(); null: on a card, the card's colours
+     * @returns {{widget: string, part: Function}} the inline style of a
      *   widget, and of a part of it (given its style classes)
      */
-    styleOf(rect, aspect, toned) {
-        const tone = toned ? this.toneFor(rect, aspect) : null;
+    styleOf(tone) {
         const font = this.font;
         return {
             widget: widgetStyle(tone, font),

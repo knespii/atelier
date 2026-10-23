@@ -115,7 +115,7 @@ class AtelierClockWidget extends DesktopWidget {
             this._clock = new GnomeDesktop.WallClock({time_only: true});
             this._clock.connectObject('notify::clock', () => this._sync(), this);
         }
-        this._face = this._stacked = this._hoursRow = this._colon = this._minutesBox = null;
+        this._face = this._stacked = this._hoursRow = this._colon = this._minutesBox = this._ownFace = null;
         this._inline = 0;
         this._time = this._suffix = this._date = this._hours = this._minutes = null;
         this._stopSeconds();
@@ -126,6 +126,12 @@ class AtelierClockWidget extends DesktopWidget {
         const design = choice === 'auto' ? (analogue ? 'paper' : 'digital') : choice;
         if (design === 'stacked') {
             this._buildStacked(box);
+            this._sync();
+            return;
+        }
+        // (A face of a kind's own: the lock screen's glass one.)
+        this._ownFace = this.buildFace(design, box, size);
+        if (this._ownFace) {
             this._sync();
             return;
         }
@@ -168,6 +174,24 @@ class AtelierClockWidget extends DesktopWidget {
         this._sync();
     }
 
+    /**
+     * A face other than these, which a kind of clock may have.
+     *
+     * @param {string} _design - the face chosen
+     * @param {St.BoxLayout} _box
+     * @param {string} _size
+     * @returns {object|null} it, built in the box ({setClock(text)}); null
+     *   for none of its own
+     */
+    buildFace(_design, _box, _size) {
+        return null;
+    }
+
+    /** @returns {number} the stacked minutes' opacity, under the hours (dimmer on the desktop) */
+    get minutesOpacity() {
+        return MINUTES_DIM;
+    }
+
     // The date over the hours, over the minutes (dimmer). (A colon waits
     // behind the hours, for the minutes coming up beside them.)
     _buildStacked(box) {
@@ -186,7 +210,7 @@ class AtelierClockWidget extends DesktopWidget {
         this._hoursRow.add_child(this._colon);
         this._hoursRow.add_child(this._hours);
         // (AM or PM small beside the minutes.)
-        this._minutesBox = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, opacity: MINUTES_DIM});
+        this._minutesBox = new St.BoxLayout({x_align: Clutter.ActorAlign.CENTER, opacity: this.minutesOpacity});
         this._minutes = label('atelier-widget-stacked-minutes');
         this._suffix = label('atelier-widget-stacked-suffix', '', {y_align: Clutter.ActorAlign.END});
         this._minutesBox.add_child(this._minutes);
@@ -194,6 +218,11 @@ class AtelierClockWidget extends DesktopWidget {
         for (const part of [this._date, this._hoursRow, this._minutesBox])
             stack.add_child(part);
         this._stacked = stack;
+    }
+
+    /** @returns {St.Widget[]} the hours and the minutes, when stacked: what has to stay legible */
+    get stackedLines() {
+        return this._stacked ? [this._hours, this._minutesBox] : [];
     }
 
     /** @returns {St.BoxLayout|null} the date, hours and minutes, when stacked */
@@ -222,7 +251,7 @@ class AtelierClockWidget extends DesktopWidget {
         this._minutesBox.set({
             translation_x: (2 * (hours + colon) + minutes - line) / 2 * t,
             translation_y: rise * t,
-            opacity: Math.round(MINUTES_DIM + (255 - MINUTES_DIM) * t),
+            opacity: Math.round(this.minutesOpacity + (255 - this.minutesOpacity) * t),
         });
     }
 
@@ -244,6 +273,10 @@ class AtelierClockWidget extends DesktopWidget {
 
     _sync() {
         this._face?.queue_repaint();
+        if (this._ownFace) {
+            this._ownFace.setClock(this._clock.clock);
+            return;
+        }
         if (this._hours) {
             const {hours, minutes, suffix} = splitClock(this._clock.clock);
             this._hours.text = hours;

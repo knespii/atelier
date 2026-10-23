@@ -4,7 +4,7 @@ import GLib from 'gi://GLib';
 
 import {
     MAX_COVER, coverage, cutoutKey, cutoutOpacity, cutoutPath, depthDir, lockWallpaper, modelPath,
-    pictureState, placement,
+    pictureState, placement, subjectTop,
 } from '../lib/depth.js';
 import {fakeU2netp} from './fakeOnnx.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
@@ -120,6 +120,26 @@ export function testCoverage() {
     const share = coverage(big, {x: 0, y: 0, width: 1000, height: 1000}, {x: 0, y: 0, width: 1000, height: 1000});
     assert(near(share, 0.3) && share < MAX_COVER, `a third of it, still under the limit (${share})`);
     assert(MAX_COVER > 0.2 && MAX_COVER < 0.6, 'the limit lets a clock be partly covered, not hidden');
+}
+
+export function testSubjectTop() {
+    // A hill over the bottom half of the picture, rising to the right (its
+    // top at row 60 on the left, 40 on the right); drawn at twice its size.
+    const [width, height] = [100, 100];
+    const cutout = {pixels: new Uint8Array(width * height * 4), width, height, rowstride: width * 4};
+    for (let x = 0; x < width; x++) {
+        for (let y = Math.round(60 - x / 5); y < height; y++)
+            cutout.pixels[y * cutout.rowstride + x * 4 + 3] = 255;
+    }
+    const shown = {x: 0, y: 0, width: 200, height: 200};
+    const left = subjectTop(cutout, shown, {x: 0, width: 40, from: 0, to: 200});
+    const right = subjectTop(cutout, shown, {x: 160, width: 40, from: 0, to: 200});
+    assert(Math.abs(left - 118) <= 4 && Math.abs(right - 86) <= 4, `where the hill starts under each (${left}, ${right})`);
+    const wide = subjectTop(cutout, shown, {x: 0, width: 200, from: 0, to: 200});
+    assert(wide > right && wide < left, `under a wide clock, once it fills a good part of it (${wide})`);
+    assertEqual(subjectTop(cutout, shown, {x: 0, width: 40, from: 0, to: 100}), null, 'nothing above the hill');
+    assertEqual(subjectTop(cutout, shown, {x: 0, width: 40, from: 150, to: 200}), 150, 'in it from the start');
+    assertEqual(subjectTop(cutout, shown, {x: 300, width: 40, from: 0, to: 200}), null, 'off the picture: nothing');
 }
 
 export function testCutoutOpacity() {

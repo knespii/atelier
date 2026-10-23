@@ -13,7 +13,7 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 import {
-    MAX_COVER, coverage, cutoutOpacity, cutoutPath, lockWallpaper, pictureState, placement,
+    MAX_COVER, coverage, cutoutOpacity, cutoutPath, lockWallpaper, pictureState, placement, subjectTop,
 } from '../../lib/depth.js';
 
 Gio._promisify(Gio.File.prototype, 'read_async');
@@ -60,6 +60,8 @@ export class DepthCutout {
         this._progress = 0;
         /** Whether the subject would cover a clock too much (and so stays off). */
         this.tooMuch = false;
+        /** Called when the cutout comes, goes or moves (the glass clock follows it). */
+        this.onChanged = null;
         this.actor.connect('destroy', () => {
             this._cancellable?.cancel();
             this.actor = null;
@@ -148,11 +150,14 @@ export class DepthCutout {
     }
 
     _clear() {
+        const had = Boolean(this._shown);
         this._sample = null;
         this._picture = null;
         this._shown = null;
         this.actor?.set_content(null);
         this._sync();
+        if (had)
+            this.onChanged?.();
     }
 
     _place() {
@@ -164,6 +169,17 @@ export class DepthCutout {
             this.actor.set_size(width, height);
         }
         this.cover(this._clocks);
+        this.onChanged?.();
+    }
+
+    /**
+     * @param {object} strip - {x, width, from, to} on the monitor (see
+     *   lib/depth.js subjectTop())
+     * @returns {number|null} where what stands in front starts in it; null
+     *   without a cutout, or nothing there
+     */
+    subjectTop(strip) {
+        return this._shown && this._sample ? subjectTop(this._sample, this._shown, strip) : null;
     }
 
     /**
@@ -219,6 +235,7 @@ export class DepthCutout {
     destroy({keepActor = false} = {}) {
         this._cancellable?.cancel();
         this._cancellable = null;
+        this.onChanged = null;
         this._background.disconnectObject(this);
         this._interface.disconnectObject(this);
         if (!keepActor)

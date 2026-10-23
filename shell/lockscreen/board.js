@@ -17,15 +17,16 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
-    LOCK_KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
+    LOCK_CLOCK_FACES, LOCK_KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
     nearestSize, nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout,
 } from '../../lib/widgets.js';
-import {ClockWidget, DateWidget} from '../desktop/kinds/time.js';
+import {DateWidget} from '../desktop/kinds/time.js';
+import {LockClockWidget} from './clock.js';
 import {DepthCutout} from './depth.js';
 import {LockTypography} from './typography.js';
 import {LockBatteryWidget, LockWeatherWidget} from './widgets.js';
 
-const WIDGETS = {clock: ClockWidget, date: DateWidget, weather: LockWeatherWidget, battery: LockBatteryWidget};
+const WIDGETS = {clock: LockClockWidget, date: DateWidget, weather: LockWeatherWidget, battery: LockBatteryWidget};
 const DIMMED = 0.25; // what is left of the widgets while the prompt is up
 const SMALLEST = 0.35; // how small a clock gets to go up over the popup
 const SHIFT_TIME = 250; // moving on when the popup changes size
@@ -43,6 +44,8 @@ export class LockBoard {
         this._interactive = interactive;
         /** The kinds there are here, with their sizes (the editor's catalog). */
         this.catalog = LOCK_KINDS;
+        /** The clock's faces on offer here: the glass one too. */
+        this.clockFaces = LOCK_CLOCK_FACES;
         this.kinds = new Map(Object.entries(WIDGETS));
         this._widgets = new Map();
         this._layout = [];
@@ -68,6 +71,8 @@ export class LockBoard {
             claude: () => null,
             openSettings: () => {},
             locked: !interactive,
+            // (A glass clock measured anew: the subject under it looked for again.)
+            depthChanged: () => this._queueDepth(),
         };
         settings.connectObject(
             'changed::widgets', () => !this._saving && this._load(),
@@ -132,6 +137,7 @@ export class LockBoard {
             return;
         if (wanted) {
             this._depth = new DepthCutout();
+            this._depth.onChanged = () => this._queueDepth();
             this.layer.add_child(this._depth.actor);
             this._depth.follow(this._progress);
             this._syncDepthDim();
@@ -140,6 +146,8 @@ export class LockBoard {
         } else {
             this._depth.destroy();
             this._depth = null;
+            // (Nothing in front of the glass clocks any more: as tall as they get.)
+            this.widgets.forEach(widget => widget.glass?.setSubject(null));
         }
         this._queueDepth();
     }
@@ -176,12 +184,47 @@ export class LockBoard {
             if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
                 this.layer.set_child_below_sibling(widget, depth.actor);
                 const box = widget.get_allocation_box();
-                clocks.push({x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()});
+                // (Stacked, each of its lines: the subject over most of the
+                // minutes would hide them, however little of the box it covers.)
+                const lines = widget.stackedLines?.map(line => this._rectIn(line, widget, box)) ?? [];
+                const glass = this._followSubject(widget, box);
+                if (glass)
+                    clocks.push(glass);
+                else if (lines.length > 0)
+                    clocks.push(...lines);
+                else
+                    clocks.push({x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()});
             } else {
                 this.layer.set_child_above_sibling(widget, depth.actor);
             }
         }
         depth.cover(clocks);
+    }
+
+    // Where a part of a widget is in the layer, as it is laid out.
+    _rectIn(actor, widget, box) {
+        let [x, y] = [box.x1, box.y1];
+        for (let part = actor; part && part !== widget; part = part.get_parent()) {
+            const own = part.get_allocation_box();
+            x += own.x1;
+            y += own.y1;
+        }
+        const own = actor.get_allocation_box();
+        return {x, y, width: own.get_width(), height: own.get_height()};
+    }
+
+    // A glass clock's digits stretch down to where the subject starts under
+    // them; what it covers of them is what counts then.
+    _followSubject(widget, box) {
+        const glass = widget.glass;
+        const strip = glass?.strip;
+        if (!strip)
+            return null;
+        const {x, y} = this._rectIn(glass, widget, box);
+        const top = this._depth.subjectTop({x: x + strip.x, width: strip.width, from: y + strip.top, to: y + strip.bottom});
+        glass.setSubject(top === null ? null : top - y);
+        const digits = glass.digitsRect;
+        return digits ? {...digits, x: x + digits.x, y: y + digits.y} : null;
     }
 
     /** @returns {LockTypography} the widgets' type */
@@ -219,7 +262,7 @@ export class LockBoard {
         const widget = new Kind(entry, this._context);
         // (On the lock screen a click goes through to GNOME's.)
         widget.reactive = this._interactive;
-        widget.connectObject('filled', () => this._tone(widget), this);
+        widget.connectObject('filled', () => this._tone(), this);
         this.layer.add_child(widget);
         widget.connect('notify::allocation', () => this._queueDepth());
         if (this._interactive)
@@ -319,19 +362,25 @@ export class LockBoard {
         this._tone();
     }
 
-    // Each widget's type in a tone legible on the wallpaper behind it (on
-    // a card, the card's colours) and in the font chosen: on it, and on
-    // the parts of it that have their own (not on the editor's buttons).
-    _tone(only = null) {
+    // The widgets' type in one tone, legible on the wallpaper behind all of
+    // them (the clocks counting most; on cards, the cards' colours) and in
+    // the font chosen: on each, and on the parts of it that have their own
+    // (not on the editor's buttons). A widget moved or filled anew may
+    // change the tone of all of them.
+    _tone() {
         if (!this._grid || this._gone)
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const [width, height] = [this._area.width / scale, this._area.height / scale];
-        for (const widget of only ? [only] : this.widgets) {
+        const parts = this.widgets.map(widget => {
             const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
             const [w, h] = pixelSize(widget.entry.size);
-            const style = this._typography.styleOf([x / width, y / height, w / width, h / height],
-                width / height, this._bare);
+            return {rect: [x / width, y / height, w / width, h / height], weight: widget.entry.kind === 'clock' ? 3 : 1};
+        });
+        const tone = this._bare ? this._typography.toneFor(parts, width / height) : null;
+        this._toneNow = tone;
+        const style = this._typography.styleOf(tone);
+        for (const widget of this.widgets) {
             widget.style = style.widget || null;
             const parts = widget.get_children().filter(child => !child.corner);
             while (parts.length > 0) {
@@ -346,6 +395,11 @@ export class LockBoard {
                 part._atelierToned = Boolean(own);
             }
         }
+    }
+
+    /** @returns {object|null} the one tone of the widgets' type (lib/lockLook.js lockTone()); null on cards */
+    get tone() {
+        return this._toneNow ?? null;
     }
 
     _save() {
@@ -412,6 +466,9 @@ export class LockBoard {
     addWidget(kind, options = {}, at = null) {
         if (!LOCK_KINDS[kind] || !this.kinds.has(kind))
             return null;
+        // (A new clock has the glass face, unless it is given another.)
+        if (kind === 'clock' && !options.face)
+            options = {...options, face: 'glass'};
         const layout = this._shownLayout();
         const entry = {id: newId(layout, kind), kind, size: LOCK_KINDS[kind].sizes[0], ...options};
         const spot = at && fits(layout, {...entry, ...at}, this._grid) ? at : findSpot(layout, entry, this._grid);
@@ -432,6 +489,8 @@ export class LockBoard {
         if (!Kind)
             return null;
         const look = new St.Widget({style_class: this.layer.get_style_class_name()});
+        if (kind === 'clock' && !options.face)
+            options = {...options, face: 'glass'};
         const widget = new Kind({id: `new-${kind}`, kind, size: LOCK_KINDS[kind].sizes[0], x: 0, y: 0, ...options},
             this._context);
         widget.reactive = false;
@@ -528,7 +587,7 @@ export class LockBoard {
         const widget = this._widgets.get(id);
         widget.entry = {...widget.entry, x, y};
         // (Over another part of the wallpaper.)
-        this._tone(widget);
+        this._tone();
         return true;
     }
 

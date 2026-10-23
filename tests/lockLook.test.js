@@ -1,6 +1,6 @@
 import {
-    FONTS, LEGIBLE, batteryState, chosenTone, fontFor, isColor, partStyle, pickTone, regionIn, regionStats,
-    shortTemperature, widgetStyle,
+    FONTS, LEGIBLE, LIGHT_ENOUGH, STRETCH, batteryState, chosenTone, fontFor, glassDigits, isColor, lockTone,
+    mergeStats, partStyle, pickTone, regionIn, regionStats, shortTemperature, widgetStyle,
 } from '../lib/lockLook.js';
 import {contrastRatio, hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {assert, assertEqual} from './util.js';
@@ -70,6 +70,47 @@ export function testToneOnMiddleGray() {
     assertEqual(pickTone(null).dark, false, 'nothing known: light, as GNOME\'s');
 }
 
+export function testOneToneForAll() {
+    // The clock over a blue sky (with a few clouds), the battery over the
+    // grass: one light tone for both, as an iPhone has it.
+    const sky = regionStats(sample('#3b6fd8', '#8fb3ee'), [0, 0, 1, 1]);
+    const grass = statsOf('#3f8a2a');
+    const both = mergeStats([{stats: sky, weight: 3}, {stats: grass, weight: 1}]);
+    const tone = lockTone(both, {tint: '#2f8fb0'});
+    assert(!tone.dark && luminance(tone.color) > 0.8, `light over the sky and the grass (${tone.color})`);
+    assert(contrastRatio(tone.color, '#3b6fd8') >= LIGHT_ENOUGH, 'and it reads there, with its shadow');
+    // Where light would not read (a pale wallpaper): dark, for all of them.
+    const pale = lockTone(mergeStats([{stats: statsOf('#efe6d2'), weight: 3}, {stats: statsOf('#e9e2d0'), weight: 1}]));
+    assert(pale.dark && contrastRatio(pale.color, '#efe6d2') >= LEGIBLE, `dark on a pale one (${pale.color})`);
+    // Weighed: the clock counts more than a small widget.
+    const merged = mergeStats([{stats: statsOf('#000000'), weight: 3}, {stats: statsOf('#ffffff'), weight: 1}]);
+    assert(Math.abs(merged.middle - 0.25) < 1e-9 && merged.mean === '#404040', `weighed (${merged.middle}, ${merged.mean})`);
+    assertEqual(mergeStats([{stats: null, weight: 1}]), null, 'nothing known: nothing merged');
+    assertEqual(lockTone(null).dark, false, 'and the type light');
+}
+
+export function testGlassDigits() {
+    const ink = 100;
+    // No subject: as tall as the box lets them, up to the most.
+    assertEqual(glassDigits(ink, 40, 200, null), {stretch: 1.6, y: 40});
+    assertEqual(glassDigits(ink, 40, 600, null).stretch, STRETCH.max, 'never taller than the most');
+    assertEqual(glassDigits(ink, 40, 100, null).stretch, STRETCH.min, 'never squashed');
+    // A subject under them: down into it, its top a little above their feet.
+    const {stretch, y} = glassDigits(ink, 40, 400, 184);
+    const feet = y + stretch * ink;
+    assert(y === 40 && Math.abs(stretch - 2) < 1e-9, `from under the date (${y}, ${stretch})`);
+    assert(Math.abs((feet - 184) / (stretch * ink) - STRETCH.overlap) < 1e-9, `their feet in it (${feet})`);
+    // Far below: as tall as they get, moved down to meet it.
+    const low = glassDigits(ink, 40, 500, 350);
+    assert(low.stretch === STRETCH.max && low.y > 40 &&
+        Math.abs(350 - low.y - (1 - STRETCH.overlap) * low.stretch * ink) < 1e-9, `moved down to it (${low.y})`);
+    // Right under the date: as short as they go, from under it.
+    assertEqual(glassDigits(ink, 40, 400, 60), {stretch: STRETCH.min, y: 40});
+    // Under the box or over the top: as without one.
+    assertEqual(glassDigits(ink, 40, 200, 500), glassDigits(ink, 40, 200, null));
+    assertEqual(glassDigits(ink, 40, 200, 10), glassDigits(ink, 40, 200, null));
+}
+
 export function testChosenTone() {
     assertEqual(chosenTone('#FFCC00'), {color: '#ffcc00', dark: false, contrast: null});
     assertEqual(chosenTone('#202020').dark, true);
@@ -99,7 +140,13 @@ export function testStyles() {
     assert(widgetStyle({color: '#202428', dark: true}, fontFor('default')).includes('rgba(255, 255, 255,'),
         'dark type: a light halo');
     assertEqual(widgetStyle(null, fontFor('default')), '', 'on a card, as it is');
-    assertEqual(partStyle(['atelier-widget-caption'], light, fontFor('default')), 'color: rgba(244, 246, 248, 0.72);');
+    assertEqual(partStyle(['atelier-widget-caption'], light, fontFor('default')), 'color: #f4f6f8;',
+        'the quieter parts in the one tone too, solid');
+    assertEqual(partStyle(['atelier-widget-time-suffix'], light, fontFor('default')), 'color: #f4f6f8;');
+    assertEqual(partStyle(['atelier-lock-value'], light, fontFor('heavy')), 'font-weight: 800;',
+        'the battery\'s and the weather\'s values in the weight of the date line');
+    assertEqual(partStyle(['atelier-widget-glass-digits'], light, fontFor('thin')), 'font-weight: 200;',
+        'the glass clock\'s digits in the display one');
     assertEqual(partStyle(['atelier-widget-stacked-hours'], light, fontFor('thin')), 'font-weight: 200;');
     assertEqual(partStyle(['atelier-widget-stacked-date'], light, fontFor('thin')), 'font-weight: 400;');
     assertEqual(partStyle(['atelier-widget-face'], light, fontFor('default')), 'color: #f4f6f8;');

@@ -1,6 +1,6 @@
 // The lock screen's own small widgets: the weather and the battery, in a
-// line of light type in the lock screen's tone (typography.js), on the
-// wallpaper. They only read what GNOME has: the weather as GNOME's calendar
+// line of type as the date line's, in the lock screen's one tone
+// (typography.js), on the wallpaper. They only read what GNOME has: the weather as GNOME's calendar
 // menu last had it (never asked anew: that would go to the network), the
 // battery as GNOME's battery tile has it. Without either, on the lock
 // screen they don't show.
@@ -109,7 +109,8 @@ class AtelierLockRing extends St.DrawingArea {
         const [width, height] = this.get_surface_size();
         const color = this.get_theme_node().get_foreground_color();
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const lineWidth = 2.6 * scale;
+        // (As thick as a letter's stroke, for its size.)
+        const lineWidth = Math.max(1.5 * scale, Math.min(width, height) * 0.14);
         const radius = Math.min(width, height) / 2 - lineWidth / 2;
         const paint = alpha => cr.setSourceRGBA(color.red / 255, color.green / 255, color.blue / 255,
             color.alpha / 255 * alpha);
