@@ -12,6 +12,11 @@ import St from 'gi://St';
 
 import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
 
+// GNOME's menu follows each move of its grid (x, y) to keep its layer of
+// menus on it, with an update before the next frame that reads the grid and
+// the menu (quickSettings.js, updateOffset).
+const MOVES = ['x', 'y'].map(detail => ({signalId: 'notify', detail}));
+
 // The menus of the tiles open in a layer over the grid, right under their
 // tile, while the grid makes room for them. Both share the same origin.
 const HostLayout = GObject.registerClass(
@@ -33,7 +38,18 @@ class AtelierQuickSettingsHostLayout extends Clutter.LayoutManager {
     vfunc_allocate(_container, box) {
         const width = box.get_width();
         const [, gridHeight] = this._grid.get_preferred_height(width);
-        this._grid.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: gridHeight}));
+        // Its moves here go unannounced: out of GNOME's menu, with the
+        // menus' layer here, there is nothing for GNOME to follow. (Moved
+        // here as the control centre opened, the grid left GNOME's update
+        // waiting for the next frame; when the shell quit before that came,
+        // the update ran on the grid and the menu once GNOME had taken them
+        // down.)
+        MOVES.forEach(move => GObject.signal_handlers_block_matched(this._grid, move));
+        try {
+            this._grid.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: gridHeight}));
+        } finally {
+            MOVES.forEach(move => GObject.signal_handlers_unblock_matched(this._grid, move));
+        }
         const [, overlayHeight] = this._overlay.get_preferred_height(width);
         this._overlay.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: overlayHeight}));
     }
