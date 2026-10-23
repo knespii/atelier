@@ -8,9 +8,23 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
+import Pango from 'gi://Pango';
 
 import {DepthSetup} from './depthSetup.js';
-import {FONTS, fontFor, isColor} from '../lib/lockLook.js';
+import {isColor} from '../lib/lockLook.js';
+import {TYPEFACES, labelFont, styleFor, typefaceFor} from '../lib/lockType.js';
+
+/**
+ * @param {object} typeface - lib/lockType.js typefaceFor()
+ * @param {object} style - lib/lockType.js styleFor()
+ * @returns {Pango.AttrList} a label's text in it (Inter and Roboto Flex are
+ *   in this process: prefs.js registers them), at the label's own size
+ */
+function fontAttributes(typeface, style) {
+    const attributes = new Pango.AttrList();
+    attributes.insert(Pango.attr_font_desc_new(Pango.FontDescription.from_string(labelFont(typeface, style).description)));
+    return attributes;
+}
 
 const LOOKS = [['bare', 'Bare'], ['modern', 'Modern'], ['analogue', 'Analogue']];
 
@@ -132,29 +146,56 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
         return row;
     }
 
-    // The fonts on offer, each said as it is there (or isn't).
+    // The font families there are, listed once.
+    _installed() {
+        if (this._families === undefined) {
+            try {
+                this._families = this.get_pango_context().get_font_map().list_families().map(f => f.get_name());
+            } catch {
+                this._families = null;
+            }
+        }
+        return this._families;
+    }
+
+    /** @returns {object} the typeface the settings choose, as there is (lib/lockType.js typefaceFor()) */
+    get typeface() {
+        return typefaceFor(this._lock.get_string('clock-font'), this._installed());
+    }
+
+    // The typefaces on offer, each in itself and said as it is there (or
+    // isn't). Thin and Heavy, from before the weight could be set, show as
+    // Default (their weight in the Weight row). Nothing is written while
+    // the row only follows the setting: each profile keeps its own, and a
+    // write would land in the one in use.
     _fontRow(group) {
         const row = new Adw.ComboRow({
             title: 'Font',
-            model: Gtk.StringList.new(FONTS.map(f => f.name)),
+            model: Gtk.StringList.new(TYPEFACES.map(t => t.name)),
         });
-        const installed = () => {
-            try {
-                return this.get_pango_context().get_font_map().list_families().map(f => f.get_name());
-            } catch {
-                return null;
-            }
-        };
+        const factory = new Gtk.SignalListItemFactory();
+        factory.connect('setup', (_, item) => item.set_child(new Gtk.Label({xalign: 0})));
+        factory.connect('bind', (_, item) => {
+            const typeface = typefaceFor(TYPEFACES[item.get_position()].id, this._installed());
+            item.get_child().set({label: typeface.name, attributes: fontAttributes(typeface, styleFor(typeface, 'text'))});
+        });
+        row.factory = factory;
+        let syncing = false;
         const sync = () => {
-            const id = this._lock.get_string('clock-font');
-            const index = Math.max(0, FONTS.findIndex(f => f.id === id));
-            if (row.selected !== index)
-                row.selected = index;
-            const font = fontFor(id, installed());
-            row.subtitle = font.missing ? 'None installed here: the shell\'s font, in its weights'
-                : font.family ?? 'The shell\'s font';
+            const typeface = this.typeface;
+            syncing = true;
+            row.selected = Math.max(0, TYPEFACES.findIndex(t => t.id === typeface.id));
+            syncing = false;
+            row.subtitle = typeface.missing ? 'None installed here: the shell\'s font'
+                : typeface.file ? 'A variable font that comes with Atelier'
+                    : typeface.family ?? 'The shell\'s font';
         };
-        row.connect('notify::selected', () => this._lock.set_string('clock-font', FONTS[row.selected].id));
+        row.connect('notify::selected', () => {
+            const id = TYPEFACES[row.selected]?.id;
+            // (Default for Thin or Heavy: as it is.)
+            if (!syncing && id && id !== this.typeface.id)
+                this._lock.set_string('clock-font', id);
+        });
         this._fontId = this._lock.connect('changed::clock-font', sync);
         sync();
         group.add(row);

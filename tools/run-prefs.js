@@ -562,13 +562,23 @@ async function runSelftest(window) {
     lockSettings.set_string('clock-color', 'auto');
     check(lockPage._colorAuto.active, 'set elsewhere, shown');
     const fonts = lockPage._fontCombo;
-    check(fonts.model.get_n_items() === 5 && fonts.selected === 0 && fonts.subtitle === 'The shell\'s font',
-        `the fonts on offer, the shell's at first (${fonts.subtitle})`);
-    fonts.selected = 2;
+    check(fonts.model.get_n_items() === 5 && fonts.selected === 0 && lockSettings.get_string('clock-font') === 'inter' &&
+        fonts.subtitle.includes('Atelier'), `the typefaces on offer, Inter at first (${fonts.subtitle})`);
+    fonts.selected = 4;
     check(lockSettings.get_string('clock-font') === 'serif' && fonts.subtitle.length > 0,
         `a font chosen is kept, said as it is here (${fonts.subtitle})`);
+    // Set elsewhere (a profile applied, say): shown, and nothing written
+    // back – a write would land in the profile in use.
+    let written = 0;
+    const writes = lockSettings.connect('changed::clock-font', () => written++);
+    for (const [id, index] of [['flex', 1], ['thin', 2], ['heavy', 2], ['inter', 0]]) {
+        written = 0;
+        lockSettings.set_string('clock-font', id);
+        check(fonts.selected === index && written === 1 && lockSettings.get_string('clock-font') === id,
+            `${id} set elsewhere: shown as ${fonts.model.get_string(index)}, nothing written back (${written})`);
+    }
+    lockSettings.disconnect(writes);
     lockSettings.set_string('clock-font', 'thin');
-    check(fonts.selected === 3, 'set elsewhere, shown');
     await render(window, 'lock-screen-type');
     lockSettings.reset('clock-color');
     lockSettings.reset('clock-font');
