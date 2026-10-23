@@ -159,8 +159,111 @@ async function checkOtherExtensions(window) {
     settings.reset('other-extensions-kept');
 }
 
+// The depth effect's rows, with stand-ins for what is there and for the
+// download (nothing is downloaded here): each step says what it needs.
+async function checkDepth(window) {
+    const page = await section(window, 'lock-screen');
+    const setup = page._depth;
+    const lock = setup._settings;
+    const missing = {python: true, missing: [], model: 'missing'};
+    // (Its rows at the bottom of the page, for pictures of them.)
+    const scrolled = findDescendant(page, w => w instanceof Gtk.ScrolledWindow);
+    const toBottom = () => (scrolled.vadjustment.value = scrolled.vadjustment.upper);
+    const real = await setup.probe();
+    check(real.model === 'missing', `with no model kept, it says so (${JSON.stringify(real)})`);
+    const showing = async state => {
+        setup.probe = () => Promise.resolve(state);
+        await setup.refresh();
+    };
+    await showing({python: false, missing: [], model: 'missing'});
+    check(setup.statusRow.title === 'Python 3 is missing' && setup.commandRow.visible &&
+        setup.commandRow.title === 'sudo apt install python3', 'without Python, how to install it');
+    await showing({python: true, missing: ['python3-onnxruntime', 'python3-pil'], model: 'missing'});
+    check(setup.statusRow.title === 'Python packages are missing' && setup.againButton.visible &&
+        setup.commandRow.title === 'sudo apt install python3-onnxruntime python3-pil' && !setup.downloadButton.visible,
+    `without onnxruntime, the command to install it, to copy (${setup.commandRow.title})`);
+    setup.copyButton.emit('clicked');
+    const copied = await new Promise(resolve => setup.commandRow.get_clipboard().read_text_async(null, (clipboard, res) => {
+        try {
+            resolve(clipboard.read_text_finish(res));
+        } catch {
+            resolve(null);
+        }
+    }));
+    check(copied === setup.commandRow.title, `which Copy copies (${copied})`);
+    await showing(missing);
+    toBottom();
+    await sleep(300);
+    check(setup.statusRow.title === 'The model isn\'t downloaded' && setup.downloadButton.visible &&
+        setup.downloadButton.label === 'Download Model (4.7 MB)…' && !setup.commandRow.visible,
+    'with the packages, the model to download – only when asked');
+    await render(window, 'lock-screen-depth-download');
+
+    // Downloading: its progress, then ready (and the cutout asked for).
+    let finish;
+    setup.download = (target, {onProgress}) => new Promise(resolve => {
+        onProgress(2 * 1024 * 1024, 4.7 * 1024 * 1024);
+        finish = resolve;
+    });
+    lock.set_boolean('depth-effect', true);
+    const request = lock.get_string('depth-request');
+    setup.downloadButton.emit('clicked');
+    await sleep(100);
+    check(setup.statusRow.title === 'Downloading the model…' && setup.statusRow.subtitle === '2.0 of 4.7 MB' &&
+        setup.cancelButton.visible && !setup.downloadButton.visible && Math.abs(setup._progress.fraction - 2 / 4.7) < 0.01,
+    `while it downloads, how far it is (${setup.statusRow.subtitle})`);
+    await render(window, 'lock-screen-depth-downloading');
+    setup.probe = () => Promise.resolve({...missing, model: 'ok'});
+    finish();
+    await sleep(200);
+    check(setup.statusRow.title === 'Ready' && setup.computeButton.visible && lock.get_string('depth-request') !== request,
+        'downloaded: ready, and the shell asked for the cutout');
+
+    // A download that fails says why.
+    setup.probe = () => Promise.resolve(missing);
+    setup.download = () => Promise.reject(new Error('no network here'));
+    await setup.refresh();
+    setup.downloadButton.emit('clicked');
+    await sleep(200);
+    check(setup.statusRow.title === 'The download failed' && setup.statusRow.subtitle.includes('no network here') &&
+        setup.downloadButton.visible, `a failed download says why, to try again (${setup.statusRow.subtitle})`);
+    await showing({...missing, model: 'does not load: INVALID_PROTOBUF'});
+    check(setup.statusRow.title === 'The model doesn\'t load' && setup.downloadButton.visible,
+        'a model that doesn\'t load is downloaded again');
+
+    // Ready: how the shell is coming on with the cutout.
+    await showing({...missing, model: 'ok'});
+    lock.set_string('depth-status', 'working');
+    check(setup.statusRow.subtitle === 'Making the cutout of this wallpaper…' && !setup.computeButton.sensitive,
+        'the cutout being made');
+    lock.set_string('depth-status', 'failed: the disk is full');
+    check(setup.statusRow.subtitle.endsWith('the disk is full') && setup.computeButton.sensitive,
+        'one that failed says why, to try again');
+    lock.set_string('depth-status', 'ready');
+    check(setup.statusRow.subtitle.startsWith('The cutout of this wallpaper is made'), 'and one made');
+    toBottom();
+    await sleep(300);
+    await render(window, 'lock-screen-depth-ready');
+    lock.set_boolean('depth-effect', false);
+    check(!setup.computeButton.visible && !setup.switchRow.active, 'switched off, nothing to compute');
+    lock.set_boolean('enabled', false);
+    check(!page._depthGroup.sensitive, 'without Atelier on the lock screen, greyed out');
+    ['enabled', 'depth-status', 'depth-request'].forEach(key => lock.reset(key));
+
+    // The real check, with a made-up model where the model is kept.
+    const {fakeU2netp} = await import('../tests/fakeOnnx.js');
+    const {modelPath} = await import('../lib/depth.js');
+    GLib.mkdir_with_parents(GLib.path_get_dirname(modelPath()), 0o755);
+    GLib.file_set_contents(modelPath(), fakeU2netp());
+    const {probe} = await import('../prefs/depthSetup.js');
+    const found = await probe();
+    check(found.model === 'ok' || found.missing.length > 0, `a model kept is checked: it loads (${JSON.stringify(found)})`);
+    GLib.unlink(modelPath());
+}
+
 async function runSelftest(window) {
     await checkOtherExtensions(window);
+    await checkDepth(window);
     const page = await section(window, 'profiles');
     const store = page._store;
     const before = store.getAll().length;

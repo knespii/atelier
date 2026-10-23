@@ -8,6 +8,8 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
+import {DepthSetup} from './depthSetup.js';
+
 const LOOKS = [['bare', 'Bare'], ['modern', 'Modern'], ['analogue', 'Analogue']];
 
 export const LockScreenPage = GObject.registerClass(
@@ -63,7 +65,17 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
         const clock = this._switch(widgets, 'gnome-clock', 'GNOME\'s clock',
             'Off when your own clocks take its place');
 
-        for (const row of [island, edit, look, clock]) {
+        const depth = new Adw.PreferencesGroup({
+            title: 'Depth Effect',
+            description: 'As on an iPhone: the subject of the wallpaper (a person, an animal, a mountain) in front ' +
+                'of the lock screen\'s own clocks. A small model finds it, on this computer, whenever the wallpaper ' +
+                'changes; where it would cover too much of a clock, the clock stays whole.',
+        });
+        this.add(depth);
+        this._depthGroup = depth;
+        this._depth = new DepthSetup(depth, this._lock);
+
+        for (const row of [island, edit, look, clock, depth]) {
             this._lock.bind('enabled', row, 'sensitive', Gio.SettingsBindFlags.GET);
             this._bound.push([row, 'sensitive']);
         }
@@ -78,6 +90,7 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
     }
 
     disconnectSettings() {
+        this._depth.disconnectSettings();
         this._bound.forEach(([row, property]) => Gio.Settings.unbind(row, property));
         this._bound = [];
         if (this._styleId)
