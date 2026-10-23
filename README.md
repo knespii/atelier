@@ -143,7 +143,15 @@ profile called **Original**, so there is always a way back.
   Screen page, when you ask: Small (99 MB, Apache-2.0, seconds a
   wallpaper), Base (389 MB, CC-BY-NC-4.0: for non-commercial use, about ten
   seconds; offered first) or Large (1.3 GB, CC-BY-NC-4.0, the finest: half
-  a minute or more, and about 2.5 GB of memory while it runs).
+  a minute or more, and about 2.5 GB of memory while it runs). A subject
+  model, BiRefNet lite (224 MB, MIT, downloaded there too, only when you
+  ask), finds the wallpaper's subject – a person, an animal, a thing – as
+  an iPhone does; where it is sure of one (a whole shape with a sharp edge,
+  of a sensible size, neither the sky, nor the land from one side to the
+  other, nor a heap of bits, nor far off to the depth model), the subject
+  stands in front too, with its own outline. It takes about ten seconds
+  more a wallpaper, and 5.3 GB of memory while it runs; alone, without a
+  depth model, only the subject stands in front.
 - **Claude Code**: a ring in the bar shows how far the current 5-hour block
   is, with the tokens Claude wrote in it; resting the pointer on it (or the
   control centre's Claude tab) shows the block, today, the last seven days
@@ -381,8 +389,8 @@ gnome-extensions enable atelier@local
 | Notes | `~/.local/share/atelier/notes.json` |
 | Photos (the gallery's copies of them) | `~/.local/share/atelier/photos/` |
 | Thumbnails, smaller copies of the photos (for the grids, and as big as the widgets show them), generated shell styles | `~/.cache/atelier/` |
-| The depth effect's models (when downloaded) | `~/.local/share/atelier/models/depth-anything-v2-*.onnx` |
-| The depth effect's cutouts of the wallpapers (the newest 12) | `~/.cache/atelier/depth/` |
+| The depth effect's models (when downloaded) | `~/.local/share/atelier/models/depth-anything-v2-*.onnx`, `birefnet-lite.onnx` |
+| The depth effect's cutout of the wallpaper (the current one's) | `~/.cache/atelier/depth/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |
 
