@@ -1,6 +1,7 @@
 import {blend, contrastLc, minimumLc} from '../lib/apca.js';
+import {GLASS, frost, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
 import {
-    REACH, STRETCH, TYPE, batteryState, chosenTone, glassDigits, isColor, legibilityPlan, lockTone, mergeStats,
+    REACH, STRETCH, TYPE, batteryState, chosenTone, glassDigits, glassInk, isColor, legibilityPlan, lockTone, mergeStats,
     partStyle, pickTone, regionIn, regionStats, roleOf, shortTemperature, styleWithPlan, widgetStyle,
 } from '../lib/lockLook.js';
 import {labelFont, styleFor, typefaceFor} from '../lib/lockType.js';
@@ -289,6 +290,71 @@ export function testStyleWithPlan() {
     assertEqual(styleWithPlan(flex, text, {boldness: 1, weight: 800}).extra.GRAD, flex.axes.GRAD.max, 'its most');
     assertEqual(styleWithPlan(flex, text, {boldness: 0, weight: 600}), text, 'not heavier: as it is');
     assertEqual(styleWithPlan(flex, text, null), text);
+}
+
+// A sample of bands of colours side by side, each as wide (a sky lighter
+// at one side, say), or of the colours pixel by pixel (fine stripes).
+function bands(colors, fine = false, width = 48, height = 30) {
+    const pixels = new Uint8Array(width * height * 3);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = fine ? (x + y) % colors.length : Math.floor(x * colors.length / width);
+            pixels.set(hexToRgb(colors[i]), (y * width + x) * 3);
+        }
+    }
+    return {pixels, channels: 3, rowstride: width * 3, width, height};
+}
+
+// The same frosted as the glass's backdrop is.
+function frosted(sample) {
+    const pixels = frost(sample.pixels, {width: sample.width, height: sample.height}, {sigma: 2});
+    return {...sample, pixels, channels: 3, rowstride: sample.width * 3};
+}
+
+export function testGlassMaterial() {
+    // The glass digits: large, so they need little (Lc 25); the glass at rest.
+    const digits = {size: 140, weight: 600, glass: tintShown(), dim: 0.86};
+    const all = [0, 0, 1, 1];
+    const planOn = (colors, tone, {fine = false, ...options} = {}) => {
+        const wallpaper = bands(colors, fine);
+        const stats = regionStats(wallpaper, all);
+        const ink = glassInk(tone, regionStats(frosted(wallpaper), all));
+        return {stats, ink, plan: legibilityPlan({...digits, tone, stats, ink, ...options})};
+    };
+    const light = {color: '#f4f4f4', dark: false};
+    // A night sky, lighter towards the city: the frost lets its light
+    // through brighter, the tint lighter still – it reads as it is, no
+    // shadow. (A flat tint over it would have wanted one.)
+    const night = ['#1c2233', '#232a3d', '#2c3550', '#4a4a66'];
+    const {stats, ink, plan} = planOn(night, light);
+    assert(plan.lc >= plan.need && plan.shadow === null && plan.boldness === 0 && plan.glass === digits.glass,
+        `on a night sky, as it is (${JSON.stringify(plan)})`);
+    const flat = legibilityPlan({...digits, tone: light, stats});
+    assert(flat.shadow !== null && flat.lc < plan.lc, `a flat tint would have taken a shadow (${JSON.stringify(flat)})`);
+    // The colour it comes out: glassColor() of the frost's lighter tenth.
+    const frost = regionStats(frosted(bands(night)), all);
+    assertEqual(ink(digits.glass, stats.tenths.light), glassColor({frosted: frost.tenths.light,
+        tint: glassTint(light, frost.mean), ...glassFor(digits.glass), behind: stats.tenths.light}));
+    assertEqual(glassFor(digits.glass), {...GLASS}, 'at rest');
+    // Fine stripes, blurred, give the frost their mean: lit less.
+    const fine = planOn(night, light, {fine: true}).plan;
+    assert(fine.lc < plan.lc, `${fine.lc} < ${plan.lc}`);
+    // A bright blue sky: the frost as light as the sky's lighter half –
+    // a shadow round the digits (no heavier weight is read better that
+    // large), as much as they lack.
+    const sky = planOn(['#3b6fd8', '#8fb3ee'], {color: '#ffffff', dark: false}).plan;
+    assert(sky.lc < sky.need && sky.boldness === 0 && sky.shadow?.color === '#000000' && sky.short === 0 &&
+        sky.glass === digits.glass, `on a bright sky, a shadow (${JSON.stringify(sky)})`);
+    // Without a shadow to give: more opaque glass, as much as it takes.
+    const opaque = planOn(['#3b6fd8', '#8fb3ee'], {color: '#ffffff', dark: false},
+        {reach: {bolder: 0, shadow: 0, glass: 0.92}}).plan;
+    assert(opaque.shadow === null && opaque.glass > digits.glass && opaque.glass <= 0.92 && opaque.short === 0,
+        `or more opaque glass (${JSON.stringify(opaque)})`);
+    // Fog, under dark glass: it reads.
+    const fog = planOn(['#d8dde3', '#c8ced6', '#e8ebef'], {color: '#242424', dark: true}).plan;
+    assert(fog.lc >= fog.need && fog.shadow === null, `dark glass on fog (${JSON.stringify(fog)})`);
+    // No backdrop made yet: the tint alone, as without ink.
+    assertEqual(glassInk(light, null), null);
 }
 
 export function testBattery() {

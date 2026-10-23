@@ -27,6 +27,7 @@ import {ControlCentreModule} from './shell/controlCentre/module.js';
 import {DepthModule} from './shell/depthModule.js';
 import {DesktopModule} from './shell/desktop/module.js';
 import {DockModule} from './shell/dock/module.js';
+import {GlassBackdropModule} from './shell/glassBackdropModule.js';
 import {IslandModule} from './shell/island/module.js';
 import {LockModule} from './shell/lockscreen/module.js';
 import {LockPreviewModule} from './shell/lockscreen/preview.js';
@@ -74,9 +75,12 @@ export default class AtelierExtension extends Extension {
             {settings: this._settings.get_child('windows'), key: 'enabled'});
         // (Placing the lock screen's widgets happens in the session.)
         this.modules.register('lockscreen-editor', ctx => new LockPreviewModule(ctx));
-        // (And the cutouts of the wallpaper for its depth effect, made then.)
+        // (And the cutouts of the wallpaper for its depth effect, made then,
+        // as the glass clock's frosted wallpaper is.)
         this.modules.register('depth', ctx => new DepthModule(ctx),
             {settings: this._settings.get_child('lockscreen'), key: 'depth-effect'});
+        this.modules.register('glass-backdrop', ctx => new GlassBackdropModule(ctx),
+            {settings: this._settings.get_child('lockscreen'), key: 'enabled'});
         // (Other extensions' settings kept out of Atelier's way, as asked.)
         this.modules.register('other-extensions', ctx => new OtherExtensionsModule(ctx));
 

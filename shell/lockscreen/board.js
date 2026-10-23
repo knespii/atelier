@@ -4,12 +4,14 @@
 // type is in a tone legible on the wallpaper behind them (typography.js),
 // in the typeface chosen for them; each part of it as it takes to read
 // where it is – nothing where it reads as it is, else heavier, or a soft
-// shadow round its letters. On the lock screen they only show – a click
-// goes through to GNOME's lock screen, which brings up the prompt; in the
-// editor (a mock lock screen in the session, see preview.js) they are
-// moved and stretched as on the desktop. When the password is asked, they
-// make room for the prompt. With the depth effect, the wallpaper's subject
-// stands over the clocks (depth.js), under the other widgets.
+// shadow round its letters – and a glass clock's digits frost the
+// wallpaper behind them (liquidGlass.js). On the lock screen they only
+// show – a click goes through to GNOME's lock screen, which brings up the
+// prompt; in the editor (a mock lock screen in the session, see
+// preview.js) they are moved and stretched as on the desktop. When the
+// password is asked, they make room for the prompt. With the depth effect,
+// the wallpaper's subject stands over the clocks (depth.js), under the
+// other widgets.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -21,8 +23,9 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {minimumLc} from '../../lib/apca.js';
+import {tintShown} from '../../lib/glassBackdrop.js';
 import {
-    TYPE, legibilityPlan, partStyle, roleOf, styleWithPlan, widgetStyle,
+    TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
 } from '../../lib/lockLook.js';
 import {labelFont} from '../../lib/lockType.js';
 import {
@@ -33,6 +36,7 @@ import {holdLabelFont} from '../core/fonts.js';
 import {DateWidget} from '../desktop/kinds/time.js';
 import {LockClockWidget} from './clock.js';
 import {DepthCutout} from './depth.js';
+import {GlassBackdrop} from './liquidGlass.js';
 import {LockTypography} from './typography.js';
 import {LockBatteryWidget, LockWeatherWidget} from './widgets.js';
 
@@ -89,12 +93,18 @@ export class LockBoard {
         this._toneNow = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
+        // The glass clocks' frosted wallpaper: made in the session ahead of
+        // time (shell/glassBackdropModule.js), or here, in the background,
+        // when it isn't there yet.
+        this._backdrop = new GlassBackdrop({make: true});
+        this._backdrop.onChanged = () => this._queueGlass();
+        this._glassLater = 0;
         this.layer = new St.Widget({reactive: false});
         // (On the lock screen, it goes with the lock screen's dialog.)
         this.layer.connect('destroy', () => {
             this._widgets.clear();
             this._gone = true;
-            this._cancelDepthLater();
+            this._cancelLaters();
         });
         // (Each label's size is known once it is styled, on the stage.)
         this.layer.connect('notify::mapped', () => this.layer.mapped && this._tone());
@@ -105,8 +115,12 @@ export class LockBoard {
             claude: () => null,
             openSettings: () => {},
             locked: !interactive,
-            // (A glass clock measured anew: the subject under it looked for again.)
-            depthChanged: () => this._queueDepth(),
+            // (A glass clock measured anew: the subject under it looked for
+            // again, and what its digits take to read there.)
+            depthChanged: () => {
+                this._queueDepth();
+                this._queueGlass();
+            },
         };
         settings.connectObject(
             'changed::widgets', () => !this._saving && this._load(),
@@ -163,6 +177,7 @@ export class LockBoard {
         this._origin = gridOrigin(monitor.width / scale, monitor.height / scale);
         this.layer.set_size(monitor.width, monitor.height);
         this._depth?.setMonitor([monitor.width, monitor.height]);
+        this._backdrop.setMonitor([monitor.width, monitor.height], scale);
     }
 
     _syncDepth() {
@@ -199,10 +214,23 @@ export class LockBoard {
         });
     }
 
-    _cancelDepthLater() {
-        if (this._depthLater)
-            global.compositor.get_laters().remove(this._depthLater);
-        this._depthLater = 0;
+    // A glass clock measured anew, or another backdrop: what its digits
+    // take to read where they are, once laid out.
+    _queueGlass() {
+        if (this._glassLater || this._gone)
+            return;
+        this._glassLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._glassLater = 0;
+            this.widgets.forEach(widget => this._planGlass(widget));
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelLaters() {
+        const laters = global.compositor.get_laters();
+        for (const later of [this._depthLater, this._glassLater].filter(Boolean))
+            laters.remove(later);
+        this._depthLater = this._glassLater = 0;
     }
 
     _syncDepthCover() {
@@ -222,17 +250,27 @@ export class LockBoard {
                 // minutes would hide them, however little of the box it covers.)
                 const lines = widget.stackedLines?.map(line => this._rectIn(line, widget, box)) ?? [];
                 const glass = this._followSubject(widget, box);
-                if (glass)
+                if (glass) {
+                    // (Its digits stretched anew: what they take to read there.)
+                    this._planGlass(widget);
                     clocks.push(glass);
-                else if (lines.length > 0)
+                } else if (lines.length > 0) {
                     clocks.push(...lines);
-                else
+                } else {
                     clocks.push({x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()});
+                }
             } else {
                 this.layer.set_child_above_sibling(widget, depth.actor);
             }
         }
         depth.cover(clocks);
+    }
+
+    // A clock's date line: a glass face's, or a stacked clock's.
+    _dateLineOf(widget) {
+        const glass = widget.glass;
+        // (glass._date: until the glass face says which its date line is.)
+        return glass ? glass.dateLine ?? glass._date ?? null : widget.dateLine ?? null;
     }
 
     // Where a part of a widget is in the layer, as it is laid out.
@@ -405,8 +443,9 @@ export class LockBoard {
     // Then each part of each as it takes to read on the wallpaper behind
     // that widget (lib/lockLook.js legibilityPlan()): nothing where it reads
     // as it is – no shadow at all – else heavier, then a soft shadow round
-    // its letters (not on the editor's buttons). A widget moved or filled
-    // anew may change the tone of all of them.
+    // its letters (not on the editor's buttons); and a glass clock's digits
+    // as their glass takes it. A widget moved or filled anew may change the
+    // tone of all of them.
     _tone() {
         if (!this._grid || this._gone)
             return;
@@ -425,6 +464,7 @@ export class LockBoard {
             const stats = tone ? typography.statsOf(rect, aspect) : null;
             for (const part of this._partsOf(widget))
                 this._setPart(part, {typeface, tone, stats});
+            this._planGlass(widget);
         }
     }
 
@@ -436,6 +476,13 @@ export class LockBoard {
         const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
         const [w, h] = pixelSize(widget.entry.size);
         return [x / width, y / height, w / width, h / height];
+    }
+
+    // The part of the main monitor an actor of a widget is laid out on:
+    // [x, y, width, height], 0 … 1.
+    _monitorRect({x, y, width, height}) {
+        const {width: mw, height: mh} = this._area;
+        return [x / mw, y / mh, width / mw, height / mh];
     }
 
     // The type on a widget that needs most to read (APCA's font lookup):
@@ -477,12 +524,16 @@ export class LockBoard {
     }
 
     // The parts of a widget styled here – each St.Widget in it, with its
-    // style classes – but the editor's buttons in its corners.
+    // style classes – but the editor's buttons in its corners, and a glass
+    // face that sets its own type (it is given its plan).
     _partsOf(widget) {
         const parts = [];
+        const own = widget.glass?.setPlan ? widget.glass : null;
         const todo = widget.get_children().filter(child => !child.corner);
         while (todo.length > 0) {
             const actor = todo.pop();
+            if (actor === own)
+                continue;
             todo.push(...actor.get_children());
             if (actor instanceof St.Widget)
                 parts.push({actor, classes: actor.get_style_class_name()?.split(' ') ?? []});
@@ -525,6 +576,96 @@ export class LockBoard {
             return;
         label._atelierFont = key;
         holdLabelFont(label, size => labelFont(typeface, style, size));
+    }
+
+    // A glass clock: its digits in the typeface chosen, at the weight and
+    // width set; the frosted wallpaper behind it; and what its digits and
+    // its date line take to read where they are – its digits measured as
+    // their material comes out over the wallpaper (lib/lockLook.js
+    // glassInk()), their glass at rest to start with. The face applies it
+    // (shell/lockscreen/clock.js); nothing is said again unless it changes.
+    _planGlass(widget) {
+        const glass = widget.glass;
+        if (!glass || this._gone)
+            return;
+        const backdrop = this._backdrop.current;
+        if (glass.backdrop !== backdrop)
+            glass.backdrop = backdrop;
+        const typography = this._typography;
+        const type = {typeface: typography.typeface, style: typography.styleFor('glass')};
+        const typeKey = JSON.stringify(type);
+        if (glass._atelierType !== typeKey && typeof glass.setType === 'function') {
+            glass._atelierType = typeKey;
+            glass.setType(type);
+        }
+        if (typeof glass.setPlan !== 'function')
+            return;
+        const tone = this._toneNow;
+        const plan = tone ? {digits: this._digitsPlan(widget, tone), date: this._datePlan(widget, tone)} : {digits: null, date: null};
+        const line = this._dateLineOf(widget);
+        if (line)
+            line._atelierPlan = plan.date;
+        const planKey = JSON.stringify(plan);
+        if (glass._atelierPlanKey === planKey)
+            return;
+        glass._atelierPlanKey = planKey;
+        glass.setPlan(plan);
+    }
+
+    // What a glass clock's digits take to read: on the wallpaper behind
+    // them (where they stand; the clock's place until they are measured),
+    // their glass as it comes out there.
+    _digitsPlan(widget, tone) {
+        const glass = widget.glass;
+        const typography = this._typography;
+        const metrics = glass.digitsMetrics ?? null;
+        // (Until the face says: its digits' size as it measures them,
+        // device pixels, and their weight as set.)
+        const size = metrics?.size ?? (glass.metrics?.fontSize ? glass.metrics.fontSize / scaleFactor() : null);
+        if (!size)
+            return null;
+        const weight = metrics?.weight ?? typography.styleFor('glass').weight;
+        const digits = glass.digitsRect;
+        const aspect = this._area.width / this._area.height;
+        let rect = this._cellRect(widget);
+        let frosted = null;
+        if (digits && widget.get_parent()) {
+            const {x, y} = this._rectIn(glass, widget, widget.get_allocation_box());
+            const onMonitor = {x: x + digits.x, y: y + digits.y, width: digits.width, height: digits.height};
+            rect = this._monitorRect(onMonitor);
+            frosted = this._frostedBehind(onMonitor);
+        }
+        return legibilityPlan({
+            size, weight, tone,
+            stats: typography.statsOf(rect, aspect),
+            glass: tintShown(metrics?.material),
+            ink: glassInk(tone, frosted),
+            dim: typography.dim,
+        });
+    }
+
+    // What a glass clock's date line takes to read, on the wallpaper
+    // behind it.
+    _datePlan(widget, tone) {
+        const line = this._dateLineOf(widget);
+        const type = line ? this._typeOf(line) : null;
+        if (!type)
+            return null;
+        const aspect = this._area.width / this._area.height;
+        const rect = widget.get_parent()
+            ? this._monitorRect(this._rectIn(line, widget, widget.get_allocation_box())) : this._cellRect(widget);
+        return legibilityPlan({...type, tone, stats: this._typography.statsOf(rect, aspect), dim: this._typography.dim});
+    }
+
+    // The frosted wallpaper behind a part of the monitor (pixels): what is
+    // there of it (lib/lockLook.js regionStats()); null without a backdrop.
+    _frostedBehind({x, y, width, height}) {
+        const backdrop = this._backdrop.current;
+        if (!backdrop?.sample || !(width > 0 && height > 0))
+            return null;
+        const {monitor: [mw, mh], factor: [fx, fy], shift: [sx, sy]} = backdrop;
+        // (Where the backdrop has it: its picture lies that much off.)
+        return regionStats(backdrop.sample, [(x + sx / fx) / mw, (y + sy / fy) / mh, width / mw, height / mh]);
     }
 
     /** @returns {object|null} the one tone of the widgets' type (lib/lockLook.js lockTone()); null on cards */
@@ -732,7 +873,9 @@ export class LockBoard {
         this._settings.disconnectObject(this);
         this._editor?.dim.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
-        this._cancelDepthLater();
+        this._cancelLaters();
+        // (Its last backdrop stays drawn on the clocks sliding away.)
+        this._backdrop.destroy();
         // (Kept with the layer, the cutout slides away with the lock screen.)
         this._depth?.destroy({keepActor: keepLayer});
         this._depth = null;
