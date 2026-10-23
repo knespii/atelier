@@ -143,7 +143,7 @@ profile called **Original**, so there is always a way back.
   Screen page, when you ask: Small (99 MB, Apache-2.0, seconds a
   wallpaper), Base (389 MB, CC-BY-NC-4.0: for non-commercial use, about ten
   seconds; offered first) or Large (1.3 GB, CC-BY-NC-4.0, the finest: half
-  a minute or more, and about 3.5 GB of memory while it runs).
+  a minute or more, and about 2.5 GB of memory while it runs).
 - **Claude Code**: a ring in the bar shows how far the current 5-hour block
   is, with the tokens Claude wrote in it; resting the pointer on it (or the
   control centre's Claude tab) shows the block, today, the last seven days
