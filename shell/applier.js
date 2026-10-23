@@ -1,5 +1,5 @@
 // Applies a profile: wallpaper, interface settings, shell theme and the GTK 4
-// theme for libadwaita apps.
+// theme for libadwaita apps, and the profile's widgets and lock screen.
 
 import Gio from 'gi://Gio';
 
@@ -7,7 +7,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 
 import {hasGtk4Support} from '../lib/gtkCss.js';
-import {AUTO_ACCENT, ProfileStore, effectiveWallpaper, isAccentColor} from '../lib/profiles.js';
+import {AUTO_ACCENT, ProfileStore, effectiveWallpaper, isAccentColor, writeLockscreen} from '../lib/profiles.js';
 import {USER_THEME_UUID, getUserThemeSettings, locateTheme} from '../lib/themes.js';
 import {paletteForWallpaper, readPaletteOptions} from '../lib/wallpaperPalette.js';
 import {serializeLayout} from '../lib/widgets.js';
@@ -34,6 +34,7 @@ export class Applier {
         this._next = null;
         this._running = null;
         this._targetId = null;
+        this._writing = false;
         this._destroyed = false;
 
         /** Optional wallpaper transition, see reveal.js */
@@ -57,6 +58,15 @@ export class Applier {
     /** @returns {string|null} the newest profile requested while busy */
     get targetId() {
         return this._targetId;
+    }
+
+    /**
+     * @returns {boolean} whether a profile's settings are being written
+     *   right now: what changes then is the profile's, not an edit of the
+     *   one in use (which it still is)
+     */
+    get writing() {
+        return this._writing;
     }
 
     /**
@@ -118,7 +128,12 @@ export class Applier {
                     console.error('Atelier: before applying a profile', e);
                 }
             }
-            this._write(plan);
+            this._writing = true;
+            try {
+                this._write(plan);
+            } finally {
+                this._writing = false;
+            }
             if (!keepActive)
                 this._store.activeId = profile.id;
             onWritten?.();
@@ -138,7 +153,7 @@ export class Applier {
         const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const plan = {
             background: null, iface: {}, shellTheme: null, gtkThemeDir: null,
-            palette: profile.palette, widgets: profile.widgets,
+            palette: profile.palette, widgets: profile.widgets, lockscreen: profile.lockscreen,
         };
         const scheme = profile.colorScheme ?? iface.get_string('color-scheme');
 
@@ -258,6 +273,14 @@ export class Applier {
                 desktop.set_boolean('glass', plan.widgets.glass);
             if (desktop.get_double('card-opacity') !== plan.widgets.opacity)
                 desktop.set_double('card-opacity', plan.widgets.opacity);
+        }
+
+        // And its lock screen, in one go.
+        if (plan.lockscreen) {
+            const lock = this._settings.get_child('lockscreen');
+            lock.delay();
+            writeLockscreen(lock, plan.lockscreen);
+            lock.apply();
         }
     }
 
