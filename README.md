@@ -10,8 +10,8 @@
 
 A GNOME Shell extension (GNOME 48 to 50) that styles the whole desktop as one
 piece. **Profiles** keep a look – wallpaper, light/dark style, accent, GTK and
-shell theme, icons, cursor, font, palette and the widgets – and one key
-switches between them. A **palette taken from the wallpaper** colors Atelier
+shell theme, icons, cursor, font, palette, the widgets and the lock screen –
+and one key switches between them. A **palette taken from the wallpaper** colors Atelier
 and, if you want, GTK apps and GNOME Terminal. In the middle of the top bar,
 an **island** takes the place of GNOME's clock: it grows into a glance, the
 notifications and the control centre, and new notes drip out of it. On the
@@ -39,11 +39,15 @@ screen and a **dock**.
   anything changed in GNOME Settings, leaves them alone; switching to a
   profile brings its look back. The widgets are the exception: what you change
   on the desktop is kept in the profile in use – and switching, they pour over
-  to where the next profile keeps them.
+  to where the next profile keeps them. So is the lock screen, as on an
+  iPhone: each profile has its own widgets on it, their look, the clock's
+  font, weight, width and colour, GNOME's clock or not and the depth effect,
+  and what you change of it (on the mock lock screen or in the settings) is
+  kept in the profile in use.
 - **A new profile**: pick the **+** card at the end of the Profiles tab. The
   island drips a sheet with what the desktop has now – the wallpaper, style,
-  themes, palette and widgets – to name it and choose light or dark and the
-  accent; *More in Settings…* opens the rest.
+  themes, palette, widgets and lock screen – to name it and choose light or
+  dark and the accent; *More in Settings…* opens the rest.
 - **Settings** live in the preferences: open *Extension Manager* (or
   *Extensions*) and click the gear next to Atelier.
 - **Other extensions**: a few get in Atelier's way – Blur my Shell's lock
