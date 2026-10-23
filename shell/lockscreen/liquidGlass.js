@@ -52,12 +52,12 @@ const LENS = 0.8;
 // The band: as deep as the shape blurred this much (logical pixels) runs
 // in from the edge, strongest at the edge; and how much lighter it is, on
 // light glass and on dark.
-const BAND = {blur: 6, light: [0.16, 0.06]};
+const BAND = {blur: 6, light: [0.22, 0.08]};
 // The rim: light caught along the upper and left edges – the shape less
 // itself moved away from the light, by the rim's width (logical pixels) –
 // brighter at the top than at the bottom; and where the light leaves it,
 // lower and right, a thinner one. On dark glass half as bright.
-const RIM = {width: 1.6, light: [-0.45, -1], alpha: [0.78, 0.3], exit: {width: 0.9, alpha: 0.32}};
+const RIM = {width: 1.6, light: [-0.45, -1], alpha: [0.9, 0.4], exit: {width: 0.9, alpha: 0.45}};
 // Inside the lower edges, a little further in, a darker line (the glass
 // is thick there), faint.
 const INNER = {width: 2.6, alpha: 0.08};
@@ -444,15 +444,27 @@ class Masks {
         this._kept = new Map();
     }
 
-    // The surface of a name, cleared: so many pixels, at a device scale.
-    _get(name, width, height, density, format = Cairo.Format.A8) {
+    /**
+     * The surface of a name: so many pixels, at a device scale.
+     *
+     * @param {string} name
+     * @param {number} width - pixels
+     * @param {number} height
+     * @param {number} density - device scale
+     * @param {Cairo.Format} [format]
+     * @param {boolean} [clear] - cleared (unless all of it is drawn anew)
+     * @returns {Cairo.ImageSurface}
+     */
+    surface(name, width, height, density, format = Cairo.Format.A8, clear = true) {
         let surface = this._kept.get(name);
         if (surface && surface.getWidth() === width && surface.getHeight() === height &&
             surface.getDeviceScale()[0] === density && surface.getFormat() === format) {
-            const cr = new Cairo.Context(surface);
-            cr.setOperator(Cairo.Operator.CLEAR);
-            cr.paint();
-            cr.$dispose();
+            if (clear) {
+                const cr = new Cairo.Context(surface);
+                cr.setOperator(Cairo.Operator.CLEAR);
+                cr.paint();
+                cr.$dispose();
+            }
             return surface;
         }
         surface = new Cairo.ImageSurface(format, width, height);
@@ -466,10 +478,12 @@ class Masks {
      * @param {object} area - {x, y, width, height} of the drawing it covers
      * @param {number} density - the drawing's device pixels per pixel
      * @param {Function} draw - (cr) => draws it, in the drawing's coordinates
+     * @param {boolean} [clear] - cleared first (unless draw() covers it all)
      * @returns {Cairo.ImageSurface} an alpha mask
      */
-    over(name, area, density, draw) {
-        const surface = this._get(name, Math.ceil(area.width * density), Math.ceil(area.height * density), density);
+    over(name, area, density, draw, clear = true) {
+        const surface = this.surface(name, Math.ceil(area.width * density), Math.ceil(area.height * density), density,
+            Cairo.Format.A8, clear);
         const cr = new Cairo.Context(surface);
         cr.translate(-area.x, -area.y);
         draw(cr);
@@ -496,17 +510,20 @@ class Masks {
     blurred(name, mask, area, density, reach) {
         const [width, height] = [Math.ceil(area.width * density), Math.ceil(area.height * density)];
         const [columns, rows] = [Math.ceil(area.width / reach) + 2, Math.ceil(area.height / reach) + 2];
-        const out = this._get(name, width, height, density, Cairo.Format.ARGB32);
-        const other = this._get(`${name}:half`, width, height, density, Cairo.Format.ARGB32);
+        // (Each drawn all over, with SOURCE: none of them cleared first.)
+        const out = this.surface(name, width, height, density, Cairo.Format.ARGB32, false);
+        const other = this.surface(`${name}:half`, width, height, density, Cairo.Format.ARGB32, false);
         [[out, 0], [other, reach / 2]].forEach(([large, offset], i) => {
-            const small = this._get(`${name}:${i}`, columns, rows, 1 / reach);
+            const small = this.surface(`${name}:${i}`, columns, rows, 1 / reach, Cairo.Format.A8, false);
             let cr = new Cairo.Context(small);
+            cr.setOperator(Cairo.Operator.SOURCE);
             cr.setSourceSurface(mask, offset, offset);
             cr.getSource().setFilter(Cairo.Filter.GOOD);
             cr.paint();
             cr.$dispose();
-            const colour = this._get(`${name}:${i}:colour`, columns, rows, 1 / reach, Cairo.Format.ARGB32);
+            const colour = this.surface(`${name}:${i}:colour`, columns, rows, 1 / reach, Cairo.Format.ARGB32, false);
             cr = new Cairo.Context(colour);
+            cr.setOperator(Cairo.Operator.SOURCE);
             cr.setSourceSurface(small, 0, 0);
             cr.paintWithAlpha(0.5);
             cr.$dispose();
@@ -538,12 +555,13 @@ class Masks {
      */
     less(name, area, density, mask, [other, dx = 0, dy = 0]) {
         return this.over(name, area, density, cr => {
+            cr.setOperator(Cairo.Operator.SOURCE);
             cr.setSourceSurface(mask, area.x, area.y);
             cr.paint();
             cr.setOperator(Cairo.Operator.DEST_OUT);
             cr.setSourceSurface(other, area.x + Math.round(dx), area.y + Math.round(dy));
             cr.paint();
-        });
+        }, false);
     }
 }
 
@@ -626,11 +644,19 @@ export class LiquidGlass {
         const masks = this._masks;
         const append = typeof path === 'function' ? path : c => c.appendPath(path);
         const light = !tone.dark;
-        // (What is drawn round the shape: the shadow's reach, or the rim's.)
+        // What is drawn round the shape (the shadow's reach, or the rim's),
+        // as far as the drawing is clipped (only some glyphs drawn anew).
         const reach = Math.ceil((shadow > 0 ? 2.5 * SHADOW.blur : 2 * RIM.width + 2) * scale);
-        const area = {x: Math.floor(x - reach), y: Math.floor(y - reach)};
-        area.width = Math.ceil((Math.ceil(x + width + reach) - area.x) / MASK_STEP) * MASK_STEP;
-        area.height = Math.ceil((Math.ceil(y + height + reach) - area.y) / MASK_STEP) * MASK_STEP;
+        cr.save();
+        cr.identityMatrix();
+        const [cx1, cy1, cx2, cy2] = cr.clipExtents();
+        cr.restore();
+        const area = {x: Math.floor(Math.max(cx1, x - reach)), y: Math.floor(Math.max(cy1, y - reach))};
+        const [right, bottom] = [Math.min(cx2, x + width + reach), Math.min(cy2, y + height + reach)];
+        if (!(right > area.x && bottom > area.y))
+            return;
+        area.width = Math.ceil((Math.ceil(right) - area.x) / MASK_STEP) * MASK_STEP;
+        area.height = Math.ceil((Math.ceil(bottom) - area.y) / MASK_STEP) * MASK_STEP;
         const [density] = cr.getTarget().getDeviceScale();
 
         const shape = masks.over('shape', area, density, c => {
@@ -707,20 +733,15 @@ export class LiquidGlass {
             // (What is not the shape, blurred: inside, strongest at the edge.
             // Outside it, the shape cuts it away.)
             const outside = masks.over('outside', area, density, c => {
+                c.setOperator(Cairo.Operator.SOURCE);
                 c.paint();
                 c.setOperator(Cairo.Operator.DEST_OUT);
                 c.setSourceSurface(shape, area.x, area.y);
                 c.paint();
-            });
+            }, false);
             const band = masks.blurred('band', outside, area, density, BAND.blur * scale);
-            cells.forEach((cell, i) => {
-                cr.save();
-                cr.rectangle(edges[i], area.y, edges[i + 1] - edges[i], area.height);
-                cr.clip();
-                this._setBackdrop(cr, at, cell.center, LENS);
-                cr.maskSurface(band, area.x, area.y);
-                cr.restore();
-            });
+            cr.setSourceSurface(this._lensed(area, density, cells, edges, at), area.x, area.y);
+            cr.maskSurface(band, area.x, area.y);
             // (Darker: as multiplied, black over an opaque backdrop.)
             if (!light) {
                 cr.setSourceRGBA(0, 0, 0, 1 - DIM);
@@ -737,6 +758,40 @@ export class LiquidGlass {
         gradient.addColorStopRGBA(1, ...tint, Math.min(1, alpha * TINT_GRADIENT[1]));
         cr.setSource(gradient);
         cr.paint();
+    }
+
+    // The backdrop through the lens about each glyph's middle: drawn small
+    // (about as fine as the backdrop is) and large again, it is blended
+    // through a mask as it is – drawn through the lens there and then, each
+    // pixel would cost Cairo several times as much.
+    _lensed(area, density, cells, edges, at) {
+        const step = Math.max(1, Math.floor(1 / Math.max(...this._backdrop.factor)));
+        const [columns, rows] = [Math.ceil(area.width / step) + 1, Math.ceil(area.height / step) + 1];
+        // (Drawn in the area's own coordinates: where it lies on the monitor
+        // is where the area does, the glyphs' middles in it.)
+        const small = this._masks.surface('lens:small', columns, rows, 1 / step, Cairo.Format.ARGB32, false);
+        const origin = [at[0] + area.x, at[1] + area.y];
+        let cr = new Cairo.Context(small);
+        cr.setOperator(Cairo.Operator.SOURCE);
+        cells.forEach((cell, i) => {
+            const left = i === 0 ? 0 : edges[i] - area.x;
+            const right = i === cells.length - 1 ? columns * step : edges[i + 1] - area.x;
+            cr.save();
+            cr.rectangle(left, 0, right - left, rows * step);
+            cr.clip();
+            this._setBackdrop(cr, origin, [cell.center[0] - area.x, cell.center[1] - area.y], LENS);
+            cr.paint();
+            cr.restore();
+        });
+        cr.$dispose();
+        const large = this._masks.surface('lens', Math.ceil(area.width * density), Math.ceil(area.height * density),
+            density, Cairo.Format.ARGB32, false);
+        cr = new Cairo.Context(large);
+        cr.setOperator(Cairo.Operator.SOURCE);
+        cr.setSourceSurface(small, 0, 0);
+        cr.paint();
+        cr.$dispose();
+        return large;
     }
 
     // The backdrop as the source, where it lies behind the drawing, through
