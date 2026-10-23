@@ -77,33 +77,37 @@ export class LockTypography extends EventEmitter {
     }
 
     /**
-     * @param {object[]} parts - {rect, weight} of each widget: rect its
+     * @param {object[]} parts - {rect, weight, text} of each widget: rect its
      *   [x, y, width, height] on the main monitor, 0 … 1; weight how much
-     *   it counts (the clock more than the small widgets)
+     *   it counts (the clock more than the small widgets); text the most
+     *   demanding type on it (lib/lockLook.js TYPE; none: the date line)
      * @param {number} aspect - the monitor's width over its height
-     * @returns {object} the one tone of their type (lib/lockLook.js lockTone())
+     * @returns {object} the one tone of their type, with what it takes to
+     *   read (lib/lockLook.js lockTone(), chosenTone())
      */
     toneFor(parts, aspect) {
-        const chosen = this._settings.get_string('clock-color');
-        if (isColor(chosen))
-            return chosenTone(chosen);
         const sample = this._sample;
-        const stats = sample ? mergeStats(parts.map(({rect, weight}) => ({
+        const stats = sample ? mergeStats(parts.map(({rect, weight, text}) => ({
             stats: regionStats(sample, regionIn(rect, aspect, sample.width / sample.height)),
             weight,
+            text,
         }))) : null;
+        const chosen = this._settings.get_string('clock-color');
+        if (isColor(chosen))
+            return chosenTone(chosen, stats, {dim: GLASS.brightness});
         return lockTone(stats, {tint: this._tint, dim: GLASS.brightness});
     }
 
     /**
      * @param {object|null} tone - toneFor(); null: on a card, the card's colours
      * @returns {{widget: string, part: Function}} the inline style of a
-     *   widget, and of a part of it (given its style classes)
+     *   widget (with the shadow its type takes to read, if any), and of a
+     *   part of it (given its style classes)
      */
     styleOf(tone) {
         const font = this.font;
         return {
-            widget: widgetStyle(tone, font),
+            widget: widgetStyle(tone, font, tone?.plan ?? null),
             part: classes => partStyle(classes, tone, font),
         };
     }
