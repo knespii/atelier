@@ -25,6 +25,9 @@ const FILL = 0.98; // of the clock's width the digits take, at most
 const SAMPLE = '00:00'; // the digits fit the width as this would: the size stays as the minutes go
 const DATE_GAP = 2; // between the date line and the digits, logical pixels
 const SETTLE_TIME = 450; // to a new height, ms
+// How far below its box a subject under the clock is looked for (and the
+// digits may go, to stand behind it), of the box's height.
+const BELOW = 1;
 // The glass: a light tint, more of it at the top, a bright rim, and a soft
 // shadow round it (outside it only).
 const TINT = [0.66, 0.44];
@@ -70,13 +73,11 @@ class AtelierGlassDigits extends St.DrawingArea {
         const path = cr.copyPath();
         const [top, bottom] = [level, level + metrics.inkHeight * stretch];
 
-        // The shadow, outside the digits only (the glass shows the wallpaper).
-        cr.save();
-        cr.newPath();
-        cr.rectangle(0, 0, width, height);
-        cr.appendPath(path);
-        cr.setFillRule(Cairo.FillRule.EVEN_ODD);
-        cr.clip();
+        // The shadow, outside the digits only (the glass shows the
+        // wallpaper): drawn on its own, the digits then taken out of it –
+        // filled, so that where a font's outlines overlap inside a digit
+        // nothing shows.
+        cr.pushGroup();
         cr.appendPath(path);
         for (const [lineWidth, alpha] of SHADOW) {
             if (dark)
@@ -86,7 +87,11 @@ class AtelierGlassDigits extends St.DrawingArea {
             cr.setLineWidth(lineWidth * scale);
             cr.strokePreserve();
         }
-        cr.restore();
+        cr.setOperator(Cairo.Operator.DEST_OUT);
+        cr.setSourceRGBA(0, 0, 0, 1);
+        cr.fill();
+        cr.popGroupToSource();
+        cr.paint();
 
         cr.newPath();
         cr.appendPath(path);
@@ -94,13 +99,26 @@ class AtelierGlassDigits extends St.DrawingArea {
         tint.addColorStopRGBA(0, r, g, b, TINT[0] * color.alpha / 255);
         tint.addColorStopRGBA(1, r, g, b, TINT[1] * color.alpha / 255);
         cr.setSource(tint);
-        cr.fillPreserve();
+        cr.fill();
+
+        // The rim: light along the digits' upper edges, as glass catches
+        // it – the digits, less themselves a little lower (again filled,
+        // not stroked: no lines where outlines overlap).
         const rim = new Cairo.LinearGradient(0, top, 0, bottom);
         rim.addColorStopRGBA(0, 1, 1, 1, RIM[0] * (dark ? 0.5 : 1));
         rim.addColorStopRGBA(1, 1, 1, 1, RIM[1] * (dark ? 0.5 : 1));
+        cr.pushGroup();
+        cr.appendPath(path);
         cr.setSource(rim);
-        cr.setLineWidth(1.2 * scale);
-        cr.stroke();
+        cr.fill();
+        cr.setOperator(Cairo.Operator.DEST_OUT);
+        cr.translate(0, 1.6 * scale);
+        cr.appendPath(path);
+        cr.setSourceRGBA(0, 0, 0, 1);
+        cr.fill();
+        cr.identityMatrix();
+        cr.popGroupToSource();
+        cr.paint();
         cr.$dispose();
     }
 });
@@ -211,18 +229,21 @@ const GlassFace = GObject.registerClass({
         this.onMeasured?.();
     }
 
-    // Under the date line, to the bottom of the box.
+    // Under the date line, to the bottom of the box – and how far below it
+    // a subject may stand that the digits go down behind.
     _room() {
         const [, dateHeight] = this._date.get_preferred_height(-1);
-        return {top: dateHeight + DATE_GAP * scaleFactor(), bottom: this._size[1]};
+        const bottom = this._size[1];
+        return {top: dateHeight + DATE_GAP * scaleFactor(), bottom, reach: Math.round(bottom * (1 + BELOW))};
     }
 
     // Where the digits go, for the room there is and the subject under them.
     _retarget(animate) {
         if (!this._metrics)
             return;
-        const {top, bottom} = this._room();
-        const target = glassDigits(this._metrics.inkHeight, top, bottom, this._subject);
+        const {top, bottom, reach} = this._room();
+        // (Down behind a subject below the box too; without one, in it.)
+        const target = glassDigits(this._metrics.inkHeight, top, this._subject === null ? bottom : reach, this._subject);
         if (this._target && Math.abs(this._target.stretch - target.stretch) < 0.005 &&
             Math.abs(this._target.y - target.y) < 0.5)
             return;
@@ -262,7 +283,8 @@ const GlassFace = GObject.registerClass({
         if (!this._metrics)
             return null;
         const width = this._metrics.width;
-        return {x: (this._size[0] - width) / 2, width, ...this._room()};
+        const {top, reach} = this._room();
+        return {x: (this._size[0] - width) / 2, width, top, bottom: reach};
     }
 
     /** @returns {object|null} {x, y, width, height} of the digits where they go, in the face */
@@ -279,7 +301,8 @@ const GlassFace = GObject.registerClass({
         const [width, height] = [box.get_width(), box.get_height()];
         const resized = width !== this._size[0] || height !== this._size[1];
         this._size = [width, height];
-        this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
+        // (Taller than the box: the digits may go down behind a subject.)
+        this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: Math.round(height * (1 + BELOW))}));
         if (!this._metrics || resized) {
             this._measure(width);
             this._target = null;
