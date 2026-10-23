@@ -492,7 +492,7 @@ class Masks {
      * @returns {Cairo.ImageSurface} an alpha mask
      */
     over(name, area, density, draw, clear = true) {
-        const surface = this.surface(name, Math.ceil(area.width * density), Math.ceil(area.height * density), density,
+        const surface = this.surface(name, Math.round(area.width * density), Math.round(area.height * density), density,
             Cairo.Format.A8, clear);
         const cr = new Cairo.Context(surface);
         cr.translate(-area.x, -area.y);
@@ -518,7 +518,7 @@ class Masks {
      *   alpha the mask)
      */
     blurred(name, mask, area, density, reach) {
-        const [width, height] = [Math.ceil(area.width * density), Math.ceil(area.height * density)];
+        const [width, height] = [Math.round(area.width * density), Math.round(area.height * density)];
         const [columns, rows] = [Math.ceil(area.width / reach) + 2, Math.ceil(area.height / reach) + 2];
         // (Each drawn all over, with SOURCE: none of them cleared first.)
         const out = this.surface(name, width, height, density, Cairo.Format.ARGB32, false);
@@ -553,8 +553,8 @@ class Masks {
     }
 
     /**
-     * A mask less another, moved by whole pixels (smoothly in between would
-     * cost each pixel a blend of four).
+     * A mask less another, moved by whole pixels of the drawing's (smoothly
+     * in between would cost each pixel a blend of four).
      *
      * @param {string} name
      * @param {object} area
@@ -569,7 +569,7 @@ class Masks {
             cr.setSourceSurface(mask, area.x, area.y);
             cr.paint();
             cr.setOperator(Cairo.Operator.DEST_OUT);
-            cr.setSourceSurface(other, area.x + Math.round(dx), area.y + Math.round(dy));
+            cr.setSourceSurface(other, area.x + dx, area.y + dy);
             cr.paint();
         }, false);
     }
@@ -662,13 +662,21 @@ export class LiquidGlass {
         cr.identityMatrix();
         const [cx1, cy1, cx2, cy2] = cr.clipExtents();
         cr.restore();
-        const area = {x: Math.floor(Math.max(cx1, x - reach)), y: Math.floor(Math.max(cy1, y - reach))};
-        const [right, bottom] = [Math.min(cx2, x + width + reach), Math.min(cy2, y + height + reach)];
-        if (!(right > area.x && bottom > area.y))
-            return;
-        area.width = Math.ceil((Math.ceil(right) - area.x) / MASK_STEP) * MASK_STEP;
-        area.height = Math.ceil((Math.ceil(bottom) - area.y) / MASK_STEP) * MASK_STEP;
+        // (On whole pixels of the drawing's – its device pixels, at 150 %
+        // half again as many: the masks lie on them pixel on pixel, which
+        // Cairo does fastest.)
         const [density] = cr.getTarget().getDeviceScale();
+        const [left, top] = [Math.max(cx1, x - reach), Math.max(cy1, y - reach)].map(v => Math.floor(v * density));
+        const [right, bottom] = [Math.min(cx2, x + width + reach), Math.min(cy2, y + height + reach)]
+            .map(v => Math.ceil(v * density));
+        if (!(right > left && bottom > top))
+            return;
+        const area = {
+            x: left / density,
+            y: top / density,
+            width: Math.ceil((right - left) / MASK_STEP) * MASK_STEP / density,
+            height: Math.ceil((bottom - top) / MASK_STEP) * MASK_STEP / density,
+        };
 
         const shape = masks.over('shape', area, density, c => {
             append(c);
@@ -676,8 +684,9 @@ export class LiquidGlass {
         });
         const [lx, ly] = RIM.light;
         const [ux, uy] = [lx / Math.hypot(lx, ly), ly / Math.hypot(lx, ly)];
-        // (A whole pixel at least, each way it goes at all.)
-        const step = v => Math.sign(v) * Math.max(Math.abs(v) > 0.2 ? 1 : 0, Math.round(Math.abs(v)));
+        // (Whole pixels of the drawing's, one at least each way it goes at all.)
+        const step = v => Math.sign(v) * Math.max(Math.abs(v) > 0.2 ? 1 : 0, Math.round(Math.abs(v * density))) /
+            density;
         const away = w => [shape, step(-ux * w * scale), step(-uy * w * scale)];
         const toward = w => [shape, step(ux * w * scale), step(uy * w * scale)];
 
@@ -795,7 +804,7 @@ export class LiquidGlass {
             cr.restore();
         });
         cr.$dispose();
-        const large = this._masks.surface('lens', Math.ceil(area.width * density), Math.ceil(area.height * density),
+        const large = this._masks.surface('lens', Math.round(area.width * density), Math.round(area.height * density),
             density, Cairo.Format.ARGB32, false);
         cr = new Cairo.Context(large);
         cr.setOperator(Cairo.Operator.SOURCE);
