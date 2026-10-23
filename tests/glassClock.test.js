@@ -1,6 +1,6 @@
 import {
     CHANGE, FEATURES, FIGURES, FILL, SAMPLE, changeAt, changedFigures, fitSize, fontFile, glassInstance, heavier,
-    learn, lineOf, opticalSize, unlearnt,
+    learn, lineOf, opticalSize, setLine, unlearnt,
 } from '../lib/glassClock.js';
 import {bundledFile, fontAt, systemFontFile} from '../lib/glyphOutlines.js';
 import {styleFor, typefaceFor} from '../lib/lockType.js';
@@ -35,35 +35,47 @@ export function testHeavier() {
 export function testInstances() {
     const inter = typefaceFor('inter');
     const style = styleFor(inter, 'glass');
-    const large = glassInstance(fontFile(inter, style.weight), inter, style, {size: 'large'});
+    const large = glassInstance(inter, style, {size: 'large'});
     assert(large.font !== null, 'Inter read');
     assertEqual(large.variations, 'wght=600,opsz=32', 'Inter at its display size: the axis\' largest');
     assertEqual(large.scaleX, 0.9, 'no width axis: drawn 90 % as wide');
-    const square = glassInstance(fontFile(inter, style.weight), inter, style, {size: 'square'});
+    const square = glassInstance(inter, style, {size: 'square'});
     assertEqual(square.key, large.key, 'Inter: one instance for every size');
     assert(square.font === large.font, 'the same kept font');
 
     const flex = typefaceFor('flex');
     const flexStyle = styleFor(flex, 'glass');
-    const flexLarge = glassInstance(fontFile(flex, 600), flex, flexStyle, {size: 'large'});
+    const flexLarge = glassInstance(flex, flexStyle, {size: 'large'});
     assertEqual(flexLarge.variations, `wght=600,wdth=90,opsz=${opticalSize('large')}`,
         'Roboto Flex: its width axis, its optical size the large clock\'s');
     assertEqual(flexLarge.scaleX, 1, 'as wide as the axis makes it');
-    const flexSquare = glassInstance(fontFile(flex, 600), flex, flexStyle, {size: 'square'});
+    const flexSquare = glassInstance(flex, flexStyle, {size: 'square'});
     assert(flexSquare.key !== flexLarge.key && flexSquare.variations.endsWith(`opsz=${opticalSize('square')}`),
         `a small clock at a smaller optical size (${flexSquare.variations})`);
-    const graded = glassInstance(fontFile(flex, 600), flex, flexStyle, {size: 'large', plan: {boldness: 0.5, weight: 700}});
+    const graded = glassInstance(flex, flexStyle, {size: 'large', plan: {boldness: 0.5, weight: 700}});
     assert(graded.variations.includes('GRAD=75') && graded.weight === 600 && graded.key !== flexLarge.key,
         `a plan grades it (${graded.variations})`);
     assertEqual(graded.font.shape(SAMPLE, FEATURES).advance, flexLarge.font.shape(SAMPLE, FEATURES).advance,
         'graded, the line as wide');
 
     const shell = typefaceFor('default');
-    const none = glassInstance(null, shell, styleFor(shell, 'glass'));
-    assert(none.font === null && none.file === null && none.variations === 'wght=600',
+    const none = glassInstance(shell, styleFor(shell, 'glass'), {shellFamily: 'No Such Family'});
+    assert(none.font === null && none.file === null && none.variations === 'wght=600' && none.key.startsWith('pango:'),
         `no file: no font, the weight for Pango (${none.variations})`);
-    const unreadable = glassInstance('/nonexistent/font.ttf', shell, styleFor(shell, 'glass'));
-    assert(unreadable.font === null, 'a file that can\'t be read: none either');
+    const cantarell = systemFontFile('Cantarell');
+    if (cantarell) {
+        const own = glassInstance(shell, styleFor(shell, 'glass'), {shellFamily: 'Cantarell'});
+        assert(own.file === cantarell && own.variations.startsWith('wght=600'), `the shell's own font's file (${own.variations})`);
+    }
+    // (A family of a file per weight: a plan's heavier weight, its heavier file.)
+    const rounded = typefaceFor('rounded');
+    if (systemFontFile('Quicksand', 500) !== systemFontFile('Quicksand', 700)) {
+        const roundedStyle = {weight: 500, width: 100};
+        const plain = glassInstance(rounded, roundedStyle);
+        const bolder = glassInstance(rounded, roundedStyle, {plan: {boldness: 1, weight: 700}});
+        assert(plain.file.endsWith('Quicksand-Medium.ttf') && bolder.file.endsWith('Quicksand-Bold.ttf'),
+            `Quicksand heavier: its bold file (${plain.file} → ${bolder.file})`);
+    }
 }
 
 export function testOpticalSize() {
@@ -77,11 +89,29 @@ export function testFitSize() {
     const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
     for (const width of [180, 336, 500]) {
         const size = fitSize(font, width, 0.9);
-        const lineAt = s => font.shape(SAMPLE, FEATURES).advance * s / font.upem * 0.9;
+        const lineAt = s => setLine(font, SAMPLE).advance * s / font.upem * 0.9;
         assert(lineAt(size) <= width * FILL && lineAt(size + 1) > width * FILL,
             `${width} px: as large as fits (${size} px, ${lineAt(size).toFixed(1)} px wide)`);
     }
     assertEqual(fitSize(font, 1), 8, 'never smaller than 8 px');
+}
+
+export function testTabularWithout() {
+    // Quicksand has no tabular figures: each of its own in a cell as wide
+    // as its widest, the time doesn't wobble all the same.
+    const path = systemFontFile('Quicksand', 700);
+    if (!path)
+        return;
+    const font = fontAt(path, '');
+    const own = font.shape('0123456789', FEATURES).glyphs.map(g => g.advance);
+    assert(new Set(own).size > 1, `its figures are as wide as each is (${own})`);
+    const a = setLine(font, '10:52');
+    const b = setLine(font, '11:11');
+    assertEqual(a.advance, b.advance, 'the line as long');
+    assertEqual([a.glyphs[2].x, a.glyphs[3].x - a.glyphs[2].x > 0], [b.glyphs[2].x, true], 'the colon where it was');
+    const one = font.outline(font.glyphOf('1')).advance;
+    const widest = Math.max(...own);
+    assertEqual(b.glyphs[0].x, (widest - one) / 2, 'a "1" in the middle of its cell');
 }
 
 export function testLines() {

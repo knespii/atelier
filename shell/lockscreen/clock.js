@@ -26,8 +26,8 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
-    CHANGE, FEATURES, FIGURES, FILL, SAMPLE, boxRound, changeAt, changedFigures, fitSize, fontFile, glassInstance,
-    heavier, learn, placeLine, traceLine, unlearnt,
+    CHANGE, FIGURES, FILL, SAMPLE, boxRound, changeAt, changedFigures, fitSize, glassInstance, heavier, learn,
+    placeLine, setLine, traceLine, unlearnt,
 } from '../../lib/glassClock.js';
 import {glassFor, tintShown} from '../../lib/glassBackdrop.js';
 import {glassDigits} from '../../lib/lockLook.js';
@@ -402,8 +402,8 @@ const GlassFace = GObject.registerClass({
     // optical size. A font without a figure is left to Pango.
     _wantedFont() {
         const {typeface, style} = this._type;
-        const wanted = glassInstance(fontFile(typeface, style.weight, shellFamily()), typeface, style,
-            {size: this._sizeName, plan: this._plan?.digits});
+        const wanted = glassInstance(typeface, style,
+            {size: this._sizeName, plan: this._plan?.digits, shellFamily: shellFamily()});
         const font = wanted.font;
         if (font && [...FIGURES.replace(/\D/g, ''), ...this._text].some(char => !(font.glyphOf(char) > 0)))
             return {...wanted, font: null, file: null, key: `pango:${wanted.key}`};
@@ -488,7 +488,7 @@ const GlassFace = GObject.registerClass({
             const size = fitSize(font.font, width, font.scaleX);
             const k = size / font.font.upem;
             const {top, bottom} = font.font.figures;
-            const {advance} = font.font.shape(SAMPLE, FEATURES);
+            const {advance} = setLine(font.font, SAMPLE);
             this._metrics = {fontSize: size, inkY: 0, inkHeight: Math.max(1, (top - bottom) * k), width: advance * k * font.scaleX};
         } else {
             if (!this._digits.get_stage())
@@ -870,8 +870,9 @@ export class GlassWarmUp {
         const style = styleFor(typeface, 'glass', {
             weight: this._settings.get_int('clock-weight'), width: this._settings.get_int('clock-width'),
         });
-        const file = fontFile(typeface, style.weight, shellFamily());
-        const fonts = [...new Set(this._clocks().map(entry => glassInstance(file, typeface, style, {size: entry.size}).font))]
+        const family = shellFamily();
+        const fonts = [...new Set(this._clocks().map(entry =>
+            glassInstance(typeface, style, {size: entry.size, shellFamily: family}).font))]
             .filter(Boolean);
         if (fonts.length === 0)
             return;
