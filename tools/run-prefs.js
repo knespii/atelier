@@ -49,9 +49,14 @@ function extensionSettings() {
 
 function seedSampleProfiles() {
     const bg = '/usr/share/backgrounds/gnome';
+    // (Lock screens of their own, as the shell gives every profile one.)
+    const glassClock = {id: 'clock', kind: 'clock', size: 'tall', x: 13, y: 2, fine: true, face: 'glass'};
+    const stackedClock = {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'};
     const profiles = [
-        {id: 'amber', name: 'Amber', wallpaper: `${bg}/amber-d.jxl`, colorScheme: 'prefer-dark', accentColor: 'orange', iconTheme: 'Adwaita'},
-        {id: 'glass', name: 'Glass Chip', wallpaper: `${bg}/glass-chip-l.jxl`, colorScheme: 'default', accentColor: 'auto', gtkTheme: 'Adwaita', shellTheme: '', font: 'Cantarell 11'},
+        {id: 'amber', name: 'Amber', wallpaper: `${bg}/amber-d.jxl`, colorScheme: 'prefer-dark', accentColor: 'orange', iconTheme: 'Adwaita',
+            lockscreen: {widgets: [glassClock], gnomeClock: false, depthEffect: true}},
+        {id: 'glass', name: 'Glass Chip', wallpaper: `${bg}/glass-chip-l.jxl`, colorScheme: 'default', accentColor: 'auto', gtkTheme: 'Adwaita', shellTheme: '', font: 'Cantarell 11',
+            lockscreen: {widgets: [stackedClock], style: 'modern', clockFont: 'serif', gnomeClock: false}},
         {id: 'desert', name: 'Desert', wallpaper: `${bg}/fold-d.jxl`, gtkTheme: 'Desert-Green-1.3', shellTheme: 'Desert-Green-1.3', cursorTheme: 'Bibata-Modern-Classic'},
     ];
     const settings = extensionSettings();
@@ -304,6 +309,9 @@ async function runSelftest(window) {
     const profiles = store.getAll();
     check(profiles.length === before + 1, 'saving the editor adds the profile');
     const added = profiles.at(-1);
+    const {readLockscreen} = await import('../lib/profiles.js');
+    check(JSON.stringify(added.lockscreen) === JSON.stringify(readLockscreen(store.settings.get_child('lockscreen'))),
+        'with the lock screen there is now');
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     check(added.gtkTheme === iface.get_string('gtk-theme') && added.font === iface.get_string('font-name'),
         `current themes captured (${added.gtkTheme}, ${added.font})`);
@@ -344,6 +352,10 @@ async function runSelftest(window) {
     await sleep(100);
     check(imported?.name === 'Renamed' && imported.id !== renamed.id && store.getAll().length === count + 1 &&
         page._rows.some(card => card.profileId === imported.id), 'an exported profile can be imported');
+    check(JSON.stringify(imported.lockscreen) === JSON.stringify(renamed.lockscreen), 'with its lock screen');
+    const amberCard = page._rows.find(card => card.profileId === 'amber');
+    check(amberCard && findDescendant(amberCard, w => w instanceof Gtk.Label &&
+        w.label.includes('Lock screen: Glass clock, Inter, depth effect')), 'a card says its lock screen');
 
     // Toasts go to Atelier's own overlay (prefs.js replaces the window's
     // content, and with it the window's overlay); after the ones before it.
