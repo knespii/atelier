@@ -432,15 +432,29 @@
     </key>
     <key name="clock-font" type="s">
       <choices>
+        <choice value="inter"/>
+        <choice value="flex"/>
         <choice value="default"/>
         <choice value="rounded"/>
         <choice value="serif"/>
         <choice value="thin"/>
         <choice value="heavy"/>
       </choices>
-      <default>'default'</default>
+      <default>'inter'</default>
       <summary>Font of the lock screen's widgets</summary>
-      <description>Default: the shell's font as the widgets have it; Rounded and Serif: the first such font installed (the shell's own otherwise); Thin and Heavy: the shell's font, thin or heavy.</description>
+      <description>Inter and Roboto Flex: variable fonts that come with Atelier (loaded into the shell only), their weight, width and optical size set on their axes; Default: the shell's font; Rounded and Serif: the first such font installed (the shell's own otherwise). Thin and Heavy are from before the weight could be set: the shell's font, thin or heavy.</description>
+    </key>
+    <key name="clock-weight" type="i">
+      <range min="0" max="1000"/>
+      <default>0</default>
+      <summary>Weight of the lock screen's clock</summary>
+      <description>The weight of the clock's digits on the font's weight axis, 100 (thin) to 1000 (the heaviest the font has); 0: as each clock face has it.</description>
+    </key>
+    <key name="clock-width" type="i">
+      <range min="0" max="200"/>
+      <default>0</default>
+      <summary>Width of the lock screen's clock</summary>
+      <description>The width of the clock's digits, in percent of the font's normal width: on the font's width axis where it has one, drawn narrower or wider otherwise; 0: as each clock face has it.</description>
     </key>
     <key name="edit-request" type="s">
       <default>''</default>
@@ -462,6 +476,11 @@
       <default>''</default>
       <summary>The depth effect's model</summary>
       <description>Which Depth Anything V2 the depth effect uses: “small”, “base” or “large”. Empty: none chosen yet, the biggest one downloaded (or Base, to download).</description>
+    </key>
+    <key name="subject-model" type="s">
+      <default>''</default>
+      <summary>The depth effect's subject model</summary>
+      <description>Which model finds the wallpaper's subject (a person, an animal, a thing) for the depth effect, besides the depth model: “lite” (BiRefNet lite, downloaded in the settings when asked) or “none”. Empty: none chosen yet, the one downloaded if there is one.</description>
     </key>
     <key name="depth-request" type="s">
       <default>''</default>
