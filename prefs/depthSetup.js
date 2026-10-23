@@ -1,8 +1,9 @@
-// The depth effect's rows on the Lock Screen page: the switch, and what it
-// needs, step by step – Python's packages (installed by the user: the
-// command to copy), then the model (downloaded here, only when the user
-// asks, and checked: rembg's checksum, and that it loads), then ready, with
-// how the cutout of the wallpaper is coming on (the shell makes it).
+// The depth effect's rows on the Lock Screen page: the switch, the model to
+// use (three sizes of Depth Anything V2), and what it needs, step by step –
+// Python's packages (installed by the user: the command to copy), then the
+// model (downloaded here, only when the user asks, and checked: its size
+// and SHA-256, and that it loads), then ready, with how the cutout of the
+// wallpaper is coming on (the shell makes it).
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
@@ -11,7 +12,7 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Soup from 'gi://Soup?version=3.0';
 
-import {MODEL, modelPath, workerPath} from '../lib/depth.js';
+import {MODELS, chosenModel, modelPath, workerPath} from '../lib/depth.js';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 Gio._promisify(Soup.Session.prototype, 'send_async');
@@ -23,7 +24,7 @@ Gio._promisify(Gio.File.prototype, 'replace_async');
 Gio._promisify(Gio.File.prototype, 'move_async');
 Gio._promisify(Gio.File.prototype, 'delete_async');
 
-const CHUNK = 64 * 1024;
+const CHUNK = 1024 * 1024;
 const MB = 1024 * 1024;
 
 /**
@@ -33,7 +34,7 @@ const MB = 1024 * 1024;
  * @returns {Promise<{python: boolean, missing: string[], model: string}>}
  *   model: 'ok', 'missing', or why it doesn't load
  */
-export async function probe(model = modelPath()) {
+export async function probe(model) {
     const python = GLib.find_program_in_path('python3');
     if (!python)
         return {python: false, missing: [], model: 'missing'};
@@ -51,9 +52,10 @@ export async function probe(model = modelPath()) {
 }
 
 /**
- * Download the model to a file of its own, checked against rembg's
- * checksum.
+ * Download a model to a file of its own, checked against its size and
+ * SHA-256.
  *
+ * @param {object} model - one of MODELS
  * @param {string} target - where it goes (written aside, moved there when whole)
  * @param {object} [options]
  * @param {Function} [options.onProgress] - (bytes, total|0)
@@ -61,18 +63,18 @@ export async function probe(model = modelPath()) {
  * @param {Function} [options.check] - (path) => Promise<string>, 'ok' when
  *   it loads (see probe())
  */
-export async function downloadModel(target, {onProgress = () => {}, cancellable = null, check = null} = {}) {
+export async function downloadModel(model, target, {onProgress = () => {}, cancellable = null, check = null} = {}) {
     const session = new Soup.Session({user_agent: 'Atelier (GNOME Shell extension)', timeout: 60});
-    const message = Soup.Message.new('GET', MODEL.url);
+    const message = Soup.Message.new('GET', model.url);
     const input = await session.send_async(message, GLib.PRIORITY_DEFAULT, cancellable);
     if (message.get_status() !== Soup.Status.OK)
         throw new Error(`the server says ${message.get_status()} ${message.get_reason_phrase() ?? ''}`.trim());
     const total = Math.max(0, message.get_response_headers().get_content_length());
-    if (total > MODEL.maxBytes)
-        throw new Error('the file there is far bigger than the model');
+    if (total > 0 && total !== model.bytes)
+        throw new Error('the file there is not the model (its size differs)');
     GLib.mkdir_with_parents(GLib.path_get_dirname(target), 0o755);
     const partial = Gio.File.new_for_path(`${target}.partial`);
-    const checksum = new GLib.Checksum(GLib.ChecksumType.MD5);
+    const checksum = new GLib.Checksum(GLib.ChecksumType.SHA256);
     try {
         const output = await partial.replace_async(null, false, Gio.FileCreateFlags.NONE,
             GLib.PRIORITY_DEFAULT, cancellable);
@@ -83,15 +85,15 @@ export async function downloadModel(target, {onProgress = () => {}, cancellable 
             if (size === 0)
                 break;
             received += size;
-            if (received > MODEL.maxBytes)
-                throw new Error('the file there is far bigger than the model');
+            if (received > model.bytes)
+                throw new Error('the file there is bigger than the model');
             checksum.update(bytes.toArray());
             await output.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, cancellable);
             onProgress(received, total);
         }
         await output.close_async(GLib.PRIORITY_DEFAULT, null);
         await input.close_async(GLib.PRIORITY_DEFAULT, null);
-        if (checksum.get_string() !== MODEL.md5)
+        if (received !== model.bytes || checksum.get_string() !== model.sha256)
             throw new Error('what came is not the model (its checksum differs)');
         const loads = check ? await check(partial.get_path()) : 'ok';
         if (loads !== 'ok' && loads !== 'missing')
@@ -122,16 +124,31 @@ export class DepthSetup {
 
         this.switchRow = new Adw.SwitchRow({
             title: 'Depth effect',
-            subtitle: 'The wallpaper\'s subject in front of your own clocks, as if they stood behind it',
+            subtitle: 'What stands near in the wallpaper in front of your own clocks, as if they stood behind it',
         });
         settings.bind('depth-effect', this.switchRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         group.add(this.switchRow);
+
+        // The model: its size, its licence and about how long it takes.
+        this._ids = Object.keys(MODELS);
+        this.modelRow = new Adw.ComboRow({
+            title: 'Depth Model',
+            model: Gtk.StringList.new(this._ids.map(id => MODELS[id].title)),
+            selected: this._ids.indexOf(this.model),
+        });
+        // (Chosen once, it stays chosen: no longer the biggest one there.)
+        this.modelRow.connect('notify::selected', () => {
+            const id = this._ids[this.modelRow.selected];
+            if (id && id !== this.model)
+                this._settings.set_string('depth-model', id);
+        });
+        group.add(this.modelRow);
 
         this.statusRow = new Adw.ActionRow({title: 'Checking…', subtitle_selectable: true});
         this._icon = new Gtk.Image({icon_name: 'content-loading-symbolic', valign: Gtk.Align.CENTER});
         this.statusRow.add_prefix(this._icon);
         this._progress = new Gtk.ProgressBar({valign: Gtk.Align.CENTER, visible: false, width_request: 120});
-        this.downloadButton = new Gtk.Button({label: `Download Model (${MODEL.label})…`, valign: Gtk.Align.CENTER,
+        this.downloadButton = new Gtk.Button({label: 'Download Model…', valign: Gtk.Align.CENTER,
             visible: false, css_classes: ['suggested-action']});
         this.downloadButton.connect('clicked', () => this._download());
         this.cancelButton = new Gtk.Button({label: 'Cancel', valign: Gtk.Align.CENTER, visible: false});
@@ -155,7 +172,25 @@ export class DepthSetup {
 
         this._statusId = settings.connect('changed::depth-status', () => this._sync());
         this._effectId = settings.connect('changed::depth-effect', () => this._sync());
+        this._modelId = settings.connect('changed::depth-model', () => this.refresh());
         this.refresh();
+    }
+
+    /** @returns {string} the model the effect uses (an id of MODELS) */
+    get model() {
+        return chosenModel(this._settings.get_string('depth-model'));
+    }
+
+    _showModel() {
+        const id = this.model;
+        const {label, license, time} = MODELS[id];
+        if (this.modelRow.selected !== this._ids.indexOf(id))
+            this.modelRow.selected = this._ids.indexOf(id);
+        const use = license.includes('NC') ? `${license}, for non-commercial use` : license;
+        const kept = this.state?.model === 'ok' ? 'downloaded' : 'not downloaded';
+        this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time} a wallpaper; ${kept}`;
+        this.modelRow.sensitive = !this._downloading;
+        this.downloadButton.label = `Download Model (${label})…`;
     }
 
     /** @returns {Promise} what is there, looked at again */
@@ -163,7 +198,7 @@ export class DepthSetup {
         const serial = ++this._serial;
         let state;
         try {
-            state = await this.probe();
+            state = await this.probe(modelPath(this.model));
         } catch (e) {
             state = {python: true, missing: [], model: `can't be checked: ${e.message}`};
         }
@@ -191,6 +226,7 @@ export class DepthSetup {
         const state = this.state;
         if (!state)
             return;
+        this._showModel();
         if (this._downloading) {
             this._show({title: 'Downloading the model…', subtitle: this._received, icon: 'folder-download-symbolic'});
         } else if (!state.python) {
@@ -202,8 +238,8 @@ export class DepthSetup {
                 icon: 'dialog-warning-symbolic', again: true, command: install(state.missing)});
         } else if (state.model === 'missing') {
             this._show({title: 'The model isn\'t downloaded',
-                subtitle: 'u2netp, which finds the subject (Apache-2.0, from rembg on GitHub): ' +
-                    'downloaded only when you ask',
+                subtitle: `Depth Anything V2 ${MODELS[this.model].title}, which sees how near each part of the ` +
+                    'wallpaper is (from Hugging Face): downloaded only when you ask',
                 icon: 'folder-download-symbolic', download: true});
         } else if (state.model !== 'ok') {
             this._show({title: 'The model doesn\'t load', subtitle: state.model,
@@ -240,7 +276,7 @@ export class DepthSetup {
         this._sync();
         let failure = null;
         try {
-            await this.download(modelPath(), {
+            await this.download(MODELS[this.model], modelPath(this.model), {
                 cancellable: this._downloading,
                 check: path => this.probe(path).then(state => state.model),
                 onProgress: (bytes, total) => {
@@ -273,6 +309,7 @@ export class DepthSetup {
         Gio.Settings.unbind(this.switchRow, 'active');
         this._settings.disconnect(this._statusId);
         this._settings.disconnect(this._effectId);
+        this._settings.disconnect(this._modelId);
         this._settings = null;
     }
 }

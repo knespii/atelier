@@ -128,16 +128,22 @@ profile called **Original**, so there is always a way back.
   Rounded, Serif (the first such font installed), Thin or Heavy. The weather
   is GNOME's as it last had it, never fetched anew. Nothing on the lock screen opens an app, reads the network or
   shows notifications; everything else of Atelier stops while it is locked.
-  With the **depth effect** (off at first), the subject of the wallpaper – a
-  person, an animal, a mountain – stands in front of the lock screen's own
-  clocks, as on an iPhone, under the date; it goes as the prompt comes up
-  and the wallpaper blurs, and stays off where the subject would cover more
-  than 40 % of a clock. A small model, u2netp (Apache-2.0, from rembg's
-  releases), finds the subject on this computer, in a background process of
-  the session, a moment after the wallpaper changes; the lock screen only
-  shows the cutout made then. It needs `sudo apt install python3-onnxruntime
-  python3-pil`, and the model (4.7 MB), which is downloaded only from the
-  settings' Lock Screen page, when you ask.
+  With the **depth effect** (off at first), what stands near in the
+  wallpaper – a hill, a town, a person, the frame of a window – stands in
+  front of the lock screen's own clocks, as on an iPhone, under the date,
+  and the sky, distant mountains or the view out of a window stay behind
+  them; it goes as the prompt comes up and the wallpaper blurs, and stays
+  off where what stands in front would cover more than 40 % of a clock. A
+  depth model, Depth Anything V2, sees how near each part of the wallpaper
+  is, on this computer, in a background process of the session at the
+  lowest priority, a moment after the wallpaper changes; the lock screen
+  only shows the cutout made then. It needs `sudo apt install
+  python3-onnxruntime python3-pil`, and one of the model's three sizes,
+  which is downloaded (from Hugging Face) only from the settings' Lock
+  Screen page, when you ask: Small (99 MB, Apache-2.0, seconds a
+  wallpaper), Base (389 MB, CC-BY-NC-4.0: for non-commercial use, about ten
+  seconds; offered first) or Large (1.3 GB, CC-BY-NC-4.0, the finest: half
+  a minute or more, and about 3.5 GB of memory while it runs).
 - **Claude Code**: a ring in the bar shows how far the current 5-hour block
   is, with the tokens Claude wrote in it; resting the pointer on it (or the
   control centre's Claude tab) shows the block, today, the last seven days
@@ -375,7 +381,7 @@ gnome-extensions enable atelier@local
 | Notes | `~/.local/share/atelier/notes.json` |
 | Photos (the gallery's copies of them) | `~/.local/share/atelier/photos/` |
 | Thumbnails, smaller copies of the photos (for the grids, and as big as the widgets show them), generated shell styles | `~/.cache/atelier/` |
-| The depth effect's model (when downloaded) | `~/.local/share/atelier/models/u2netp.onnx` |
+| The depth effect's models (when downloaded) | `~/.local/share/atelier/models/depth-anything-v2-*.onnx` |
 | The depth effect's cutouts of the wallpapers (the newest 12) | `~/.cache/atelier/depth/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |

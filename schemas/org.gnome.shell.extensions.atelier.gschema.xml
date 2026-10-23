@@ -450,7 +450,18 @@
     <key name="depth-effect" type="b">
       <default>false</default>
       <summary>Depth effect</summary>
-      <description>The subject in front of the wallpaper stands over the lock screen's own clocks, as if they were behind it. A small model (u2netp, downloaded in the settings when asked) finds the subject, in the session; the lock screen only shows the cutout made then. Off for a clock the subject would cover too much of.</description>
+      <description>What stands nearer than the wallpaper's far layer (the sky, distant mountains, the view out of a window) stands over the lock screen's own clocks, as if they were behind it. A depth model (Depth Anything V2, downloaded in the settings when asked) sees how near each part is, in the session; the lock screen only shows the cutout made then. Off for a clock what stands in front would cover too much of.</description>
+    </key>
+    <key name="depth-model" type="s">
+      <choices>
+        <choice value=''/>
+        <choice value='small'/>
+        <choice value='base'/>
+        <choice value='large'/>
+      </choices>
+      <default>''</default>
+      <summary>The depth effect's model</summary>
+      <description>Which Depth Anything V2 the depth effect uses: “small”, “base” or “large”. Empty: none chosen yet, the biggest one downloaded (or Base, to download).</description>
     </key>
     <key name="depth-request" type="s">
       <default>''</default>

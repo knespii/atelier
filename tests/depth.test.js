@@ -3,10 +3,10 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    MAX_COVER, coverage, cutoutKey, cutoutOpacity, cutoutPath, depthDir, lockWallpaper, modelPath,
-    pictureState, placement, subjectTop,
+    DEFAULT_MODEL, MAX_COVER, MODELS, chosenModel, coverage, cutoutKey, cutoutOpacity, cutoutPath, depthDir,
+    lockWallpaper, modelPath, pictureState, placement, subjectTop,
 } from '../lib/depth.js';
-import {fakeU2netp} from './fakeOnnx.js';
+import {fakeDepthModel} from './fakeOnnx.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
 const WORKER = GLib.build_filenamev([GLib.get_current_dir(), 'lib', 'depthWorker.py']);
@@ -27,8 +27,35 @@ export function testCutoutKey() {
     assertEqual(cutoutPath(picture, [1920, 1080]), `${depthDir()}/${key}.png`);
     assert(depthDir().startsWith(GLib.get_user_cache_dir()) && depthDir().endsWith('/atelier/depth'),
         `in Atelier's cache (${depthDir()})`);
-    assert(modelPath().startsWith(GLib.get_user_data_dir()) && modelPath().endsWith('/atelier/models/u2netp.onnx'),
-        `the model with Atelier's data (${modelPath()})`);
+    assert(modelPath('base').startsWith(GLib.get_user_data_dir()) &&
+        modelPath('base').endsWith('/atelier/models/depth-anything-v2-base.onnx'),
+    `the model with Atelier's data (${modelPath('base')})`);
+}
+
+export function testModels() {
+    assertEqual(Object.keys(MODELS), ['small', 'base', 'large'], 'three sizes, smallest first');
+    for (const [id, model] of Object.entries(MODELS)) {
+        assert(model.url.startsWith(`https://huggingface.co/onnx-community/depth-anything-v2-${id}/resolve/`) &&
+            /\/resolve\/[0-9a-f]{40}\/onnx\/model\.onnx$/.test(model.url),
+        `${id}: from Hugging Face, at a revision of its own (${model.url})`);
+        assert(/^[0-9a-f]{64}$/.test(model.sha256) && Number.isInteger(model.bytes) && model.bytes > 50e6,
+            `${id}: its SHA-256 and size, to check it by`);
+        assert(model.label && model.title && model.time, `${id}: what the settings say of it`);
+    }
+    assertEqual(new Set(Object.values(MODELS).map(m => m.name)).size, 3, 'each in a file of its own');
+    assertEqual(MODELS.small.license, 'Apache-2.0');
+    assertEqual([MODELS.base.license, MODELS.large.license], ['CC-BY-NC-4.0', 'CC-BY-NC-4.0']);
+    assert(MODELS.small.bytes < MODELS.base.bytes && MODELS.base.bytes < MODELS.large.bytes, 'growing');
+    assertEqual(DEFAULT_MODEL, 'base');
+}
+
+export function testChosenModel() {
+    const having = ids => id => ids.includes(id);
+    assertEqual(chosenModel('small', having(['large'])), 'small', 'the one chosen, downloaded or not');
+    assertEqual(chosenModel('', having([])), DEFAULT_MODEL, 'none chosen, none there: the one offered first');
+    assertEqual(chosenModel('', having(['small', 'large'])), 'large', 'none chosen: the biggest one there');
+    assertEqual(chosenModel('', having(['small'])), 'small');
+    assertEqual(chosenModel('toString', having(['base'])), 'base', 'one that isn\'t a model counts as none');
 }
 
 export function testPictureState() {
@@ -189,8 +216,8 @@ export function testWorkerMakesACutout() {
         return;
     }
     const dir = freshDir('depth-worker');
-    const model = `${dir}/u2netp.onnx`;
-    GLib.file_set_contents(model, fakeU2netp());
+    const model = `${dir}/depth.onnx`;
+    GLib.file_set_contents(model, fakeDepthModel());
     const check = runWorker(['--check', '--model', model]);
     assertEqual(check.answer, {ok: true, missing: [], model: 'ok'}, 'the made-up model loads');
     GLib.file_set_contents(`${dir}/broken.onnx`, 'not a model');
@@ -198,7 +225,8 @@ export function testWorkerMakesACutout() {
     assert(!broken.answer.ok && broken.answer.model.startsWith('does not load'), 'a broken one is told apart');
     assertEqual(runWorker(['--check', '--model', `${dir}/gone.onnx`]).answer.model, 'missing');
 
-    // A light disc on a dark picture, 1600 × 1000: the disc is the subject.
+    // A light disc on a dark picture, 1600 × 1000: to the made-up model,
+    // the disc is near, the rest far, with nothing between.
     const picture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 1600, 1000);
     picture.fill(0x141e28ff);
     for (let y = 300; y < 700; y++) {
@@ -210,18 +238,19 @@ export function testWorkerMakesACutout() {
     const target = `${dir}/depth/cutout.png`;
     const run = runWorker(['--model', model, '--input', `${dir}/disc.jpg`, '--output', target,
         '--width', '800', '--height', '450']);
-    assert(run.status === 0 && run.answer.ok, `done (${JSON.stringify(run.answer)})`);
+    assert(run.status === 0 && run.answer.ok && run.answer.split === 'gap', `done (${JSON.stringify(run.answer)})`);
     const cutout = GdkPixbuf.Pixbuf.new_from_file(target);
     assertEqual([cutout.get_width(), cutout.get_height()], [800, 500], 'big enough to cover the monitor, zoomed in');
     assertEqual([cutout.get_option('tEXt::atelier-width'), cutout.get_option('tEXt::atelier-height')],
         ['1600', '1000'], 'with the picture\'s own size, to place it as GNOME does');
     const alpha = (x, y) => cutout.get_pixels()[y * cutout.get_rowstride() + x * 4 + 3];
     assert(alpha(400, 250) === 255 && alpha(10, 10) === 0 && alpha(790, 490) === 0,
-        `the subject opaque, the rest see-through (${alpha(400, 250)}, ${alpha(10, 10)})`);
-    const edge = alpha(300, 250);
-    assert(edge > 0 && edge < 255, `soft at the edges (${edge})`);
-    assert(Math.abs(run.answer.subject - Math.PI * 100 * 100 / (800 * 500)) < 0.01,
-        `it says how much of it is the subject (${run.answer.subject})`);
+        `the near disc opaque, the rest see-through (${alpha(400, 250)}, ${alpha(10, 10)})`);
+    const edge = [296, 297, 298, 299, 300, 301, 302, 303, 304].map(x => alpha(x, 250));
+    assert(edge.some(a => a > 0 && a < 255) && alpha(294, 250) < 32 && alpha(306, 250) > 223,
+        `its edge on the disc's own, soft over a pixel or two (${edge})`);
+    assert(Math.abs(run.answer.front - Math.PI * 100 * 100 / (800 * 500)) < 0.01,
+        `it says how much of it stands in front (${run.answer.front})`);
     assert(!GLib.file_test(`${target}.partial`, GLib.FileTest.EXISTS), 'written whole');
 
     const failed = runWorker(['--model', model, '--input', `${dir}/gone.jpg`, '--output', `${dir}/x.png`,
@@ -241,15 +270,11 @@ function paint(width, height, colour) {
         width, height, width * 3);
 }
 
-export function testWorkerFindsTheSky() {
-    if (!workerCanRun()) {
-        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
-        return;
-    }
-    const dir = freshDir('depth-sky');
-    const model = `${dir}/u2netp.onnx`;
-    GLib.file_set_contents(model, fakeU2netp());
-    const cutoutOf = (name, picture) => {
+// The cutouts the worker makes with the made-up model, 800 × 450, in dir.
+function cutoutsIn(dir) {
+    const model = `${dir}/depth.onnx`;
+    GLib.file_set_contents(model, fakeDepthModel());
+    return (name, picture) => {
         picture.savev(`${dir}/${name}.png`, 'png', [], []);
         const run = runWorker(['--model', model, '--input', `${dir}/${name}.png`, '--output', `${dir}/${name}-cutout.png`,
             '--width', '800', '--height', '450']);
@@ -258,33 +283,70 @@ export function testWorkerFindsTheSky() {
         const pixels = cutout.get_pixels();
         return {answer: run.answer, alpha: (x, y) => pixels[y * cutout.get_rowstride() + x * 4 + 3]};
     };
+}
 
-    // A blue sky, deeper up high, over a hill: the left of it bright (what
-    // the made-up model finds salient), the right of it dark green (what it
-    // doesn't). The hill stands in front all the same, the sky doesn't.
-    const horizon = x => 240 + Math.round(30 * Math.sin(x / 130));
-    const landscape = cutoutOf('landscape', paint(800, 450, (x, y) => {
-        if (y < horizon(x))
-            return [10 + y / 10, 45 + y / 10, 140 + y / 10];
-        return x < 400 ? [255, 255, 90] : [10, 40, 15];
+export function testWorkerFindsTheFarLayer() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const cutoutOf = cutoutsIn(freshDir('depth-far'));
+    // No gap in the depths: a little going away into the dark on the left,
+    // a wide wall (the far layer, as many pixels as any depth has) and, on
+    // the right, coming nearer and nearer. In front: only what is clearly
+    // nearer than the wall.
+    const grey = v => [v, v, v].map(c => Math.round(c * 255));
+    const {answer, alpha} = cutoutOf('wall', paint(800, 450, x => {
+        if (x < 200)
+            return grey(0.4 * x / 200);
+        return grey(x < 500 ? 0.4 : 0.4 + 0.6 * (x - 500) / 300);
     }));
-    assert(landscape.answer.sky, `the sky is found (${JSON.stringify(landscape.answer)})`);
-    const {alpha} = landscape;
-    assert(alpha(600, 60) === 0 && alpha(200, 120) === 0, `the sky see-through (${alpha(600, 60)}, ${alpha(200, 120)})`);
-    assert(alpha(600, 400) === 255 && alpha(200, 400) === 255,
-        `the hill in front, salient or not (${alpha(600, 400)}, ${alpha(200, 400)})`);
-    assert(alpha(650, horizon(650) + 6) === 255 && alpha(650, horizon(650) - 6) < 32,
-        `the edge follows the horizon (${[-12, -8, -6, -4, -2, 0, 2, 4, 6, 8, 12].map(d => alpha(650, horizon(650) + d))})`);
-    const edge = [-2, -1, 0, 1, 2].map(d => alpha(650, horizon(650) + d));
-    assert(edge.some(a => a > 0 && a < 255), `soft at the horizon (${edge})`);
-    assert(Math.abs(landscape.answer.front - 0.47) < 0.05, `about the share under the horizon (${landscape.answer.front})`);
+    assertEqual([answer.split, answer.sky], ['far', false], `the far layer without a gap (${JSON.stringify(answer)})`);
+    assert(alpha(100, 200) === 0 && alpha(350, 200) === 0 && alpha(550, 200) === 0,
+        `what is farther, the wall and what is hardly nearer see-through (${[100, 350, 550].map(x => alpha(x, 200))})`);
+    assert(alpha(720, 200) === 255 && alpha(790, 200) === 255,
+        `what is clearly nearer in front (${[720, 790].map(x => alpha(x, 200))})`);
+    // (Nearer than the wall by NEARER, 1.6: from about 0.64 of the way, x 620.)
+    const from = [...Array(300).keys()].map(x => 500 + x).find(x => alpha(x, 200) >= 128);
+    assert(Math.abs(from - 620) < 30, `from where it is NEARER times as near as the wall (${from})`);
+}
 
-    // Texture all over (a pattern, a room): no sky, only the subject.
+export function testWorkerFindsTheSky() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const cutoutOf = cutoutsIn(freshDir('depth-sky'));
+
+    // A blue sky, paler down low, over a bright hill: to the made-up model,
+    // the hill is the nearest, the sky the farthest – and a grey cloud in
+    // it nearer than the sky's edge: it isn't in front all the same.
+    const horizon = x => 240 + Math.round(30 * Math.sin(x / 130));
+    const cloud = (x, y) => ((x - 600) / 70) ** 2 + ((y - 90) / 28) ** 2 < 1;
+    const landscape = cutoutOf('landscape', paint(800, 450, (x, y) => {
+        if (cloud(x, y))
+            return [175, 175, 185];
+        if (y < horizon(x))
+            return [20 + y / 5, 60 + y / 5, 150 + y / 5];
+        return [255, 255, 150];
+    }));
+    assert(landscape.answer.sky && landscape.answer.split === 'gap',
+        `the sky is found (${JSON.stringify(landscape.answer)})`);
+    const {alpha} = landscape;
+    assert(alpha(100, 60) === 0 && alpha(300, 200) === 0, `the sky see-through (${alpha(100, 60)}, ${alpha(300, 200)})`);
+    assert(alpha(600, 90) === 0 && alpha(560, 95) === 0, `and the cloud in it (${alpha(600, 90)}, ${alpha(560, 95)})`);
+    assert(alpha(600, 400) === 255 && alpha(200, 400) === 255,
+        `the hill in front (${alpha(600, 400)}, ${alpha(200, 400)})`);
+    assert(alpha(650, horizon(650) + 4) === 255 && alpha(650, horizon(650) - 4) === 0,
+        `the edge on the horizon (${[-8, -4, -2, -1, 0, 1, 2, 4, 8].map(d => alpha(650, horizon(650) + d))})`);
+    assert(Math.abs(landscape.answer.front - 0.47) < 0.05,
+        `about the share under the horizon (${landscape.answer.front})`);
+
+    // Texture all over (a pattern, a room): no sky.
     let seed = 7;
     const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
     const noise = cutoutOf('noise', paint(800, 450, () => [random() * 255, random() * 255, random() * 255]));
     assertEqual(noise.answer.sky, false, 'no sky in a pattern');
-    assertEqual(noise.answer.front, noise.answer.subject, 'only the subject in front');
 
     // A blue picture with nothing under it: no ground, so no sky either.
     const blue = cutoutOf('blue', paint(800, 450, (x, y) => [50 + y / 5, 110 + y / 6, 220]));

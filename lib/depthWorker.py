@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # The cutout of a wallpaper for the lock screen's depth effect (lib/depth.js):
-# what stands in front of the sky – a hill, a town, the trees, found by the
-# picture's colours alone – and the subject – what u2netp, a small model
-# rembg uses, finds salient – with the rest made see-through, softly at the
-# edges. The shell
-# runs it in a process of its own, in the session (never on the lock screen),
-# at the lowest priority, one wallpaper at a time.
+# what stands nearer than the far layer of the picture – the sky, distant
+# mountains, the view out of a window – with the rest made see-through.
+# How near each pixel is comes from Depth Anything V2, a model that guesses
+# depth from a single picture; the sky, found by its colours, is never in
+# front however near the model makes it. The cutout's edges follow the
+# picture's own outlines. The shell runs it in a process of its own, in the
+# session (never on the lock screen), at the lowest priority, one wallpaper
+# at a time.
 #
 #   depthWorker.py --check [--model FILE]
 #       what is there: the Python modules it needs, and whether the model
@@ -24,12 +26,39 @@ import sys
 
 # The Debian and Ubuntu packages each module comes in.
 PACKAGES = {'onnxruntime': 'python3-onnxruntime', 'numpy': 'python3-numpy', 'PIL': 'python3-pil'}
-SIZE = 320  # the model's input, pixels a side
+# The model's input: this many pixels on the short side (as it was trained),
+# both sides a multiple of its patches.
+SHORT = 518
+PATCH = 14
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
-# Where the saliency (0 … 1) turns from background to subject: a soft step
-# between these, so faint haze around the subject goes and its edges stay soft.
-EDGE = (0.3, 0.7)
+# Threads for the model: four at most (it runs at the lowest priority, so
+# the desktop comes first all the same), a third of the processor's.
+THREADS = max(1, min(4, (os.cpu_count() or 1) // 3))
+
+# The far layer and what stands in front of it. The model says how near
+# each pixel is (larger, nearer), here 0 (the farthest) … 1 (the nearest).
+# The sky and a view through a window stand apart from the rest: a gap in
+# the depths, a band where hardly any pixel is (this share of them in each
+# hundredth), above a far layer of this share of the picture at least,
+# looked for in the far half.
+GAP = 0.002
+FAR_LEAST = 0.05
+GAP_LOW = 0.5
+# Without a gap (misty mountains behind a town), the far layer is the
+# farthest of the depths many pixels share, and what is nearer than it by
+# this much stands in front.
+NEARER = 1.6
+# The step from the far layer to what stands in front: over this ratio of
+# nearness, before the edges are fitted to the picture.
+STEP = 1.5
+# Fitting the edges to the picture (a guided filter, on a copy half as
+# big): its window, a share of the copy's longer side, and how closely it
+# follows the picture's colours.
+FIT_WINDOW = 1 / 200
+FIT_EPS = 1e-3
+# How sharp the fitted edge is made again: the slope of its last step.
+SHARPEN = 4
 
 # The sky: looked for on a copy of the picture this wide, pixels.
 SKY_WIDTH = 640
@@ -57,6 +86,11 @@ SKY_EDGE = 3
 # how light (0 … 1) a blue there has to be for it.
 SKY_GROW = 24
 HAZE = 0.88
+# The sky is kept out of what stands in front where the model makes it no
+# nearer than this many times the far layer's edge (a cloud it thinks near);
+# nearer than that, it is something in front with the sky showing through
+# (a see-through sleeve, a window).
+SKY_NEARER = 2
 
 
 def say(answer, status=0):
@@ -89,10 +123,13 @@ def options(argv):
 
 def session(ort, model):
     settings = ort.SessionOptions()
-    # (Two threads at most: the desktop stays smooth meanwhile.)
-    settings.intra_op_num_threads = 2
+    settings.intra_op_num_threads = THREADS
     settings.inter_op_num_threads = 1
-    return ort.InferenceSession(model, sess_options=settings, providers=['CPUExecutionProvider'])
+    runner = ort.InferenceSession(model, sess_options=settings, providers=['CPUExecutionProvider'])
+    # (A picture in, a map of depths out: anything else is another model.)
+    if len(runner.get_inputs()) != 1 or len(runner.get_inputs()[0].shape) != 4:
+        raise ValueError('it is not a depth model (it takes no picture)')
+    return runner
 
 
 def check(found, model):
@@ -110,20 +147,84 @@ def check(found, model):
     say(answer)
 
 
-def saliency(found, model, picture):
-    """The model's map of what stands out, 0 … 1, SIZE × SIZE (as rembg reads it)."""
+def depths(found, model, picture):
+    """How near each pixel is, 0 (the farthest) … 1 (the nearest), as the
+    model sees the picture (SHORT pixels on its short side)."""
     np, Image = found['numpy'], found['PIL'].Image
-    small = np.asarray(picture.resize((SIZE, SIZE), Image.Resampling.LANCZOS), dtype=np.float32)
-    small = small / max(float(small.max()), 1e-6)
+    scale = SHORT / min(picture.size)
+    width, height = (max(PATCH, round(side * scale / PATCH) * PATCH) for side in picture.size)
+    small = np.asarray(picture.resize((width, height), Image.Resampling.BICUBIC), dtype=np.float32) / 255
     small = (small - np.array(MEAN, dtype=np.float32)) / np.array(STD, dtype=np.float32)
     tensor = small.transpose((2, 0, 1))[np.newaxis].astype(np.float32)
     runner = session(found['onnxruntime'], model)
     output = runner.run(None, {runner.get_inputs()[0].name: tensor})[0]
-    prediction = np.asarray(output, dtype=np.float32).reshape(output.shape[-2:])
-    low, high = float(prediction.min()), float(prediction.max())
+    del runner  # (its memory back before the rest)
+    near = np.asarray(output, dtype=np.float32).reshape(output.shape[-2:])
+    # (The nearest few pixels all 1: a speck of noise doesn't set the scale.)
+    low, high = float(near.min()), float(np.percentile(near, 99.5))
     if high - low < 1e-6:
-        return np.zeros((SIZE, SIZE), dtype=np.float32)
-    return (prediction - low) / (high - low)
+        return np.zeros(near.shape, dtype=np.float32)
+    return np.clip((near - low) / (high - low), 0, 1)
+
+
+def split(np, near):
+    """Where the far layer ends: the nearness (0 … 1) what stands in front
+    starts from, and how it was found ('gap' or 'far')."""
+    share = np.histogram(near, bins=100, range=(0, 1))[0] / near.size
+    below = np.cumsum(share)
+    # A gap above the far layer: in the middle of it (as a ratio).
+    for start in range(1, round(GAP_LOW * 100)):
+        if share[start] < GAP and below[start - 1] >= FAR_LEAST:
+            end = start
+            while end < 100 and share[end] < GAP:
+                end += 1
+            return float(np.sqrt(start * end)) / 100, 'gap'
+    # None: the farthest of the depths that many pixels share (over half as
+    # many as the depth most share), on a scale of ratios, smoothed.
+    edges = np.linspace(np.log(0.01), 0, 41)
+    counts = np.histogram(np.log(np.maximum(near, 0.01)), bins=edges)[0].astype(np.float64)
+    counts = np.convolve(np.pad(counts, 1, mode='edge'), [0.25, 0.5, 0.25], 'valid')
+    for i, count in enumerate(counts):
+        if (count >= 0.5 * counts.max() and count >= counts[max(0, i - 1)] and
+                count >= counts[min(len(counts) - 1, i + 1)]):
+            return float(np.exp((edges[i] + edges[i + 1]) / 2)) * NEARER, 'far'
+    return 0.5, 'far'
+
+
+def box(np, a, r):
+    """The mean of each (2r + 1)² window of a (its edges carried on)."""
+    side = 2 * r + 1
+    padded = np.pad(a, [(r + 1, r), (r + 1, r)] + [(0, 0)] * (a.ndim - 2), mode='edge')
+    total = padded.cumsum(0).cumsum(1)
+    return (total[side:, side:] - total[:-side, side:] - total[side:, :-side] + total[:-side, :-side]) / (side * side)
+
+
+def fit(np, Image, picture, mask):
+    """The mask (0 … 1, as big as the picture) with its edges moved onto the
+    picture's own: He's guided filter, by the picture's colours, worked out
+    on copies half as big and laid over the whole one."""
+    size = picture.size
+    half = (max(1, size[0] // 2), max(1, size[1] // 2))
+    guide = np.asarray(picture.resize(half, Image.Resampling.BOX), dtype=np.float32) / 255
+    rough = np.asarray(Image.fromarray(mask.astype(np.float32), 'F').resize(half, Image.Resampling.BOX))
+    r = max(2, round(max(half) * FIT_WINDOW))
+    mean = box(np, guide, r)
+    mean_mask = box(np, rough, r)
+    together = box(np, guide * rough[..., np.newaxis], r) - mean * mean_mask[..., np.newaxis]
+    spread = np.empty(guide.shape[:2] + (3, 3), dtype=np.float32)
+    for i in range(3):
+        for j in range(i, 3):
+            both = box(np, guide[..., i] * guide[..., j], r) - mean[..., i] * mean[..., j]
+            spread[..., i, j] = spread[..., j, i] = both
+    spread += FIT_EPS * np.eye(3, dtype=np.float32)
+    a = np.linalg.solve(spread, together[..., np.newaxis])[..., 0]
+    b = mean_mask - (a * mean).sum(axis=2)
+    a, b = box(np, a, r), box(np, b, r)
+
+    def whole(channel):
+        return np.asarray(Image.fromarray(channel.astype(np.float32), 'F').resize(size, Image.Resampling.BILINEAR))
+    full = np.asarray(picture, dtype=np.float32) / 255
+    return sum(whole(a[..., i]) * full[..., i] for i in range(3)) + whole(b)
 
 
 def flood(np, Image, ImageDraw, inside, sides):
@@ -275,25 +376,24 @@ def cutout(found, model, source, target, width, height):
     # As big as it is drawn over the monitor (zoomed in), no bigger.
     scale = min(1.0, max(width / shown[0], height / shown[1]))
     size = (max(1, round(shown[0] * scale)), max(1, round(shown[1] * scale)))
-    mask = saliency(found, model, picture)
-    low, high = EDGE
-    step = np.clip((mask - low) / (high - low), 0, 1)
-    step = step * step * (3 - 2 * step)
-    alpha = Image.fromarray((step * 255).round().astype(np.uint8), 'L').resize(size, Image.Resampling.LANCZOS)
-    # A little softer still, about a pixel in a thousand.
-    alpha = alpha.filter(ImageFilter.GaussianBlur(max(1.0, max(size) / 1000)))
-    subject = float((np.asarray(alpha) >= 128).mean())
-    # In front: the subject, and whatever isn't sky – but none of the sky
-    # itself, however much the model makes of it (a bank of clouds stands
-    # out to it as a subject would; a bird in the sky doesn't look like sky).
+    near = depths(found, model, picture)
+    edge, how = split(np, near)
+    picture = picture.resize(size, Image.Resampling.LANCZOS) if size != shown else picture
+    near = np.asarray(Image.fromarray(near, 'F').resize(size, Image.Resampling.BILINEAR))
+    # In front: what is nearer than the far layer's edge, stepping up over
+    # a ratio of STEP around it…
+    rough = np.clip(np.log(np.maximum(near, 1e-4) / edge) / np.log(STEP) + 0.5, 0, 1)
+    # …its edges then moved onto the picture's own, and made sharp again
+    # (soft over a pixel or two).
+    alpha = np.clip((fit(np, Image, picture, rough) - 0.5) * SHARPEN + 0.5, 0, 1)
+    alpha = alpha * alpha * (3 - 2 * alpha)
+    # None of the sky itself, however near the model makes a cloud – but a
+    # see-through sleeve with the sky behind it is in front.
     above, airy = sky(found, picture)
     if above is not None:
-        ground = soften(np, Image, ImageFilter, 1 - above, size)
         air = soften(np, Image, ImageFilter, airy.astype(np.float32), size)
-        subject_alpha = np.asarray(alpha, dtype=np.float32) / 255 * (1 - air)
-        both = np.maximum(subject_alpha, ground)
-        alpha = Image.fromarray((both * 255).round().astype(np.uint8), 'L')
-    picture = picture.resize(size, Image.Resampling.LANCZOS) if size != shown else picture
+        alpha = alpha * (1 - air * (near < SKY_NEARER * edge))
+    alpha = Image.fromarray((alpha * 255).round().astype(np.uint8), 'L')
     picture.putalpha(alpha)
     # The picture's own size, as GNOME places it (see lib/depth.js placement()).
     info = PngImagePlugin.PngInfo()
@@ -308,8 +408,8 @@ def cutout(found, model, source, target, width, height):
         if os.path.exists(partial):
             os.remove(partial)
     covered = float((np.asarray(alpha) >= 128).mean())
-    say({'ok': True, 'width': size[0], 'height': size[1], 'picture': list(shown), 'subject': round(subject, 4),
-         'sky': above is not None, 'front': round(covered, 4)})
+    say({'ok': True, 'width': size[0], 'height': size[1], 'picture': list(shown), 'far': round(edge, 4),
+         'split': how, 'sky': above is not None, 'front': round(covered, 4)})
 
 
 def main():

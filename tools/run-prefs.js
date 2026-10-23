@@ -170,8 +170,33 @@ async function checkDepth(window) {
     // (Its rows at the bottom of the page, for pictures of them.)
     const scrolled = findDescendant(page, w => w instanceof Gtk.ScrolledWindow);
     const toBottom = () => (scrolled.vadjustment.value = scrolled.vadjustment.upper);
-    const real = await setup.probe();
+    const {MODELS, modelPath} = await import('../lib/depth.js');
+    const real = await setup.probe(modelPath(setup.model));
     check(real.model === 'missing', `with no model kept, it says so (${JSON.stringify(real)})`);
+
+    // The model to use: none chosen and none there, Base is offered; each
+    // says how big it is, its licence and about how long it takes.
+    check(setup.model === 'base' && setup.modelRow.selected === 1 &&
+        setup.modelRow.subtitle.includes('389 MB') && setup.modelRow.subtitle.includes('CC-BY-NC-4.0') &&
+        setup.modelRow.subtitle.endsWith('not downloaded'),
+    `Base offered first (${setup.modelRow.subtitle})`);
+    setup.modelRow.selected = 0;
+    check(lock.get_string('depth-model') === 'small' && setup.model === 'small', 'Small chosen in the list');
+    await sleep(200);
+    check(setup.modelRow.subtitle.includes('99 MB') && setup.modelRow.subtitle.includes('Apache-2.0') &&
+        !setup.modelRow.subtitle.includes('non-commercial'), `Small: its size, a free licence (${setup.modelRow.subtitle})`);
+    lock.set_string('depth-model', 'large');
+    await sleep(200);
+    check(setup.modelRow.selected === 2 && setup.modelRow.subtitle.includes('1.3 GB'),
+        `the list follows the setting (${setup.modelRow.subtitle})`);
+    lock.reset('depth-model');
+    // (Large downloaded, none chosen: it is the one used, and ready.)
+    GLib.mkdir_with_parents(GLib.path_get_dirname(modelPath('large')), 0o755);
+    GLib.file_set_contents(modelPath('large'), '');
+    check(setup.model === 'large', 'none chosen: the biggest one downloaded is used');
+    GLib.unlink(modelPath('large'));
+    check(setup.model === 'base', 'and without it, Base');
+    await setup.refresh();
     const showing = async state => {
         setup.probe = () => Promise.resolve(state);
         await setup.refresh();
@@ -196,23 +221,26 @@ async function checkDepth(window) {
     toBottom();
     await sleep(300);
     check(setup.statusRow.title === 'The model isn\'t downloaded' && setup.downloadButton.visible &&
-        setup.downloadButton.label === 'Download Model (4.7 MB)…' && !setup.commandRow.visible,
+        setup.downloadButton.label === 'Download Model (389 MB)…' && !setup.commandRow.visible,
     'with the packages, the model to download – only when asked');
     await render(window, 'lock-screen-depth-download');
 
     // Downloading: its progress, then ready (and the cutout asked for).
-    let finish;
-    setup.download = (target, {onProgress}) => new Promise(resolve => {
-        onProgress(2 * 1024 * 1024, 4.7 * 1024 * 1024);
+    let finish, asked;
+    setup.download = (model, target, {onProgress}) => new Promise(resolve => {
+        asked = [model, target];
+        onProgress(200 * 1024 * 1024, 389 * 1024 * 1024);
         finish = resolve;
     });
     lock.set_boolean('depth-effect', true);
     const request = lock.get_string('depth-request');
     setup.downloadButton.emit('clicked');
     await sleep(100);
-    check(setup.statusRow.title === 'Downloading the model…' && setup.statusRow.subtitle === '2.0 of 4.7 MB' &&
-        setup.cancelButton.visible && !setup.downloadButton.visible && Math.abs(setup._progress.fraction - 2 / 4.7) < 0.01,
+    check(setup.statusRow.title === 'Downloading the model…' && setup.statusRow.subtitle === '200.0 of 389.0 MB' &&
+        setup.cancelButton.visible && !setup.downloadButton.visible && Math.abs(setup._progress.fraction - 200 / 389) < 0.01,
     `while it downloads, how far it is (${setup.statusRow.subtitle})`);
+    check(asked[0] === MODELS.base && asked[1] === modelPath('base') && !setup.modelRow.sensitive,
+        'the chosen model, to where it is kept; no other chosen meanwhile');
     await render(window, 'lock-screen-depth-downloading');
     setup.probe = () => Promise.resolve({...missing, model: 'ok'});
     finish();
@@ -249,17 +277,15 @@ async function checkDepth(window) {
     check(!setup.computeButton.visible && !setup.switchRow.active, 'switched off, nothing to compute');
     lock.set_boolean('enabled', false);
     check(!page._depthGroup.sensitive, 'without Atelier on the lock screen, greyed out');
-    ['enabled', 'depth-status', 'depth-request'].forEach(key => lock.reset(key));
+    ['enabled', 'depth-status', 'depth-request', 'depth-model'].forEach(key => lock.reset(key));
 
     // The real check, with a made-up model where the model is kept.
-    const {fakeU2netp} = await import('../tests/fakeOnnx.js');
-    const {modelPath} = await import('../lib/depth.js');
-    GLib.mkdir_with_parents(GLib.path_get_dirname(modelPath()), 0o755);
-    GLib.file_set_contents(modelPath(), fakeU2netp());
+    const {fakeDepthModel} = await import('../tests/fakeOnnx.js');
+    GLib.file_set_contents(modelPath('base'), fakeDepthModel());
     const {probe} = await import('../prefs/depthSetup.js');
-    const found = await probe();
+    const found = await probe(modelPath('base'));
     check(found.model === 'ok' || found.missing.length > 0, `a model kept is checked: it loads (${JSON.stringify(found)})`);
-    GLib.unlink(modelPath());
+    GLib.unlink(modelPath('base'));
 }
 
 async function runSelftest(window) {

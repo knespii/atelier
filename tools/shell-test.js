@@ -32,10 +32,10 @@ import * as dockCore from './dock-tests/core.js';
 import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
 import * as dockWindows from './dock-tests/windows.js';
-import {cutoutPath, modelPath, pictureState, workerPath} from '../lib/depth.js';
+import {chosenModel, cutoutPath, modelPath, pictureState, workerPath} from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
-import {fakeU2netp} from '../tests/fakeOnnx.js';
+import {fakeDepthModel} from '../tests/fakeOnnx.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
@@ -4068,8 +4068,8 @@ function discPicture(path, [width, height], [cx, cy, r], disc, around, text = {}
 
 const isGreen = ([r, g, b]) => g > 200 && r < 90 && b < 90;
 
-// The depth effect: the subject of the wallpaper over the lock screen's
-// clocks. The cutout is made in the session (here by hand: a green disc
+// The depth effect: what stands near in the wallpaper over the lock
+// screen's clocks. The cutout is made in the session (here by hand: a green disc
 // over the wallpaper's light one, so it shows where it is drawn); the lock
 // screen lays it over the wallpaper as GNOME zooms it, over the clock and
 // under the date, takes it away as the prompt comes up, and leaves it off
@@ -4210,8 +4210,10 @@ async function testLockDepth() {
     if (!depthModule || !usable) {
         results.push(`INFO  no python3-onnxruntime here: the cutout made in the session untested (${Boolean(depthModule)})`);
     } else {
-        GLib.mkdir_with_parents(GLib.path_get_dirname(modelPath()), 0o755);
-        GLib.file_set_contents(modelPath(), fakeU2netp());
+        // (None chosen: the one offered first, Base, as a made-up one.)
+        const model = modelPath(chosenModel(lockSettings.get_string('depth-model')));
+        GLib.mkdir_with_parents(GLib.path_get_dirname(model), 0o755);
+        GLib.file_set_contents(model, fakeDepthModel());
         GLib.unlink(cutout);
         lockSettings.set_string('depth-request', 'test');
         check(await waitFor(() => lockSettings.get_string('depth-status') === 'working', 3000),
@@ -4221,7 +4223,15 @@ async function testLockDepth() {
         const made = GLib.file_test(cutout, GLib.FileTest.EXISTS) ? GdkPixbuf.Pixbuf.new_from_file(cutout) : null;
         check(made?.get_option('tEXt::atelier-width') === '1600' && made.get_has_alpha(),
             `of the wallpaper as it is (${made?.get_width()}×${made?.get_height()})`);
-        GLib.unlink(modelPath());
+        // Another model chosen: made anew, with it.
+        lockSettings.set_string('depth-model', 'small');
+        GLib.file_set_contents(modelPath('small'), fakeDepthModel());
+        GLib.unlink(model);
+        check(await waitFor(() => lockSettings.get_string('depth-status') === 'working', 3000) &&
+            await waitFor(() => lockSettings.get_string('depth-status') === 'ready', 60000),
+        `another model chosen, the cutout is made anew (${lockSettings.get_string('depth-status')})`);
+        GLib.unlink(modelPath('small'));
+        lockSettings.reset('depth-model');
     }
 
     lockSettings.set_boolean('depth-effect', false);
@@ -4363,14 +4373,15 @@ async function testLockGlassClock() {
     kept.forEach(([key, value]) => background.set_string(key, value));
 }
 
-// The lock screen on a wallpaper of one's own (ATELIER_TEST_WALLPAPER), its
-// cutout made by the worker with the real model (ATELIER_TEST_MODEL, only
-// read), as someone has it: a large stacked clock in the middle and a small
-// battery under it; then the glass clock. Screenshots, mostly.
+// The lock screen on wallpapers of one's own (ATELIER_TEST_WALLPAPER, one
+// or more, apart by colons), each cutout made by the worker with a real
+// depth model (ATELIER_TEST_MODEL, only read), as someone has it: a large
+// stacked clock in the middle and a small battery under it on the first;
+// the glass clock on each. Screenshots, mostly.
 async function testLockOnOwnWallpaper() {
-    const [source, model] = [GLib.getenv('ATELIER_TEST_WALLPAPER'), GLib.getenv('ATELIER_TEST_MODEL')];
+    const [sources, model] = [GLib.getenv('ATELIER_TEST_WALLPAPER'), GLib.getenv('ATELIER_TEST_MODEL')];
     const python = GLib.find_program_in_path('python3');
-    if (!Main.screenShield || !source || !model || !python) {
+    if (!Main.screenShield || !sources || !model || !python) {
         results.push('INFO  no ATELIER_TEST_WALLPAPER and ATELIER_TEST_MODEL: the lock screen on one\'s own wallpaper not shown');
         return;
     }
@@ -4381,21 +4392,6 @@ async function testLockOnOwnWallpaper() {
     const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
     const monitor = Main.layoutManager.primaryMonitor;
     const size = [monitor.width, monitor.height];
-    // (A copy in the test's own data: the one given is only read.)
-    const dir = `${GLib.get_user_data_dir()}/atelier/wallpapers`;
-    GLib.mkdir_with_parents(dir, 0o755);
-    const wallpaper = `${dir}/own-${GLib.path_get_basename(source)}`;
-    Gio.File.new_for_path(source).copy(Gio.File.new_for_path(wallpaper), Gio.FileCopyFlags.OVERWRITE, null, null);
-    const cutout = cutoutPath(pictureState(wallpaper), size);
-    const worker = Gio.Subprocess.new([python, workerPath(), '--model', model, '--input', wallpaper, '--output', cutout,
-        '--width', `${size[0]}`, '--height', `${size[1]}`], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
-    const stdout = await new Promise(resolve => worker.communicate_utf8_async(null, null,
-        (_, res) => resolve(worker.communicate_utf8_finish(res)[1] ?? '')));
-    const answer = JSON.parse(stdout.trim().split('\n').at(-1) || '{}');
-    check(answer.ok && GLib.file_test(cutout, GLib.FileTest.EXISTS), `its cutout made (${JSON.stringify(answer)})`);
-    background.set_string('picture-uri', uriOf(wallpaper));
-    background.set_string('picture-uri-dark', uriOf(wallpaper));
-    background.set_string('picture-options', 'zoom');
     // In the middle, as on a grid of 34 columns: on this one's, as far from the sides.
     const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
     const [columns] = gridSize(monitor.width / scale, monitor.height / scale);
@@ -4404,33 +4400,61 @@ async function testLockOnOwnWallpaper() {
         {id: 'clock', kind: 'clock', size: 'large', x: 13 + shift, y: 5, fine: true, face},
         {id: 'battery', kind: 'battery', size: 'small', x: 15 + shift, y: 18, fine: true},
     ]);
-    lockSettings.set_string('widgets', layout('stacked'));
     lockSettings.set_string('style', 'bare');
     lockSettings.set_boolean('gnome-clock', false);
     lockSettings.set_boolean('password-field', false);
     lockSettings.set_boolean('depth-effect', true);
     const realBattery = fakeBattery();
-    await wallpapersSettled();
-    const locked = await lockForTest();
+    // (Copies in the test's own data: the ones given are only read.)
+    const dir = `${GLib.get_user_data_dir()}/atelier/wallpapers`;
+    GLib.mkdir_with_parents(dir, 0o755);
     try {
-        check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.typography.sample, 5000),
-            'locked on it, its cutout there');
-        await restPointer();
-        await Scripting.sleep(800);
-        const depth = lock().board.depth;
-        await screenshot('92-lock-own-stacked');
-        results.push(`INFO  stacked: the cutout ${depth.actor.visible ? 'shown' : 'off'}, the tone ${lock().board.tone?.color}`);
-        lockSettings.set_string('widgets', layout('glass'));
-        check(await waitFor(() => lock().board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 3000),
-            'the glass clock in its place');
-        const glass = lock().board.widgets.find(w => w.entry.id === 'clock').glass;
-        await waitFor(() => glass.stretch === glass.target.stretch, 2000);
-        await Scripting.sleep(600);
-        await screenshot('93-lock-own-glass');
-        results.push(`INFO  glass: ×${glass.target.stretch.toFixed(2)}, the cutout ${depth.actor.visible ? 'shown' : 'off'}`);
-        check(depth.actor.visible, 'what stands in front over the glass clock');
+        for (const [n, source] of sources.split(':').filter(Boolean).entries()) {
+            const wallpaper = `${dir}/own-${GLib.path_get_basename(source)}`;
+            Gio.File.new_for_path(source).copy(Gio.File.new_for_path(wallpaper), Gio.FileCopyFlags.OVERWRITE, null, null);
+            const cutout = cutoutPath(pictureState(wallpaper), size);
+            const started = GLib.get_monotonic_time();
+            const worker = Gio.Subprocess.new([python, workerPath(), '--model', model, '--input', wallpaper,
+                '--output', cutout, '--width', `${size[0]}`, '--height', `${size[1]}`],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            const stdout = await new Promise(resolve => worker.communicate_utf8_async(null, null,
+                (_, res) => resolve(worker.communicate_utf8_finish(res)[1] ?? '')));
+            const answer = JSON.parse(stdout.trim().split('\n').at(-1) || '{}');
+            const took = (GLib.get_monotonic_time() - started) / 1e6;
+            check(answer.ok && GLib.file_test(cutout, GLib.FileTest.EXISTS),
+                `its cutout made in ${took.toFixed(1)} s (${JSON.stringify(answer)})`);
+            background.set_string('picture-uri', uriOf(wallpaper));
+            background.set_string('picture-uri-dark', uriOf(wallpaper));
+            background.set_string('picture-options', 'zoom');
+            lockSettings.set_string('widgets', layout(n === 0 ? 'stacked' : 'glass'));
+            await wallpapersSettled();
+            const locked = await lockForTest();
+            try {
+                check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.typography.sample, 5000),
+                    `locked on ${GLib.path_get_basename(source)}, its cutout there`);
+                await restPointer();
+                await Scripting.sleep(800);
+                const depth = lock().board.depth;
+                if (n === 0) {
+                    await screenshot('92-lock-own-stacked');
+                    results.push(`INFO  stacked: the cutout ${depth.actor.visible ? 'shown' : 'off'}, ` +
+                        `the tone ${lock().board.tone?.color}`);
+                    lockSettings.set_string('widgets', layout('glass'));
+                }
+                check(await waitFor(() => lock().board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 3000),
+                    'the glass clock in its place');
+                const glass = lock().board.widgets.find(w => w.entry.id === 'clock').glass;
+                await waitFor(() => glass.stretch === glass.target.stretch, 2000);
+                await Scripting.sleep(600);
+                const name = n === 0 ? '93-lock-own-glass' : `94-lock-own-glass-${n}`;
+                await screenshot(name);
+                results.push(`INFO  ${name} (${GLib.path_get_basename(source)}): glass ×${glass.target.stretch.toFixed(2)}, ` +
+                    `the cutout ${depth.actor.visible ? 'shown' : `off${depth.tooMuch ? ' (covers too much)' : ''}`}`);
+            } finally {
+                await locked.unlock();
+            }
+        }
     } finally {
-        await locked.unlock();
         realBattery();
     }
     ['widgets', 'style', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));

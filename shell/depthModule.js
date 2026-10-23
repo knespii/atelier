@@ -1,18 +1,18 @@
 // The depth effect's cutouts (lib/depth.js), made in the session while the
 // effect is on: of the wallpaper the lock screen shows, whenever it changes
 // (a profile applied, the style turned dark), for the main monitor, and
-// again when the preferences ask. The worker (lib/depthWorker.py) runs in a
-// process of its own at the lowest priority, one at a time, a moment after
-// the change; a cutout made already is used as it is. It stops with the
-// session's modules as the screen locks: the lock screen only shows a
-// cutout that is there.
+// again when the preferences ask or another model is chosen. The worker
+// (lib/depthWorker.py) runs in a process of its own at the lowest priority,
+// one at a time, a moment after the change; a cutout made already is used
+// as it is. It stops with the session's modules as the screen locks: the
+// lock screen only shows a cutout that is there.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {cutoutPath, depthDir, lockWallpaper, modelPath, pictureState, workerPath} from '../lib/depth.js';
+import {chosenModel, cutoutPath, depthDir, lockWallpaper, modelPath, pictureState, workerPath} from '../lib/depth.js';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 Gio._promisify(Gio.File.prototype, 'enumerate_children_async');
@@ -49,6 +49,9 @@ export class DepthModule {
         this._lockSettings.connectObject(
             'changed::enabled', () => this._queue(),
             'changed::depth-request', () => this._queue(0, true),
+            // (Cutouts of other wallpapers stay as the model before made
+            // them, till they are made anew.)
+            'changed::depth-model', () => this._queue(0, true),
             this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queue(), this);
         this._queue();
@@ -110,14 +113,15 @@ export class DepthModule {
             return;
         }
         const python = GLib.find_program_in_path('python3');
+        const model = modelPath(chosenModel(this._lockSettings.get_string('depth-model')));
         // (The preferences say what is missing.)
-        if (!python || !GLib.file_test(modelPath(), GLib.FileTest.EXISTS)) {
+        if (!python || !GLib.file_test(model, GLib.FileTest.EXISTS)) {
             this._setStatus('');
             return;
         }
         this._setStatus('working');
         let answer = null;
-        const process = Gio.Subprocess.new([python, this._worker, '--model', modelPath(), '--input', path,
+        const process = Gio.Subprocess.new([python, this._worker, '--model', model, '--input', path,
             '--output', target, '--width', `${size[0]}`, '--height', `${size[1]}`],
         Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
         this._process = process;

@@ -15,8 +15,9 @@
 #                               (only the lock screen's checks, on one
 #                               monitor; results in tests/output/shell. With
 #                               ATELIER_TEST_WALLPAPER and ATELIER_TEST_MODEL,
-#                               a picture and u2netp.onnx, only read: the lock
-#                               screen on that wallpaper too)
+#                               pictures (apart by colons) and a Depth
+#                               Anything V2 .onnx, only read: the lock screen
+#                               on those wallpapers too)
 set -eu
 
 SUITE="${1:-main}"
