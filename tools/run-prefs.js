@@ -578,10 +578,70 @@ async function runSelftest(window) {
             `${id} set elsewhere: shown as ${fonts.model.get_string(index)}, nothing written back (${written})`);
     }
     lockSettings.disconnect(writes);
+
+    // The clocks' weight and width: as each face has them at first, or on
+    // a slider – in tens, written once it is let be; set elsewhere, shown.
+    const weight = lockPage._weight;
+    check(weight.automatic.active && !weight.scale.sensitive && weight.scale.get_value() === 600 &&
+        lockSettings.get_int('clock-weight') === 0, `the clocks' weight as each face has it (${weight.scale.get_value()})`);
+    let weights = 0;
+    const weightWrites = lockSettings.connect('changed::clock-weight', () => weights++);
+    weight.automatic.active = false;
+    check(lockSettings.get_int('clock-weight') === 600 && weight.scale.sensitive && weights === 1,
+        'Automatic off: the weight it shows, set');
+    weights = 0;
+    for (const value of [455, 512, 487])
+        weight.scale.emit('change-value', Gtk.ScrollType.JUMP, value);
+    await sleep(500);
+    check(lockSettings.get_int('clock-weight') === 490 && weights === 1,
+        `dragged: in tens, written once let be (${lockSettings.get_int('clock-weight')}, ${weights} writes)`);
+    weights = 0;
+    lockSettings.set_string('clock-font', 'flex');
+    lockSettings.set_int('clock-weight', 950);
+    check(weight.scale.get_value() === 950 && weight.scale.get_adjustment().get_upper() === 1000 && weights === 1,
+        `on Roboto Flex's weight axis, to 1000; set elsewhere, shown, nothing written back (${weights})`);
+    lockSettings.set_int('clock-weight', 0);
     lockSettings.set_string('clock-font', 'thin');
+    check(weight.automatic.active && weight.scale.get_value() === 200, `Thin: its own weight (${weight.scale.get_value()})`);
+    lockSettings.disconnect(weightWrites);
+    const width = lockPage._width;
+    check(width.automatic.active && width.scale.get_value() === 90 && width.row.subtitle.startsWith('As each'),
+        'the width as each face has it: the glass clock a little narrower');
+    lockSettings.set_int('clock-width', 120);
+    check(!width.automatic.active && width.scale.get_value() === 120 && width.row.subtitle.includes('width axis'),
+        `a width set, shown (${width.row.subtitle})`);
+    width.automatic.active = true;
+    check(lockSettings.get_int('clock-width') === 0, 'Automatic again');
+
+    // Colours from the wallpaper, each checked where the clocks are.
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    for (const key of ['picture-uri', 'picture-uri-dark'])
+        background.set_string(key, 'file:///usr/share/backgrounds/gnome/amber-d.jxl');
+    const sampled = () => lockPage._sampled?.endsWith('amber-d.jxl') && lockPage._swatches.length > 0;
+    for (let i = 0; i < 60 && !sampled(); i++)
+        await sleep(100);
+    const swatches = lockPage._swatches;
+    check(swatches.length > 0 && swatches.every(swatch => /^#[0-9a-f]{6}$/.test(swatch.color) && swatch.button.tooltip_text),
+        `colours from the wallpaper (${swatches.map(swatch => `${swatch.color}${swatch.reaches ? '' : ' (faint)'}`)})`);
+    swatches[0].button.active = true;
+    check(lockSettings.get_string('clock-color') === swatches[0].color && !lockPage._colorAuto.active,
+        'one picked: the colour of the clocks, Auto off');
+    lockSettings.set_string('clock-color', 'auto');
+    check(swatches.every(swatch => !swatch.button.active) && lockPage._colorAuto.active, 'Auto again: none picked');
+    lockSettings.set_string('clock-color', swatches.at(-1).color);
+    check(swatches.at(-1).button.active && swatches.filter(swatch => swatch.button.active).length === 1,
+        'set elsewhere, shown');
+    lockSettings.set_int('clock-weight', 300);
+    // (The Type group in sight.)
+    const lockScroll = findDescendant(lockPage, w => w instanceof Gtk.ScrolledWindow);
+    lockScroll.get_child().scroll_to(lockPage._swatchRowWidget, null);
+    await sleep(400);
     await render(window, 'lock-screen-type');
-    lockSettings.reset('clock-color');
-    lockSettings.reset('clock-font');
+    lockScroll.vadjustment.value = 0;
+    for (const key of ['clock-color', 'clock-font', 'clock-weight', 'clock-width'])
+        lockSettings.reset(key);
+    for (const key of ['picture-uri', 'picture-uri-dark'])
+        background.reset(key);
 
     const notesSettings = store.settings.get_child('notes');
     desktop._notes.active = false;

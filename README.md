@@ -128,8 +128,10 @@ profile called **Original**, so there is always a way back.
   opened from the settings' Lock Screen page. Their type is in a tone of the
   palette's hue, light or dark, picked from the wallpaper behind them so
   that it is legible there (contrast as APCA measures it), or in a color
-  of one's own; a part that would not read as it is is set a little
-  heavier, or gets a soft shadow round its letters, and only that part.
+  of one's own – any, or one of the wallpaper's that the settings offer,
+  each shown where the clocks are; a part that would not read as it is is
+  set a little heavier, or gets a soft shadow round its letters, and only
+  that part.
   Its font is Inter or Roboto Flex (variable fonts that come with Atelier,
   loaded into the shell only), the shell's, or a rounded or serif one
   installed, the clocks' digits in the weight and width of one's choice.
