@@ -1,8 +1,11 @@
-// A tiny made-up model in place of Depth Anything V2, for the depth
-// worker's tests: the same input and output as the real one's (1×3×H×W in,
-// any size; 1×H×W out), how near a pixel is being simply how bright it is –
-// the mean of the channels, so the brighter, the nearer. Written as ONNX's
-// protobuf by hand: no onnx package needed, nothing downloaded.
+// Tiny made-up models in place of the depth effect's, for the depth
+// worker's tests. One for Depth Anything V2: the same input and output as
+// the real one's (1×3×H×W in, any size; 1×H×W out), how near a pixel is
+// being simply how bright it is – the mean of the channels, so the
+// brighter, the nearer. One for BiRefNet: its input and output (1×3×1024×1024
+// in, 1×1×1024×1024 logits out), the subject being what the weights given
+// pick out of the channels. Written as ONNX's protobuf by hand: no onnx
+// package needed, nothing downloaded.
 
 const encoder = new TextEncoder();
 
@@ -43,6 +46,22 @@ const node = (op, inputs, outputs, attributes = []) => [
     ...attributes.flatMap(attribute => bytes(5, attribute)),
 ];
 
+// TensorProto: floats of the given dims, an initializer (the model's own
+// numbers), little-endian as raw_data has them.
+const floats = (name, dims, values) => [
+    ...dims.flatMap(d => number(1, d)),
+    ...number(2, 1), // FLOAT
+    ...bytes(8, name),
+    ...bytes(9, [...new Uint8Array(new Float32Array(values).buffer)]),
+];
+
+const model = graph => new Uint8Array([
+    ...number(1, 7), // ir_version
+    ...bytes(2, 'atelier-tests'),
+    ...bytes(7, graph),
+    ...bytes(8, [...bytes(1, ''), ...number(2, 13)]), // opset 13
+]);
+
 /** @returns {Uint8Array} the model, as an .onnx file has it */
 export function fakeDepthModel() {
     // AttributeProto: axes = [1] (INTS), keepdims = 0 (INT).
@@ -54,10 +73,27 @@ export function fakeDepthModel() {
         ...bytes(11, tensor('pixel_values', ['batch', 3, 'height', 'width'])),
         ...bytes(12, tensor('predicted_depth', ['batch', 'height', 'width'])),
     ];
-    return new Uint8Array([
-        ...number(1, 7), // ir_version
-        ...bytes(2, 'atelier-tests'),
-        ...bytes(7, graph),
-        ...bytes(8, [...bytes(1, ''), ...number(2, 13)]), // opset 13
-    ]);
+    return model(graph);
+}
+
+/**
+ * A made-up BiRefNet: each pixel's logit (how sure it is that the pixel is
+ * the subject's, before a sigmoid) is a weighted sum of its channels, as the
+ * model gets them (less ImageNet's mean, over its deviation), and a bias – a
+ * convolution of 1×1. The default picks out what is red, surely.
+ *
+ * @param {number[]} [weights] - [red, green, blue]
+ * @param {number} [bias]
+ * @returns {Uint8Array} the model, as an .onnx file has it
+ */
+export function fakeSubjectModel(weights = [4, -2, -2], bias = -6) {
+    const graph = [
+        ...bytes(1, node('Conv', ['input_image', 'weights', 'bias'], ['output_image'])),
+        ...bytes(2, 'fake-birefnet'),
+        ...bytes(5, floats('weights', [1, 3, 1, 1], weights)),
+        ...bytes(5, floats('bias', [1], [bias])),
+        ...bytes(11, tensor('input_image', [1, 3, 1024, 1024])),
+        ...bytes(12, tensor('output_image', [1, 1, 1024, 1024])),
+    ];
+    return model(graph);
 }

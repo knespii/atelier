@@ -3,10 +3,12 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    DEFAULT_MODEL, MAX_COVER, MODELS, chosenModel, coverage, cutoutKey, cutoutOpacity, cutoutPath, depthDir,
-    lockWallpaper, modelPath, pictureState, placement, subjectTop,
+    CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
+    chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, legibility,
+    lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath, subjectTop,
 } from '../lib/depth.js';
-import {fakeDepthModel} from './fakeOnnx.js';
+import {STRETCH} from '../lib/lockLook.js';
+import {fakeDepthModel, fakeSubjectModel} from './fakeOnnx.js';
 import {assert, assertEqual, freshDir, writeFile} from './util.js';
 
 const WORKER = GLib.build_filenamev([GLib.get_current_dir(), 'lib', 'depthWorker.py']);
@@ -56,6 +58,62 @@ export function testChosenModel() {
     assertEqual(chosenModel('', having(['small', 'large'])), 'large', 'none chosen: the biggest one there');
     assertEqual(chosenModel('', having(['small'])), 'small');
     assertEqual(chosenModel('toString', having(['base'])), 'base', 'one that isn\'t a model counts as none');
+}
+
+export function testSubjectModels() {
+    assertEqual(Object.keys(SUBJECT_MODELS), ['lite'], 'BiRefNet lite');
+    const lite = SUBJECT_MODELS.lite;
+    assertEqual(lite.url, 'https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/' +
+        'de15b22ba131738a16dff04aab8bdf8dc32e3ac1/onnx/model.onnx', 'from Hugging Face, at its revision, in full precision');
+    assertEqual([lite.sha256, lite.bytes], ['5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333', 224005088],
+        'its SHA-256 and size, as Hugging Face gives them');
+    assertEqual([lite.license, lite.label], ['MIT', '224 MB']);
+    assert(lite.title && lite.time, 'what the settings say of it');
+    assert(!Object.values(MODELS).some(model => model.name === lite.name), 'in a file of its own');
+    assert(subjectModelPath('lite').startsWith(GLib.get_user_data_dir()) &&
+        subjectModelPath('lite').endsWith('/atelier/models/birefnet-lite.onnx'),
+    `with the depth models (${subjectModelPath('lite')})`);
+}
+
+export function testChosenSubjectModel() {
+    const having = ids => id => ids.includes(id);
+    assertEqual(chosenSubjectModel('', having([])), 'none', 'none chosen, none there: none');
+    assertEqual(chosenSubjectModel('', having(['lite'])), 'lite', 'none chosen: the one downloaded');
+    assertEqual(chosenSubjectModel('lite', having([])), 'lite', 'the one chosen, downloaded or not');
+    assertEqual(chosenSubjectModel('none', having(['lite'])), 'none', 'none, on purpose, downloaded or not');
+    assertEqual(chosenSubjectModel('toString', having(['lite'])), 'lite', 'what isn\'t a model counts as nothing chosen');
+}
+
+export function testCutoutModels() {
+    const having = ids => path => ids.some(id => path.endsWith(`/${id}`));
+    const [large, base, lite] = [modelPath('large'), modelPath('base'), subjectModelPath('lite')];
+    assertEqual(cutoutModels('', '', having(['depth-anything-v2-large.onnx', 'birefnet-lite.onnx'])),
+        {model: large, subject: lite}, 'the ones downloaded');
+    assertEqual(cutoutModels('', 'none', having(['depth-anything-v2-large.onnx', 'birefnet-lite.onnx'])),
+        {model: large, subject: null}, 'not the subject model when none is chosen');
+    assertEqual(cutoutModels('base', 'lite', having(['depth-anything-v2-large.onnx'])),
+        {model: null, subject: null}, 'none of them when the ones chosen aren\'t downloaded');
+    assertEqual(cutoutModels('', '', having(['birefnet-lite.onnx'])), {model: null, subject: lite},
+        'the subject model alone');
+    assertEqual(cutoutModels('base', '', having(['depth-anything-v2-base.onnx'])), {model: base, subject: null});
+    assertEqual(modelsTag({model: large, subject: lite}), 'depth-anything-v2-large.onnx birefnet-lite.onnx',
+        'what the worker writes in a cutout of them');
+    assertEqual(modelsTag({model: null, subject: lite}), '- birefnet-lite.onnx');
+    assertEqual(modelsTag({model: base, subject: null}), 'depth-anything-v2-base.onnx -');
+    assert(CUTOUT_VERSION >= 5, 'cutouts from before the subject made anew');
+}
+
+export function testPngText() {
+    const path = GLib.build_filenamev([freshDir('depth-png'), 'cutout.png']);
+    const picture = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, true, 8, 64, 32);
+    picture.fill(0x20406080);
+    picture.savev(path, 'png', ['tEXt::atelier-models', 'tEXt::atelier-width'],
+        ['depth-anything-v2-large.onnx birefnet-lite.onnx', '1920']);
+    const [, bytes] = GLib.file_get_contents(path);
+    assertEqual(pngText(bytes), {'atelier-models': 'depth-anything-v2-large.onnx birefnet-lite.onnx',
+        'atelier-width': '1920'}, 'the text a PNG keeps');
+    assertEqual(pngText(bytes.subarray(0, 60))['atelier-models'], undefined, 'not what was cut off');
+    assertEqual(pngText(new TextEncoder().encode('not a picture at all')), {}, 'nothing of what isn\'t a PNG');
 }
 
 export function testPictureState() {
@@ -147,6 +205,77 @@ export function testCoverage() {
     const share = coverage(big, {x: 0, y: 0, width: 1000, height: 1000}, {x: 0, y: 0, width: 1000, height: 1000});
     assert(near(share, 0.3) && share < MAX_COVER, `a third of it, still under the limit (${share})`);
     assert(MAX_COVER > 0.2 && MAX_COVER < 0.6, 'the limit lets a clock be partly covered, not hidden');
+}
+
+// Four digits of a clock, 100 × 200 each, side by side from (100, 100), on
+// a monitor of 800 × 400 the cutout covers one to one.
+const DIGITS = [100, 220, 340, 460].map(x => ({x, y: 100, width: 100, height: 200}));
+const MONITOR = {x: 0, y: 0, width: 800, height: 400};
+
+// A cutout of 800 × 400 with the subject where inside(x, y) says.
+function cutoutWhere(inside) {
+    const [width, height] = [800, 400];
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++)
+            pixels[(y * width + x) * 4 + 3] = inside(x, y) ? 255 : 0;
+    }
+    return {pixels, width, height, rowstride: width * 4};
+}
+
+export function testLegibilityGlassFeet() {
+    // A hill over the digits' feet: the bottom quarter of them, as the
+    // glass face has it on purpose.
+    const hill = cutoutWhere((x, y) => y >= 250);
+    const glass = legibility(hill, MONITOR, {glyphs: DIGITS, overlap: STRETCH.overlap, glass: true});
+    assert(glass.stays && glass.worst === 0 && glass.glyph === -1 && Math.abs(glass.whole - 0.25) < 0.01,
+        `the glass digits' feet behind the hill: on, nothing that should show covered (${JSON.stringify(glass)})`);
+    const plain = legibility(hill, MONITOR, {glyphs: DIGITS});
+    assert(plain.stays && Math.abs(plain.worst - 0.25) < 0.01,
+        `another face: a quarter of each digit gone still reads (${JSON.stringify(plain)})`);
+    // A little higher: a third of each.
+    const higher = cutoutWhere((x, y) => y >= 233);
+    const covered = legibility(higher, MONITOR, {glyphs: DIGITS});
+    assert(!covered.stays && covered.worst > MAX_GLYPH_COVER && covered.whole < MAX_COVER,
+        `a third of every digit gone: off, though the clock as a whole is under MAX_COVER (${JSON.stringify(covered)})`);
+    const tall = legibility(higher, MONITOR, {glyphs: DIGITS, overlap: STRETCH.overlap, glass: true});
+    assert(tall.stays && tall.worst < 0.15,
+        `the glass digits, standing behind it a quarter on purpose, keep enough (${JSON.stringify(tall)})`);
+}
+
+export function testLegibilityOneDigit() {
+    // A head rising into the second digit only, over 40 % of it: the clock
+    // as a whole is a tenth covered – on by the box alone, off digit by digit.
+    const head = cutoutWhere((x, y) => x >= 220 && x < 320 && y >= 180);
+    const box = {x: 100, y: 100, width: 460, height: 200};
+    assert(coverage(head, MONITOR, box) < MAX_COVER, 'little of the clock\'s box');
+    const verdict = legibility(head, MONITOR, {glyphs: DIGITS, box});
+    assert(!verdict.stays && verdict.glyph === 1 && Math.abs(verdict.worst - 0.6) < 0.02,
+        `one digit losing more than MAX_GLYPH_COVER is enough (${JSON.stringify(verdict)})`);
+    // A narrow subject between the digits: none of them loses anything.
+    const pole = cutoutWhere(x => x >= 202 && x < 218);
+    assertEqual(legibility(pole, MONITOR, {glyphs: DIGITS, box}).stays, true, 'between the digits: on');
+    const none = legibility(cutoutWhere(() => false), MONITOR, {glyphs: DIGITS, box});
+    assertEqual([none.stays, none.worst, none.glyph, none.whole], [true, 0, -1, 0], 'nothing in front: on');
+}
+
+export function testLegibilityWhole() {
+    // The subject over the clock's box all round its digits (none of them
+    // touched): the box over MAX_COVER is enough.
+    const around = cutoutWhere((x, y) => y < 100 || y >= 300);
+    const box = {x: 100, y: 0, width: 460, height: 400};
+    const verdict = legibility(around, MONITOR, {glyphs: DIGITS, box});
+    assert(!verdict.stays && verdict.worst === 0 && verdict.whole > MAX_COVER,
+        `the clock as a whole covered too much: off (${JSON.stringify(verdict)})`);
+    // The glass face may have more of it covered.
+    const half = cutoutWhere((x, y) => y >= 200);
+    const glass = legibility(half, MONITOR, {glyphs: DIGITS, overlap: 0.5, glass: true});
+    assert(glass.stays && glass.whole > MAX_COVER && glass.whole <= MAX_COVER_GLASS,
+        `glass digits half behind it on purpose: still on (${JSON.stringify(glass)})`);
+    // Digits off the picture count as uncovered; none at all, nothing covered.
+    const off = legibility(cutoutWhere(() => true), {x: 1000, y: 0, width: 800, height: 400}, {glyphs: DIGITS});
+    assertEqual([off.stays, off.worst], [true, 0], 'the cutout elsewhere: on');
+    assertEqual(legibility(around, MONITOR, {glyphs: []}).stays, true, 'no digits, no box: nothing to keep legible');
 }
 
 export function testSubjectTop() {
@@ -351,4 +480,157 @@ export function testWorkerFindsTheSky() {
     // A blue picture with nothing under it: no ground, so no sky either.
     const blue = cutoutOf('blue', paint(800, 450, (x, y) => [50 + y / 5, 110 + y / 6, 220]));
     assertEqual(blue.answer.sky, false, 'blue all over is not a sky with something in front');
+}
+
+// The worker with the made-up subject model (picking out what is red, or
+// as the weights given say), with the made-up depth model or without one:
+// pictures of 400 × 300, cutouts for a monitor as big.
+function subjectCutouts(dir, {weights, bias} = {}) {
+    const subject = `${dir}/subject.onnx`;
+    GLib.file_set_contents(subject, fakeSubjectModel(weights, bias));
+    const depth = `${dir}/depth.onnx`;
+    GLib.file_set_contents(depth, fakeDepthModel());
+    return (name, picture, {withDepth = false, withSubject = true} = {}) => {
+        picture.savev(`${dir}/${name}.png`, 'png', [], []);
+        const run = runWorker([...withDepth ? ['--model', depth] : [], ...withSubject ? ['--subject', subject] : [],
+            '--input', `${dir}/${name}.png`, '--output', `${dir}/${name}-cutout.png`, '--width', '400', '--height', '300']);
+        assert(run.status === 0 && run.answer.ok, `done (${JSON.stringify(run.answer)})`);
+        const cutout = GdkPixbuf.Pixbuf.new_from_file(`${dir}/${name}-cutout.png`);
+        const pixels = cutout.get_pixels();
+        return {answer: run.answer, cutout, alpha: (x, y) => pixels[y * cutout.get_rowstride() + x * 4 + 3]};
+    };
+}
+
+const disc = (cx, cy, r) => (x, y) => (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 < r * r;
+
+export function testWorkerChecksTheSubjectModel() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const dir = freshDir('depth-subject');
+    GLib.file_set_contents(`${dir}/subject.onnx`, fakeSubjectModel());
+    GLib.file_set_contents(`${dir}/depth.onnx`, fakeDepthModel());
+    assertEqual(runWorker(['--check', '--subject', `${dir}/subject.onnx`]).answer, {ok: true, missing: [], subject: 'ok'},
+        'the made-up subject model loads');
+    assertEqual(runWorker(['--check', '--model', `${dir}/depth.onnx`, '--subject', `${dir}/subject.onnx`]).answer,
+        {ok: true, missing: [], model: 'ok', subject: 'ok'}, 'each model said of');
+    GLib.file_set_contents(`${dir}/broken.onnx`, 'not a model');
+    const broken = runWorker(['--check', '--model', `${dir}/depth.onnx`, '--subject', `${dir}/broken.onnx`]).answer;
+    assert(!broken.ok && broken.model === 'ok' && broken.subject.startsWith('does not load'),
+        `a broken one told apart (${JSON.stringify(broken)})`);
+    assertEqual(runWorker(['--check', '--subject', `${dir}/gone.onnx`]).answer.subject, 'missing');
+    const neither = runWorker(['--input', `${dir}/a.png`, '--output', `${dir}/c.png`, '--width', '4', '--height', '4']);
+    assert(neither.status === 2 && /--model or --subject/.test(neither.answer.error), 'without a model, it says so');
+}
+
+export function testWorkerHoldsASureSubject() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const cutoutOf = subjectCutouts(freshDir('depth-subject'));
+    // A red disc on grey: the subject model alone stands the disc in front,
+    // its edge on the disc's own.
+    const red = disc(200, 150, 60);
+    const picture = paint(400, 300, (x, y) => (red(x, y) ? [220, 40, 40] : [128, 128, 128]));
+    const {answer, cutout, alpha} = cutoutOf('disc', picture);
+    const share = Math.PI * 60 * 60 / (400 * 300);
+    assert(answer.subject.parts === 1 && Math.abs(answer.subject.held - share) < 0.01 && answer.split === null &&
+        answer.far === null, `the subject alone, held (${JSON.stringify(answer)})`);
+    assert(alpha(200, 150) === 255 && alpha(200, 100) === 255 && alpha(20, 20) === 0 && alpha(200, 220) === 0,
+        `the disc in front, the rest see-through (${alpha(200, 150)}, ${alpha(20, 20)})`);
+    assert(alpha(137, 150) < 32 && alpha(143, 150) > 223,
+        `its edge on the disc's (${[136, 138, 140, 142, 144].map(x => alpha(x, 150))})`);
+    assertEqual(cutout.get_option('tEXt::atelier-models'), '- subject.onnx', 'which models made it, said in it');
+
+    // The depth model sees the grey nearer than the disc (to the made-up
+    // one, the brighter the nearer): the subject, far off, is left to it.
+    const far = cutoutOf('far', picture, {withDepth: true});
+    assert(far.answer.subject.held === 0 && far.answer.subject.left.includes('far') && far.alpha(200, 150) === 0,
+        `a subject the depth model has far off stays behind (${JSON.stringify(far.answer.subject)})`);
+    assertEqual(far.cutout.get_option('tEXt::atelier-models'), 'depth.onnx subject.onnx');
+}
+
+export function testWorkerAddsTheSubject() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    // A red disc on a dusky blue, its top bright (near, to the made-up depth
+    // model), its foot dark red (farther than the blue, so behind it): the
+    // subject model takes the whole disc for the subject, held as most of it
+    // is near – its foot stands in front too.
+    const cutoutOf = subjectCutouts(freshDir('depth-union'), {weights: [6, -3, -3], bias: -8});
+    const red = disc(200, 150, 60);
+    const picture = paint(400, 300, (x, y) => {
+        if (!red(x, y))
+            return [40, 50, 80];
+        return y < 192 ? [240, 60, 50] : [125, 0, 0];
+    });
+    const depthOnly = cutoutOf('depth-only', picture, {withDepth: true, withSubject: false});
+    assert(depthOnly.answer.subject === null && depthOnly.alpha(200, 120) === 255 && depthOnly.alpha(200, 202) === 0,
+        `the depth model alone: the bright top in front, the dark foot not (${depthOnly.alpha(200, 202)})`);
+    const both = cutoutOf('both', picture, {withDepth: true});
+    assert(both.answer.subject.parts === 1 && both.alpha(200, 120) === 255 && both.alpha(200, 202) === 255 &&
+        both.alpha(20, 20) === 0 && both.alpha(200, 280) === 0,
+    `with the subject: the whole disc in front, the rest still behind (${JSON.stringify(both.answer)})`);
+    // (The foot: a segment of the disc 18 pixels high, 0.9 % of the picture.)
+    assert(Math.abs(both.answer.front - depthOnly.answer.front - 0.0089) < 0.002,
+        `that much more in front (${both.answer.front}, ${depthOnly.answer.front})`);
+}
+
+export function testWorkerLeavesUnsureSubjects() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const dir = freshDir('depth-unsure');
+    const [red, grey] = [[220, 40, 40], [128, 128, 128]];
+    const left = (cutoutOf, name, inside) => {
+        const {answer, alpha} = cutoutOf(name, paint(400, 300, (x, y) => (inside(x, y) ? red : grey)));
+        assert(answer.subject.held === 0 && answer.front === 0 && alpha(200, 150) === 0,
+            `${name}: nothing in front (${JSON.stringify(answer.subject)})`);
+        return answer.subject.left;
+    };
+    const cutoutOf = subjectCutouts(dir);
+    // Across the picture from side to side: the land, depth's to place.
+    assertEqual(left(cutoutOf, 'across', (x, y) => y >= 130 && y < 190), ['across']);
+    // A block with a dozen holes in it: a heap of things, not one.
+    assertEqual(left(cutoutOf, 'heap', (x, y) => x >= 50 && x < 350 && y >= 50 && y < 250 &&
+        !((x - 50) % 75 >= 30 && (x - 50) % 75 < 55 && (y - 50) % 66 >= 20 && (y - 50) % 66 < 45)), ['heap']);
+    // A dozen squares, none of them the subject more than the others.
+    assertEqual(left(cutoutOf, 'scattered', (x, y) => x % 100 >= 35 && x % 100 < 65 && y % 100 >= 35 && y % 100 < 65),
+        ['scattered']);
+    // One square under a hundredth of the picture: no subject.
+    assertEqual(left(cutoutOf, 'small', (x, y) => x >= 185 && x < 215 && y >= 135 && y < 165), ['small']);
+    // A model hardly sure of anything: a haze, not an edge.
+    assertEqual(left(subjectCutouts(dir, {weights: [0.4, -0.2, -0.2], bias: 0}), 'haze', disc(200, 150, 60)), ['unsure']);
+}
+
+export function testWorkerLeavesTheSkyOut() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    // A subject model that picks out what is light: a grey cloud in a blue
+    // sky is the sky's, the bright hill under it (from one side to the
+    // other) the land's – with the depth model or without.
+    const cutoutOf = subjectCutouts(freshDir('depth-cloud'), {weights: [2, 2, 2], bias: -4});
+    const cloud = (x, y) => ((x - 300) / 35) ** 2 + ((y - 45) / 14) ** 2 < 1;
+    const picture = paint(400, 300, (x, y) => {
+        if (cloud(x, y))
+            return [175, 175, 185];
+        if (y < 130 + Math.round(15 * Math.sin(x / 65)))
+            return [20 + y / 3, 60 + y / 3, 150 + y / 3];
+        return [255, 255, 150];
+    });
+    const alone = cutoutOf('cloud', picture);
+    assert(alone.answer.sky && alone.answer.subject.held === 0 && alone.answer.front === 0 &&
+        JSON.stringify(alone.answer.subject.left) === '["across","sky"]',
+    `a cloud picked as the subject is left out, and the land (${JSON.stringify(alone.answer)})`);
+    const both = cutoutOf('cloud-depth', picture, {withDepth: true});
+    const depth = cutoutOf('cloud-depth-only', picture, {withDepth: true, withSubject: false});
+    assert(both.answer.subject.left.includes('sky') && both.alpha(300, 45) === 0 && both.alpha(200, 250) === 255 &&
+        both.answer.front === depth.answer.front, `with the depth model, its cutout as it was (${JSON.stringify(both.answer)})`);
 }
