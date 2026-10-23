@@ -305,8 +305,8 @@ async function renderWallpaper(path, {cache, work}, shape) {
 
     const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, dir: cache});
     let start = GLib.get_monotonic_time();
-    const pixels = await makeBackdrop(spec);
-    const made = ms(start);
+    const made = await makeBackdrop(spec);
+    const making = ms(start);
     start = GLib.get_monotonic_time();
     const backdrop = await loadBackdrop(spec, null);
     const loaded = ms(start);
@@ -351,8 +351,8 @@ async function renderWallpaper(path, {cache, work}, shape) {
     print(`${name}: tone ${tone.color}${tone.dark ? ' (dark)' : ''}, frosted ${frosted}, tint ${tint}; ` +
         `glass ${color} (WCAG contrast ${contrastRatio(color, around).toFixed(2)} with ${around}), ` +
         `raised ${raisedColor} (${contrastRatio(raisedColor, around).toFixed(2)})`);
-    print(`    backdrop ${spec.size.width}×${spec.size.height}: made in ${made.toFixed(1)} ms` +
-        `${pixels ? '' : ' (there already)'}, loaded in ${loaded.toFixed(1)} ms; ` +
+    print(`    backdrop ${spec.size.width}×${spec.size.height}: made in ${making.toFixed(1)} ms` +
+        `${made ? '' : ' (there already)'}, loaded in ${loaded.toFixed(1)} ms; ` +
         `drawing the digits: before ${paintBeforeMs.toFixed(2)} ms, glass ${paintGlassMs.toFixed(2)} ms, ` +
         `raised ${paintRaisedMs.toFixed(2)} ms`);
 }

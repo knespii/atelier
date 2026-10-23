@@ -55,7 +55,9 @@ export function testPictureArea() {
     const cut = pictureArea(shown, factor, backdrop, [400, 300]);
     assertEqual([cut.y, cut.height], [0, size.height], 'only what is on the monitor');
     assert(cut.offsetY < 0, `drawn from above it (${cut.offsetY})`);
-    near(cut.offsetY, shown.y * factor[1], 1e-9, 'where GNOME draws it');
+    assert(Number.isInteger(cut.offsetY), 'at a whole pixel (as GdkPixbuf draws it anyway)');
+    near(cut.offsetY - cut.shift[1], shown.y * factor[1], 1e-9, 'where GNOME draws it, but for the shift');
+    assert(Math.abs(cut.shift[1]) <= 0.5, `less than half a pixel away (${cut.shift})`);
     near(cut.scaleY, shown.height * factor[1] / 300, 1e-9);
     // Scaled, a tall one leaves the sides to GNOME's colours.
     const tall = pictureArea(placement('scaled', [2560, 1440], [1000, 2000]), factor, backdrop, [100, 200]);
@@ -195,6 +197,9 @@ export function testBackdropTransform() {
     near(middle[1], 80 * 0.25, 1e-9);
     const edge = source(lens, [28, 30]);
     near(edge[0] - middle[0], 8 / 0.8 * 0.25, 1e-9, 'further out, what lies further still (drawn smaller)');
+    const shifted = source(backdropTransform({at: [100, 50], factor: [0.25, 0.2], shift: [0.3, -0.4]}), [8, 10]);
+    near(shifted[0], (100 + 8) * 0.25 + 0.3, 1e-9, 'where its picture was moved to');
+    near(shifted[1], (50 + 10) * 0.2 - 0.4, 1e-9);
 }
 
 export function testGlyphCells() {
@@ -289,6 +294,63 @@ export async function testBackdropMade() {
     const sides = await loadBackdrop(scaled);
     const top = hexToRgb(meanColor(sides.sample, [0, 0, 1, 0.08]));
     assert(top[1] > 200 && top[0] < 60, `green over it (${top})`);
+}
+
+// A picture of red and blue, red where it is said to be.
+function redAndBlue(dir, name, width, height, isRed) {
+    const path = GLib.build_filenamev([dir, `${name}.png`]);
+    const pixels = new Uint8Array(width * height * 3);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++)
+            pixels.set(isRed(x, y) ? [220, 30, 30] : [30, 30, 220], (y * width + x) * 3);
+    }
+    GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(pixels), GdkPixbuf.Colorspace.RGB, false, 8, width, height,
+        width * 3).savev(path, 'png', [], []);
+    return path;
+}
+
+// Where red turns to blue along a line of the backdrop, in its pixels:
+// where red and blue are as strong (blurred as light adds up, evenly, they
+// are where the two meet; made richer and brighter, they still are).
+function redMeetsBlue({pixels}, length, at) {
+    const balance = i => pixels[at(i)] - pixels[at(i) + 2];
+    for (let i = 0; i + 1 < length; i++) {
+        const [here, next] = [balance(i), balance(i + 1)];
+        if (here > 0 && next <= 0)
+            return i + 0.5 + here / (here - next);
+    }
+    return NaN;
+}
+
+export async function testBackdropAligned() {
+    const dir = freshDir('glass-aligned');
+    const monitor = [640, 360];
+    // A tall picture, zoomed: cut at the top and the bottom. Red above
+    // its row 250, which GNOME draws at y = -246 + 250 × 853 / 400.
+    const tall = redAndBlue(dir, 'tall', 300, 400, (x, y) => y < 250);
+    const zoom = backdropSpec({path: tall, style: 'zoom', monitor, dir});
+    const shown = placement('zoom', monitor, [300, 400]);
+    const made = await makeBackdrop(zoom);
+    const kept = await loadBackdrop(zoom);
+    assertEqual(kept.shift.map(v => v.toFixed(4)), made.shift.map(v => v.toFixed(4)), 'its shift kept with it');
+    const zoomed = kept.sample;
+    const column = Math.floor(zoomed.width / 2);
+    const y = redMeetsBlue(zoomed, zoomed.height, i => i * zoomed.rowstride + column * zoomed.channels);
+    near(y, (shown.y + 250 * shown.height / 400) * zoom.size.factor[1] + kept.shift[1], 0.2,
+        'zoomed: where GNOME draws it');
+
+    // Scaled: in the middle, GNOME's colour beside it. Red left of its
+    // column 100.
+    const scaled = backdropSpec({path: redAndBlue(dir, 'left', 300, 400, x => x < 100), style: 'scaled', monitor,
+        colors: {primary: '#000000'}, dir});
+    const placed = placement('scaled', monitor, [300, 400]);
+    await makeBackdrop(scaled);
+    const {sample, shift} = await loadBackdrop(scaled);
+    const row = Math.floor(sample.height / 2);
+    const x = redMeetsBlue(sample, sample.width, i => row * sample.rowstride + i * sample.channels);
+    assert(Math.abs(shift[0]) > 0.05, `(a picture GdkPixbuf moves: ${shift})`);
+    near(x, (placed.x + 100 * placed.width / 300) * scaled.size.factor[0] + shift[0], 0.2,
+        'scaled: where GNOME draws it');
 }
 
 // Pixels of a surface, as a pixbuf reads them from its PNG.

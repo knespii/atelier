@@ -171,13 +171,15 @@ async function stepwise(steps) {
 }
 
 // Written aside and moved into place: a reader never finds half of it.
-async function savePng(pixbuf, path) {
+// (Notes go in as PNG's text: {key: value}.)
+async function savePng(pixbuf, path, notes = {}) {
     GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o755);
     const partial = Gio.File.new_for_path(`${path}.${GLib.uuid_string_random().slice(0, 8)}.partial`);
     try {
         const stream = await partial.replace_async(null, false, Gio.FileCreateFlags.NONE, GLib.PRIORITY_LOW, null);
         await new Promise((resolve, reject) => {
-            pixbuf.save_to_streamv_async(stream, 'png', [], [], null, (_, res) => {
+            const keys = Object.keys(notes).map(key => `tEXt::${key}`);
+            pixbuf.save_to_streamv_async(stream, 'png', keys, Object.values(notes), null, (_, res) => {
                 try {
                     resolve(GdkPixbuf.Pixbuf.save_to_stream_finish(res));
                 } catch (e) {
@@ -215,7 +217,8 @@ async function prune(dir, keep) {
     }
 }
 
-// The monitor's backdrop, frosted: its pixels.
+// The monitor's backdrop, frosted: its pixels, and how far its picture
+// lies from where it belongs (pictureArea()).
 async function frostedPixels(spec) {
     const {monitor, style, size} = spec;
     const stored = await fileInfoOf(spec.path, null);
@@ -246,10 +249,13 @@ async function frostedPixels(spec) {
         picture.composite(canvas, area.x, area.y, area.width, area.height, area.offsetX, area.offsetY,
             area.scaleX, area.scaleY, GdkPixbuf.InterpType.BILINEAR, 255);
     }
-    return stepwise(frostSteps(canvas.get_pixels(), {
+    const pixels = await stepwise(frostSteps(canvas.get_pixels(), {
         width, height, channels: canvas.get_n_channels(), rowstride: canvas.get_rowstride(),
     }, {sigma: size.sigma}));
+    return {pixels, shift: area?.shift ?? [0, 0]};
 }
+
+const SHIFT_NOTE = 'atelier-shift';
 
 const jobs = new Map();
 
@@ -260,22 +266,22 @@ const jobs = new Map();
  * just stops waiting).
  *
  * @param {object} spec - backdropSpec()
- * @returns {Promise<Uint8Array|null>} its pixels (RGB, width × 3 bytes a
- *   row) when made now; null when it was there
+ * @returns {Promise<object|null>} when made now, {pixels (RGB, width × 3
+ *   bytes a row), shift}; null when it was there
  */
 export function makeBackdrop(spec) {
     if (GLib.file_test(spec.file, GLib.FileTest.EXISTS))
         return Promise.resolve(null);
     if (!jobs.has(spec.file)) {
         const job = (async () => {
-            const pixels = await frostedPixels(spec);
+            const made = await frostedPixels(spec);
             const {width, height} = spec.size;
-            const pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(pixels), GdkPixbuf.Colorspace.RGB,
+            const pixbuf = GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(made.pixels), GdkPixbuf.Colorspace.RGB,
                 false, 8, width, height, width * 3);
-            await savePng(pixbuf, spec.file);
+            await savePng(pixbuf, spec.file, {[SHIFT_NOTE]: made.shift.map(v => v.toFixed(4)).join(',')});
             prune(GLib.path_get_dirname(spec.file), spec.file)
                 .catch(e => console.warn(`Atelier: old glass backdrops stay: ${e.message}`));
-            return pixels;
+            return made;
         })().finally(() => jobs.delete(spec.file));
         jobs.set(spec.file, job);
     }
@@ -286,17 +292,19 @@ export function makeBackdrop(spec) {
  * A backdrop made, ready to draw with.
  *
  * @param {object} spec - backdropSpec()
- * @param {Uint8Array|null} [pixels] - its pixels, if they are at hand
- *   (makeBackdrop()); read from its file otherwise
+ * @param {object|null} [made] - makeBackdrop()'s, when it made it now (its
+ *   pixels at hand); read from its file otherwise
  * @param {Gio.Cancellable} [cancellable]
  * @returns {Promise<object>} {key, surface (Cairo), factor (its pixels per
- *   monitor pixel), monitor, sample (its pixels, for what is behind)}
+ *   monitor pixel), shift (how far its picture lies from where it belongs,
+ *   its pixels), monitor, sample (its pixels, for what is behind)}
  */
-export async function loadBackdrop(spec, pixels = null, cancellable = null) {
+export async function loadBackdrop(spec, made = null, cancellable = null) {
     let sample;
-    if (pixels) {
+    let shift = made?.shift;
+    if (made) {
         const {width, height} = spec.size;
-        sample = {pixels, channels: 3, rowstride: width * 3, width, height};
+        sample = {pixels: made.pixels, channels: 3, rowstride: width * 3, width, height};
     } else {
         const pixbuf = await decode(spec.file, 0, 0, cancellable);
         sample = {
@@ -306,6 +314,7 @@ export async function loadBackdrop(spec, pixels = null, cancellable = null) {
             width: pixbuf.get_width(),
             height: pixbuf.get_height(),
         };
+        shift = pixbuf.get_option(`tEXt::${SHIFT_NOTE}`)?.split(',').map(Number);
     }
     const surface = Cairo.ImageSurface.createFromPNG(spec.file);
     const [width, height] = [surface.getWidth(), surface.getHeight()];
@@ -313,6 +322,7 @@ export async function loadBackdrop(spec, pixels = null, cancellable = null) {
         key: spec.key,
         surface,
         factor: [width / spec.monitor[0], height / spec.monitor[1]],
+        shift: shift?.length === 2 && shift.every(Number.isFinite) ? shift : [0, 0],
         monitor: spec.monitor,
         sample,
     };
@@ -400,10 +410,10 @@ export class GlassBackdrop {
             return;
         }
         try {
-            const pixels = await makeBackdrop(spec);
+            const made = await makeBackdrop(spec);
             if (cancellable.is_cancelled())
                 return;
-            const backdrop = await loadBackdrop(spec, pixels, cancellable);
+            const backdrop = await loadBackdrop(spec, made, cancellable);
             if (!cancellable.is_cancelled())
                 this._set(backdrop);
         } catch (e) {
@@ -601,11 +611,12 @@ export class LiquidGlass {
             return null;
         const key = [rect.x, rect.y, rect.width, rect.height].map(Math.round).join(',');
         if (!this._behind.has(key)) {
-            const [mw, mh] = backdrop.monitor;
+            const {monitor: [mw, mh], factor: [fx, fy], shift: [sx, sy]} = backdrop;
             // (A few rectangles: the digits as they grow.)
             if (this._behind.size > 32)
                 this._behind.clear();
-            this._behind.set(key, meanColor(backdrop.sample, [rect.x / mw, rect.y / mh, rect.width / mw, rect.height / mh]));
+            this._behind.set(key, meanColor(backdrop.sample,
+                [(rect.x + sx / fx) / mw, (rect.y + sy / fy) / mh, rect.width / mw, rect.height / mh]));
         }
         return this._behind.get(key);
     }
@@ -797,8 +808,8 @@ export class LiquidGlass {
     // The backdrop as the source, where it lies behind the drawing, through
     // a lens about a point; the matrix the identity again after.
     _setBackdrop(cr, at, center, lens) {
-        const {surface, factor} = this._backdrop;
-        const {x, y, scaleX, scaleY} = backdropTransform({at, factor, center, lens});
+        const {surface, factor, shift} = this._backdrop;
+        const {x, y, scaleX, scaleY} = backdropTransform({at, factor, center, lens, shift});
         cr.identityMatrix();
         cr.translate(x, y);
         cr.scale(scaleX, scaleY);
