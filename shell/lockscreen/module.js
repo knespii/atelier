@@ -2,7 +2,8 @@
 // with the padlock over GNOME's lock screen, following GNOME's check of who
 // is there (lib/lockState.js), the lock screen's widgets (board.js) and its
 // own password popup (password.js). The wallpaper stays sharp until the
-// password is asked, and blurs as GNOME blurs it as the prompt comes up.
+// password is asked, and turns to glass as the prompt comes up (glass.js):
+// blurred as GNOME blurs it, its colours kept.
 // Nothing here launches anything, reads the network, shows notifications or
 // takes the keyboard.
 
@@ -16,6 +17,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {Phase, initialState, look, reduce} from '../../lib/lockState.js';
 import {LockBoard} from './board.js';
+import {LockGlass} from './glass.js';
 import {
     clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt, wallpaperBlursOf,
 } from './gnome.js';
@@ -51,6 +53,7 @@ export class LockModule {
         this._unlocking = false;
         this._room = 0;
         this._following = null;
+        this._glass = null;
         this.state = initialState();
     }
 
@@ -82,7 +85,7 @@ export class LockModule {
             if (this._lockSettings.get_boolean('password-field'))
                 this._field = new PasswordField(this._island);
         }
-        this._board = new LockBoard(this._lockSettings);
+        this._board = new LockBoard(this._lockSettings, {palette: this._settings.get_child('palette')});
         if (!placeOverBackground(this._dialog, this._board.layer)) {
             this._board.destroy();
             this._board = null;
@@ -90,7 +93,8 @@ export class LockModule {
         // GNOME's blur at its fullest, as it has set it.
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const [blur] = wallpaperBlursOf(this._dialog);
-        this._blur = blur?.radius > 0 ? {radius: blur.radius / scale, brightness: blur.brightness} : BLUR;
+        this._glass = new LockGlass(this._dialog,
+            blur?.radius > 0 ? {radius: blur.radius / scale, brightness: blur.brightness} : BLUR);
         // As the prompt comes up (or the popup asking instead), and as GNOME
         // sets its blur anew.
         promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._follow(), this);
@@ -179,14 +183,18 @@ export class LockModule {
     }
 
     // GNOME's prompt comes up the same way whether it shows or the popup
-    // asks instead: the wallpaper blurs as it does, and the widgets make
-    // room in the middle.
+    // asks instead: the wallpaper turns to glass as it does, and the
+    // widgets make room in the middle.
     _makeRoom(animate = false) {
-        // (Unlocked, it all slides away as it is.)
+        // (Unlocked, it all slides away as it is, the wallpaper coming
+        // sharp again.)
         if (this._unlocking)
             return;
         const progress = this._room;
-        this._blurWallpaper(progress);
+        if (this.state.phase === Phase.SUCCESS)
+            this._glass.release();
+        else
+            this._glass.set(progress);
         this._island?.reveal(progress);
         if (!this._board)
             return;
@@ -195,18 +203,6 @@ export class LockModule {
         const monitor = Main.layoutManager.primaryMonitor;
         const top = (island ? island.y + island.height - monitor.y : 0) + GAP * scale;
         this._board.makeRoom(progress, this._field?.standing ? this._field.rect : null, top, GAP * scale, animate);
-    }
-
-    /** @param {number} progress - 0 sharp … 1 as blurred (and darkened) as GNOME has it */
-    _blurWallpaper(progress) {
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        for (const effect of wallpaperBlursOf(this._dialog)) {
-            effect.set({
-                radius: Math.round(this._blur.radius * scale * progress),
-                brightness: 1 - (1 - this._blur.brightness) * progress,
-            });
-            effect.enabled = progress > 0;
-        }
     }
 
     // GNOME's time and date (and the hint under them, which would be left
@@ -288,12 +284,13 @@ export class LockModule {
         Main.layoutManager.disconnectObject(this);
         this._board?.destroy({keepLayer: this._unlocking});
         this._board = null;
-        // (Unlocked, the lock screen goes as it is; turned off, GNOME's own
-        // clock and blur come back.)
+        // (Unlocked, the lock screen goes as it is, coming sharp; turned
+        // off, GNOME's own clock and blur come back.)
         if (this._dialog && !this._unlocking) {
             this._syncClock(true);
-            this._blurWallpaper(1);
+            this._glass?.restore();
         }
+        this._glass = null;
         this._lockSettings = null;
         this._dialog = null;
     }
