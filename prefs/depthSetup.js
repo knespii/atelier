@@ -188,7 +188,7 @@ export class DepthSetup {
             this.modelRow.selected = this._ids.indexOf(id);
         const use = license.includes('NC') ? `${license}, for non-commercial use` : license;
         const kept = this.state?.model === 'ok' ? 'downloaded' : 'not downloaded';
-        this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time} a wallpaper; ${kept}`;
+        this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time}; ${kept}`;
         this.modelRow.sensitive = !this._downloading;
         this.downloadButton.label = `Download Model (${label})…`;
     }
