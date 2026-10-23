@@ -4,10 +4,10 @@ import GLib from 'gi://GLib';
 
 import {placement} from '../lib/depth.js';
 import {
-    BACKDROP_VERSION, DIM, FROST, GLASS, backdropKey, backdropSize, backdropTransform, backgroundPixels, boxWidths,
-    frost, frostSteps, glassColor, glassTint, glyphCells, meanColor, parseColor, pictureArea,
+    BACKDROP_VERSION, DIM, FROST, GLASS, LEGIBLE_STEPS, backdropKey, backdropSize, backdropTransform, backgroundPixels,
+    boxWidths, frost, frostSteps, glassColor, glassTint, glyphCells, legibleGlass, meanColor, parseColor, pictureArea,
 } from '../lib/glassBackdrop.js';
-import {hexToOklch, hexToRgb} from '../lib/palette.js';
+import {contrastRatio, hexToOklch, hexToRgb} from '../lib/palette.js';
 import {LiquidGlass, backdropDir, backdropSpec, loadBackdrop, makeBackdrop} from '../shell/lockscreen/liquidGlass.js';
 import {assert, assertEqual, freshDir} from './util.js';
 
@@ -249,6 +249,25 @@ export function testGlassColor() {
     assert(more > rest, 'more tint, lighter light glass');
     const [less, opaque] = [0.5, 1].map(opacity => hexToOklch(glassColor({frosted, tint, opacity, behind: '#000000'}))[0]);
     assert(opaque > less, 'more opaque, less of what is behind');
+}
+
+export function testLegibleGlass() {
+    assertEqual(LEGIBLE_STEPS[0], {...GLASS, shadow: 0}, 'first, the glass at rest');
+    for (let i = 1; i < LEGIBLE_STEPS.length; i++) {
+        const [before, step] = [LEGIBLE_STEPS[i - 1], LEGIBLE_STEPS[i]];
+        assert(['tintAlpha', 'opacity', 'shadow'].every(key => step[key] >= before[key]) &&
+            ['tintAlpha', 'opacity', 'shadow'].some(key => step[key] > before[key]), `step ${i}: more legible`);
+        assert(step.shadow === 0 || step.opacity === 1, `step ${i}: opaque before it casts a shadow`);
+    }
+    // As a contrast plan would ask: light glass on a light blue sky.
+    const tone = {color: '#f4f4f4', dark: false};
+    const [frosted, around] = ['#6098ff', '#638ad7'];
+    const tint = glassTint(tone, frosted);
+    const reads = target => step => contrastRatio(glassColor({frosted, tint, behind: around, ...step}), around) >= target;
+    assertEqual(legibleGlass(reads(1.2)), LEGIBLE_STEPS[0], 'readable at rest: as it is');
+    const more = LEGIBLE_STEPS.indexOf(legibleGlass(reads(1.8)));
+    assert(more > 0 && more < LEGIBLE_STEPS.length - 1, `harder to read: further up (${more})`);
+    assertEqual(legibleGlass(() => false), LEGIBLE_STEPS.at(-1), 'never enough: as legible as it gets');
 }
 
 // A picture: its left half red, its right half blue (16:9).

@@ -23,7 +23,7 @@ import PangoCairo from 'gi://PangoCairo';
 import System from 'system';
 
 import {placement} from '../lib/depth.js';
-import {GLASS, glassColor, glassTint} from '../lib/glassBackdrop.js';
+import {GLASS, LEGIBLE_STEPS, glassColor, glassTint} from '../lib/glassBackdrop.js';
 import {glassDigits, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
 import {contrastRatio} from '../lib/palette.js';
 import {wallpaperDir} from '../lib/paths.js';
@@ -54,8 +54,8 @@ const TEXT = '10:52';
 const FAMILY = 'Inter';
 const WEIGHT = 600;
 const DATE_SIZE = 20; // 15pt, pixels
-// The glass as a contrast plan may raise it.
-const RAISED = {tintAlpha: 0.62, opacity: 1, shadow: 1};
+// The glass as legible as a contrast plan may make it.
+const RAISED = LEGIBLE_STEPS.at(-1);
 const REPAINTS = 120; // to time drawing the digits
 
 const ms = since => (GLib.get_monotonic_time() - since) / 1000;
