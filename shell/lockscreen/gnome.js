@@ -60,16 +60,35 @@ export function placeOverBackground(dialog, layer) {
 
 /**
  * @param {UnlockDialog} dialog
+ * @returns {Clutter.Actor[]} the lock screen's wallpaper, one for each
+ *   monitor, each blurred by GNOME's effect named 'blur'; GNOME makes them
+ *   anew when the monitors change
+ */
+export function wallpapersOf(dialog) {
+    const background = dialog?._backgroundGroup;
+    if (!(background instanceof Clutter.Actor))
+        return [];
+    return background.get_children().filter(widget => widget.get_effect('blur') instanceof Shell.BlurEffect);
+}
+
+/**
+ * @param {UnlockDialog} dialog
  * @returns {Shell.BlurEffect[]} what blurs the lock screen's wallpaper, one
  *   for each monitor; GNOME sets them anew when the monitors or the scale
  *   change
  */
 export function wallpaperBlursOf(dialog) {
+    return wallpapersOf(dialog).map(widget => widget.get_effect('blur'));
+}
+
+/**
+ * @param {UnlockDialog} dialog
+ * @returns {Clutter.Actor|null} what holds the wallpapers: it goes with the
+ *   lock screen
+ */
+export function backgroundGroupOf(dialog) {
     const background = dialog?._backgroundGroup;
-    if (!(background instanceof Clutter.Actor))
-        return [];
-    return background.get_children().map(widget => widget.get_effect('blur'))
-        .filter(effect => effect instanceof Shell.BlurEffect);
+    return background instanceof Clutter.Actor ? background : null;
 }
 
 /**

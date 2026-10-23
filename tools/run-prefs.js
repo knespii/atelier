@@ -10,6 +10,7 @@
 // the Makefile sets, because the Extensions app code imports Shew.
 
 import Adw from 'gi://Adw?version=1';
+import Gdk from 'gi://Gdk?version=4.0';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Graphene from 'gi://Graphene';
 import Gio from 'gi://Gio';
@@ -505,6 +506,34 @@ async function runSelftest(window) {
     for (const id of photos.gallery.ids())
         await photos.gallery.remove(id, store.settings);
     desktopSettings.reset('widgets');
+
+    // The lock screen's type: its colour (Auto, or one chosen) and font.
+    const lockPage = await section(window, 'lock-screen');
+    const lockSettings = store.settings.get_child('lockscreen');
+    check(lockPage._colorAuto.active && lockSettings.get_string('clock-color') === 'auto' &&
+        lockPage._colorButton.sensitive, 'the lock screen\'s colour is picked from the wallpaper at first');
+    const orange = new Gdk.RGBA();
+    orange.parse('#ff8800');
+    lockPage._colorButton.rgba = orange;
+    check(lockSettings.get_string('clock-color') === '#ff8800' && !lockPage._colorAuto.active,
+        `a colour chosen is kept, Auto off (${lockSettings.get_string('clock-color')})`);
+    lockPage._colorAuto.active = true;
+    check(lockSettings.get_string('clock-color') === 'auto', 'Auto again');
+    lockPage._colorAuto.active = false;
+    check(lockSettings.get_string('clock-color') === '#ff8800', 'and off, the colour the button has');
+    lockSettings.set_string('clock-color', 'auto');
+    check(lockPage._colorAuto.active, 'set elsewhere, shown');
+    const fonts = lockPage._fontCombo;
+    check(fonts.model.get_n_items() === 5 && fonts.selected === 0 && fonts.subtitle === 'The shell\'s font',
+        `the fonts on offer, the shell's at first (${fonts.subtitle})`);
+    fonts.selected = 2;
+    check(lockSettings.get_string('clock-font') === 'serif' && fonts.subtitle.length > 0,
+        `a font chosen is kept, said as it is here (${fonts.subtitle})`);
+    lockSettings.set_string('clock-font', 'thin');
+    check(fonts.selected === 3, 'set elsewhere, shown');
+    await render(window, 'lock-screen-type');
+    lockSettings.reset('clock-color');
+    lockSettings.reset('clock-font');
 
     const notesSettings = store.settings.get_child('notes');
     desktop._notes.active = false;

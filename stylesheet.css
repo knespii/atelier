@@ -1803,7 +1803,9 @@
 .atelier-widget-claude-line,
 .atelier-widget-controls,
 .atelier-widget-month,
-.atelier-widget-cell {
+.atelier-widget-cell,
+.atelier-lock-column,
+.atelier-lock-line {
   background-color: transparent;
   border: none;
   box-shadow: none;
@@ -1956,6 +1958,35 @@
 /* On the lock screen, bare: just what the widgets show, on the wallpaper */
 .atelier-lock-bare .atelier-widget {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* On the lock screen: the weather and the battery, in a line of light type
+   (in the lock screen's tone, set on each widget) */
+.atelier-lock-column {
+  spacing: 1px;
+}
+
+.atelier-lock-line {
+  spacing: 9px;
+}
+
+.atelier-lock-icon {
+  icon-size: 22px;
+}
+
+.atelier-lock-ring {
+  width: 24px;
+  height: 24px;
+}
+
+.atelier-lock-value {
+  font-size: 18pt;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+.atelier-widget-line .atelier-lock-quiet {
+  padding-left: 3px;
 }
 
 /* Date */

@@ -62,7 +62,7 @@ class LockPreview {
                 Math.round((monitor.width - clock.width) / 2), Math.round(monitor.height / 3)));
         }
 
-        this._board = new LockBoard(lockSettings, {interactive: true});
+        this._board = new LockBoard(lockSettings, {interactive: true, palette: settings.get_child('palette')});
         this._board.setHome(this.actor);
 
         this.actor.ease({opacity: 255, duration: FADE_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
