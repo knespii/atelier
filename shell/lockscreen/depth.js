@@ -13,7 +13,7 @@ import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 import {
-    MAX_COVER, coverage, cutoutOpacity, cutoutPath, lockWallpaper, pictureState, placement, subjectTop,
+    MAX_COVER, MAX_COVER_GLASS, coverage, cutoutOpacity, cutoutPath, lockWallpaper, pictureState, placement, subjectTop,
 } from '../../lib/depth.js';
 
 Gio._promisify(Gio.File.prototype, 'read_async');
@@ -193,7 +193,7 @@ export class DepthCutout {
     cover(clocks) {
         this._clocks = clocks;
         this.tooMuch = Boolean(this._shown) &&
-            clocks.some(rect => coverage(this._sample, this._shown, rect) > MAX_COVER);
+            clocks.some(rect => coverage(this._sample, this._shown, rect) > (rect.glass ? MAX_COVER_GLASS : MAX_COVER));
         this._sync();
     }
 

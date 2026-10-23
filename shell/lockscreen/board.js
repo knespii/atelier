@@ -230,7 +230,7 @@ export class LockBoard {
         const top = this._depth.subjectTop(span, ACROSS) ?? this._depth.subjectTop(span);
         glass.setSubject(top === null ? null : top - y);
         const digits = glass.digitsRect;
-        return digits ? {...digits, x: x + digits.x, y: y + digits.y} : null;
+        return digits ? {...digits, x: x + digits.x, y: y + digits.y, glass: true} : null;
     }
 
     /** @returns {LockTypography} the widgets' type */
