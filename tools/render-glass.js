@@ -1,12 +1,14 @@
 // The glass clock's material (shell/lockscreen/liquidGlass.js) drawn over
-// wallpapers, next to the look before it, as pictures to look at: where the
-// large glass clock stands at cell 13, 2 of a 2560×1440 monitor, its digits
-// a stand-in for the clock's ("10:52" in Inter, stretched tall as the glass
-// face stretches them). Each picture: before, the glass at rest, and the
-// glass as a contrast plan may raise it (more opaque, more tint, a shadow).
-// The backdrops are made as the shell makes them, and timed, as is drawing
-// the digits. With no arguments, the wallpapers in Atelier's library and a
-// synthetic one; or the pictures given.
+// wallpapers, next to the look before it, as pictures to look at: on the
+// lock screen the user has – a laptop's 2560×1600 panel at 150 % (GNOME's
+// fractional scaling: the stage in logical pixels, 1704×1065, drawings in
+// the panel's), the large glass clock at cell 13, 2 of its 34×20 grid –
+// its digits a stand-in for the clock's ("10:52" in Inter, stretched tall
+// as the glass face stretches them). Each picture: before, the glass at
+// rest, and the glass as a contrast plan may raise it (more opaque, more
+// tint, a shadow). The backdrops are made as the shell makes them, and
+// timed, as is drawing the digits. With no arguments, the wallpapers in
+// Atelier's library and a synthetic one; or the pictures given.
 //
 //   gjs -m tools/render-glass.js [picture…]
 //
@@ -30,13 +32,14 @@ import {LiquidGlass, backdropSpec, loadBackdrop, makeBackdrop} from '../shell/lo
 
 const ROOT = GLib.path_get_dirname(GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]));
 const OUTPUT = GLib.build_filenamev([ROOT, 'tests', 'output', 'glass-material']);
-const MONITOR = [2560, 1440];
-const SCALE = 1;
+const MONITOR = [1704, 1065]; // logical pixels
+const DENSITY = 1.502347469329834; // the panel's pixels per logical one
+const SCALE = 1; // St's scale factor (1 with fractional scaling)
 const STYLE = 'zoom';
 // The user's lock screen: the large glass clock at cell 13, 2.
 const [CLOCK_X, CLOCK_Y] = cellOrigin(13, 2, gridOrigin(...MONITOR));
 const [CLOCK_W, CLOCK_H] = pixelSize('large');
-const CLOCK = {x: CLOCK_X * SCALE, y: CLOCK_Y * SCALE, width: CLOCK_W * SCALE, height: CLOCK_H * SCALE};
+const CLOCK = {x: CLOCK_X, y: CLOCK_Y, width: CLOCK_W, height: CLOCK_H};
 // What of the monitor each picture shows: the clock and some room round it.
 const ROOM = [150, 60];
 const REGION = {
@@ -57,6 +60,13 @@ const REPAINTS = 120; // to time drawing the digits
 
 const ms = since => (GLib.get_monotonic_time() - since) / 1000;
 
+// A surface as St gives one to draw in: logical pixels, the panel's dense.
+function surfaceOf(width, height) {
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, Math.ceil(width * DENSITY), Math.ceil(height * DENSITY));
+    surface.setDeviceScale(DENSITY, DENSITY);
+    return surface;
+}
+
 function savePixbufPng(pixbuf, path) {
     pixbuf.savev(path, 'png', [], []);
     return path;
@@ -65,7 +75,7 @@ function savePixbufPng(pixbuf, path) {
 // A wallpaper of the hardest kind: hard edges and every colour, fine
 // stripes, lights on black and a white field.
 function syntheticWallpaper(path) {
-    const [width, height] = MONITOR;
+    const [width, height] = [2560, 1600];
     const pixels = new Uint8Array(width * height * 3);
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -101,18 +111,21 @@ function sharpRegion(path, file) {
     picture = picture.apply_embedded_orientation() ?? picture;
     const [pw, ph] = [picture.get_width(), picture.get_height()];
     const shown = placement(STYLE, MONITOR, [pw, ph]);
-    const canvas = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, REGION.width, REGION.height);
+    const [width, height] = [Math.ceil(REGION.width * DENSITY), Math.ceil(REGION.height * DENSITY)];
+    const canvas = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
     canvas.fill(0x000000ff);
-    picture.composite(canvas, 0, 0, REGION.width, REGION.height, shown.x - REGION.x, shown.y - REGION.y,
-        shown.width / pw, shown.height / ph, GdkPixbuf.InterpType.HYPER, 255);
+    picture.composite(canvas, 0, 0, width, height, (shown.x - REGION.x) * DENSITY, (shown.y - REGION.y) * DENSITY,
+        shown.width * DENSITY / pw, shown.height * DENSITY / ph, GdkPixbuf.InterpType.HYPER, 255);
     savePixbufPng(canvas, file);
+    const surface = Cairo.ImageSurface.createFromPNG(file);
+    surface.setDeviceScale(DENSITY, DENSITY);
     // (The tone is picked from a 96×60 sample of a 16:10 thumbnail, as on the lock screen.)
     const scale = Math.max(400 / pw, 250 / ph);
     const cover = picture.scale_simple(Math.round(pw * scale), Math.round(ph * scale), GdkPixbuf.InterpType.BILINEAR);
     const thumb = cover.new_subpixbuf(Math.floor((cover.get_width() - 400) / 2), Math.floor((cover.get_height() - 250) / 2),
         400, 250).scale_simple(96, 60, GdkPixbuf.InterpType.BILINEAR);
     return {
-        surface: Cairo.ImageSurface.createFromPNG(file),
+        surface,
         sample: {
             pixels: thumb.get_pixels(), channels: thumb.get_n_channels(), rowstride: thumb.get_rowstride(),
             width: thumb.get_width(), height: thumb.get_height(),
@@ -123,7 +136,7 @@ function sharpRegion(path, file) {
 // The stand-in for the glass face's digits, laid out as clock.js lays
 // them out in the clock's box.
 function digits() {
-    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, CLOCK.width, CLOCK.height);
+    const surface = surfaceOf(CLOCK.width, CLOCK.height);
     const cr = new Cairo.Context(surface);
     const layoutAt = (size, text) => {
         const layout = PangoCairo.create_layout(cr);
@@ -229,14 +242,14 @@ function paintBefore(cr, path, tone, {y, height}) {
 // drawn into a surface of the clock's size (as the face's drawing area
 // is) and laid over it.
 function render(sharp, shape, draw, tone) {
-    const clock = new Cairo.ImageSurface(Cairo.Format.ARGB32, CLOCK.width, CLOCK.height);
+    const clock = surfaceOf(CLOCK.width, CLOCK.height);
     const ccr = new Cairo.Context(clock);
     const start = GLib.get_monotonic_time();
     draw(ccr);
     const took = ms(start);
     ccr.$dispose();
 
-    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, REGION.width, REGION.height);
+    const surface = surfaceOf(REGION.width, REGION.height);
     const cr = new Cairo.Context(surface);
     cr.setSourceSurface(sharp, 0, 0);
     cr.paint();
@@ -262,7 +275,7 @@ function sideBySide(looks, file, title) {
     const label = 30;
     const gap = 8;
     const width = looks.length * REGION.width + (looks.length - 1) * gap;
-    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, width, REGION.height + label);
+    const surface = surfaceOf(width, REGION.height + label);
     const cr = new Cairo.Context(surface);
     cr.setSourceRGB(0.12, 0.12, 0.13);
     cr.paint();
@@ -284,7 +297,7 @@ function sideBySide(looks, file, title) {
 // The middle of the look, twice as large: the edges up close.
 function closeUp(look, file) {
     const [w, h] = [260, 200];
-    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, w * 2, h * 2);
+    const surface = surfaceOf(w * 2, h * 2);
     const cr = new Cairo.Context(surface);
     cr.scale(2, 2);
     cr.setSourceSurface(look, -(REGION.width / 2 - w / 2), -(CLOCK.y - REGION.y + 70));
@@ -300,7 +313,7 @@ async function renderWallpaper(path, {cache, work}, shape) {
     // The tone as the lock screen picks it for the clock (dimmed as its
     // glass dims the wallpaper while the password is asked: 0.86).
     const rect = [CLOCK.x / MONITOR[0], CLOCK.y / MONITOR[1], CLOCK.width / MONITOR[0], CLOCK.height / MONITOR[1]];
-    const stats = regionStats(sharp.sample, regionIn(rect, MONITOR[0] / MONITOR[1], 1.6));
+    const stats = regionStats(sharp.sample, regionIn(rect, MONITOR[0] / MONITOR[1], 400 / 250));
     const tone = lockTone(stats, {dim: 0.86});
 
     const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, dir: cache});
@@ -326,7 +339,7 @@ async function renderWallpaper(path, {cache, work}, shape) {
 
     // Drawing the digits again and again, as a change of them would.
     const repaint = draw => {
-        const clock = new Cairo.ImageSurface(Cairo.Format.ARGB32, CLOCK.width, CLOCK.height);
+        const clock = surfaceOf(CLOCK.width, CLOCK.height);
         start = GLib.get_monotonic_time();
         for (let i = 0; i < REPAINTS; i++) {
             const cr = new Cairo.Context(clock);
@@ -381,7 +394,8 @@ const pictures = ARGV.length > 0 ? [...ARGV]
 
 const shape = digits();
 print(`digits: ${FAMILY} ${WEIGHT} at ${shape.fontSize} px, ${shape.stretch.toFixed(2)}× as tall, ` +
-    `${Math.round(shape.bounds.width)}×${Math.round(shape.bounds.height)} px in a ${CLOCK.width}×${CLOCK.height} clock`);
+    `${Math.round(shape.bounds.width)}×${Math.round(shape.bounds.height)} px in a ${CLOCK.width}×${CLOCK.height} clock ` +
+    `at ${CLOCK.x}, ${CLOCK.y} of a ${MONITOR.join('×')} monitor (logical pixels; drawn ${DENSITY.toFixed(2)}× as dense)`);
 let failed = false;
 for (const path of pictures) {
     try {
