@@ -209,3 +209,64 @@ export function testWorkerMakesACutout() {
     assert(failed.status === 4 && !failed.answer.ok && failed.answer.error,
         `a picture that can't be read: it says why (${failed.answer.error})`);
 }
+
+// A picture of width × height, each pixel's [r, g, b] from colour(x, y).
+function paint(width, height, colour) {
+    const pixels = new Uint8Array(width * height * 3);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++)
+            pixels.set(colour(x, y), (y * width + x) * 3);
+    }
+    return GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(pixels), GdkPixbuf.Colorspace.RGB, false, 8,
+        width, height, width * 3);
+}
+
+export function testWorkerFindsTheSky() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const dir = freshDir('depth-sky');
+    const model = `${dir}/u2netp.onnx`;
+    GLib.file_set_contents(model, fakeU2netp());
+    const cutoutOf = (name, picture) => {
+        picture.savev(`${dir}/${name}.png`, 'png', [], []);
+        const run = runWorker(['--model', model, '--input', `${dir}/${name}.png`, '--output', `${dir}/${name}-cutout.png`,
+            '--width', '800', '--height', '450']);
+        assert(run.status === 0 && run.answer.ok, `done (${JSON.stringify(run.answer)})`);
+        const cutout = GdkPixbuf.Pixbuf.new_from_file(`${dir}/${name}-cutout.png`);
+        const pixels = cutout.get_pixels();
+        return {answer: run.answer, alpha: (x, y) => pixels[y * cutout.get_rowstride() + x * 4 + 3]};
+    };
+
+    // A blue sky, deeper up high, over a hill: the left of it bright (what
+    // the made-up model finds salient), the right of it dark green (what it
+    // doesn't). The hill stands in front all the same, the sky doesn't.
+    const horizon = x => 240 + Math.round(30 * Math.sin(x / 130));
+    const landscape = cutoutOf('landscape', paint(800, 450, (x, y) => {
+        if (y < horizon(x))
+            return [10 + y / 10, 45 + y / 10, 140 + y / 10];
+        return x < 400 ? [255, 255, 90] : [10, 40, 15];
+    }));
+    assert(landscape.answer.sky, `the sky is found (${JSON.stringify(landscape.answer)})`);
+    const {alpha} = landscape;
+    assert(alpha(600, 60) === 0 && alpha(200, 120) === 0, `the sky see-through (${alpha(600, 60)}, ${alpha(200, 120)})`);
+    assert(alpha(600, 400) === 255 && alpha(200, 400) === 255,
+        `the hill in front, salient or not (${alpha(600, 400)}, ${alpha(200, 400)})`);
+    assert(alpha(650, horizon(650) + 6) === 255 && alpha(650, horizon(650) - 6) < 32,
+        `the edge follows the horizon (${[-12, -8, -6, -4, -2, 0, 2, 4, 6, 8, 12].map(d => alpha(650, horizon(650) + d))})`);
+    const edge = [-2, -1, 0, 1, 2].map(d => alpha(650, horizon(650) + d));
+    assert(edge.some(a => a > 0 && a < 255), `soft at the horizon (${edge})`);
+    assert(Math.abs(landscape.answer.front - 0.47) < 0.05, `about the share under the horizon (${landscape.answer.front})`);
+
+    // Texture all over (a pattern, a room): no sky, only the subject.
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const noise = cutoutOf('noise', paint(800, 450, () => [random() * 255, random() * 255, random() * 255]));
+    assertEqual(noise.answer.sky, false, 'no sky in a pattern');
+    assertEqual(noise.answer.front, noise.answer.subject, 'only the subject in front');
+
+    // A blue picture with nothing under it: no ground, so no sky either.
+    const blue = cutoutOf('blue', paint(800, 450, (x, y) => [50 + y / 5, 110 + y / 6, 220]));
+    assertEqual(blue.answer.sky, false, 'blue all over is not a sky with something in front');
+}

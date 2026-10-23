@@ -71,9 +71,10 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
 
         const depth = new Adw.PreferencesGroup({
             title: 'Depth Effect',
-            description: 'As on an iPhone: the subject of the wallpaper (a person, an animal, a mountain) in front ' +
-                'of the lock screen\'s own clocks. A small model finds it, on this computer, whenever the wallpaper ' +
-                'changes; where it would cover too much of a clock, the clock stays whole.',
+            description: 'As on an iPhone: what stands in front of the wallpaper\'s sky (a hill, a town) and its ' +
+                'subject (a person, an animal) in front of the lock screen\'s own clocks. A small model finds them, ' +
+                'on this computer, whenever the wallpaper changes; where they would cover too much of a clock, the ' +
+                'clock stays whole.',
         });
         this.add(depth);
         this._depthGroup = depth;

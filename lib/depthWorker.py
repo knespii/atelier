@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # The cutout of a wallpaper for the lock screen's depth effect (lib/depth.js):
-# the subject in front of it – what u2netp, a small model rembg uses, finds
-# salient – with the rest made see-through, softly at the edges. The shell
+# what stands in front of the sky – a hill, a town, the trees, found by the
+# picture's colours alone – and the subject – what u2netp, a small model
+# rembg uses, finds salient – with the rest made see-through, softly at the
+# edges. The shell
 # runs it in a process of its own, in the session (never on the lock screen),
 # at the lowest priority, one wallpaper at a time.
 #
@@ -28,6 +30,29 @@ STD = (0.229, 0.224, 0.225)
 # Where the saliency (0 … 1) turns from background to subject: a soft step
 # between these, so faint haze around the subject goes and its edges stay soft.
 EDGE = (0.3, 0.7)
+
+# The sky: looked for on a copy of the picture this wide, pixels.
+SKY_WIDTH = 640
+# The hues of a blue sky, 0 … 1 around the colour wheel (cyan to blue).
+BLUE = (0.5, 0.7)
+# How rough the sky may be: the mean step in brightness between pixels next
+# to each other, on a copy twice as wide (denim, grass and leaves are rougher).
+SMOOTH_BLUE = 0.02
+SMOOTH_CLOUD = 0.1
+# How far (in RGB, 0 … 1) a colour may be from the sky's own blue there, or
+# from that blue mixed with white (the hazy edge of a cloud): bluish and
+# darker – a blue shirt, a pale foot against the sky – is further.
+SKY_NEAR = 0.07
+# A sky worth the name: this share of the top row at least, and of the whole
+# picture; and with ground under it, this share of the bottom rows. (Blue
+# glimpsed between the shapes of a pattern is not one.)
+SKY_TOP = 0.5
+SKY_SHARE = 0.2
+SKY_GROUND = 0.6
+# …and of it this share blue at least.
+SKY_BLUE = 0.25
+# The edge of the sky, soft over about this many pixels of the cutout.
+SKY_EDGE = 3
 
 
 def say(answer, status=0):
@@ -97,6 +122,109 @@ def saliency(found, model, picture):
     return (prediction - low) / (high - low)
 
 
+def flood(np, Image, ImageDraw, inside, sides):
+    """What of `inside` (booleans) is joined to the given sides of the picture
+    ('top', 'left', 'right', 'bottom'), as PIL's flood fill finds it."""
+    height, width = inside.shape
+    canvas = np.zeros((height + 2, width + 2), dtype=np.uint8)
+    canvas[1:-1, 1:-1] = np.where(inside, 255, 0)
+    # (A frame round the picture, open on the sides asked for, to start from.)
+    canvas[0, :] = 255 if 'top' in sides else 1
+    canvas[-1, :] = 255 if 'bottom' in sides else 1
+    canvas[1:-1, 0] = 255 if 'left' in sides else 1
+    canvas[1:-1, -1] = 255 if 'right' in sides else 1
+    image = Image.fromarray(canvas, 'L').copy()  # (one of its own, to draw on)
+    for y, x in ((0, 0), (0, width + 1), (height + 1, 0), (height + 1, width + 1)):
+        if image.getpixel((x, y)) == 255:
+            ImageDraw.floodfill(image, (x, y), 128)
+    side = {'top': (0, 1), 'bottom': (height + 1, 1), 'left': (1, 0), 'right': (1, width + 1)}
+    for name in sides:
+        y, x = side[name]
+        if image.getpixel((x, y)) == 255:
+            ImageDraw.floodfill(image, (x, y), 128)
+    return np.asarray(image)[1:-1, 1:-1] == 128
+
+
+def sky(found, picture):
+    """Where the sky is, 1 … 0, SKY_WIDTH wide: blue or the white and grey of
+    clouds, smooth, joined to the top of the picture, with what lies in it
+    (a cloud, a bird) counted in. None when there is no sky worth the name
+    (a room, a pattern, a picture without ground under it)."""
+    np, Image = found['numpy'], found['PIL'].Image
+    from PIL import ImageDraw, ImageFilter
+    width = min(SKY_WIDTH, picture.width)
+    height = max(8, round(picture.height * width / picture.width))
+    small = picture.resize((width, height), Image.Resampling.BOX)
+    # How rough it is: the steps in brightness on a copy twice as big, the
+    # mean of each two by two (a blur would smooth denim into sky).
+    grey = np.asarray(picture.resize((width * 2, height * 2), Image.Resampling.BOX).convert('L'),
+                      dtype=np.float32) / 255
+    steps = (np.abs(np.diff(grey, axis=1, append=grey[:, -1:])) +
+             np.abs(np.diff(grey, axis=0, append=grey[-1:])))
+    rough = steps.reshape(height, 2, width, 2).mean(axis=(1, 3))
+    hue, saturation, value = np.moveaxis(np.asarray(small.convert('HSV'), dtype=np.float32) / 255, 2, 0)
+    rgb = np.asarray(small, dtype=np.float32) / 255
+    blue = ((hue >= BLUE[0]) & (hue <= BLUE[1]) & (saturation > 0.12) & (value > 0.3) &
+            (rough < SMOOTH_BLUE))
+    cloud = (saturation < 0.2) & (value > 0.65) & (rough < SMOOTH_CLOUD)
+    if (blue | cloud)[0].mean() < SKY_TOP:
+        return None
+    # The sky's own blue, as it changes over the picture (deeper up high,
+    # paler at the horizon, lighter towards the sun): a smooth surface fitted
+    # to the blue joined to the top, the odd one out (a blue shirt, a pale
+    # foot against it) left out of it. What is blue but far from it isn't sky.
+    near = flood(np, Image, ImageDraw, blue | cloud, ('top',)) & blue
+    if near.sum() > 50:
+        ys, xs = np.nonzero(near)
+        u, v = xs / width, ys / height
+        terms = np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], axis=1)
+        colours = rgb[ys, xs]
+        keep = np.ones(len(xs), dtype=bool)
+        for _ in range(6):
+            fit = np.linalg.lstsq(terms[keep], colours[keep], rcond=None)[0]
+            miss = np.linalg.norm(terms @ fit - colours, axis=1)
+            keep = miss < max(0.02, 2 * float(np.median(miss[keep])))
+        yy, xx = np.mgrid[0:height, 0:width]
+        u, v = (xx / width).ravel(), (yy / height).ravel()
+        model = (np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], axis=1) @ fit).reshape(height, width, 3)
+        # (The nearest mix of that blue with white, and how far from it.)
+        white = 1 - model
+        share = np.clip((((rgb - model) * white).sum(axis=2) /
+                         np.maximum((white * white).sum(axis=2), 1e-6)), 0, 1)
+        miss = np.linalg.norm(rgb - model - share[..., np.newaxis] * white, axis=2)
+        blue = (miss < SKY_NEAR) & (rough < SMOOTH_CLOUD)
+    else:
+        blue[:] = False
+    # Cut thin bridges (a leaf, a wire) before it is followed from the top…
+    likely = Image.fromarray(np.where(blue | cloud, 255, 0).astype(np.uint8), 'L')
+    likely = likely.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+    found_sky = flood(np, Image, ImageDraw, np.asarray(likely) > 0, ('top',))
+    # …and what lies in it, not joined to the sides or the bottom, is the sky's.
+    found_sky |= ~flood(np, Image, ImageDraw, ~found_sky, ('left', 'right', 'bottom'))
+    rows = max(1, height // 8)
+    if (found_sky[0].mean() < SKY_TOP or found_sky.mean() < SKY_SHARE or
+            (~found_sky[-rows:]).mean() < SKY_GROUND or
+            # (Some of it blue: white alone may be a page, a wall, a map.)
+            (found_sky & near).sum() < SKY_BLUE * found_sky.sum()):
+        return None
+    # Its edge smoothed: specks gone, the outline rounded.
+    mask = Image.fromarray(np.where(found_sky, 255, 0).astype(np.uint8), 'L')
+    mask = mask.filter(ImageFilter.MedianFilter(5))
+    return np.asarray(mask, dtype=np.float32) / 255
+
+
+def soften(np, Image, ImageFilter, mask, size):
+    """A mask of 0 … 1, made as big as the cutout, its edge soft over about
+    SKY_EDGE pixels there (however small the mask was)."""
+    height, width = mask.shape
+    blurred = Image.fromarray((mask * 255).round().astype(np.uint8), 'L').filter(ImageFilter.GaussianBlur(1))
+    big = np.asarray(blurred.resize(size, Image.Resampling.BICUBIC), dtype=np.float32) / 255
+    # (The blur spreads the edge over about four pixels of the mask.)
+    spread = 4 * size[0] / width
+    step = np.clip((big - 0.5) * spread / SKY_EDGE + 0.5, 0, 1)
+    return step * step * (3 - 2 * step)
+
+
 def load(source):
     """The picture as GNOME has it: read by GdkPixbuf, as mutter reads it
     (JPEG XL and SVG too), turned as its camera says; by PIL without it."""
@@ -131,6 +259,13 @@ def cutout(found, model, source, target, width, height):
     alpha = Image.fromarray((step * 255).round().astype(np.uint8), 'L').resize(size, Image.Resampling.LANCZOS)
     # A little softer still, about a pixel in a thousand.
     alpha = alpha.filter(ImageFilter.GaussianBlur(max(1.0, max(size) / 1000)))
+    subject = float((np.asarray(alpha) >= 128).mean())
+    # In front: the subject, and whatever isn't sky.
+    above = sky(found, picture)
+    if above is not None:
+        ground = soften(np, Image, ImageFilter, 1 - above, size)
+        both = np.maximum(np.asarray(alpha, dtype=np.float32) / 255, ground)
+        alpha = Image.fromarray((both * 255).round().astype(np.uint8), 'L')
     picture = picture.resize(size, Image.Resampling.LANCZOS) if size != shown else picture
     picture.putalpha(alpha)
     # The picture's own size, as GNOME places it (see lib/depth.js placement()).
@@ -146,7 +281,8 @@ def cutout(found, model, source, target, width, height):
         if os.path.exists(partial):
             os.remove(partial)
     covered = float((np.asarray(alpha) >= 128).mean())
-    say({'ok': True, 'width': size[0], 'height': size[1], 'picture': list(shown), 'subject': round(covered, 4)})
+    say({'ok': True, 'width': size[0], 'height': size[1], 'picture': list(shown), 'subject': round(subject, 4),
+         'sky': above is not None, 'front': round(covered, 4)})
 
 
 def main():
