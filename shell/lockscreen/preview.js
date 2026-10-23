@@ -17,6 +17,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DesktopEditor} from '../desktop/editor.js';
 import {LockBoard} from './board.js';
+import {GlassWarmUp} from './clock.js';
 
 const FADE_TIME = 300;
 
@@ -100,7 +101,11 @@ class LockPreview {
     }
 }
 
-/** A module of the session: opens the preview when the preferences ask. */
+/**
+ * A module of the session: opens the preview when the preferences ask, and
+ * readies what the lock screen's glass clocks take to draw while the
+ * session is idle (clock.js GlassWarmUp).
+ */
 export class LockPreviewModule {
     /**
      * @param {object} context
@@ -114,6 +119,7 @@ export class LockPreviewModule {
     enable() {
         this._lockSettings = this._settings.get_child('lockscreen');
         this._lockSettings.connectObject('changed::edit-request', () => this.open(), this);
+        this._warmUp = new GlassWarmUp(this._lockSettings);
     }
 
     /** Edit the lock screen's widgets. */
@@ -125,6 +131,8 @@ export class LockPreviewModule {
     }
 
     disable() {
+        this._warmUp?.destroy();
+        this._warmUp = null;
         this._lockSettings?.disconnectObject(this);
         this._lockSettings = null;
         this.preview?.destroy();
