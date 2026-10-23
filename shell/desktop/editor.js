@@ -292,6 +292,11 @@ export class DesktopEditor {
         return [x, y, this._gallery.width, this._gallery.height];
     }
 
+    /** @returns {St.Widget} what dims the screen under the widgets while it edits */
+    get dim() {
+        return this._dim;
+    }
+
     // Coming up: the dim fading in, the cells swelling out of drops from
     // the middle outwards, the gallery spreading out of a drop in its
     // middle (what is on it showing once it is there).

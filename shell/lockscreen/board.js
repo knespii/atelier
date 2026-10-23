@@ -4,9 +4,12 @@
 // click goes through to GNOME's lock screen, which brings up the prompt;
 // in the editor (a mock lock screen in the session, see preview.js) they
 // are moved and stretched as on the desktop. When the password is asked,
-// they make room for the prompt.
+// they make room for the prompt. With the depth effect, the wallpaper's
+// subject stands over the clocks (depth.js), under the other widgets.
 
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -16,6 +19,7 @@ import {
     nearestSize, nearestSpot, newId, nextSize, parseLayout, placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {ClockWidget, DateWidget} from '../desktop/kinds/time.js';
+import {DepthCutout} from './depth.js';
 
 const WIDGETS = {clock: ClockWidget, date: DateWidget};
 const DIMMED = 0.25; // what is left of the widgets while the prompt is up
@@ -40,11 +44,15 @@ export class LockBoard {
         this._saving = false;
         this._gone = false;
         this._look = null;
+        this._depth = null;
+        this._depthLater = 0;
+        this._progress = 0;
         this.layer = new St.Widget({reactive: false});
         // (On the lock screen, it goes with the lock screen's dialog.)
         this.layer.connect('destroy', () => {
             this._widgets.clear();
             this._gone = true;
+            this._cancelDepthLater();
         });
         // What the widgets read: nothing here opens an app or the network.
         this._context = {
@@ -57,13 +65,20 @@ export class LockBoard {
         settings.connectObject(
             'changed::widgets', () => !this._saving && this._load(),
             'changed::style', () => this._syncLook(),
+            'changed::depth-effect', () => this._syncDepth(),
             this);
         Main.layoutManager.connectObject('monitors-changed', () => {
             this._syncArea();
             this._place();
         }, this);
         this._syncArea();
+        this._syncDepth();
         this._syncLook();
+    }
+
+    /** @returns {DepthCutout|null} the wallpaper's subject over the clocks, with the depth effect */
+    get depth() {
+        return this._depth;
     }
 
     /** @returns {DesktopWidget[]} */
@@ -101,6 +116,65 @@ export class LockBoard {
         this._grid = gridSize(monitor.width / scale, monitor.height / scale);
         this._origin = gridOrigin(monitor.width / scale, monitor.height / scale);
         this.layer.set_size(monitor.width, monitor.height);
+        this._depth?.setMonitor([monitor.width, monitor.height]);
+    }
+
+    _syncDepth() {
+        const wanted = this._settings.get_boolean('depth-effect');
+        if (wanted === Boolean(this._depth))
+            return;
+        if (wanted) {
+            this._depth = new DepthCutout();
+            this.layer.add_child(this._depth.actor);
+            this._depth.follow(this._progress);
+            this._syncDepthDim();
+            if (this._area)
+                this._depth.setMonitor([this._area.width, this._area.height]);
+        } else {
+            this._depth.destroy();
+            this._depth = null;
+        }
+        this._queueDepth();
+    }
+
+    // Once the widgets are laid out anew (moved, given a size, a face): the
+    // clocks under the subject, the others over it, and whether it covers
+    // a clock too much.
+    _queueDepth() {
+        if (this._depthLater || !this._depth || this._gone)
+            return;
+        this._depthLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._depthLater = 0;
+            this._syncDepthCover();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelDepthLater() {
+        if (this._depthLater)
+            global.compositor.get_laters().remove(this._depthLater);
+        this._depthLater = 0;
+    }
+
+    _syncDepthCover() {
+        const depth = this._depth;
+        if (!depth?.actor || this._gone)
+            return;
+        const clocks = [];
+        for (const widget of this.widgets) {
+            // (One being dragged in the editor is over everything until it lands.)
+            if (widget.get_parent() !== this.layer || widget.has_style_pseudo_class('dragged'))
+                continue;
+            // (In the editor, one pointed at is in front, to be moved.)
+            if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
+                this.layer.set_child_below_sibling(widget, depth.actor);
+                const box = widget.get_allocation_box();
+                clocks.push({x: box.x1, y: box.y1, width: box.get_width(), height: box.get_height()});
+            } else {
+                this.layer.set_child_above_sibling(widget, depth.actor);
+            }
+        }
+        depth.cover(clocks);
     }
 
     // Bare (just the clocks' faces on the wallpaper), or cards as on the
@@ -133,7 +207,11 @@ export class LockBoard {
         // (On the lock screen a click goes through to GNOME's.)
         widget.reactive = this._interactive;
         this.layer.add_child(widget);
+        widget.connect('notify::allocation', () => this._queueDepth());
+        if (this._interactive)
+            widget.connect('notify::hover', () => this._queueDepth());
         this._widgets.set(entry.id, widget);
+        this._queueDepth();
         this._editor?.adopt(widget);
         return widget;
     }
@@ -154,6 +232,8 @@ export class LockBoard {
      *   following the progress)
      */
     makeRoom(progress, popup, top, gap, animate = false) {
+        this._progress = progress;
+        this._depth?.follow(progress);
         const dim = Math.round(255 * (1 - (1 - DIMMED) * progress));
         this.layer.opacity = popup ? 255 : dim;
         for (const widget of this.widgets) {
@@ -252,7 +332,17 @@ export class LockBoard {
 
     /** @param {DesktopEditor|null} editor - while it edits this board */
     set editor(editor) {
+        this._editor?.dim.disconnectObject(this);
         this._editor = editor;
+        // (The subject dimmed with the wallpaper under it, as the editor dims it.)
+        editor?.dim.connectObject('notify::opacity', () => this._syncDepthDim(), this);
+        this._syncDepthDim();
+    }
+
+    _syncDepthDim() {
+        const dim = this._editor?.dim;
+        const shade = dim?.mapped ? dim.get_theme_node().get_background_color().alpha / 255 : 0;
+        this._depth?.dim(shade * (dim?.opacity ?? 0) / 255);
     }
 
     restoreLayer() {
@@ -323,6 +413,7 @@ export class LockBoard {
         this._widgets.delete(id);
         widget.destroy();
         this._save();
+        this._queueDepth();
     }
 
     resizeWidget(id) {
@@ -402,7 +493,12 @@ export class LockBoard {
      */
     destroy({keepLayer = false} = {}) {
         this._settings.disconnectObject(this);
+        this._editor?.dim.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        this._cancelDepthLater();
+        // (Kept with the layer, the cutout slides away with the lock screen.)
+        this._depth?.destroy({keepActor: keepLayer});
+        this._depth = null;
         if (!this._gone && !keepLayer)
             this.layer.destroy();
     }

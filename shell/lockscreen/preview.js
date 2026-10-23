@@ -3,7 +3,9 @@
 // edit-request); the screen then shows a mock lock screen – the wallpaper,
 // sharp as the lock screen shows it until the password is asked, and
 // GNOME's clock where it sits (when it shows) – and the desktop's editor
-// over the lock screen's widgets. Done (or Escape) and it goes.
+// over the lock screen's widgets (with the depth effect, the wallpaper's
+// subject over the clocks as there, dimmed with the wallpaper under it).
+// Done (or Escape) and it goes.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -87,6 +89,7 @@ class LockPreview {
     destroy() {
         if (!this.actor)
             return;
+        this._board.editor = null;
         this._editor?.destroy();
         this._editor = null;
         this._board.destroy();

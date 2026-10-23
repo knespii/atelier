@@ -193,6 +193,8 @@ export class LockModule {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const island = this._island?.actor;
         const monitor = Main.layoutManager.primaryMonitor;
+        // (Over the main monitor's wallpaper, wherever that monitor is.)
+        this._board.layer.set_position(monitor.x, monitor.y);
         const top = (island ? island.y + island.height - monitor.y : 0) + GAP * scale;
         this._board.makeRoom(progress, this._field?.standing ? this._field.rect : null, top, GAP * scale, animate);
     }

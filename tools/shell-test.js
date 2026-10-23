@@ -30,6 +30,9 @@ import * as dockCore from './dock-tests/core.js';
 import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
 import * as dockWindows from './dock-tests/windows.js';
+import {cutoutPath, modelPath, pictureState, workerPath} from '../lib/depth.js';
+import {GAP, PITCH, SIZES, cellOrigin, gridOrigin} from '../lib/widgets.js';
+import {fakeU2netp} from '../tests/fakeOnnx.js';
 
 const UUID = 'atelier@local';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
@@ -4012,6 +4015,186 @@ async function testLockPasswordField() {
     }
 }
 
+// A picture with a disc in it, as a PNG: width × height of one colour, the
+// disc (its centre and radius in the picture's pixels) of another – or
+// see-through around the disc, for a cutout.
+function discPicture(path, [width, height], [cx, cy, r], disc, around, text = {}) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, true, 8, width, height);
+    pixbuf.fill(around);
+    for (let y = Math.max(0, Math.ceil(cy - r)); y < Math.min(height, cy + r); y++) {
+        const half = Math.sqrt(Math.max(0, r * r - (y + 0.5 - cy) ** 2));
+        const [x1, x2] = [Math.max(0, Math.round(cx - half)), Math.min(width, Math.round(cx + half))];
+        if (x2 > x1)
+            pixbuf.new_subpixbuf(x1, y, x2 - x1, 1).fill(disc);
+    }
+    pixbuf.savev(path, 'png', Object.keys(text).map(key => `tEXt::${key}`), Object.values(text));
+}
+
+const isGreen = ([r, g, b]) => g > 200 && r < 90 && b < 90;
+
+// The depth effect: the subject of the wallpaper over the lock screen's
+// clocks. The cutout is made in the session (here by hand: a green disc
+// over the wallpaper's light one, so it shows where it is drawn); the lock
+// screen lays it over the wallpaper as GNOME zooms it, over the clock and
+// under the date, takes it away as the prompt comes up, and leaves it off
+// when the subject would cover too much of the clock. Then the session
+// makes one itself, with a made-up model.
+async function testLockDepth() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the depth effect untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+
+    // Where the clock goes (a large one at cells 2, 2), and a disc right
+    // of it, over a part of it: on the screen, then on a wallpaper of
+    // 1600 × 1200, which GNOME zooms to 1920 × 1440, 180 pixels cut off at
+    // the top and the bottom.
+    const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
+    const [left, top] = cellOrigin(2, 2, origin).map(v => v * scale);
+    const side = (SIZES.large[0] * PITCH - GAP) * scale;
+    const [cx, cy, r] = [left + side + 60, top + side / 2, 180];
+    const zoom = 1920 / 1600;
+    const dir = `${OUTPUT}/depth`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/wallpaper.png`;
+    discPicture(wallpaper, [1600, 1200], [cx / zoom, (cy + 180) / zoom, r / zoom], 0xf0d0a0ff, 0x304050ff);
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    // (Half as big as the wallpaper: stretched over it.)
+    const cutout = cutoutPath(pictureState(wallpaper), [monitor.width, monitor.height]);
+    GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+    discPicture(cutout, [800, 600], [cx / zoom / 2, (cy + 180) / zoom / 2, r / zoom / 2], 0x00ff00ff, 0x00000000,
+        {'atelier-width': '1600', 'atelier-height': '1200'});
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
+        {id: 'date', kind: 'date', size: 'square', x: 2, y: 12, fine: true},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', true);
+    await Scripting.sleep(500);
+    const at = (name, x, y) => averageColor(name, Math.round(x) - 3, Math.round(y) - 3, 6, 6);
+    const locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.depth.actor.visible, 3000),
+            'locked: the cutout made of the wallpaper is there');
+        const board = lock().board;
+        const depth = board.depth;
+        const children = board.layer.get_children();
+        const clock = board.widgets.find(w => w.entry.id === 'clock');
+        const date = board.widgets.find(w => w.entry.id === 'date');
+        check(children.indexOf(clock) < children.indexOf(depth.actor) &&
+            children.indexOf(depth.actor) < children.indexOf(date), 'over the clock, under the date');
+        check(JSON.stringify(depth.shown) === JSON.stringify({x: 0, y: -180, width: 1920, height: 1440}) &&
+            depth.actor.x === 0 && depth.actor.y === -180 && depth.actor.width === 1920,
+        `over the wallpaper as GNOME zooms it (${JSON.stringify(depth.shown)})`);
+        check(!depth.tooMuch && !depth.actor.reactive, 'a part of the clock covered: on; it takes no clicks');
+        await restPointer();
+        await Scripting.sleep(500);
+        await screenshot('88-lock-depth');
+        const box = clock.get_allocation_box();
+        const [mx, my] = [monitor.x, monitor.y];
+        check(isGreen(at('88-lock-depth', mx + cx, my + cy)) && isGreen(at('88-lock-depth', mx + box.x2 - 40, my + cy)),
+            `the subject shows where the wallpaper has it, over the clock too (${at('88-lock-depth', mx + box.x2 - 40, my + cy)})`);
+        check(!isGreen(at('88-lock-depth', mx + box.x1 + 40, my + box.y1 + 40)), 'the rest of the clock as it is');
+        const edges = [[0, -1], [1, 0], [0, 1]].map(([dx, dy]) => [
+            at('88-lock-depth', mx + cx + dx * (r - 8), my + cy + dy * (r - 8)),
+            at('88-lock-depth', mx + cx + dx * (r + 8), my + cy + dy * (r + 8))]);
+        check(edges.every(([inside, outside]) => isGreen(inside) && !isGreen(outside)),
+            `exactly over it: its edge within a few pixels of the wallpaper's (${JSON.stringify(edges)})`);
+
+        // The prompt: it goes as the wallpaper blurs, and comes back.
+        await clickAt(mx + 300, my + 900);
+        check(await waitFor(() => lock()?.state.phase === 'ready' && lock().room === 1, 3000) &&
+            !depth.actor.visible && depth.actor.opacity === 0, 'the prompt up, the cutout gone (the wallpaper blurs)');
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => lock().room === 0 && depth.actor.visible && depth.actor.opacity === 255, 3000),
+            'back to the clock, back again');
+
+        // A clock right under the subject: the effect turns off.
+        lockSettings.set_string('widgets', JSON.stringify([{
+            id: 'clock', kind: 'clock', size: 'large', fine: true, face: 'stacked',
+            x: Math.round(((cx - side / 2) / scale - origin[0]) / PITCH), y: 2,
+        }]));
+        check(await waitFor(() => lock().board.depth.tooMuch && !lock().board.depth.actor.visible, 3000),
+            'a clock the subject would cover much of: the effect off, the clock whole');
+        await Scripting.sleep(300);
+        await screenshot('89-lock-depth-covered');
+        check(!isGreen(at('89-lock-depth-covered', mx + cx, my + cy)), 'nothing of the cutout shows');
+    } finally {
+        await locked.unlock();
+    }
+
+    // On the mock lock screen too, to place the clock with it.
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'stacked'},
+    ]));
+    const editor = atelier().modules.get('lockscreen-editor');
+    lockSettings.set_string('edit-request', 'depth');
+    check(await waitFor(() => editor?.preview?._board.depth?.loaded && editor.preview._board.depth.actor.visible, 3000),
+        'the editor\'s mock lock screen has it');
+    await restPointer();
+    await Scripting.sleep(600);
+    await screenshot('90-lock-depth-editor');
+    const dimmed = at('90-lock-depth-editor', monitor.x + cx, monitor.y + cy);
+    check(dimmed[0] < 30 && dimmed[2] < 30 && Math.abs(dimmed[1] - 255 * 0.55) < 15,
+        `where the wallpaper has it, dimmed with it as the editor dims it (${dimmed})`);
+    const previewBoard = editor.preview._board;
+    const order = () => {
+        const children = previewBoard.layer.get_children();
+        return children.indexOf(previewBoard.widgets[0]) > children.indexOf(previewBoard.depth.actor);
+    };
+    check(!order(), 'the clock behind it');
+    await pointerTo(monitor.x + left + 40, monitor.y + top + 40);
+    check(await waitFor(order, 1000), 'pointed at, in front, to be moved');
+    await restPointer();
+    check(await waitFor(() => !order(), 1000), 'and behind it again');
+    await pressKey(Clutter.KEY_Escape);
+    await waitFor(() => !editor.preview, 3000);
+
+    // Made in the session: with a model (a made-up one), when asked.
+    const depthModule = atelier().modules.get('depth');
+    const python = GLib.find_program_in_path('python3');
+    let usable = false;
+    if (python) {
+        const probe = Gio.Subprocess.new([python, workerPath(), '--check'],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+        const [, stdout] = probe.communicate_utf8(null, null);
+        usable = JSON.parse(stdout).ok;
+    }
+    if (!depthModule || !usable) {
+        results.push(`INFO  no python3-onnxruntime here: the cutout made in the session untested (${Boolean(depthModule)})`);
+    } else {
+        GLib.mkdir_with_parents(GLib.path_get_dirname(modelPath()), 0o755);
+        GLib.file_set_contents(modelPath(), fakeU2netp());
+        GLib.unlink(cutout);
+        lockSettings.set_string('depth-request', 'test');
+        check(await waitFor(() => lockSettings.get_string('depth-status') === 'working', 3000),
+            'asked, the cutout is being made');
+        check(await waitFor(() => lockSettings.get_string('depth-status') === 'ready', 60000) &&
+            GLib.file_test(cutout, GLib.FileTest.EXISTS), `and is made (${lockSettings.get_string('depth-status')})`);
+        const made = GLib.file_test(cutout, GLib.FileTest.EXISTS) ? GdkPixbuf.Pixbuf.new_from_file(cutout) : null;
+        check(made?.get_option('tEXt::atelier-width') === '1600' && made.get_has_alpha(),
+            `of the wallpaper as it is (${made?.get_width()}×${made?.get_height()})`);
+        GLib.unlink(modelPath());
+    }
+
+    lockSettings.set_boolean('depth-effect', false);
+    check(await waitFor(() => !atelier().modules.get('depth'), 1000), 'switched off, nothing makes cutouts');
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect', 'depth-request', 'depth-status']
+        .forEach(key => lockSettings.reset(key));
+    kept.forEach(([key, value]) => background.set_string(key, value));
+}
+
 async function testDisableCleansUp(atelier) {
     // (Grouped, with a black notch: the sides moved and the ears are up.)
     const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
@@ -4197,6 +4380,7 @@ export async function run() {
         await part(testLockScreen, ext);
         await part(testLockWidgets);
         await part(testLockPasswordField);
+        await part(testLockDepth);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);
