@@ -1,0 +1,23 @@
+The lock screen's fonts, loaded into GNOME Shell's process only (never
+installed into the system): shell/core/fonts.js adds them to the shell's
+font maps, lib/glyphOutlines.js reads their outlines for the glass clock.
+
+Inter.ttf
+    Inter 4.001, variable: wght 100–900, opsz 14–32.
+    From https://github.com/google/fonts/blob/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf
+    (there named Inter[opsz,wght].ttf).
+    sha256 29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031
+    Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter),
+    SIL Open Font License 1.1: Inter-OFL.txt.
+
+RobotoFlex.ttf
+    Roboto Flex 3.200, variable: wght 100–1000, wdth 25–151, opsz 8–144,
+    GRAD, XOPQ, XTRA, YOPQ, YTAS, YTDE, YTFI, YTLC, YTUC, slnt.
+    From https://github.com/google/fonts/blob/main/ofl/robotoflex/RobotoFlex%5BGRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght%5D.ttf
+    (there named RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf).
+    sha256 9b523f7d82593df0107173849ebb8c817471a1df4b4fb2c3cbf40cfd810c8281
+    Copyright 2017 The Roboto Flex Project Authors
+    (https://github.com/TypeNetwork/Roboto-Flex),
+    SIL Open Font License 1.1: RobotoFlex-OFL.txt.
+
+The files are as published, only renamed (the fonts' own names are kept).
