@@ -408,7 +408,7 @@
     <key name="widgets" type="s">
       <default>'[]'</default>
       <summary>Widgets on the lock screen</summary>
-      <description>Clocks and the date on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
+      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
     </key>
     <key name="style" type="s">
       <choices>
@@ -425,10 +425,42 @@
       <summary>GNOME's clock on the lock screen</summary>
       <description>Off when the lock screen's own clocks take its place (with the hint under it, how to unlock: the island's padlock is there to click).</description>
     </key>
+    <key name="clock-color" type="s">
+      <default>'auto'</default>
+      <summary>Color of the lock screen's widgets</summary>
+      <description>“auto”: a tone of the palette's hue, light or dark, picked for each widget from the wallpaper behind it so that it is legible there; or a color, '#rrggbb'. On the wallpaper only (the Bare look): cards keep their own.</description>
+    </key>
+    <key name="clock-font" type="s">
+      <choices>
+        <choice value="default"/>
+        <choice value="rounded"/>
+        <choice value="serif"/>
+        <choice value="thin"/>
+        <choice value="heavy"/>
+      </choices>
+      <default>'default'</default>
+      <summary>Font of the lock screen's widgets</summary>
+      <description>Default: the shell's font as the widgets have it; Rounded and Serif: the first such font installed (the shell's own otherwise); Thin and Heavy: the shell's font, thin or heavy.</description>
+    </key>
     <key name="edit-request" type="s">
       <default>''</default>
       <summary>Request to edit the lock screen</summary>
       <description>Set by the preferences: the shell shows a mock lock screen to place the widgets on.</description>
+    </key>
+    <key name="depth-effect" type="b">
+      <default>false</default>
+      <summary>Depth effect</summary>
+      <description>The subject in front of the wallpaper stands over the lock screen's own clocks, as if they were behind it. A small model (u2netp, downloaded in the settings when asked) finds the subject, in the session; the lock screen only shows the cutout made then. Off for a clock the subject would cover too much of.</description>
+    </key>
+    <key name="depth-request" type="s">
+      <default>''</default>
+      <summary>Request to make the wallpaper's cutout now</summary>
+      <description>Set by the preferences: the shell makes the cutout of the wallpaper anew.</description>
+    </key>
+    <key name="depth-status" type="s">
+      <default>''</default>
+      <summary>How the cutout of the wallpaper is coming on</summary>
+      <description>Written by the shell for the preferences: empty, “working”, “ready”, “none” (no wallpaper it can be made of) or “failed: ” and why.</description>
     </key>
   </schema>
 

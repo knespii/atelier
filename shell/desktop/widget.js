@@ -8,7 +8,7 @@ import GioUnix from 'gi://GioUnix';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
-import {pixelSize} from '../../lib/widgets.js';
+import {SIZES, pixelSize} from '../../lib/widgets.js';
 
 // What the card holds fills it; while editing, its buttons sit in the top
 // right corner and the handle to stretch it on the bottom right one, a
@@ -48,6 +48,8 @@ class AtelierWidgetCardLayout extends Clutter.LayoutManager {
 export const DesktopWidget = GObject.registerClass({
     Signals: {
         'menu-request': {},
+        // (Filled anew: for a size, say.)
+        'filled': {},
     },
 }, class AtelierDesktopWidget extends St.Widget {
     /**
@@ -82,7 +84,7 @@ export const DesktopWidget = GObject.registerClass({
      * @param {string} size
      */
     fill(size) {
-        for (const name of ['square', 'card', 'large', 'wide'])
+        for (const name of Object.keys(SIZES))
             this.remove_style_class_name(`atelier-widget-${name}`);
         this.add_style_class_name(`atelier-widget-${size}`);
         this.entry = {...this.entry, size};
@@ -97,6 +99,7 @@ export const DesktopWidget = GObject.registerClass({
         // (Under the buttons and the handle in its corners.)
         this.insert_child_at_index(this._content, 0);
         this.build(this._content, size);
+        this.emit('filled');
     }
 
     /** The card as big as its size. */
