@@ -33,7 +33,8 @@ import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
 import * as dockWindows from './dock-tests/windows.js';
 import {cutoutPath, modelPath, pictureState, workerPath} from '../lib/depth.js';
-import {GAP, PITCH, SIZES, cellOrigin, gridOrigin} from '../lib/widgets.js';
+import {STRETCH} from '../lib/lockLook.js';
+import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
 import {fakeU2netp} from '../tests/fakeOnnx.js';
 
 const UUID = 'atelier@local';
@@ -3848,6 +3849,8 @@ async function testLockWidgets() {
         check(!clock.reactive && !board.layer.reactive, 'it takes no clicks');
         check(/^\d{1,2}$/.test(clock._hours?.text) && /^\d{2}/.test(clock._minutes?.text) && clock._date?.text,
             `stacked: the date, the hours over the minutes (${clock._hours?.text} ${clock._minutes?.text})`);
+        check(clock._minutesBox.opacity === 255 && clock._minutes.get_theme_node().get_foreground_color().alpha === 255,
+            `the minutes as bright as the hours here, in the one tone (${clock._minutesBox.opacity})`);
         const labels = [dialog._clock._time, dialog._clock._date, dialog._clock._hint];
         check(labels.every(l => !l.visible), 'in place of GNOME\'s clock, its hint gone with it');
         lockSettings.set_boolean('gnome-clock', true);
@@ -3880,6 +3883,12 @@ async function testLockWidgets() {
     check(preview._board.widgets.length === 1, 'with the clock on it');
     check(Boolean(preview._board.addWidget('date')) &&
         JSON.parse(lockSettings.get_string('widgets')).some(e => e.kind === 'date'), 'a widget added is kept');
+    const added = preview._board.addWidget('clock', {size: 'square'});
+    check(added?.entry.face === 'glass' && Boolean(added.glass) &&
+        JSON.parse(lockSettings.get_string('widgets')).some(e => e.kind === 'clock' && e.face === 'glass'),
+    'a new clock has the glass face');
+    if (added)
+        preview._board.removeWidget(added.entry.id);
     check(!preview._board.addWidget('github'), 'nothing that opens an app or reads the network');
     await Scripting.sleep(600);
     await screenshot('84-lock-editor');
@@ -4222,6 +4231,212 @@ async function testLockDepth() {
     kept.forEach(([key, value]) => background.set_string(key, value));
 }
 
+// A picture of the monitor's size: a sky over a hill whose top is at
+// `hill` (a cutout of it: the hill alone, the sky see-through).
+function hillPicture(path, [width, height], hill, sky, ground, text = {}) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, true, 8, width, height);
+    pixbuf.fill(sky);
+    pixbuf.new_subpixbuf(0, hill, width, height - hill).fill(ground);
+    pixbuf.savev(path, 'png', Object.keys(text).map(key => `tEXt::${key}`), Object.values(text));
+}
+
+// GNOME's battery, made up: charging, at 96 %. Gives back the real one.
+function fakeBattery() {
+    const systemItem = Main.panel.statusArea.quickSettings._system?._systemItem;
+    const realToggle = systemItem?._powerToggle;
+    const toggle = new QuickSettings.QuickToggle({title: '96 %'});
+    toggle._proxy = {IsPresent: true, Percentage: 96, State: 1};
+    if (systemItem)
+        systemItem._powerToggle = toggle;
+    return () => {
+        if (systemItem)
+            systemItem._powerToggle = realToggle;
+    };
+}
+
+// The lock screen's glass clock: the time in tall digits the wallpaper
+// shows through, stretched from under the date line down into what stands
+// in front (a hill, here), which passes in front of their feet; as tall as
+// the box lets them without it. In the one tone of the other widgets.
+async function testLockGlassClock() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the glass clock untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const size = [monitor.width, monitor.height];
+    const dir = `${OUTPUT}/glass`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/hill.png`;
+    // (A hill over the lower part of the clock's box, cells 2 to 10 down.)
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
+    const [, boxTop] = cellOrigin(2, 2, origin).map(v => v * scale);
+    const side = (SIZES.large[1] * PITCH - GAP) * scale;
+    let hill = Math.round(boxTop + side * 0.62);
+    hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    const cutout = cutoutPath(pictureState(wallpaper), size);
+    GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+    const writeCutout = () => hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff,
+        {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`});
+    writeCutout();
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+        {id: 'battery', kind: 'battery', size: 'line', x: 2, y: 12, fine: true},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', true);
+    const realBattery = fakeBattery();
+    await wallpapersSettled();
+    const locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.widgets[0]?.glass?.target, 5000),
+            'locked: the glass clock, the cutout of the hill there');
+        const board = lock().board;
+        const clock = board.widgets.find(w => w.entry.id === 'clock');
+        const glass = clock.glass;
+        check(/^\d{1,2}:\d{2}$/.test(glass._digits.text) && /\w+, \w+ \d+/.test(glass._date.text),
+            `the time in one line, the date over it (${glass._digits.text}, ${glass._date.text})`);
+        // (Where the digits go on the monitor.)
+        const digitsNow = () => {
+            const rect = board._followSubject(clock, clock.get_allocation_box());
+            return rect ? {...rect, feet: rect.y + rect.height} : null;
+        };
+        const intoHill = d => (d.feet - hill) / d.height;
+        check(await waitFor(() => glass.stretch === glass.target.stretch, 2000) && glass.target.stretch > 1.2 &&
+            Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03,
+        `stretched down into the hill, their feet behind it (×${glass.target.stretch.toFixed(2)}, ${intoHill(digitsNow()).toFixed(2)} of them)`);
+        check(!board.depth.tooMuch && board.depth.actor.visible, 'the hill in front of them');
+        const [, faceY] = glass.get_transformed_position();
+        const [, dateY] = glass._date.get_transformed_position();
+        check(dateY < faceY + glass.target.y && dateY + glass._date.height <= faceY + glass.target.y + 1,
+            'the date line just over them');
+        const battery = board.widgets.find(w => w.entry.id === 'battery');
+        const ink = actor => hexOf(actor.get_theme_node().get_foreground_color());
+        check(ink(glass._digits) === ink(glass._date) && ink(glass._digits) === ink(battery._value) &&
+            ink(battery._value) === ink(battery._caption) && luminance(ink(glass._digits)) > 0.7,
+        `in the one light tone of the other widgets (${ink(glass._digits)}, ${ink(battery._value)})`);
+        await restPointer();
+        await Scripting.sleep(600);
+        await screenshot('91-lock-glass');
+        // The glass: lighter than the sky behind it, the sky showing through.
+        const digits = digitsNow();
+        const sky = averageColor('91-lock-glass', monitor.x + 20, monitor.y + 20, 8, 8);
+        let lit = [0, 0, 0];
+        for (let x = Math.round(digits.x); x < digits.x + digits.width; x += 3) {
+            const at = averageColor('91-lock-glass', monitor.x + x, monitor.y + Math.round(digits.y + digits.height * 0.3), 2, 2);
+            if (lightOf(at) > lightOf(lit))
+                lit = at;
+        }
+        check(lightOf(lit) > lightOf(sky) + 40 && lightOf(lit) < 250 && lit[2] > lit[0],
+            `the digits a light glass the sky shows through (${lit} over ${sky})`);
+
+        // The hill higher: the digits shorter, easing there.
+        hill = Math.round(boxTop + side * 0.45);
+        writeCutout();
+        board.depth._load();
+        const before = glass.target.stretch;
+        check(await waitFor(() => glass.target.stretch < before - 0.1, 3000) &&
+            await waitFor(() => glass.stretch === glass.target.stretch, 2000),
+        `the hill higher, they ease shorter (×${before.toFixed(2)} → ×${glass.target.stretch.toFixed(2)})`);
+        check(Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03, 'their feet in it again');
+
+        // Without the depth effect: as tall as the box lets them.
+        lockSettings.set_boolean('depth-effect', false);
+        check(await waitFor(() => !board.depth && glass.target.stretch > before - 0.01, 3000),
+            `without it, as tall as the box lets them (×${glass.target.stretch.toFixed(2)})`);
+    } finally {
+        await locked.unlock();
+        realBattery();
+    }
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+    kept.forEach(([key, value]) => background.set_string(key, value));
+}
+
+// The lock screen on a wallpaper of one's own (ATELIER_TEST_WALLPAPER), its
+// cutout made by the worker with the real model (ATELIER_TEST_MODEL, only
+// read), as someone has it: a large stacked clock in the middle and a small
+// battery under it; then the glass clock. Screenshots, mostly.
+async function testLockOnOwnWallpaper() {
+    const [source, model] = [GLib.getenv('ATELIER_TEST_WALLPAPER'), GLib.getenv('ATELIER_TEST_MODEL')];
+    const python = GLib.find_program_in_path('python3');
+    if (!Main.screenShield || !source || !model || !python) {
+        results.push('INFO  no ATELIER_TEST_WALLPAPER and ATELIER_TEST_MODEL: the lock screen on one\'s own wallpaper not shown');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const size = [monitor.width, monitor.height];
+    // (A copy in the test's own data: the one given is only read.)
+    const dir = `${GLib.get_user_data_dir()}/atelier/wallpapers`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/own-${GLib.path_get_basename(source)}`;
+    Gio.File.new_for_path(source).copy(Gio.File.new_for_path(wallpaper), Gio.FileCopyFlags.OVERWRITE, null, null);
+    const cutout = cutoutPath(pictureState(wallpaper), size);
+    const worker = Gio.Subprocess.new([python, workerPath(), '--model', model, '--input', wallpaper, '--output', cutout,
+        '--width', `${size[0]}`, '--height', `${size[1]}`], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+    const stdout = await new Promise(resolve => worker.communicate_utf8_async(null, null,
+        (_, res) => resolve(worker.communicate_utf8_finish(res)[1] ?? '')));
+    const answer = JSON.parse(stdout.trim().split('\n').at(-1) || '{}');
+    check(answer.ok && GLib.file_test(cutout, GLib.FileTest.EXISTS), `its cutout made (${JSON.stringify(answer)})`);
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    // In the middle, as on a grid of 34 columns: on this one's, as far from the sides.
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const [columns] = gridSize(monitor.width / scale, monitor.height / scale);
+    const shift = (columns - 34) / 2;
+    const layout = face => JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 13 + shift, y: 5, fine: true, face},
+        {id: 'battery', kind: 'battery', size: 'small', x: 15 + shift, y: 18, fine: true},
+    ]);
+    lockSettings.set_string('widgets', layout('stacked'));
+    lockSettings.set_string('style', 'bare');
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', true);
+    const realBattery = fakeBattery();
+    await wallpapersSettled();
+    const locked = await lockForTest();
+    try {
+        check(await waitFor(() => lock()?.board?.depth?.loaded && lock().board.typography.sample, 5000),
+            'locked on it, its cutout there');
+        await restPointer();
+        await Scripting.sleep(800);
+        const depth = lock().board.depth;
+        await screenshot('92-lock-own-stacked');
+        results.push(`INFO  stacked: the cutout ${depth.actor.visible ? 'shown' : 'off'}, the tone ${lock().board.tone?.color}`);
+        lockSettings.set_string('widgets', layout('glass'));
+        check(await waitFor(() => lock().board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 3000),
+            'the glass clock in its place');
+        const glass = lock().board.widgets.find(w => w.entry.id === 'clock').glass;
+        await waitFor(() => glass.stretch === glass.target.stretch, 2000);
+        await Scripting.sleep(600);
+        await screenshot('93-lock-own-glass');
+        results.push(`INFO  glass: ×${glass.target.stretch.toFixed(2)}, the cutout ${depth.actor.visible ? 'shown' : 'off'}`);
+        check(depth.actor.visible, 'what stands in front over the glass clock');
+    } finally {
+        await locked.unlock();
+        realBattery();
+    }
+    ['widgets', 'style', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+    kept.forEach(([key, value]) => background.set_string(key, value));
+}
+
 async function testDisableCleansUp(atelier) {
     // (Grouped, with a black notch: the sides moved and the ears are up.)
     const bar = Main.extensionManager.lookup(UUID).stateObj._settings.get_child('bar');
@@ -4395,6 +4610,13 @@ async function testLockLook() {
         check(await waitFor(() => contrastRatio(ink(hours()), LIGHT) >= 4.5 && luminance(ink(hours())) < 0.2, 3000),
             `on a light wallpaper, the clock in a dark tone, legible on it (${ink(hours())}, ${contrastRatio(ink(hours()), LIGHT).toFixed(1)}:1)`);
         check(contrastRatio(ink(widget('date')._day), LIGHT) >= 4.5, `the date too (${ink(widget('date')._day)})`);
+        const everything = () => [hours(), widget('clock')._minutes, widget('clock')._suffix, widget('clock')._date,
+            widget('date')._day, widget('date')._month, widget('weather')._value, widget('weather')._caption,
+            widget('battery')._value, widget('battery')._caption];
+        const inks = () => new Set(everything().map(ink));
+        check(inks().size === 1, `one tone for all of it, solid (${[...inks()]})`);
+        const families = () => new Set(everything().map(actor => actor.get_theme_node().get_font().get_family()));
+        check(families().size === 1, `in one family (${[...families()]})`);
         await restPointer();
         await Scripting.sleep(400);
         await screenshot('88-lock-look-light');
@@ -4402,6 +4624,7 @@ async function testLockLook() {
         showWallpaper(dark);
         check(await waitFor(() => contrastRatio(ink(hours()), DARK) >= 4.5 && luminance(ink(hours())) > 0.5, 5000),
             `on a dark wallpaper, in a light one (${ink(hours())}, ${contrastRatio(ink(hours()), DARK).toFixed(1)}:1)`);
+        check(inks().size === 1, `all of it (${[...inks()]})`);
         // A colour of one's own.
         lockSettings.set_string('clock-color', '#ffcc00');
         check(ink(hours()) === '#ffcc00' && ink(widget('battery')._value) === '#ffcc00', 'a colour chosen, on all of them');
@@ -4417,6 +4640,7 @@ async function testLockLook() {
         check(font(hours()).get_weight() === 200, `thin: in a thin one (${font(hours()).get_weight()})`);
         lockSettings.set_string('clock-font', 'serif');
         const serif = board.typography.font.family;
+        check(families().size === 1, `the font chosen on all of it (${[...families()]})`);
         check(Boolean(serif) && font(hours()).get_family().includes(serif) &&
             font(widget('weather')._value).get_family().includes(serif),
         `serif: the first serif installed (${font(hours()).get_family()})`);
@@ -4570,6 +4794,20 @@ export async function run() {
             testQuitWithWorkQueued(ext);
             return;
         }
+        // Only the lock screen's checks (tools/shell-test.sh lock).
+        if (SUITE === 'lock') {
+            await part(testLockScreen, ext);
+            await part(testLockWidgets);
+            await part(testLockPasswordField);
+            await part(testLockDepth);
+            await part(testLockLook);
+            await part(testLockGlassClock);
+            await part(testLockOnOwnWallpaper);
+            // (GNOME's wallpapers made anew as it quits would touch what is gone.)
+            await wallpapersSettled();
+            testQuitWithWorkQueued(ext);
+            return;
+        }
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
             await testDockOnTwoMonitors(ext);
@@ -4613,6 +4851,8 @@ export async function run() {
         await part(testLockPasswordField);
         await part(testLockDepth);
         await part(testLockLook);
+        await part(testLockGlassClock);
+        await part(testLockOnOwnWallpaper);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);

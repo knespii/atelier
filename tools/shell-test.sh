@@ -11,6 +11,12 @@
 #        tools/shell-test.sh dock
 #                               (only the dock's checks, on one monitor;
 #                               results in tests/output/shell)
+#        tools/shell-test.sh lock
+#                               (only the lock screen's checks, on one
+#                               monitor; results in tests/output/shell. With
+#                               ATELIER_TEST_WALLPAPER and ATELIER_TEST_MODEL,
+#                               a picture and u2netp.onnx, only read: the lock
+#                               screen on that wallpaper too)
 set -eu
 
 SUITE="${1:-main}"
