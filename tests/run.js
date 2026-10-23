@@ -3,6 +3,7 @@
 
 import System from 'system';
 
+import * as apca from './apca.test.js';
 import * as claudeUsage from './claudeUsage.test.js';
 import * as compat from './compat.test.js';
 import * as depth from './depth.test.js';
@@ -35,7 +36,8 @@ import * as thumbnails from './thumbnails.test.js';
 import * as widgets from './widgets.test.js';
 
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
-    dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth};
+    dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
+    apca};
 
 let total = 0;
 let failures = 0;
