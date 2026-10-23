@@ -1,9 +1,10 @@
 // The depth effect's rows on the Lock Screen page: the switch, the model to
-// use (three sizes of Depth Anything V2), and what it needs, step by step –
-// Python's packages (installed by the user: the command to copy), then the
-// model (downloaded here, only when the user asks, and checked: its size
-// and SHA-256, and that it loads), then ready, with how the cutout of the
-// wallpaper is coming on (the shell makes it).
+// use (three sizes of Depth Anything V2), the subject model (BiRefNet, or
+// none), and what they need, step by step – Python's packages (installed by
+// the user: the command to copy), then a model (downloaded here, only when
+// the user asks, and checked: its size and SHA-256, and that it loads),
+// then ready, with how the cutout of the wallpaper is coming on (the shell
+// makes it).
 
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
@@ -12,7 +13,9 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Soup from 'gi://Soup?version=3.0';
 
-import {MODELS, chosenModel, modelPath, workerPath} from '../lib/depth.js';
+import {
+    MODELS, SUBJECT_MODELS, chosenModel, chosenSubjectModel, modelPath, subjectModelPath, workerPath,
+} from '../lib/depth.js';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 Gio._promisify(Soup.Session.prototype, 'send_async');
@@ -30,25 +33,33 @@ const MB = 1024 * 1024;
 /**
  * What the depth effect has of what it needs.
  *
- * @param {string} [model] - the model to try (the one kept, by default)
- * @returns {Promise<{python: boolean, missing: string[], model: string}>}
- *   model: 'ok', 'missing', or why it doesn't load
+ * @param {string} [model] - the depth model to try
+ * @param {string} [subject] - the subject model to try
+ * @returns {Promise<{python: boolean, missing: string[], model: string, subject: string}>}
+ *   model and subject: 'ok', 'missing', or why it doesn't load
  */
-export async function probe(model) {
+export async function probe(model, subject) {
     const python = GLib.find_program_in_path('python3');
     if (!python)
-        return {python: false, missing: [], model: 'missing'};
-    const there = GLib.file_test(model, GLib.FileTest.EXISTS);
-    const process = Gio.Subprocess.new([python, workerPath(), '--check', ...there ? ['--model', model] : []],
-        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+        return {python: false, missing: [], model: 'missing', subject: 'missing'};
+    const there = path => Boolean(path) && GLib.file_test(path, GLib.FileTest.EXISTS);
+    const process = Gio.Subprocess.new([python, workerPath(), '--check',
+        ...there(model) ? ['--model', model] : [], ...there(subject) ? ['--subject', subject] : []],
+    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
     const [stdout] = await process.communicate_utf8_async(null, null);
     let answer = {};
     try {
         answer = JSON.parse(stdout.trim().split('\n').at(-1));
     } catch {
-        answer = {missing: [], model: `the check failed (${process.get_exit_status()})`};
+        const failed = `the check failed (${process.get_exit_status()})`;
+        answer = {missing: [], model: failed, subject: failed};
     }
-    return {python: true, missing: answer.missing ?? [], model: there ? answer.model ?? 'missing' : 'missing'};
+    return {
+        python: true,
+        missing: answer.missing ?? [],
+        model: there(model) ? answer.model ?? 'missing' : 'missing',
+        subject: there(subject) ? answer.subject ?? 'missing' : 'missing',
+    };
 }
 
 /**
@@ -144,13 +155,30 @@ export class DepthSetup {
         });
         group.add(this.modelRow);
 
+        // The subject model, or none; downloaded here too, when asked.
+        this._subjects = ['none', ...Object.keys(SUBJECT_MODELS)];
+        this.subjectRow = new Adw.ComboRow({
+            title: 'Subject Model',
+            model: Gtk.StringList.new(this._subjects.map(id => SUBJECT_MODELS[id]?.title ?? 'None')),
+            selected: this._subjects.indexOf(this.subject),
+        });
+        this.subjectRow.connect('notify::selected', () => {
+            const id = this._subjects[this.subjectRow.selected];
+            if (id && id !== this.subject)
+                this._settings.set_string('subject-model', id);
+        });
+        this.subjectButton = new Gtk.Button({valign: Gtk.Align.CENTER, visible: false});
+        this.subjectButton.connect('clicked', () => this._download('subject'));
+        this.subjectRow.add_suffix(this.subjectButton);
+        group.add(this.subjectRow);
+
         this.statusRow = new Adw.ActionRow({title: 'Checking…', subtitle_selectable: true});
         this._icon = new Gtk.Image({icon_name: 'content-loading-symbolic', valign: Gtk.Align.CENTER});
         this.statusRow.add_prefix(this._icon);
         this._progress = new Gtk.ProgressBar({valign: Gtk.Align.CENTER, visible: false, width_request: 120});
         this.downloadButton = new Gtk.Button({label: 'Download Model…', valign: Gtk.Align.CENTER,
             visible: false, css_classes: ['suggested-action']});
-        this.downloadButton.connect('clicked', () => this._download());
+        this.downloadButton.connect('clicked', () => this._download('depth'));
         this.cancelButton = new Gtk.Button({label: 'Cancel', valign: Gtk.Align.CENTER, visible: false});
         this.cancelButton.connect('clicked', () => this._downloading?.cancel());
         this.computeButton = new Gtk.Button({label: 'Compute Now', valign: Gtk.Align.CENTER, visible: false});
@@ -173,12 +201,24 @@ export class DepthSetup {
         this._statusId = settings.connect('changed::depth-status', () => this._sync());
         this._effectId = settings.connect('changed::depth-effect', () => this._sync());
         this._modelId = settings.connect('changed::depth-model', () => this.refresh());
+        this._subjectId = settings.connect('changed::subject-model', () => this.refresh());
         this.refresh();
     }
 
     /** @returns {string} the model the effect uses (an id of MODELS) */
     get model() {
         return chosenModel(this._settings.get_string('depth-model'));
+    }
+
+    /** @returns {string} the subject model it uses: an id of SUBJECT_MODELS, or 'none' */
+    get subject() {
+        return chosenSubjectModel(this._settings.get_string('subject-model'));
+    }
+
+    // The subject model to show (and to download): the one chosen, or the
+    // one there is to download while none is chosen.
+    get _subjectShown() {
+        return this.subject === 'none' ? Object.keys(SUBJECT_MODELS)[0] : this.subject;
     }
 
     _showModel() {
@@ -191,6 +231,24 @@ export class DepthSetup {
         this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time}; ${kept}`;
         this.modelRow.sensitive = !this._downloading;
         this.downloadButton.label = `Download Model (${label})…`;
+        this._showSubject();
+    }
+
+    // Unless none is chosen on purpose, the subject model to download, or
+    // why the one there doesn't load.
+    _showSubject() {
+        const id = this._subjectShown;
+        const {title, label, license, time} = SUBJECT_MODELS[id];
+        if (this.subjectRow.selected !== this._subjects.indexOf(this.subject))
+            this.subjectRow.selected = this._subjects.indexOf(this.subject);
+        const state = this.state?.subject ?? 'missing';
+        const kept = state === 'ok' ? 'downloaded' : state === 'missing' ? 'not downloaded' : `it doesn't load: ${state}`;
+        this.subjectRow.subtitle = `${title}, ${label} (${license}), which finds the wallpaper's subject (a person, ` +
+            `an animal, a thing) to stand in front too, where it is sure of one: ${time}; ${kept}`;
+        this.subjectRow.sensitive = !this._downloading;
+        this.subjectButton.label = `Download (${label})…`;
+        this.subjectButton.visible = state !== 'ok' && !this._downloading &&
+            this._settings.get_string('subject-model') !== 'none';
     }
 
     /** @returns {Promise} what is there, looked at again */
@@ -198,9 +256,10 @@ export class DepthSetup {
         const serial = ++this._serial;
         let state;
         try {
-            state = await this.probe(modelPath(this.model));
+            state = await this.probe(modelPath(this.model), subjectModelPath(this._subjectShown));
         } catch (e) {
-            state = {python: true, missing: [], model: `can't be checked: ${e.message}`};
+            const why = `can't be checked: ${e.message}`;
+            state = {python: true, missing: [], model: why, subject: why};
         }
         if (serial !== this._serial || !this._settings)
             return;
@@ -227,8 +286,11 @@ export class DepthSetup {
         if (!state)
             return;
         this._showModel();
+        // (The subject model alone will do, without a depth model.)
+        const subject = this.subject !== 'none' && state.subject === 'ok';
         if (this._downloading) {
-            this._show({title: 'Downloading the model…', subtitle: this._received, icon: 'folder-download-symbolic'});
+            this._show({title: this._fetching === 'subject' ? 'Downloading the subject model…' : 'Downloading the model…',
+                subtitle: this._received, icon: 'folder-download-symbolic'});
         } else if (!state.python) {
             this._show({title: 'Python 3 is missing', subtitle: 'The depth effect runs in Python 3: install python3',
                 icon: 'dialog-warning-symbolic', again: true, command: install(['python3'])});
@@ -236,20 +298,22 @@ export class DepthSetup {
             this._show({title: 'Python packages are missing',
                 subtitle: `It needs ${state.missing.join(', ')}: install them, then check again`,
                 icon: 'dialog-warning-symbolic', again: true, command: install(state.missing)});
-        } else if (state.model === 'missing') {
+        } else if (state.model === 'missing' && !subject) {
             this._show({title: 'The model isn\'t downloaded',
                 subtitle: `Depth Anything V2 ${MODELS[this.model].title}, which sees how near each part of the ` +
                     'wallpaper is (from Hugging Face): downloaded only when you ask',
                 icon: 'folder-download-symbolic', download: true});
-        } else if (state.model !== 'ok') {
+        } else if (state.model !== 'ok' && state.model !== 'missing') {
             this._show({title: 'The model doesn\'t load', subtitle: state.model,
                 icon: 'dialog-warning-symbolic', download: true});
         } else {
-            this._showReady();
+            this._showReady(state.model === 'missing');
         }
     }
 
-    _showReady() {
+    // (Without a depth model, the subject alone: the depth model still to
+    // download.)
+    _showReady(download = false) {
         const on = this._settings.get_boolean('depth-effect');
         const status = this._settings.get_string('depth-status');
         let subtitle = 'Switch it on: the cutout of the wallpaper is made in the background';
@@ -263,22 +327,27 @@ export class DepthSetup {
             subtitle = `The cutout failed: ${status.slice('failed: '.length)}`;
         else if (on)
             subtitle = 'The cutout is made a moment after the wallpaper changes';
-        this._show({title: 'Ready', subtitle, icon: 'object-select-symbolic', compute: on});
+        this._show({title: 'Ready', subtitle, icon: 'object-select-symbolic', compute: on, download});
         this.computeButton.sensitive = status !== 'working';
     }
 
-    async _download() {
+    // The depth model chosen, or the subject model.
+    async _download(kind) {
         if (this._downloading)
             return;
+        const subject = kind === 'subject';
+        const id = subject ? this._subjectShown : this.model;
         this._downloading = new Gio.Cancellable();
+        this._fetching = kind;
         this._received = 'Starting…';
         this._progress.fraction = 0;
         this._sync();
         let failure = null;
         try {
-            await this.download(MODELS[this.model], modelPath(this.model), {
+            await this.download(subject ? SUBJECT_MODELS[id] : MODELS[id], subject ? subjectModelPath(id) : modelPath(id), {
                 cancellable: this._downloading,
-                check: path => this.probe(path).then(state => state.model),
+                check: path => (subject ? this.probe(null, path) : this.probe(path))
+                    .then(state => (subject ? state.subject : state.model) ?? 'missing'),
                 onProgress: (bytes, total) => {
                     this._progress.fraction = total > 0 ? Math.min(1, bytes / total) : 0;
                     this._received = total > 0
@@ -296,11 +365,13 @@ export class DepthSetup {
         if (!this._settings)
             return;
         await this.refresh();
-        if (failure && this.state?.model === 'missing') {
+        const now = subject ? this.state?.subject : this.state?.model;
+        if (failure && now === 'missing') {
             this.statusRow.title = 'The download failed';
             this.statusRow.subtitle = `${failure}. Try again?`;
         }
-        if (!failure && this.state?.model === 'ok')
+        // (The cutout made anew, with it.)
+        if (!failure && now === 'ok')
             this._settings.set_string('depth-request', GLib.uuid_string_random());
     }
 
@@ -310,6 +381,7 @@ export class DepthSetup {
         this._settings.disconnect(this._statusId);
         this._settings.disconnect(this._effectId);
         this._settings.disconnect(this._modelId);
+        this._settings.disconnect(this._subjectId);
         this._settings = null;
     }
 }
