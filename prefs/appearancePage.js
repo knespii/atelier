@@ -1,16 +1,24 @@
-// "Appearance" section: the palette that comes from the wallpaper, and which
-// apps take it.
+// "Appearance" section: the palette that comes from the wallpaper, which
+// apps take it, and how Atelier's glass looks.
 
 import Adw from 'gi://Adw';
+import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {PRESETS, VARIANTS, buildPalette} from '../lib/palette.js';
 import {isTerminalAvailable, restoreTerminal} from '../lib/terminal.js';
 import {OptionCards, schemePreview, swatchesPreview} from './optionCards.js';
+import {naturalWidth} from './widgets.js';
 
 const SOURCES = [['wallpaper', 'Wallpaper'], ['swatch', 'Swatch'], ['preset', 'Fixed']];
 const VARIANT_LABELS = {vibrant: 'Vibrant', muted: 'Muted', monochrome: 'Monochrome'};
+// The glass's variants (lib/glassLook.js), with what each is.
+const GLASS = [
+    ['regular', 'Regular', 'What is behind it bends at its edges, as through a lens, and they catch the light'],
+    ['clear', 'Clear', 'More see-through, a little darker under it to keep what is on it legible'],
+    ['off', 'Off', 'Solid surfaces, without blur or light'],
+];
 
 export const AppearancePage = GObject.registerClass(
 class AtelierAppearancePage extends Adw.PreferencesPage {
@@ -30,6 +38,7 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
         previewGroup.add(this._previewBox);
         this.add(previewGroup);
         this.add(this._buildPaletteGroup());
+        this.add(this._buildGlassGroup());
         this.add(this._buildAppsGroup());
 
         this._ids.push(
@@ -37,10 +46,14 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
             [this._palette, this._palette.connect('changed::source', () => this._syncSource())],
             [this._palette, this._palette.connect('changed::variant',
                 () => this._variants.setSelected(this._palette.get_string('variant')))],
-            [this._settings, this._settings.connect('changed::gtk-css-problem', () => this._syncProblem())]);
+            [this._settings, this._settings.connect('changed::gtk-css-problem', () => this._syncProblem())],
+            [this._settings, this._settings.connect('changed::glass-variant', () => this._syncGlass())]);
+        if (this._a11y)
+            this._ids.push([this._a11y, this._a11y.connect('changed::high-contrast', () => this._syncGlass())]);
         this._syncPalette();
         this._syncSource();
         this._syncProblem();
+        this._syncGlass();
     }
 
     disconnectSettings() {
@@ -119,6 +132,35 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
         variantsRow.set_child(this._variants);
         group.add(variantsRow);
         return group;
+    }
+
+    // Regular, clear or off – which GNOME's high contrast always turns off.
+    _buildGlassGroup() {
+        const group = new Adw.PreferencesGroup();
+        this._glassRow = new Adw.ActionRow({title: 'Glass'});
+        this._glassToggles = new Adw.ToggleGroup({valign: Gtk.Align.CENTER});
+        for (const [name, label] of GLASS)
+            this._glassToggles.add(new Adw.Toggle({name, label}));
+        this._glassToggles.connect('notify::active-name', () => {
+            const name = this._glassToggles.active_name;
+            if (name && name !== this._settings.get_string('glass-variant'))
+                this._settings.set_string('glass-variant', name);
+        });
+        this._glassRow.add_suffix(naturalWidth(this._glassToggles));
+        group.add(this._glassRow);
+        const a11y = Gio.SettingsSchemaSource.get_default().lookup('org.gnome.desktop.a11y.interface', true);
+        this._a11y = a11y?.has_key('high-contrast')
+            ? new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'}) : null;
+        return group;
+    }
+
+    _syncGlass() {
+        const variant = this._settings.get_string('glass-variant');
+        if (this._glassToggles.active_name !== variant)
+            this._glassToggles.active_name = variant;
+        const what = GLASS.find(([name]) => name === variant)?.[2] ?? '';
+        this._glassRow.subtitle = this._a11y?.get_boolean('high-contrast') && variant !== 'off'
+            ? `${what}. GNOME's high contrast keeps it off for now.` : what;
     }
 
     _buildAppsGroup() {

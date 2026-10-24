@@ -388,6 +388,17 @@ async function runSelftest(window) {
     appearance._variants.setSelected('muted');
     check(appearance._palette.get_string('variant') === 'muted', 'variant cards set the variant');
     appearance._palette.reset('variant');
+    // The glass: regular, clear or off, each said in a sentence.
+    const glassRow = appearance._glassRow;
+    check(glassRow.title === 'Glass' && appearance._glassToggles.active_name === 'regular' &&
+        glassRow.subtitle.includes('bends'), `Glass: regular to begin with (${glassRow.subtitle})`);
+    appearance._glassToggles.active_name = 'clear';
+    check(appearance._settings.get_string('glass-variant') === 'clear' && glassRow.subtitle.includes('see-through'),
+        'Clear writes the glass variant, and says what it is');
+    appearance._settings.set_string('glass-variant', 'off');
+    check(appearance._glassToggles.active_name === 'off' && glassRow.subtitle.startsWith('Solid'),
+        'and the row follows the setting');
+    appearance._settings.reset('glass-variant');
 
     // Island: the switches write the island's settings; turning it off
     // disables its options.
