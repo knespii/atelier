@@ -69,7 +69,7 @@ export class DockModule {
             if (this.docks.some(dock => dock.glass) !== this._glassy())
                 this._queueRebuild();
             else
-                this.docks.forEach(dock => dock.setGlassLook(this._glassLook.look));
+                this.docks.forEach(dock => dock.setGlassLook(this._glassLook.look, this._glassLook.light));
         }, this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueRebuild(), this);
         this._sync();
@@ -173,6 +173,7 @@ export class DockModule {
             settings: this._dockSettings,
             glass,
             look: this._glassLook.look,
+            light: this._glassLook.light,
             monitorIndex,
             main: i === 0,
             services: this.services,

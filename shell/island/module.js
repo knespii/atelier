@@ -157,7 +157,10 @@ export class IslandModule {
             'notify::hover', () => this._onHover(),
             'clicked', (_, button) => this._onClicked(button),
             'page-closed', () => this._onPageClosed(),
-            'page-opened', () => this._raise(),
+            'page-opened', () => {
+                this._raise();
+                this._syncDeep();
+            },
             'idle-resized', () => this._queueLayout(),
             this);
         this._slot.connectObject('notify::allocation', () => this._queueLayout(), this);
@@ -319,7 +322,8 @@ export class IslandModule {
         // The drop is of the island's stuff, and the island is drawn along
         // with it, so they flow into each other.
         const glass = this._glassy();
-        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look});
+        // (Deep: a sheet's form is styled for a dark surface.)
+        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light, deep: true});
         this._liquid.setPartner(this._partner);
         Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
         const sheet = new LiquidSheet(island, this._liquid, form);
@@ -464,9 +468,17 @@ export class IslandModule {
     }
 
     _onPageClosed() {
+        this._syncDeep();
         // Back at rest under the pointer: the glance may follow.
         if (!this._island.page && this._island.hover)
             this._onHover();
+    }
+
+    // Under GNOME's own controls – the control centre's page, styled for a
+    // dark surface only – the glass is deep, whatever GNOME's style.
+    _syncDeep() {
+        const page = this._island?.page;
+        this._glass?.setDeep(Boolean(page?.has_style_class_name?.('atelier-cc')));
     }
 
     /**
@@ -559,7 +571,7 @@ export class IslandModule {
             island.remove_style_class_name('atelier-island-notch');
 
         if (glass && !this._glass) {
-            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look});
+            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look, light: this._glassLook.light});
             this._glass.setPartner(this._partner);
             Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
             island.add_style_class_name('atelier-island-glass');
@@ -568,10 +580,11 @@ export class IslandModule {
             this._glass.destroy();
             this._glass = null;
         }
-        // (Regular or clear.)
-        this._glass?.setLook(this._glassLook.look);
+        // (Regular or clear, light or smoky.)
+        this._glass?.setLook(this._glassLook.look, this._glassLook.light);
         if (glass)
-            this._liquid?.setLook(this._glassLook.look);
+            this._liquid?.setLook(this._glassLook.look, this._glassLook.light);
+        this._syncDeep();
         // Black ears; glass draws its own.
         const ears = this._ear > 0 && !glass;
         if (ears && !this._ears) {

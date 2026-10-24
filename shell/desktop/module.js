@@ -466,15 +466,15 @@ export class DesktopModule {
         else
             this._layer.remove_style_class_name('atelier-desktop-glassy');
         if (glass && !this._glass) {
-            this._glass = new DesktopGlass(this._glassLook.look);
+            this._glass = new DesktopGlass(this._glassLook.look, this._glassLook.light);
             this._layer.insert_child_at_index(this._glass, 0);
             this._glass.setArea(this._area);
         } else if (!glass && this._glass) {
             this._glass.destroy();
             this._glass = null;
         }
-        // (Regular or clear.)
-        this._glass?.setLook(this._glassLook.look);
+        // (Regular or clear, in the light style or the dark.)
+        this._glass?.setLook(this._glassLook.look, this._glassLook.light);
         // (As see-through as the settings have them: inline, over the look.)
         this._cardStyle = cardStyle(glass ? 'glassy' : style, this._desktopSettings.get_double('card-opacity'));
         this._widgets.forEach(widget => !widget.melted && widget.set_style(this._cardStyle || null));

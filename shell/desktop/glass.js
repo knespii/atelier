@@ -25,7 +25,8 @@ import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js'
 
 const MAX_RECTS = 32;
 const BLUR_RADIUS = 40; // logical pixels
-const BLUR_BRIGHTNESS = 0.8;
+// How bright the blur leaves the wallpaper, in the light style and the dark.
+const BLUR_BRIGHTNESS = {light: 1, smoky: 0.85};
 
 // The widgets' rectangles (and the liquid), each with the light it catches;
 // the sheen runs across the one a pixel is nearest to.
@@ -145,8 +146,9 @@ class AtelierDesktopGlass extends St.Widget {
      * lines up with the desktop's.
      *
      * @param {object|null} [look] - the material (lib/glassLook.js LOOK's)
+     * @param {boolean} [light] - GNOME's style is light
      */
-    _init(look = null) {
+    _init(look = null, light = false) {
         super._init({style_class: 'atelier-desktop-glass', reactive: false, clip_to_allocation: true});
         Shell.util_set_hidden_from_pick(this, true);
         this._wallpaper = new Clutter.Actor();
@@ -158,6 +160,7 @@ class AtelierDesktopGlass extends St.Widget {
         this._liquid = {};
         this._lights = [];
         this._look = look;
+        this._lightStyle = light;
         this._mask.setMaterial(look, glassScale());
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor',
             () => this._mask.setMaterial(this._look, glassScale()), this);
@@ -171,15 +174,20 @@ class AtelierDesktopGlass extends St.Widget {
         });
     }
 
-    /** @param {object|null} look - another material (LOOK's) */
-    setLook(look) {
-        if (look === this._look)
+    /**
+     * @param {object|null} look - another material (LOOK's)
+     * @param {boolean} [light] - GNOME's style is light
+     */
+    setLook(look, light = this._lightStyle) {
+        if (look === this._look && light === this._lightStyle)
             return;
-        const frosted = this._frost;
+        const blurred = [this._frost, this._blurBrightness];
         this._look = look;
+        this._lightStyle = light;
         this._mask.setMaterial(look, glassScale());
-        // (Less frosted, it is blurred anew.)
-        if (this._frost !== frosted)
+        // (Less frosted, or as bright as the other style has it: blurred
+        // anew.)
+        if (this._frost !== blurred[0] || this._blurBrightness !== blurred[1])
             this._blur();
         glassLight.sync();
     }
@@ -187,6 +195,12 @@ class AtelierDesktopGlass extends St.Widget {
     // How frosted it is (LOOK's): a share of its blur.
     get _frost() {
         return this._look?.frost ?? 1;
+    }
+
+    // In GNOME's light style, the wallpaper as bright as it is; in its dark
+    // one, dimmed a little (the cards' own colour is over it).
+    get _blurBrightness() {
+        return this._lightStyle ? BLUR_BRIGHTNESS.light : BLUR_BRIGHTNESS.smoky;
     }
 
     /** @returns {object|null} the material it is drawn with */
@@ -230,7 +244,7 @@ class AtelierDesktopGlass extends St.Widget {
         actor.add_effect_with_name('atelier-blur', new Shell.BlurEffect({
             mode: Shell.BlurMode.ACTOR,
             radius: BLUR_RADIUS * scale * this._frost,
-            brightness: BLUR_BRIGHTNESS,
+            brightness: this._blurBrightness,
         }));
     }
 
@@ -284,13 +298,18 @@ class AtelierDesktopGlass extends St.Widget {
      *   where they are)
      */
     setLights(lights) {
-        // Under windows (or anything else), the widgets may not be seen at
-        // all: their light leans only while the pointer is on the desktop.
-        if (!this._pointerOnDesktop())
-            lights = lights.map(() => REST_LIGHT);
-        const changed = lights.map((light, i) => !this._lights[i] || !sameLight(light, this._lights[i]));
+        const changes = wanted => wanted.map((light, i) => !this._lights[i] || !sameLight(light, this._lights[i]));
+        let changed = changes(lights);
         if (!changed.includes(true))
             return false;
+        // Under windows (or anything else), the widgets may not be seen at
+        // all: their light leans only while the pointer is on the desktop.
+        if (lights.some(light => !sameLight(light, REST_LIGHT)) && !this._pointerOnDesktop()) {
+            lights = lights.map(() => REST_LIGHT);
+            changed = changes(lights);
+            if (!changed.includes(true))
+                return false;
+        }
         this._lights = lights;
         this._mask.setLights(lights);
         changed.forEach((yes, i) => {
@@ -306,11 +325,12 @@ class AtelierDesktopGlass extends St.Widget {
         return true;
     }
 
-    // Whether what the pointer is over (as Clutter last picked it) is the
-    // desktop: the wallpaper or the widgets.
+    // Whether what the pointer is over is the desktop: the wallpaper or the
+    // widgets. (Picked where it is: GNOME 50 no longer says which actor a
+    // device is over.)
     _pointerOnDesktop() {
-        const pointer = global.stage.context.get_backend().get_default_seat().get_pointer();
-        const actor = pointer ? global.stage.get_device_actor(pointer, null) : null;
+        const [x, y] = global.get_pointer();
+        const actor = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
         return Boolean(actor && (Main.layoutManager._backgroundGroup.contains(actor) ||
             this.get_parent()?.contains(actor)));
     }

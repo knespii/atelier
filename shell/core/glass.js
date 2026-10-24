@@ -19,14 +19,15 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {REST_LIGHT, bodyRect, boundsOf, sameLight} from '../../lib/glassLook.js';
+import {REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, tintOf} from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
     MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
 } from './glassMaterial.js';
 
 const BLUR_RADIUS = 36; // logical pixels
-const BLUR_BRIGHTNESS = 0.75;
+// How bright the blur leaves the wallpaper, under light glass and smoky.
+const BLUR_BRIGHTNESS = {light: 1, smoky: 0.85};
 // Live glass is blurred over the bounds of its shapes, in steps of this many
 // logical pixels (so it isn't made anew every frame they change).
 const LIVE_STEP = 64;
@@ -291,9 +292,13 @@ class AtelierGlassSurface extends St.Widget {
      *   shapes, changing every frame without anything being laid out anew
      * @param {object|null} [params.look] - the material (lib/glassLook.js
      *   LOOK's), none for plain blurred glass; never for solid surfaces
+     * @param {boolean} [params.light] - GNOME's style is light: light glass
+     *   (else smoky)
+     * @param {boolean} [params.deep] - dark glass whatever the style, for
+     *   what is styled for a dark surface only (a sheet's form)
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
-        solid = false, look = null} = {}) {
+        solid = false, look = null, light = false, deep = false} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -304,6 +309,8 @@ class AtelierGlassSurface extends St.Widget {
         this._side = side ?? (fromBottom ? 'BOTTOM' : 'TOP');
         this._solid = solid;
         this._look = solid ? null : look;
+        this._lightStyle = light;
+        this._deep = deep;
         this._shape = null;
         this._drop = null;
         this._neck = null;
@@ -337,40 +344,77 @@ class AtelierGlassSurface extends St.Widget {
             this._bgManager = null;
         });
         this._mask.setMaterial(this._look, glassScale());
-        if (!solid)
-            this._tint.opacity = Math.round(255 * Math.min(1, this._frost));
+        this._syncTint();
         this._build();
     }
 
     /**
-     * Another material: another variant of glass. (A solid surface has
-     * none.)
+     * Another material: another variant of glass, or of GNOME's style. (A
+     * solid surface has none.)
      *
      * @param {object|null} look - LOOK's, null for plain blurred glass
+     * @param {boolean} [light] - GNOME's style is light
      */
-    setLook(look) {
-        if (this._solid || look === this._look)
+    setLook(look, light = this._lightStyle) {
+        if (this._solid || (look === this._look && light === this._lightStyle))
             return;
-        const frosted = this._frost;
+        const blurred = [this._frost, this._blurBrightness];
         this._look = look;
+        this._lightStyle = light;
         this._mask.setMaterial(look, glassScale());
-        // (Less frosted, it is blurred anew.)
-        if (this._frost !== frosted)
-            this._syncFrost();
+        this._syncTint();
+        // (Less frosted, or as bright as the other style has it: blurred
+        // anew.)
+        if (this._frost !== blurred[0] || this._blurBrightness !== blurred[1])
+            this._syncBlur();
         glassLight.sync();
     }
 
-    // How frosted it is (LOOK's): its blur and its tint, a share of its own.
+    /**
+     * Dark glass whatever GNOME's style, under what is styled for a dark
+     * surface only (GNOME's own controls in the control centre).
+     *
+     * @param {boolean} deep
+     */
+    setDeep(deep) {
+        if (deep === this._deep)
+            return;
+        this._deep = deep;
+        this._syncTint();
+    }
+
+    // How frosted it is (LOOK's): its blur, a share of its own (its tint is
+    // as the stylesheet has it for each).
     get _frost() {
         return this._look?.frost ?? 1;
     }
 
-    _syncFrost() {
-        this._tint.opacity = Math.round(255 * Math.min(1, this._frost));
+    // Light glass shows the wallpaper as bright as it is; smoky glass dims
+    // it a little before its tint.
+    get _blurBrightness() {
+        return this._lightStyle ? BLUR_BRIGHTNESS.light : BLUR_BRIGHTNESS.smoky;
+    }
+
+    // Its tint as the stylesheet has it (stylesheet.css, the palette's in
+    // shell/core/theme.js): one class of its own for each.
+    _syncTint() {
+        if (this._solid)
+            return;
+        const wanted = `atelier-glass-${tintOf(this._look, {light: this._lightStyle, deep: this._deep})}`;
+        for (const tint of TINTS) {
+            if (`atelier-glass-${tint}` !== wanted)
+                this.remove_style_class_name(`atelier-glass-${tint}`);
+        }
+        this.add_style_class_name(wanted);
+    }
+
+    _syncBlur() {
         this._blurBackground();
         const live = this._live?.get_effect('atelier-glass-blur');
-        if (live)
+        if (live) {
             live.radius = BLUR_RADIUS * glassScale() * this._frost;
+            live.brightness = this._blurBrightness;
+        }
     }
 
     /** @returns {object|null} the material it is drawn with */
@@ -440,7 +484,7 @@ class AtelierGlassSurface extends St.Widget {
             this._live.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
                 mode: Shell.BlurMode.ACTOR,
                 radius: BLUR_RADIUS * scale * this._frost,
-                brightness: BLUR_BRIGHTNESS,
+                brightness: this._blurBrightness,
             }));
             this.insert_child_above(this._live, this._wallpaper);
             this._wallpaper.hide();
@@ -499,7 +543,7 @@ class AtelierGlassSurface extends St.Widget {
         actor.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
             mode: Shell.BlurMode.ACTOR,
             radius: BLUR_RADIUS * scale * this._frost,
-            brightness: BLUR_BRIGHTNESS,
+            brightness: this._blurBrightness,
         }));
     }
 

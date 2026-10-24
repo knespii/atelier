@@ -165,8 +165,8 @@ export function glassScale() {
 
 /**
  * The glass to draw, as the glass-variant setting and GNOME's high contrast
- * have it (lib/glassLook.js resolveVariant()); emits 'changed' when it
- * changes.
+ * have it (lib/glassLook.js resolveVariant()), light or smoky as GNOME's
+ * style is; emits 'changed' when it changes.
  */
 export class GlassLook extends EventEmitter {
     /** @param {Gio.Settings} settings - Atelier's */
@@ -177,22 +177,32 @@ export class GlassLook extends EventEmitter {
         const a11y = source.lookup('org.gnome.desktop.a11y.interface', true);
         this._a11y = a11y?.has_key('high-contrast')
             ? new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'}) : null;
+        this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         settings.connectObject('changed::glass-variant', () => this._sync(), this);
         this._a11y?.connectObject('changed::high-contrast', () => this._sync(), this);
-        this._variant = this._resolve();
+        this._interface.connectObject('changed::color-scheme', () => this._sync(), this);
+        [this._variant, this._light] = this._resolve();
     }
 
     _resolve() {
-        return resolveVariant(this._settings.get_string('glass-variant'),
-            {highContrast: this._a11y?.get_boolean('high-contrast') ?? false});
+        return [
+            resolveVariant(this._settings.get_string('glass-variant'),
+                {highContrast: this._a11y?.get_boolean('high-contrast') ?? false}),
+            this._interface.get_string('color-scheme') !== 'prefer-dark',
+        ];
     }
 
     _sync() {
-        const variant = this._resolve();
-        if (variant === this._variant)
+        const [variant, light] = this._resolve();
+        if (variant === this._variant && light === this._light)
             return;
-        this._variant = variant;
+        [this._variant, this._light] = [variant, light];
         this.emit('changed');
+    }
+
+    /** @returns {boolean} whether GNOME's style is light: light glass, else smoky */
+    get light() {
+        return this._light;
     }
 
     /** @returns {string} 'regular', 'clear' or 'off' (solid surfaces) */
@@ -214,6 +224,8 @@ export class GlassLook extends EventEmitter {
         this._settings.disconnectObject(this);
         this._a11y?.disconnectObject(this);
         this._a11y = null;
+        this._interface?.disconnectObject(this);
+        this._interface = null;
     }
 }
 

@@ -45,10 +45,11 @@ class Surface {
     /**
      * @param {boolean} glass - of glass, not black
      * @param {object|null} look - the glass's material (LOOK's)
+     * @param {boolean} light - GNOME's style is light: light glass
      */
-    constructor(glass, look) {
+    constructor(glass, look, light) {
         this._glass = glass;
-        this.actor = new GlassSurface({reach: 0.1, solid: !glass, look});
+        this.actor = new GlassSurface({reach: 0.1, solid: !glass, look, light});
         if (!glass)
             this.actor.add_style_class_name('atelier-capsule');
         // (Never the target of a drag and drop.)
@@ -279,11 +280,11 @@ export class BarModule {
         const count = style === 'island' || glassBar ? 1 : capsules ? 2 : 0;
         if (this._surfaces.length !== count || this._surfaces.some(surface => surface.glass !== glass)) {
             this._surfaces.forEach(surface => surface.destroy());
-            this._surfaces = Array.from({length: count}, () => new Surface(glass, look));
+            this._surfaces = Array.from({length: count}, () => new Surface(glass, look, this._glassLook.light));
         }
-        // (Regular or clear.)
+        // (Regular or clear, light or smoky.)
         if (glass)
-            this._surfaces.forEach(surface => surface.actor.setLook(look));
+            this._surfaces.forEach(surface => surface.actor.setLook(look, this._glassLook.light));
         // Only the one island of glass is one glass with the island's.
         if (!(style === 'island' && glass)) {
             this._surfaces.forEach(surface => surface.actor.setPartner(null));

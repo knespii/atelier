@@ -115,13 +115,18 @@ class GlassLight {
     }
 
     // Where the light comes from for each of a surface's areas: from above,
-    // or leaning towards the pointer.
+    // or leaning towards the pointer. (A surface that fails at it is told
+    // in the journal; the others, and whoever shows one, go on.)
     _light(surface, pointer, scale = 1) {
-        const look = surface.lightLook();
-        const areas = surface.lightAreas();
-        if (areas.length === 0)
-            return;
-        surface.setLights(areas.map(area => (look && pointer ? lightToward(area, pointer, look, scale) : REST_LIGHT)));
+        try {
+            const look = surface.lightLook();
+            const areas = surface.lightAreas();
+            if (areas.length === 0)
+                return;
+            surface.setLights(areas.map(area => (look && pointer ? lightToward(area, pointer, look, scale) : REST_LIGHT)));
+        } catch (e) {
+            console.error('Atelier: the glass\'s light', e);
+        }
     }
 }
 

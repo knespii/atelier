@@ -1517,8 +1517,10 @@ async function testBarStyles(ext) {
 
 // Pictures of the glass on wallpapers (ATELIER_TEST_WALLPAPER, pictures
 // apart by colons, only read; GNOME's own otherwise): the one island as a
-// notch at rest and with the glance, capsules beside a floating island,
-// the dock and the widgets – in each variant. Only pictures, to look at.
+// notch at rest, with the glance and with the control centre, capsules
+// beside a floating island, the dock and the widgets – in each variant, in
+// GNOME's dark style (smoky glass) and its light one (light glass). Only
+// pictures, to look at.
 async function testGlassPictures(ext) {
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
@@ -1527,6 +1529,8 @@ async function testGlassPictures(ext) {
     const island = islandModule.island;
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
     const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = iface.get_string('color-scheme');
     const dir = `${OUTPUT}/glass-pictures`;
     GLib.mkdir_with_parents(dir, 0o755);
     const sources = (GLib.getenv('ATELIER_TEST_WALLPAPER') ?? '').split(':').filter(Boolean);
@@ -1547,44 +1551,12 @@ async function testGlassPictures(ext) {
             background.set_string('picture-uri-dark', uriOf(wallpaper));
             background.set_string('picture-options', 'zoom');
             await wallpapersSettled();
-            for (const variant of ['regular', 'clear', 'off']) {
-                settings.set_string('glass-variant', variant);
-                const name = `${n}-${variant}`;
-                // The one island, a notch, as the user has it.
-                bar.set_string('style', 'island');
-                bar.set_string('island-shape', 'notch');
-                bar.set_string('surface', 'glass');
-                bar.set_boolean('compact', true);
-                desktopSettings.set_string('style', 'modern');
-                desktopSettings.set_boolean('glass', true);
-                await restPointer();
-                await Scripting.sleep(900);
-                await shot(`${name}-top`, global.stage.width / 2 - 450, 0, 900, 60);
-                await pointerTo(...centerOf(island));
-                await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
-                await Scripting.sleep(700);
-                await shot(`${name}-glance`, island.x - 40, 0, island.width + 80, island.y + island.height + 30);
-                await restPointer();
-                await waitFor(() => island.page === null, 2000);
-                // Capsules beside a floating island.
-                bar.set_string('style', 'grouped');
-                bar.set_string('sides', 'capsules');
-                bar.set_string('island-shape', 'floating');
-                bar.set_boolean('compact', false);
-                await Scripting.sleep(900);
-                await shot(`${name}-capsules`, global.stage.width / 2 - 450, 0, 900, 60);
-                // The dock, and the widgets.
-                const dock = ext.stateObj.modules.get('dock')?.dock;
-                if (dock) {
-                    await waitFor(() => !dock.hidden, 2000);
-                    const [x, y] = dock.container.get_transformed_position();
-                    const [width, height] = dock.container.get_transformed_size();
-                    await shot(`${name}-dock`, x - 24, y - 24, width + 48, height + 48);
-                }
-                const desktop = ext.stateObj.modules.get('desktop');
-                if (desktop) {
-                    const area = desktop.area;
-                    await shot(`${name}-widgets`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
+            const looks = [['prefer-dark', '', ['regular', 'clear', 'off']], ['prefer-light', 'light-', ['regular', 'clear']]];
+            for (const [style, prefix, variants] of looks) {
+                for (const variant of variants) {
+                    iface.set_string('color-scheme', style);
+                    settings.set_string('glass-variant', variant);
+                    await shootGlass(`${n}-${prefix}${variant}`, variant === 'regular');
                 }
             }
         }
@@ -1592,8 +1564,59 @@ async function testGlassPictures(ext) {
         ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
         ['style', 'glass'].forEach(key => desktopSettings.reset(key));
         settings.reset('glass-variant');
+        iface.set_string('color-scheme', scheme);
         kept.forEach(([key, value]) => background.set_string(key, value));
         await wallpapersSettled();
+    }
+
+    // (Each look: the bar as the user has it, the glance and – deep glass –
+    // the control centre over it, capsules, the dock, the widgets.)
+    async function shootGlass(name, controlCentre) {
+        // The one island, a notch, as the user has it.
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        desktopSettings.set_string('style', 'modern');
+        desktopSettings.set_boolean('glass', true);
+        await restPointer();
+        await Scripting.sleep(900);
+        await shot(`${name}-top`, global.stage.width / 2 - 450, 0, 900, 60);
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
+        await Scripting.sleep(700);
+        await shot(`${name}-glance`, island.x - 40, 0, island.width + 80, island.y + island.height + 30);
+        await restPointer();
+        await waitFor(() => island.page === null, 2000);
+        if (controlCentre) {
+            Main.panel.toggleQuickSettings();
+            await waitFor(() => hasClass(island.page, 'atelier-cc'), 2000);
+            await Scripting.sleep(900);
+            await shot(`${name}-cc`, island.x - 40, 0, island.width + 80, island.y + island.height + 30);
+            Main.panel.closeQuickSettings();
+            await waitFor(() => island.page === null, 2000);
+            await Scripting.sleep(400);
+        }
+        // Capsules beside a floating island.
+        bar.set_string('style', 'grouped');
+        bar.set_string('sides', 'capsules');
+        bar.set_string('island-shape', 'floating');
+        bar.set_boolean('compact', false);
+        await Scripting.sleep(900);
+        await shot(`${name}-capsules`, global.stage.width / 2 - 450, 0, 900, 60);
+        // The dock, and the widgets.
+        const dock = ext.stateObj.modules.get('dock')?.dock;
+        if (dock) {
+            await waitFor(() => !dock.hidden, 2000);
+            const [x, y] = dock.container.get_transformed_position();
+            const [width, height] = dock.container.get_transformed_size();
+            await shot(`${name}-dock`, x - 24, y - 24, width + 48, height + 48);
+        }
+        const desktop = ext.stateObj.modules.get('desktop');
+        if (desktop) {
+            const area = desktop.area;
+            await shot(`${name}-widgets`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
+        }
     }
 }
 
@@ -1881,6 +1904,29 @@ async function testLiquidGlass(ext) {
             await closeTestWindows();
             await restPointer();
         }
+
+        // Its tint: smoky in GNOME's dark style, deep under the control
+        // centre's GNOME controls (styled for a dark surface only), light
+        // in the light style – the wallpaper not dimmed by its blur then.
+        const islandGlass = islandModule._glass;
+        const blurOf = surface => surface._bgManager?.backgroundActor?.get_effect('atelier-glass-blur')?.brightness;
+        check(hasClass(islandGlass, 'atelier-glass-smoky') && blurOf(islandGlass) < 1,
+            `dark style: smoky glass, the blur dimming a little (${blurOf(islandGlass)})`);
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc'), 2000);
+        check(hasClass(islandGlass, 'atelier-glass-deep') && !hasClass(islandGlass, 'atelier-glass-smoky'),
+            'the control centre open: deep glass under it');
+        Main.panel.closeQuickSettings();
+        await waitFor(() => island.page === null, 2000);
+        check(hasClass(islandGlass, 'atelier-glass-smoky') && !hasClass(islandGlass, 'atelier-glass-deep'),
+            'closed, smoky again');
+        const scheme = iface.get_string('color-scheme');
+        iface.set_string('color-scheme', 'prefer-light');
+        await Scripting.sleep(300);
+        check(hasClass(islandModule._glass, 'atelier-glass-light') && blurOf(islandModule._glass) === 1,
+            `light style: light glass, the wallpaper as bright as it is (${blurOf(islandModule._glass)})`);
+        iface.set_string('color-scheme', scheme);
+        await Scripting.sleep(300);
 
         // With GNOME's animations off, the light stays above.
         iface.set_boolean('enable-animations', false);
