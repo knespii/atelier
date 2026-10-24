@@ -284,6 +284,10 @@ class AtelierDesktopGlass extends St.Widget {
      *   where they are)
      */
     setLights(lights) {
+        // Under windows (or anything else), the widgets may not be seen at
+        // all: their light leans only while the pointer is on the desktop.
+        if (!this._pointerOnDesktop())
+            lights = lights.map(() => REST_LIGHT);
         const changed = lights.map((light, i) => !this._lights[i] || !sameLight(light, this._lights[i]));
         if (!changed.includes(true))
             return false;
@@ -300,6 +304,15 @@ class AtelierDesktopGlass extends St.Widget {
             }));
         });
         return true;
+    }
+
+    // Whether what the pointer is over (as Clutter last picked it) is the
+    // desktop: the wallpaper or the widgets.
+    _pointerOnDesktop() {
+        const pointer = global.stage.context.get_backend().get_default_seat().get_pointer();
+        const actor = pointer ? global.stage.get_device_actor(pointer, null) : null;
+        return Boolean(actor && (Main.layoutManager._backgroundGroup.contains(actor) ||
+            this.get_parent()?.contains(actor)));
     }
 
     /** @returns {number[][]} where each widget's light comes from now */

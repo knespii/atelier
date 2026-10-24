@@ -1854,6 +1854,34 @@ async function testLiquidGlass(ext) {
             `${changes.get(islandModule._glass) - snapshot.get(islandModule._glass)} new lights of ${lights.length} ` +
             `looks, ${(lights.reduce((a, b) => a + b, 0) / Math.max(1, lights.length)).toFixed(3)} ms each`);
 
+        // The widgets' glass: its light leans with the pointer on the
+        // desktop beside them, not over a window that covers them.
+        const widgets = [...desktop?.widgets?.values() ?? []].filter(widget => widget.visible);
+        if (desktop?._glass && widgets.length > 0) {
+            const rects = widgets.map(widget => [...widget.get_transformed_position(), ...widget.get_transformed_size()]);
+            const right = Math.max(...rects.map(([x, , w]) => x + w));
+            const [cx, cy] = centerOf(widgets[0]);
+            const beside = [right + px(40), cy];
+            const before = changes.get(desktop._glass);
+            await pointerTo(...beside);
+            await Scripting.sleep(200);
+            check(changes.get(desktop._glass) > before, 'beside the widgets on the desktop, their light leans');
+            await restPointer();
+            await Scripting.sleep(200);
+            const window = await openTestWindow('Over the widgets');
+            await moveTestWindow(window, [Math.round(cx - px(200)), Math.round(cy - px(150)),
+                Math.round(right - cx + px(400)), px(300)]);
+            const covered = changes.get(desktop._glass);
+            await pointerTo(...beside);
+            await Scripting.sleep(200);
+            await pointerTo(beside[0] - px(20), beside[1] + px(10));
+            await Scripting.sleep(200);
+            check(changes.get(desktop._glass) === covered,
+                `over a window covering them, not (${changes.get(desktop._glass) - covered} new lights)`);
+            await closeTestWindows();
+            await restPointer();
+        }
+
         // With GNOME's animations off, the light stays above.
         iface.set_boolean('enable-animations', false);
         await Scripting.sleep(200);
