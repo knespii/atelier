@@ -26,7 +26,7 @@ import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js'
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 import {contrastLc, minimumLc} from '../lib/apca.js';
-import {luminance} from '../lib/palette.js';
+import {hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
@@ -1997,6 +1997,228 @@ async function testLiquidGlass(ext) {
         kept.forEach(([key, value]) => background.set_string(key, value));
         await restPointer();
         await wallpapersSettled();
+    }
+}
+
+// The first actor in a tree with a style class.
+function actorWith(root, name) {
+    for (const child of root?.get_children?.() ?? []) {
+        if (hasClass(child, name))
+            return child;
+        const found = actorWith(child, name);
+        if (found)
+            return found;
+    }
+    return null;
+}
+
+// Vibrancy: type and icons on glass read on what is behind the glass –
+// over a light wallpaper dark, over a dark one as they are set; each side
+// of the bar, the island, the dock and each widget on what is behind it;
+// the palette's colours in their hue; an open page over windows as set;
+// all of it as set again with the glass off. (The glass drawn here is
+// still the old one, darker; its tint is cleared, as Liquid Glass has
+// none, so that what is predicted is near what is drawn.)
+async function testVibrancy(ext) {
+    const modules = ext.stateObj.modules;
+    const vibrancy = modules.get('vibrancy');
+    const desktop = modules.get('desktop');
+    const islandModule = modules.get('island');
+    const dock = () => modules.get('dock')?.dock ?? null;
+    if (!check(vibrancy && desktop && islandModule && dock(), 'vibrancy, the island, the desktop and the dock running'))
+        return;
+    const island = islandModule.island;
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const desktopSettings = settings.get_child('desktop');
+    const dockSettings = settings.get_child('dock');
+    const paletteSettings = settings.get_child('palette');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
+    const showWallpaper = path => ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(path)));
+    // (In the dark style: apps' windows are taken to be dark.)
+    const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = desktopInterface.get_string('color-scheme');
+    const LIGHT = '#efe6d2';
+    const DARK = '#141a24';
+    const light = makePicture('vibrancy-light', LIGHT);
+    const dark = makePicture('vibrancy-dark', DARK);
+    const halves = makePicture('vibrancy-halves', LIGHT, DARK);
+    const clearGlass = Gio.File.new_for_path(`${OUTPUT}/clear-glass.css`);
+    GLib.file_set_contents(clearGlass.get_path(), '.atelier-glass StWidget.atelier-glass-tint { background-color: transparent; }\n');
+    // (The theme as it is now: GNOME makes it anew for another style,
+    // taking the stylesheets loaded over to the new one.)
+    const theme = () => St.ThemeContext.get_for_stage(global.stage).get_theme();
+
+    const ink = actor => (actor?.get_stage() ? hexOf(actor.get_theme_node().get_foreground_color()) : null);
+    const fill = actor => hexOf(actor.get_theme_node().get_background_color());
+    const isDark = color => color !== null && luminance(color) < 0.05;
+    // What shows it: the island's time, a button on each side of the bar
+    // (the workspaces' on the left, the system menu on the right), the
+    // dock's Show Applications icon, a widget at the left and one at the
+    // right (their type, the date's weekday in the palette's colour).
+    const time = () => islandModule._idle._time;
+    const leftButton = () => Main.panel.statusArea.activities;
+    const rightButton = () => Main.panel.statusArea.quickSettings;
+    const showApps = () => actorWith(dock()?.container, 'show-apps-icon');
+    const widget = id => desktop.widgets.get(id);
+    const weekday = () => widget('date')?._weekday;
+    const polarity = id => vibrancy.surfaceOf(id)?.polarity ?? null;
+    const legible = (actor, id) => {
+        const backdrop = vibrancy.surfaceOf(id)?.backdrop;
+        return backdrop ? Math.abs(contrastLc(ink(actor), isDark(ink(actor)) ? backdrop.dark : backdrop.light)) : 0;
+    };
+    const shown = () => ({
+        time: ink(time()), left: ink(leftButton()), right: ink(rightButton()), dock: ink(showApps()),
+        clock: ink(widget('clock')), date: ink(widget('date')), weekday: ink(weekday()),
+    });
+    const settle = async predicate => {
+        const ok = await waitFor(predicate, 8000);
+        await Scripting.sleep(500);
+        return ok;
+    };
+
+    try {
+        // Glass everywhere: the sides of the bar in capsules at the edges,
+        // the island, the dock, the widgets' cards (as see-through as the
+        // glass alone), a clock at the left and the date at the right; a
+        // palette of the sea.
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        theme().load_stylesheet(clearGlass);
+        dockSettings.set_boolean('show-show-apps-button', true);
+        bar.set_string('sides', 'capsules');
+        bar.set_string('surface', 'glass');
+        desktopSettings.set_string('style', 'modern');
+        desktopSettings.set_boolean('glass', true);
+        desktopSettings.set_double('card-opacity', 0.4);
+        desktopSettings.set_string('widgets', JSON.stringify([
+            {id: 'clock', kind: 'clock', size: 'square', x: 2, y: 4, fine: true},
+            {id: 'date', kind: 'date', size: 'square', x: 30, y: 4, fine: true},
+        ]));
+        paletteSettings.set_string('source', 'preset');
+        paletteSettings.set_string('preset', 'sea');
+        await restPointer();
+        showWallpaper(dark);
+        await wallpapersSettled();
+        check(await settle(() => widget('date')?.mapped && !desktop._flowing && showApps() &&
+            ['island', 'bar-left', 'bar-right', 'dock-0', 'widget-clock', 'widget-date'].every(id => polarity(id) === 'light')),
+        `on a dark wallpaper, light type everywhere (${['island', 'bar-left', 'bar-right', 'dock-0', 'widget-clock', 'widget-date'].map(polarity)})`);
+        const asSet = shown();
+        check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => asSet[part] === '#ffffff'),
+            `all of it as it is set, white (${JSON.stringify(asSet)})`);
+        check(vibrancy.stylesheet === null, `no colours of its own (${vibrancy.stylesheet})`);
+        await screenshot('32a-vibrancy-dark');
+
+        // A light wallpaper: dark type, as emphatic as it is set – readable
+        // on the glass as it is predicted.
+        showWallpaper(light);
+        await wallpapersSettled();
+        check(await settle(() => isDark(ink(time())) && isDark(ink(widget('clock')))),
+            `on a light wallpaper, dark type (${JSON.stringify(shown())})`);
+        const onLight = shown();
+        check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => isDark(onLight[part])),
+            `the bar's sides, the island, the dock and the widgets (${JSON.stringify(onLight)})`);
+        check(legible(time(), 'island') >= 60 && legible(leftButton(), 'bar-left') >= 60 &&
+            legible(widget('clock'), 'widget-clock') >= 60,
+        `legible on their glass (Lc ${[legible(time(), 'island'), legible(leftButton(), 'bar-left'),
+            legible(widget('clock'), 'widget-clock')].map(lc => lc.toFixed(0))})`);
+        const dots = actorWith(leftButton(), 'workspace-dot');
+        check(!dots || isDark(fill(dots)), `the workspaces' dots too (${dots && fill(dots)})`);
+        const primary = JSON.parse(paletteSettings.get_string('current')).dark.primary;
+        const [, chroma, hue] = hexToOklch(onLight.weekday);
+        const hueDistance = Math.abs(((hue - hexToOklch(primary)[2] + 540) % 360) - 180);
+        check(hueDistance < 6 && chroma > 0.03 && hexToOklch(onLight.weekday)[0] < hexToOklch(primary)[0],
+            `the date's weekday the palette's ${primary}, deeper (${onLight.weekday}, ${hueDistance.toFixed(1)}° off)`);
+        const date = actorWith(island, 'atelier-island-date');
+        check(!date?.visible || Math.abs(contrastLc(ink(date), vibrancy.surfaceOf('island').backdrop.dark)) <
+            Math.abs(contrastLc(ink(time()), vibrancy.surfaceOf('island').backdrop.dark)),
+        'the island\'s date quieter than its time');
+        await screenshot('32b-vibrancy-light');
+
+        // Open over the wallpaper, the glance is dark too; over a window
+        // (live glass, what it shows not known), as set.
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        const glanceTime = () => actorWith(island.page, 'atelier-glance-time');
+        check(glanceTime() && isDark(ink(glanceTime())), `the glance over the wallpaper, dark (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('32c-vibrancy-glance-light', 420);
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+        await Scripting.sleep(400);
+        const window = await openTestWindow('vibrancy-under-island');
+        const [restX, restY, restWidth] = island.restRect();
+        await moveTestWindow(window, [restX + restWidth / 2 - 400, restY + 40, 800, 500]);
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        check(polarity('island-windows') === 'light' && glanceTime() && ink(glanceTime()) === '#ffffff',
+            `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('32d-vibrancy-glance-window', 420);
+        // In the light style, its windows are taken to be light.
+        desktopInterface.set_string('color-scheme', 'prefer-light');
+        check(await settle(() => polarity('island-windows') === 'dark' && isDark(ink(glanceTime()))),
+            `over a window, in the light style, dark (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('32d2-vibrancy-glance-window-light-style', 420);
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        await wallpapersSettled();
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+
+        // A dock more opaque near windows: dark type on its clear glass
+        // away from them, light on its dark wash near one – in a class of
+        // its own, no stylesheet made anew as windows come and go.
+        dockSettings.set_string('transparency-mode', 'DYNAMIC');
+        const container = () => dock().container;
+        const scope = 'atelier-vibrant-dock-0';
+        check(await settle(() => vibrancy.surfaceOf('dock-0-near')?.polarity === 'light' &&
+            vibrancy.surfaceOf('dock-0')?.polarity === 'dark' && hasClass(container(), scope)),
+        `a dock dark near windows: its type light there, dark away (${['dock-0', 'dock-0-near'].map(polarity)})`);
+        const sheet = vibrancy.stylesheet;
+        check(isDark(ink(showApps())), `away from windows, dark (${ink(showApps())})`);
+        // (Just above it: near, not over it – the dock would go out of its way.)
+        const rect = dock().staticRect;
+        await moveTestWindow(window, [rect.x, rect.y - 324, rect.width, 320]);
+        check(await settle(() => hasClass(container(), `${scope}-near`) && !hasClass(container(), scope)) &&
+            ink(showApps()) === '#ffffff' && vibrancy.stylesheet === sheet,
+        `a window near: light, the same stylesheet (${ink(showApps())}, ${vibrancy.stylesheet === sheet})`);
+        const shotY = rect.y - 120;
+        await screenshotArea('32e-vibrancy-dock-near-window', rect.x - 40, shotY, rect.width + 80, global.stage.height - shotY);
+        await closeTestWindows();
+        check(await settle(() => hasClass(container(), scope) && isDark(ink(showApps()))), 'gone: dark again');
+        dockSettings.reset('transparency-mode');
+        await Scripting.sleep(400);
+
+        // Light at the left, dark at the right: each side, each widget, on
+        // what is behind it.
+        showWallpaper(halves);
+        await wallpapersSettled();
+        check(await settle(() => polarity('bar-left') === 'dark' && polarity('bar-right') === 'light' &&
+            polarity('widget-clock') === 'dark' && polarity('widget-date') === 'light'),
+        `half light, half dark: ${['bar-left', 'bar-right', 'widget-clock', 'widget-date'].map(polarity)}`);
+        const split = shown();
+        check(isDark(split.left) && split.right === '#ffffff' && isDark(split.clock) && split.date === '#ffffff',
+            `the left side and the clock dark, the right side and the date as set (${JSON.stringify(split)})`);
+        await screenshot('32f-vibrancy-halves');
+
+        // Solid surfaces: as set.
+        settings.set_string('glass-variant', 'off');
+        check(await settle(() => vibrancy.stylesheet === null && ink(time()) === '#ffffff'),
+            `glass off: type as set (${JSON.stringify(shown())})`);
+        settings.reset('glass-variant');
+        check(await settle(() => isDark(ink(widget('clock')))), 'and back');
+    } finally {
+        theme().unload_stylesheet(clearGlass);
+        desktopInterface.set_string('color-scheme', scheme);
+        await closeTestWindows();
+        ['show-show-apps-button', 'transparency-mode'].forEach(key => dockSettings.reset(key));
+        ['sides', 'surface'].forEach(key => bar.reset(key));
+        ['style', 'glass', 'card-opacity', 'widgets'].forEach(key => desktopSettings.reset(key));
+        ['source', 'preset'].forEach(key => paletteSettings.reset(key));
+        settings.reset('glass-variant');
+        uris.forEach(([key, uri]) => background.set_string(key, uri));
+        await wallpapersSettled();
+        await Scripting.sleep(800);
     }
 }
 
@@ -4325,6 +4547,27 @@ async function lockForTest() {
     };
 }
 
+// The lock screen's wallpaper and its glass (shell/lockscreen/glass.js), as
+// they are: GNOME's own blur of each wallpaper (off while Atelier's lock
+// screen is there), whether the glass is over them or under them (at rest),
+// how opaque it is over them, and each wallpaper's glass – its blur, its
+// look and how often it was made.
+function wallpaperGlass(module) {
+    const group = Main.screenShield._dialog?._backgroundGroup ?? null;
+    const glass = module?._glass;
+    const panes = glass?.panes ?? [];
+    const over = Boolean(glass?.layer) && group?.get_last_child() === glass.layer;
+    return {
+        own: group?.get_children().map(w => w.get_effect('blur')).filter(Boolean) ?? [],
+        over,
+        under: Boolean(glass?.layer) && group?.get_first_child() === glass.layer,
+        shown: over ? glass.layer.opacity : 0,
+        blurs: panes.map(pane => pane.get_effect('atelier-lock-blur')),
+        looks: panes.map(pane => pane.get_effect('atelier-glass')?.look),
+        made: panes.map(pane => pane.made),
+    };
+}
+
 // The clock's faces spilled out of an editor's gallery: each sample within
 // its place, all of them on the panel or scrolled to.
 function facesFit(spill) {
@@ -4385,15 +4628,16 @@ async function testLockWidgets() {
         await Scripting.sleep(500);
         await screenshot('83-lock-widgets');
 
-        const blurs = () => dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
-        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+        const glass = () => wallpaperGlass(lock());
+        check(glass().own.length > 0 && glass().own.every(e => !e.enabled) && glass().shown === 0,
             'the wallpaper sharp until the password is asked');
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
         check(await waitFor(() => clock.get_paint_opacity() === 0, 2000) && board.layer.opacity === 255,
             'and the widgets make room for it: the clock goes, all of it');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
-            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => glass().shown === 255 && glass().over && glass().own.every(e => !e.enabled) &&
+            glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+        `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${glass().blurs.map(e => e.radius)})`);
     } finally {
         await locked.unlock();
     }
@@ -4456,7 +4700,7 @@ async function testLockPasswordField() {
     ]));
     lockSettings.set_boolean('gnome-clock', false);
     const widget = id => lock().board.widgets.find(w => w.entry.id === id);
-    const blurs = () => shield._dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
+    const glass = () => wallpaperGlass(lock());
     let locked = await lockForTest();
     try {
         check(await waitFor(() => lock()?.island?.actor && lock().board?.widgets.length === 2 &&
@@ -4464,7 +4708,7 @@ async function testLockPasswordField() {
         const clock = widget('clock');
         // (Where it is at rest: in the popup's way, as checked below.)
         const clockBottom = clock.stacked.get_transformed_position()[1] + clock.stacked.get_transformed_size()[1];
-        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+        check(glass().own.length > 0 && glass().own.every(e => !e.enabled) && glass().shown === 0,
             'the wallpaper sharp until the password is asked');
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
@@ -4505,8 +4749,9 @@ async function testLockPasswordField() {
         check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the popup (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
         check(!findActor(form, a => a instanceof St.Button), 'no buttons: Enter sends it, Escape goes back');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
-            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => glass().shown === 255 && glass().over && glass().own.every(e => !e.enabled) &&
+            glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+        `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${glass().blurs.map(e => e.radius)})`);
         check(await waitFor(() => lock().room === 1 && !clock.get_transition('translation_y'), 2000),
             'the prompt is up, room made for it');
         const box = actor => {
@@ -4533,7 +4778,7 @@ async function testLockPasswordField() {
         check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
         check(await waitFor(() => !sheet() && lock().room === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
             clock._colon.opacity === 0 && clock._minutesBox.translation_y === 0 &&
-            widget('date').opacity === 255 && blurs().every(e => e.radius === 0), 2000),
+            widget('date').opacity === 255 && glass().shown === 0, 2000),
         'the popup draws back, the clock comes down, stacked again, the wallpaper is sharp again');
         await Scripting.sleep(600);
 
@@ -5261,6 +5506,135 @@ function stepsIn(pixels, [x, y, width, height], step = 3) {
     return most;
 }
 
+// A picture of the monitor's size, from one colour at its top to another at
+// its bottom ([r, g, b] each).
+function gradientPicture(path, [width, height], top, bottom) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
+    for (let y = 0; y < height; y++) {
+        const [r, g, b] = top.map((v, i) => Math.round(v + (bottom[i] - v) * y / Math.max(1, height - 1)));
+        pixbuf.new_subpixbuf(0, y, width, 1).fill(((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0);
+    }
+    pixbuf.savev(path, 'png', [], []);
+}
+
+// Where a screenshot differs from another (the glass clock over the
+// wallpaper, and the wallpaper alone): how many pixels, their mean, and how
+// many of them within a few levels of a colour.
+function changedPixels(shot, bare, [x, y, width, height], color = null) {
+    let [count, near] = [0, 0];
+    const sum = [0, 0, 0];
+    for (let row = y; row < y + height; row++) {
+        for (let col = x; col < x + width; col++) {
+            const here = shot.at(col, row);
+            if (colorDistance(here, bare.at(col, row)) <= 24)
+                continue;
+            count++;
+            here.forEach((v, i) => (sum[i] += v));
+            if (color && colorDistance(here, color) <= 4)
+                near++;
+        }
+    }
+    return {count, mean: sum.map(v => Math.round(v / Math.max(1, count))), near};
+}
+
+// The glass clock in each of Atelier's glass variants (lib/glassLook.js)
+// on a light wallpaper and on a dark one: regular glass; clear glass,
+// dimmer; none, solid digits in the tone – as GNOME's high contrast makes
+// them, whatever is chosen. Each as the lock screen draws it, and the
+// wallpaper alone, in tests/output/shell/glass-looks.
+async function testLockGlassLooks() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the glass clock\'s looks untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const settings = atelier()._settings;
+    const lockSettings = settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const a11y = new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'});
+    const monitor = Main.layoutManager.primaryMonitor;
+    const dir = `${OUTPUT}/glass-looks`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', false);
+    try {
+        for (const [name, top, bottom] of [['light', [0xdf, 0xe8, 0xf3], [0xf6, 0xef, 0xe2]],
+            ['dark', [0x0d, 0x12, 0x20], [0x2b, 0x34, 0x52]]]) {
+            const wallpaper = `${dir}/${name}.png`;
+            gradientPicture(wallpaper, [monitor.width, monitor.height], top, bottom);
+            background.set_string('picture-uri', uriOf(wallpaper));
+            background.set_string('picture-uri-dark', uriOf(wallpaper));
+            background.set_string('picture-options', 'zoom');
+            settings.set_string('glass-variant', 'regular');
+            await wallpapersSettled();
+            const locked = await lockForTest();
+            let clock = null;
+            try {
+                const there = () => lock()?.board?.widgets[0]?.glass;
+                check(await waitFor(() => there()?.target && there().backdrop && lock().board.tone, 15000),
+                    `locked on a ${name} wallpaper: the glass clock, its glass frosting it`);
+                clock = lock().board.widgets[0];
+                const glass = clock.glass;
+                // (The time as the test sets it.)
+                clock._sync = () => {};
+                glass.setClock('10:08');
+                await waitFor(() => !glass.changing && glass.stretch === glass.target.stretch, 2000);
+                await restPointer();
+                const area = [...glass.get_transformed_position(), glass.width, glass.height].map(Math.round);
+                const shot = async label => {
+                    await Scripting.sleep(500);
+                    await screenshotArea(`glass-looks/${name}-${label}`, ...area);
+                    return pixelsOf(`glass-looks/${name}-${label}`, area);
+                };
+                clock.hide();
+                const bare = await shot('wallpaper');
+                clock.show();
+                const tone = lock().board.tone;
+                const looks = {};
+                for (const variant of ['regular', 'clear', 'off']) {
+                    settings.set_string('glass-variant', variant);
+                    await waitFor(() => glass.variant === variant && (variant === 'off') === !glass.backdrop, 5000);
+                    looks[variant] = changedPixels(await shot(variant), bare, area, hexToRgb(tone.color));
+                }
+                const said = Object.entries(looks).map(([v, l]) => `${v} ${l.mean} of ${l.count}`).join(', ');
+                check(Object.values(looks).every(l => l.count > 2000), `the digits drawn in each (${said})`);
+                const lightness = rgb => rgb.reduce((sum, v) => sum + v, 0) / 3;
+                check(colorDistance(looks.regular.mean, looks.clear.mean) >= 3 &&
+                    (tone.dark || lightness(looks.clear.mean) < lightness(looks.regular.mean)),
+                `clear glass not as regular glass${tone.dark ? '' : ', dimmer'} (${tone.color})`);
+                check(looks.off.near > 0.8 * looks.off.count && glass.digitsMetrics?.tintAlpha === null,
+                    `none: solid digits in the tone (${looks.off.near} of ${looks.off.count} pixels ${tone.color})`);
+                // GNOME's high contrast: solid digits, whatever is chosen.
+                settings.set_string('glass-variant', 'regular');
+                await waitFor(() => glass.variant === 'regular', 3000);
+                a11y.set_boolean('high-contrast', true);
+                check(await waitFor(() => glass.variant === 'off', 3000) && glass.digitsMetrics?.tintAlpha === null,
+                    'GNOME\'s high contrast: solid digits, though regular glass is chosen');
+                a11y.reset('high-contrast');
+                check(await waitFor(() => glass.variant === 'regular' && glass.backdrop, 5000), 'and glass again without it');
+                results.push(`INFO  the glass clock on a ${name} wallpaper (tone ${tone.color}): ${said}; ` +
+                    'pictures in tests/output/shell/glass-looks');
+            } finally {
+                if (clock)
+                    delete clock._sync;
+                await locked.unlock();
+            }
+        }
+    } finally {
+        settings.reset('glass-variant');
+        a11y.reset('high-contrast');
+        ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+    }
+}
+
 // The lock screen's clock as the prompt comes up and goes, frame by frame,
 // slowed down: as the user has it, a large glass clock over a hill that
 // stands in front of its digits' feet (the depth effect on, a band of the
@@ -5573,10 +5947,11 @@ function paceOf(frames, calls, since, moved) {
 // from Escape until the clock is back and still, the frames come as often as
 // the display shows them – but the first time up, which makes what is kept
 // for the next (and where the shell draws without a GPU, ATELIER_TEST_SLOW:
-// only said) – and the glass clock is not drawn anew at all, however GNOME
-// restyles its lock screen as the key focus comes and goes; the popup's
-// liquid only as large as it flows. What each frame cost where goes in
-// tests/output/shell/pace.
+// only said), none over 20 ms for the room made or the wallpaper's glass
+// fading in and out (made once, as the lock screen showed) – and the glass
+// clock is not drawn anew at all, however GNOME restyles its lock screen as
+// the key focus comes and goes; the popup's liquid only as large as it
+// flows. What each frame cost where goes in tests/output/shell/pace.
 async function testLockPromptPace() {
     const shield = Main.screenShield;
     if (!shield) {
@@ -5676,10 +6051,8 @@ async function testLockPromptPace() {
             ]);
             const now = () => GLib.get_monotonic_time() / 1000;
             const tag = `at ${density}×, a clock of ${[clock.width, clock.height].map(Math.round).join('×')} px`;
-            // (How much the wallpaper is blurred: by whichever of its blurs is on.)
-            const wallpaperActor = shield._dialog._backgroundGroup.get_children().find(w => w.get_effect('blur'));
-            const blurred = () => Math.max(0, ...(wallpaperActor?.get_effects() ?? [])
-                .filter(e => e instanceof Shell.BlurEffect && e.enabled).map(e => e.radius));
+            // (How opaque the wallpaper's glass is over it.)
+            const frosted = () => wallpaperGlass(module).shown;
             // (The popup's liquid, timed and measured once it is there.)
             const liquid = () => field?._popup?._paint ?? null;
             let liquidSize = null;
@@ -5696,11 +6069,12 @@ async function testLockPromptPace() {
                     island: module.island?.actor?.translation_y ?? 0,
                     popup: paint ? 1 : 0,
                     form: field?.form?.opacity ?? 0,
-                    blur: blurred(),
+                    glass: frosted(),
+                    made: wallpaperGlass(module).made.join('/'),
                 };
             };
             const moved = (a, b) => a.popup || b.popup ||
-                ['room', 'clock', 'island', 'form', 'blur'].some(key => a[key] !== b[key]);
+                ['room', 'clock', 'island', 'form', 'glass'].some(key => a[key] !== b[key]);
             const phases = [];
             // A while, from start() until done() (or for so long), and a
             // little after. (While it rests, every frame counts: the
@@ -5721,6 +6095,10 @@ async function testLockPromptPace() {
             };
             const drawn = () => [glass._digits.repaints, glass._moving.repaints];
             const before = drawn();
+            // (The wallpaper's glass, made as the lock screen showed.)
+            const made = wallpaperGlass(module).made;
+            check(made.length > 0 && made.every(n => n === 1) && wallpaperGlass(module).under,
+                `the wallpaper's glass made once as the lock screen showed, under the wallpaper while it rests (${made})`);
             // (What it is drawn from: anew, once, if that changes meanwhile –
             // the board's frosted wallpaper made late, on a slow machine.)
             const sources = () => [glass.backdrop, JSON.stringify(glass._plan)];
@@ -5738,6 +6116,8 @@ async function testLockPromptPace() {
                 check(JSON.stringify(drawn()) === JSON.stringify(before), notDrawn);
             else
                 results.push(`INFO  its frosted wallpaper or its plan came anew meanwhile: ${notDrawn}`);
+            check(JSON.stringify(wallpaperGlass(module).made) === JSON.stringify(made),
+                `nor the wallpaper's glass made anew: it only fades in and out (${made} → ${wallpaperGlass(module).made})`);
             const share = liquidSize ? liquidSize[0] * liquidSize[1] / (monitor.width * monitor.height) : 1;
             check(share < 0.25, `the popup's liquid only round it, not over the monitor (${liquidSize?.map(Math.round).join('×')})`);
 
@@ -5759,17 +6139,44 @@ async function testLockPromptPace() {
                     results.push(`INFO  ${slow ? 'drawn without a GPU: ' : ''}${pace}`);
                 else
                     check(spread.mean <= 18.5 && spread.p95 <= 25 && long.length <= 1, `the prompt ${pace}`);
-                for (const f of moving.filter(row => row.gap > 20)) {
+                // A frame over 20 ms, and what held it up: GNOME dropping its
+                // prompt, the popup made, its form first drawn or its liquid
+                // gone, or nothing measured to speak of (the garbage
+                // collector) – never the room made, the wallpaper's glass
+                // fading in or out (once a radius GNOME's blur grew by: a
+                // frame of its own at 12 pixels).
+                const causeOf = f => {
+                    const i = frames.indexOf(f);
+                    const before = frames[i - 1];
+                    if ((f.spent['GNOME\'s prompt gone'] ?? 0) > 0)
+                        return 'GNOME drops its prompt';
+                    if ((f.spent['events followed'] ?? 0) > 1)
+                        return 'the popup made';
+                    if (before && !before.form && f.form)
+                        return 'the popup\'s form first drawn';
+                    // (Its form drawn alone, without it, the frame after.)
+                    if ([i - 1, i].some(j => frames[j - 1]?.popup && frames[j] && !frames[j].popup))
+                        return 'the popup\'s liquid gone';
+                    const spent = Object.values(f.spent).reduce((sum, took) => sum + took, 0);
+                    return f.layout + f.painting + spent < 4 ? 'nothing measured' : null;
+                };
+                const late = moving.filter(f => f.gap > 20);
+                if (!slow && (name.startsWith('down') || name === 'up 2')) {
+                    const said = late.map(f => `${ms(f.gap)} ms: ${causeOf(f) ?? `room ${f.room.toFixed(2)}`}`);
+                    check(late.every(causeOf), `the prompt ${name}, ${tag}: no frame over 20 ms but where GNOME, the ` +
+                        `popup or the garbage collector holds it up (${said.join('; ') || 'none'})`);
+                }
+                for (const f of late) {
                     const top = Object.entries(f.spent).filter(([, took]) => took >= 0.5)
                         .map(([stage, took]) => `${stage.trim()} ${ms(took)}`).join(', ');
                     results.push(`INFO      ${ms(f.gap)} ms (laid out ${ms(f.layout)}, painted ${ms(f.painting)}; room ` +
-                        `${f.room.toFixed(2)}, clock ${f.clock}, blur ${f.blur}${top ? `; ${top}` : ''})`);
+                        `${f.room.toFixed(2)}, clock ${f.clock}, glass ${f.glass}${top ? `; ${top}` : ''})`);
                 }
                 GLib.file_set_contents(`${dir}/${density}x-${name.replace(' ', '-')}.txt`, `${[
-                    ['frame', 'gap', 'moving', 'layout', 'painting', 'room', 'clock', 'blur', 'island', 'popup', 'form',
+                    ['frame', 'gap', 'moving', 'layout', 'painting', 'room', 'clock', 'glass', 'made', 'island', 'popup', 'form',
                         ...names.map(n => n.trim())].join('\t'),
                     ...frames.map((f, i) => [i, ms(f.gap), f.moving ? 1 : 0, ms(f.layout), ms(f.painting),
-                        f.room.toFixed(3), f.clock, f.blur, Math.round(f.island), f.popup, f.form,
+                        f.room.toFixed(3), f.clock, f.glass, f.made, Math.round(f.island), f.popup, f.form,
                         ...names.map(n => ms(f.spent[n] ?? 0))].join('\t')),
                 ].join('\n')}\n`);
             }
@@ -6530,6 +6937,12 @@ async function testDisableCleansUp(atelier) {
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
+    const sheets = St.ThemeContext.get_for_stage(global.stage).get_theme().get_custom_stylesheets()
+        .map(file => file.get_basename());
+    const boxes = [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox];
+    check(!sheets.some(name => /^vibrancy-[0-9a-f]{12}\.css$/.test(name)) &&
+        !boxes.some(box => (box.get_style_class_name() ?? '').includes('atelier-vibrant')),
+    `no colours of the type on glass left (${sheets})`);
     const trayProto = Object.getPrototypeOf(Main.messageTray);
     check(['_showNotification', '_hideNotification', '_updateShowingNotification']
         .every(name => Main.messageTray[name] === trayProto[name]), 'message tray restored');
@@ -6779,8 +7192,7 @@ async function testLockLook() {
     locked = await lockForTest();
     try {
         check(await waitFor(() => lock()?.board?.widgets.length > 0, 3000), 'locked again, on a colourful wallpaper');
-        const dialog = shield._dialog;
-        const wallpapers = () => dialog._backgroundGroup.get_children();
+        const glass = () => wallpaperGlass(lock());
         // (Away from the widgets, the popup and the island: the red half –
         // once the lock screen shows its wallpaper: locked by hand, GNOME
         // fades to black until the pointer moves.)
@@ -6794,11 +7206,10 @@ async function testLockLook() {
         }
         await clickAt(300, 800);
         check(await waitFor(() => lock().room === 1 && lock()._glass.progress === 1, 3000), 'the prompt is up');
-        const glass = wallpapers().map(w => w.get_effect('atelier-glass'));
-        check(glass.length > 0 && glass.every(e => e?.enabled && e.look[0] > 1.2),
+        check(glass().shown === 255 && glass().looks.length > 0 && glass().looks.every(look => look?.[0] > 1.2),
             'the wallpaper turns to glass, its colours a little richer');
-        check(wallpapers().every(w => w.get_effect('blur').radius >= 80 && w.get_effect('blur').brightness > 0.8),
-            `blurred as GNOME has it, darkened far less (${wallpapers().map(w => w.get_effect('blur').brightness)})`);
+        check(glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8) && glass().own.every(e => !e.enabled),
+            `blurred as GNOME has it, darkened far less (${glass().blurs.map(e => e.brightness.toFixed(2))})`);
         await restPointer();
         await Scripting.sleep(300);
         await screenshot('89b-lock-glass');
@@ -6806,8 +7217,8 @@ async function testLockLook() {
         check(chromaOf(sharp) > 100 && chromaOf(blurred) >= 0.85 * chromaOf(sharp) && lightOf(blurred) >= 0.7 * lightOf(sharp),
             `its colours kept (chroma ${chromaOf(sharp)} → ${chromaOf(blurred)}, light ${Math.round(lightOf(sharp))} → ${Math.round(lightOf(blurred))})`);
         await pressKey(Clutter.KEY_Escape);
-        check(await waitFor(() => lock().room === 0 && wallpapers().every(w => !w.get_effect('atelier-glass').enabled &&
-            !w.get_effect('blur').enabled), 3000), 'Escape: sharp again, no glass');
+        check(await waitFor(() => lock().room === 0 && glass().shown === 0 && glass().own.every(e => !e.enabled), 3000),
+            'Escape: sharp again, no glass');
         // Unlocked: sharp again as the lock screen goes, by itself.
         await clickAt(300, 800);
         await waitFor(() => lock().room === 1 && lock()._field?.form, 3000);
@@ -6819,7 +7230,7 @@ async function testLockLook() {
         check(await waitFor(() => {
             progress.push(lock()._glass.progress);
             return lock()._glass.progress === 0;
-        }, 2000) && progress.some(p => p > 0 && p < 1) && wallpapers().every(w => !w.get_effect('blur').enabled),
+        }, 2000) && progress.some(p => p > 0 && p < 1) && glass().shown === 0 && glass().own.every(e => !e.enabled),
         `unlocked, the wallpaper comes sharp again, step by step (${progress.length} steps)`);
     } finally {
         await locked.unlock();
@@ -7095,6 +7506,7 @@ export async function run() {
             await part(testLockDepth);
             await part(testLockLook);
             await part(testLockGlassClock);
+            await part(testLockGlassLooks);
             await part(testLockClockFades);
             await part(testLockPromptPace);
             await part(testLockFreeStretch);
@@ -7125,6 +7537,7 @@ export async function run() {
         await part(testBarStyles, ext);
         await part(testLiquidGlass, ext);
         await part(testGlassPictures, ext);
+        await part(testVibrancy, ext);
         await part(testFullscreen, ext);
         await part(testClaude, ext);
         await part(testDesktop, ext);
@@ -7153,6 +7566,7 @@ export async function run() {
         await part(testLockDepth);
         await part(testLockLook);
         await part(testLockGlassClock);
+        await part(testLockGlassLooks);
         await part(testLockClockFades);
         await part(testLockPromptPace);
         await part(testLockFreeStretch);

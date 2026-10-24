@@ -23,6 +23,7 @@ import {
     dockRect, dropIndex, fitIconSize, isHorizontal, maxLength, strutRect,
 } from '../../lib/dockGeometry.js';
 import {GlassSurface} from '../core/glass.js';
+import {blurOf, glassLayers} from '../core/vibrancy.js';
 import {scrollDock} from './actions.js';
 import {DockHider} from './hider.js';
 import {DockItem} from './icon.js';
@@ -56,8 +57,10 @@ export class Dock extends EventEmitter {
      *   shortcuts), not one on another monitor
      * @param {object} params.services - what all docks share: {windows,
      *   badges, locations, spread, hotkeys, musicPill}
+     * @param {VibrancyModule|null} [params.vibrancy] - what colours type
+     *   on glass (shell/core/vibrancy.js)
      */
-    constructor({settings, glass, look = null, light = false, monitorIndex, main, services}) {
+    constructor({settings, glass, look = null, light = false, monitorIndex, main, services, vibrancy = null}) {
         super();
         this._settings = settings;
         this._services = services;
@@ -70,6 +73,8 @@ export class Dock extends EventEmitter {
         this._items = new Map(); // app id → DockItem
         this._running = []; // ids of running apps not pinned, in the order they came
         this._rect = null;
+        this._vibrancy = null;
+        this._vibrant = null;
         this._showApps = null;
         this._timers = new Timers();
         this._ctx = {dock: this, settings, services, side: this._side};
@@ -139,6 +144,7 @@ export class Dock extends EventEmitter {
             this.actor.connect('notify::allocation', () => this.syncGlass());
             // (Away with the dock, as when a window is full screen.)
             this.actor.connect('notify::visible', () => this.syncGlass());
+            this._vibrancy = vibrancy;
         }
 
         const align = horizontal ? 'y_align' : 'x_align';
@@ -450,6 +456,7 @@ export class Dock extends EventEmitter {
         }
         this.syncGlass();
         this.theming.sync();
+        this.updateVibrancy();
         this.emit('placed', rect);
     }
 
@@ -505,6 +512,50 @@ export class Dock extends EventEmitter {
         if (!this._glass || this._glass.opacity === opacity && !this._glass.get_transition('opacity'))
             return;
         this._glass.ease({opacity, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+    }
+
+    /**
+     * Of glass, its marks, separators, highlights and Show Applications
+     * icon follow what is behind the glass (shell/core/vibrancy.js), where
+     * it rests shown, under its wash – placed anew, or its wash changed.
+     * More opaque near windows (DYNAMIC), it has its type for that in a
+     * class of its own, put on as windows come and go: no stylesheet is
+     * made anew for them.
+     */
+    updateVibrancy() {
+        if (!this._vibrancy || !this._glass || !this.theming)
+            return;
+        const states = this._settings.get_string('transparency-mode') === 'DYNAMIC' ? [false, true] : [undefined];
+        if (this._vibrant?.length === states.length) {
+            this._vibrant.forEach(surface => surface.update());
+        } else {
+            this._dropVibrancy();
+            this._vibrant = states.map(near => this._vibrancy.surface({
+                id: `dock-${this._monitorIndex}${near ? '-near' : ''}`,
+                inks: 'dock',
+                roots: ['.atelier-dock'],
+                rect: () => this._rect,
+                blur: () => blurOf(this._glass),
+                tint: () => glassLayers(this._glass),
+                strength: () => this.theming?.washOf(near).strength ?? 1,
+                layers: () => this.theming?.washOf(near).layers ?? [],
+            }));
+        }
+        const now = this._vibrant[this._vibrant.length > 1 && this.theming.near ? 1 : 0];
+        for (const surface of this._vibrant) {
+            if (surface === now)
+                this._container.add_style_class_name(surface.scope);
+            else
+                this._container.remove_style_class_name(surface.scope);
+        }
+    }
+
+    _dropVibrancy() {
+        for (const surface of this._vibrant ?? []) {
+            this._container?.remove_style_class_name(surface.scope);
+            surface.destroy();
+        }
+        this._vibrant = null;
     }
 
     syncGlass() {
@@ -616,6 +667,7 @@ export class Dock extends EventEmitter {
         this.hider.destroy();
         this.intellihide.destroy();
         this.theming.destroy();
+        this._dropVibrancy();
         AppFavorites.getAppFavorites().disconnectObject(this);
         Shell.AppSystem.get_default().disconnectObject(this);
         this._services.windows.disconnectObject(this);

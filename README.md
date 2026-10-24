@@ -110,7 +110,7 @@ profile called **Original**, so there is always a way back.
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.
 - **Lock screen**: the wallpaper stays sharp until the password is asked.
-  Then it turns to glass – blurred as GNOME blurs it, but its colours kept,
+  Then it fades into glass – blurred as GNOME blurs it, but its colours kept,
   a little richer, darker only towards the corners – the island comes out of the top edge with a padlock in a
   ring of ticks, and a popup of its own – the user's picture and name over
   the field, Enter sends it – spreads out of a drop in the middle of the
@@ -140,8 +140,11 @@ profile called **Original**, so there is always a way back.
   digits under a small date line, as large as the clock is wide and as
   tall as it is stretched, the font's own outlines grown taller along
   their straight stems (curves and bars keep their weight), in Liquid
-  Glass – the wallpaper frosted behind them, tinted from what is behind,
-  light along their edges – and, with the depth effect, behind what is
+  Glass – the wallpaper frosted and glowing through them, bent at their
+  edges with a hint of colour at the very rim, tinted from what is behind,
+  the light from above along their edges and a sheen across them; clear,
+  or solid digits, as the glass is chosen (see [Glass](#glass)) – and,
+  with the depth effect, behind what is
   near wherever it covers them; as the minute turns, only the figures that
   change rise into place.
   Its font is Inter or Roboto Flex (variable fonts that come with Atelier,
@@ -319,6 +322,24 @@ Optional, in Settings → Appearance:
 - **Color GNOME Terminal** – a terminal profile "Atelier" (a copy of your
   default profile with the palette's colors) becomes the default; switching
   the option off brings your profile back.
+
+## Glass
+
+Atelier's glass – the island, the bar's capsules, the widgets, the dock and
+the lock screen's glass clock – is Liquid Glass, as iOS 26 has it: what is
+behind it bends at its edges as through a lens, red a little more than blue
+(a hint of colour at the very rim), and comes out richer and lighter; its
+edges catch a light from above that leans towards the pointer as it comes
+near (and stays put with GNOME's animations off); a soft sheen runs across
+it and a fine grain keeps its gradients from banding. Its tint follows
+GNOME's style – light in the light one, smoky but see-through in the dark
+one. Type and icons on it read on what is behind it: over a light wallpaper
+they turn dark, over a dark one they stay light, in the palette's hue,
+legible as APCA measures contrast.
+
+In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
+little darker under it to keep what is on it legible) or *Off* (solid
+surfaces). GNOME's high contrast keeps it off.
 
 ## Settings
 

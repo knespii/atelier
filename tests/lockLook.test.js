@@ -1,5 +1,6 @@
 import {blend, contrastLc, minimumLc} from '../lib/apca.js';
 import {GLASS, frost, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
+import {lookOf} from '../lib/glassLook.js';
 import {
     REACH, STRETCH, TYPE, batteryState, chosenTone, glassDigits, glassInk, isColor, legibilityPlan, lockTone, mergeStats,
     partStyle, pickTone, regionIn, regionStats, roleOf, shortTemperature, styleWithPlan, widgetStyle,
@@ -323,7 +324,8 @@ export function testGlassMaterial() {
     // The colour it comes out: glassColor() of the frost's lighter tenth.
     const frost = regionStats(frosted(bands(night)), all);
     assertEqual(ink(digits.glass, stats.tenths.light), glassColor({frosted: frost.tenths.light,
-        tint: glassTint(light, frost.mean), ...glassFor(digits.glass), behind: stats.tenths.light}));
+        tint: glassTint(light, frost.mean), ...glassFor(digits.glass), behind: stats.tenths.light,
+        look: lookOf('regular')}));
     assertEqual(glassFor(digits.glass), {...GLASS}, 'at rest');
     // Fine stripes, blurred, give the frost their mean: lit less.
     const fine = planOn(night, light, {fine: true}).plan;

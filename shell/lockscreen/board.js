@@ -27,6 +27,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {minimumLc} from '../../lib/apca.js';
 import {cutoutOpacity} from '../../lib/depth.js';
+import {lookOf} from '../../lib/glassLook.js';
 import {
     STRETCH, TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
 } from '../../lib/lockLook.js';
@@ -39,7 +40,7 @@ import {holdLabelFont} from '../core/fonts.js';
 import {DateWidget} from '../desktop/kinds/time.js';
 import {LockClockWidget} from './clock.js';
 import {DepthCutout} from './depth.js';
-import {GlassBackdrop} from './liquidGlass.js';
+import {GlassBackdrop, GlassVariant} from './liquidGlass.js';
 import {LockTypography} from './typography.js';
 import {LockBatteryWidget, LockWeatherWidget} from './widgets.js';
 
@@ -77,10 +78,12 @@ export class LockBoard {
      * @param {object} [options]
      * @param {boolean} [options.interactive] - the widgets take clicks (in the editor)
      * @param {Gio.Settings} [options.palette] - Atelier's palette settings
+     * @param {Gio.Settings} [options.atelier] - Atelier's own (the glass
+     *   variant the glass clocks are drawn in; regular glass without)
      * @param {boolean} [options.ownPopup] - the lock screen's own popup asks
      *   for the password (a clock of hours over minutes stays, over it)
      */
-    constructor(settings, {interactive = false, palette = null, ownPopup = false} = {}) {
+    constructor(settings, {interactive = false, palette = null, atelier = null, ownPopup = false} = {}) {
         this._settings = settings;
         this._interactive = interactive;
         this._ownPopup = ownPopup;
@@ -99,10 +102,15 @@ export class LockBoard {
         this._toneNow = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
-        // The glass clocks' frosted wallpaper: made in the session ahead of
-        // time (clock.js GlassWarmUp), or here, in the background, when it
-        // isn't there yet.
-        this._backdrop = new GlassBackdrop({make: true});
+        // The glass clocks' glass, as Atelier's glass looks (none, solid
+        // digits, with GNOME's high contrast on), and their frosted
+        // wallpaper for it: made in the session ahead of time (clock.js
+        // GlassWarmUp), or here, in the background, when it isn't there yet.
+        this._glassVariant = new GlassVariant(atelier, variant => {
+            this._backdrop.setVariant(variant);
+            this._queueGlass();
+        });
+        this._backdrop = new GlassBackdrop({make: true, variant: this._glassVariant.variant});
         this._backdrop.onChanged = () => this._queueGlass();
         this._glassLater = 0;
         this.layer = new St.Widget({reactive: false});
@@ -699,6 +707,7 @@ export class LockBoard {
         const backdrop = this._backdrop.current;
         if (glass.backdrop !== backdrop)
             glass.backdrop = backdrop;
+        glass.setVariant(this._glassVariant.variant);
         const typography = this._typography;
         glass.setType({typeface: typography.typeface, style: typography.styleFor('glass')});
         const tone = this._toneNow;
@@ -730,7 +739,7 @@ export class LockBoard {
             tone,
             stats: typography.statsOf(this._monitorRect(onMonitor), this._area.width / this._area.height),
             glass: metrics.tintAlpha,
-            ink: glassInk(tone, this._frostedBehind(onMonitor)),
+            ink: glassInk(tone, this._frostedBehind(onMonitor), lookOf(this._glassVariant.variant)),
             dim: typography.dim,
         });
     }
@@ -991,6 +1000,7 @@ export class LockBoard {
         this._cancelLaters();
         // (Its last backdrop stays drawn on the clocks sliding away.)
         this._backdrop.destroy();
+        this._glassVariant.destroy();
         // (Kept with the layer, the cutout slides away with the lock screen.)
         this._depth?.destroy({keepActor: keepLayer});
         this._depth = null;

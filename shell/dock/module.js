@@ -35,9 +35,11 @@ export class DockModule {
     /**
      * @param {object} context
      * @param {Gio.Settings} context.settings
+     * @param {ModuleManager} [context.modules]
      */
-    constructor({settings}) {
+    constructor({settings, modules = null}) {
         this._settings = settings;
+        this._modules = modules;
         this.docks = [];
         this.services = null;
     }
@@ -177,6 +179,7 @@ export class DockModule {
             monitorIndex,
             main: i === 0,
             services: this.services,
+            vibrancy: this._modules?.get('vibrancy') ?? null,
         }));
         this.services.overview.attach(this.dock);
     }

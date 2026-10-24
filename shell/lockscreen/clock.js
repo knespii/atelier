@@ -43,6 +43,7 @@ import {
     placeLine, setLine, traceLine, unlearnt,
 } from '../../lib/glassClock.js';
 import {glassFor, tintShown} from '../../lib/glassBackdrop.js';
+import {lookOf} from '../../lib/glassLook.js';
 import {glassDigits} from '../../lib/lockLook.js';
 import {labelFont, styleFor, typefaceFor} from '../../lib/lockType.js';
 import {hexToRgb, luminance} from '../../lib/palette.js';
@@ -50,7 +51,7 @@ import {LOCK_KINDS, parseLayout, splitClock} from '../../lib/widgets.js';
 import {holdLabelFont} from '../core/fonts.js';
 import {ClockWidget} from '../desktop/kinds/time.js';
 import {label} from '../desktop/widget.js';
-import {LiquidGlass, prepareLockBackdrop} from './liquidGlass.js';
+import {GlassVariant, LiquidGlass, grainPattern, prepareLockBackdrop} from './liquidGlass.js';
 
 const DATE_GAP = 2; // between the date line and the digits, logical pixels
 // Type this light (WCAG luminance) or darker is dark type, as
@@ -148,7 +149,7 @@ const GlassFace = GObject.registerClass({
      *   widgets.js sizeOf()): the optical size its digits are drawn at
      * @param {object} [kept] - what it was told before, by the clock it is
      *   the face of (it keeps it for the face built anew for another size):
-     *   {type, plan, backdrop}
+     *   {type, plan, backdrop, variant}
      */
     _init(size = 'large', kept = {}) {
         super._init({style_class: 'atelier-widget-glass', x_expand: true, y_expand: true});
@@ -190,6 +191,7 @@ const GlassFace = GObject.registerClass({
         this.workedOut = 0;
         this._type = kept.type ?? defaultType();
         this._plan = kept.plan ?? null;
+        this._variant = kept.variant ?? 'regular';
         /** Called when the digits are measured anew (the depth effect follows them). */
         this.onMeasured = null;
         // (What of their style the digits were last drawn in: restyled().)
@@ -357,6 +359,26 @@ const GlassFace = GObject.registerClass({
         this._repaint();
     }
 
+    /** @returns {string} the glass the digits are drawn in (lib/glassLook.js VARIANTS) */
+    get variant() {
+        return this._variant;
+    }
+
+    /**
+     * The glass the digits are drawn in, as Atelier's glass looks:
+     * 'regular', 'clear', or 'off' – solid, in the tone (liquidGlass.js
+     * GlassVariant). Until it is told, regular.
+     *
+     * @param {string} variant
+     */
+    setVariant(variant) {
+        if (variant === this._variant)
+            return;
+        this._variant = variant;
+        this._kept.variant = variant;
+        this._repaint();
+    }
+
     /** @returns {object|null} the frosted wallpaper behind the glass */
     get backdrop() {
         return this._glass.backdrop;
@@ -383,13 +405,17 @@ const GlassFace = GObject.registerClass({
      *   (lib/lockLook.js legibilityPlan()): {size: their size before they
      *   stretch, CSS pixels; weight: their own, before any plan; tintAlpha:
      *   how much of the glass's tint shows where least, at rest – the
-     *   plan's `glass` (lib/glassBackdrop.js tintShown())}; null until
-     *   measured
+     *   plan's `glass` (lib/glassBackdrop.js tintShown()); null for no
+     *   glass, solid digits}; null until measured
      */
     get digitsMetrics() {
         if (!this._metrics)
             return null;
-        return {size: this._metrics.fontSize / scaleFactor(), weight: this._type.style.weight, tintAlpha: tintShown()};
+        return {
+            size: this._metrics.fontSize / scaleFactor(),
+            weight: this._type.style.weight,
+            tintAlpha: lookOf(this._variant) ? tintShown() : null,
+        };
     }
 
     /** @returns {object|null} {stretch, y}: how tall the digits stand in the box, and where their top is */
@@ -806,7 +832,10 @@ const GlassFace = GObject.registerClass({
     paintLayer(layer, cr) {
         if (!this._metrics || !this._text || !this._font)
             return;
-        const look = {tone: this._tone(), at: this._onMonitor(layer), scale: scaleFactor(), ...this._material()};
+        const look = {
+            tone: this._tone(), at: this._onMonitor(layer), scale: scaleFactor(), variant: this._variant,
+            ...this._material(),
+        };
         if (layer === this._digits) {
             this._paintedAt = look.at;
             const since = GLib.get_monotonic_time();
@@ -885,7 +914,7 @@ const GlassFace = GObject.registerClass({
     // Glyphs in glass: their outlines, one path, the material over it (or,
     // quick, a sketch of it).
     _paintGlyphs(cr, glass, glyphs, {
-        bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow, dx = 0, dy = 0, quick = false,
+        bounds, glyphBoxes, tone, at, scale, variant, tintAlpha, opacity, shadow, dx = 0, dy = 0, quick = false,
     }) {
         if (glyphs.length === 0)
             return;
@@ -895,9 +924,9 @@ const GlassFace = GObject.registerClass({
         const path = cr.copyPath();
         cr.newPath();
         if (quick)
-            glass.sketch(cr, path, {bounds, tone, at, scale, tintAlpha, opacity});
+            glass.sketch(cr, path, {bounds, tone, at, scale, variant, tintAlpha, opacity});
         else
-            glass.paint(cr, path, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow});
+            glass.paint(cr, path, {bounds, glyphBoxes, tone, at, scale, variant, tintAlpha, opacity, shadow});
     }
 
     // Where the font has no file to draw from, Pango draws the digits,
@@ -943,7 +972,7 @@ const GlassFace = GObject.registerClass({
         });
     }
 
-    _paintPango(cr, {tone, at, scale, tintAlpha, opacity, shadow, quick}) {
+    _paintPango(cr, {tone, at, scale, variant, tintAlpha, opacity, shadow, quick}) {
         const layout = PangoCairo.create_layout(cr);
         const boxes = this._pangoBoxes(layout, this._stretch, this._level);
         const [ink] = layout.get_pixel_extents();
@@ -957,10 +986,11 @@ const GlassFace = GObject.registerClass({
         const path = cr.copyPath();
         cr.newPath();
         const bounds = boxRound(boxes);
+        const options = {bounds, tone, at, scale, variant, tintAlpha, opacity};
         if (quick)
-            this._glass.sketch(cr, path, {bounds, tone, at, scale, tintAlpha, opacity});
+            this._glass.sketch(cr, path, options);
         else
-            this._glass.paint(cr, path, {bounds, glyphBoxes: boxes, tone, at, scale, tintAlpha, opacity, shadow});
+            this._glass.paint(cr, path, {...options, glyphBoxes: boxes, shadow});
     }
 });
 
@@ -1028,17 +1058,21 @@ const DIGITS_KEYS = ['enabled', 'widgets', 'clock-font', 'clock-weight', 'clock-
  * clocks take to draw: how their figures stretch in the instance they are
  * drawn in (the slow part, kept in this process: on the lock screen the
  * first paint then costs no more than any other), and the frosted
- * wallpaper their glass shows (liquidGlass.js, kept in the cache). Only
- * while the lock screen has a glass clock; anew as its font or the
- * wallpaper changes.
+ * wallpaper their glass shows and its grain (liquidGlass.js, kept in the
+ * cache and in this process). Only while the lock screen has a glass
+ * clock; anew as its font, the glass or the wallpaper changes.
  */
 export class GlassWarmUp {
-    /** @param {Gio.Settings} settings - the lockscreen ones */
-    constructor(settings) {
+    /**
+     * @param {Gio.Settings} settings - the lockscreen ones
+     * @param {Gio.Settings} [atelier] - Atelier's own (the glass variant)
+     */
+    constructor(settings, atelier = null) {
         this._settings = settings;
         this._idle = 0;
         this._backdropIdle = 0;
         this._gone = false;
+        this._variant = new GlassVariant(atelier, () => this._queueBackdrop());
         this._background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
         this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         settings.connectObject('changed', (_, key) => {
@@ -1091,21 +1125,25 @@ export class GlassWarmUp {
         });
     }
 
-    // The frosted wallpaper of the main monitor, once things settle (a
-    // wallpaper changes several settings at once).
+    // The frosted wallpaper of the main monitor for the glass there is, and
+    // its grain, once things settle (a wallpaper changes several settings
+    // at once).
     _queueBackdrop() {
         if (this._backdropIdle)
             GLib.source_remove(this._backdropIdle);
         this._backdropIdle = GLib.idle_add(GLib.PRIORITY_LOW, () => {
             this._backdropIdle = 0;
             const monitor = Main.layoutManager.primaryMonitor;
-            if (!monitor || this._clocks().length === 0)
+            const look = lookOf(this._variant.variant);
+            if (!monitor || !look || this._clocks().length === 0)
                 return GLib.SOURCE_REMOVE;
+            grainPattern(look.grain);
             prepareLockBackdrop({
                 background: this._background,
                 iface: this._interface,
                 monitor: [monitor.width, monitor.height],
                 scale: scaleFactor(),
+                look,
             }).catch(e => !this._gone && console.warn(`Atelier: the glass clock's frosted wallpaper isn't ready: ${e.message}`));
             return GLib.SOURCE_REMOVE;
         });
@@ -1118,6 +1156,7 @@ export class GlassWarmUp {
                 GLib.source_remove(id);
         }
         this._idle = this._backdropIdle = 0;
+        this._variant.destroy();
         this._settings.disconnectObject(this);
         this._background.disconnectObject(this);
         this._interface.disconnectObject(this);
