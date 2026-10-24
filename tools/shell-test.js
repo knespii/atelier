@@ -5490,8 +5490,12 @@ async function testLockStretchSpeed() {
         await Scripting.sleep(600);
         const sketched = callsOf('glass sketched').length > 0;
         const rested = callsOf('glass painted', stopped).length;
+        // (In full only where that is quick enough, as the face last timed
+        // it: not on a slow machine, nor at every size.)
+        const cheap = glass._restExpected;
         if (density === 1)
-            check(sketched && rested === 1, `drawn quickly as it goes, held still a moment: in full (${rested} times)`);
+            check(sketched && rested === (cheap ? 1 : 0),
+                `drawn quickly as it goes, held still a moment: in full ${cheap ? 'once, quick enough' : 'not, too slow here'} (${rested} times)`);
         else
             results.push(`INFO  stretching the glass clock at ${density}×: held still, drawn in full ${rested} times`);
 
@@ -5551,7 +5555,7 @@ async function testLockStretchSpeed() {
         clock.glass._repaint();
         await Scripting.sleep(300);
         await screenshotArea('96b-lock-stretched-drawn-anew', ...area);
-        const [landed, anew] = ['96-lock-stretched', '96b-lock-stretched-drawn-anew'].map(pixelsOf);
+        const [landed, anew] = ['96-lock-stretched', '96b-lock-stretched-drawn-anew'].map(name => pixelsOf(name));
         // (Every other pixel each way: as good, and four times as quick.)
         let [difference, compared] = [0, 0];
         for (let row = 0; row < area[3]; row += 2) {

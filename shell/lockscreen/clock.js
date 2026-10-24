@@ -161,6 +161,7 @@ const GlassFace = GObject.registerClass({
         this._settleId = 0;
         // (How long drawing the digits in full last took, ms a pixel of the drawing's.)
         this._fullCost = null;
+        this._restExpected = false;
         /** How many figures it has worked out itself (none, when the session did ahead of it). */
         this.workedOut = 0;
         this._type = kept.type ?? defaultType();
@@ -252,9 +253,10 @@ const GlassFace = GObject.registerClass({
     // that is quick enough (as long as it last took, for as many pixels).
     _waitForRest(pixels) {
         this._stopRest();
+        this._restExpected = (this._fullCost ?? Infinity) * pixels <= QUICK_ENOUGH;
         this._restId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, REST_TIME, () => {
             this._restId = 0;
-            if (this._stretching && (this._fullCost ?? Infinity) * pixels <= QUICK_ENOUGH && this._digits.mapped) {
+            if (this._stretching && this._restExpected && this._digits.mapped) {
                 this._rested = true;
                 this._digits.queue_repaint();
             }
