@@ -1,4 +1,4 @@
-import {gather, overflow, pour, pourParts, spread} from '../lib/liquid.js';
+import {gather, gatherBounds, overflow, pour, pourParts, spread} from '../lib/liquid.js';
 import {assert, assertEqual} from './util.js';
 
 const look = {radius: 22, blend: 18};
@@ -33,6 +33,28 @@ export function testGatherAndSpread() {
     assert(Math.abs(hx - hy) < 0.25 * Math.max(hx, hy) && radius >= Math.min(hx, hy) - 0.01, 'round, nearly');
     assertEqual(spread(card, 1, look).boxes, [[98, 108, 88, 88, 22, 0]], 'spread, the card');
     assertEqual(spread(card, 0, look).boxes, [], 'nothing yet');
+}
+
+export function testGatherBounds() {
+    // A card as wide as it is tall, wider, taller: every drop it draws
+    // into (or spreads out of) within the bounds.
+    for (const rect of [[700, 300, 368, 368], [700, 300, 368, 270], [40, 10, 120, 400]]) {
+        const [bx, by, bw, bh] = gatherBounds(rect);
+        for (let i = 0; i <= 200; i++) {
+            for (const {boxes} of [gather(rect, i / 200, look), spread(rect, i / 200, look)]) {
+                for (const [cx, cy, hx, hy] of boxes) {
+                    assert(cx - hx >= bx && cx + hx <= bx + bw && cy - hy >= by && cy + hy <= by + bh,
+                        `${rect} at ${i / 200}: within ${[bx, by, bw, bh].map(Math.round)}`);
+                }
+            }
+        }
+    }
+    // (The lock screen's popup: little more than itself.)
+    const [, , popupWidth, popupHeight] = gatherBounds([700, 300, 368, 270]);
+    assert(popupWidth * popupHeight < 1.4 * 368 * 270, `the popup's, ${Math.round(popupWidth)} × ${Math.round(popupHeight)}`);
+    const [x, y, width, height] = gatherBounds(card, 50);
+    const [x0, y0, width0, height0] = gatherBounds(card);
+    assertEqual([x, y, width, height], [x0 - 50, y0 - 50, width0 + 100, height0 + 100], 'a shadow round it as far again');
 }
 
 export function testOverflow() {

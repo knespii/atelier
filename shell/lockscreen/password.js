@@ -22,7 +22,7 @@ import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUti
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ShellEntry from 'resource:///org/gnome/shell/ui/shellEntry.js';
 
-import {clamp01, gather, spread} from '../../lib/liquid.js';
+import {clamp01, gather, gatherBounds, spread} from '../../lib/liquid.js';
 import {MessageKind} from '../../lib/lockState.js';
 import {LiquidPaint} from '../core/liquid.js';
 
@@ -206,10 +206,25 @@ class MeltPopup {
     }
 
     // The liquid that the form is while it moves, right under it, in its
-    // look; and where the form is (or will be, once laid out).
+    // look; and where the form is (or will be, once laid out), in the
+    // liquid. The liquid covers only as far as it flows, its shadow round
+    // it – not all of the monitor: what it is drawn in is made as it first
+    // shows, and over all of a large monitor that takes a frame of its own,
+    // as the popup opens and as it closes.
     _melt() {
-        // (As big as the layer: it would be laid out as big as it asks to be.)
-        const paint = new LiquidPaint({width: this.actor.width, height: this.actor.height});
+        const [, width] = this.form.get_preferred_width(-1);
+        const [, height] = this.form.get_preferred_height(width);
+        const rect = [Math.round((this.actor.width - width) / 2), Math.round((this.actor.height - height) / 2),
+            width, height];
+        const node = this.form.get_theme_node();
+        const shadow = node.get_box_shadow();
+        const reach = 1 + (shadow ? shadow.blur + Math.max(Math.abs(shadow.xoffset), Math.abs(shadow.yoffset)) : 0);
+        const [x, y, w, h] = gatherBounds(rect, reach);
+        const [left, top] = [Math.max(0, Math.floor(x)), Math.max(0, Math.floor(y))];
+        const [right, bottom] = [Math.min(this.actor.width, Math.ceil(x + w)),
+            Math.min(this.actor.height, Math.ceil(y + h))];
+        // (Placed, it is laid out where it is put, as big as it is made.)
+        const paint = new LiquidPaint({x: left, y: top, width: right - left, height: bottom - top});
         paint.connect('destroy', () => {
             if (this._paint === paint)
                 this._paint = null;
@@ -217,11 +232,7 @@ class MeltPopup {
         this._paint = paint;
         this.actor.insert_child_below(paint, this.form);
         paint.setLook(this.form);
-        const [, width] = this.form.get_preferred_width(-1);
-        const [, height] = this.form.get_preferred_height(width);
-        const rect = [Math.round((this.actor.width - width) / 2), Math.round((this.actor.height - height) / 2),
-            width, height];
-        return [rect, {radius: this.form.get_theme_node().get_border_radius(St.Corner.TOPLEFT)}];
+        return [[rect[0] - left, rect[1] - top, width, height], {radius: node.get_border_radius(St.Corner.TOPLEFT)}];
     }
 
     // Over a duration: step(t) every frame, then done (at once without

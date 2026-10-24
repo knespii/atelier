@@ -3980,10 +3980,20 @@ async function testLockPasswordField() {
             'the wallpaper sharp until the password is asked');
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
-        // (Its liquid over all the monitor, the drop wherever it is.)
+        // (Its liquid round the middle of the monitor, as far as the drop
+        // gets, not over all of it.)
         const liquid = () => field()?._popup?._paint;
-        check(await waitFor(() => liquid()?.get_allocation_box().get_width() === Main.layoutManager.primaryMonitor.width,
-            1000), 'a key: the password popup spreads out of a drop');
+        const inTheMiddle = () => {
+            const paint = liquid();
+            if (!paint?.has_allocation())
+                return false;
+            const {x, y, width, height} = Main.layoutManager.primaryMonitor;
+            const [px, py] = paint.get_transformed_position();
+            const [pw, ph] = paint.get_transformed_size();
+            return pw > 0 && pw < width && ph < height &&
+                Math.abs(px + pw / 2 - (x + width / 2)) <= 1 && Math.abs(py + ph / 2 - (y + height / 2)) <= 1;
+        };
+        check(await waitFor(inTheMiddle, 1000), 'a key: the password popup spreads out of a drop in the middle');
         check(await waitFor(shown, 3000) && !liquid(), 'and is there');
         const form = field().form;
         const monitor = Main.layoutManager.primaryMonitor;
