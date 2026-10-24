@@ -4678,10 +4678,15 @@ async function testLockOnOwnWallpaper() {
     const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
     const [columns] = gridSize(monitor.width / scale, monitor.height / scale);
     const shift = (columns - 34) / 2;
-    const layout = face => JSON.stringify([
+    // (ATELIER_TEST_LAYOUT: one's own, as the lockscreen widgets key keeps
+    // it, on a grid of 34 columns – its glass clock on every wallpaper.)
+    const own = JSON.parse(GLib.getenv('ATELIER_TEST_LAYOUT') || 'null');
+    const layout = face => JSON.stringify(own?.map(entry => ({...entry, x: entry.x + shift})) ?? [
         {id: 'clock', kind: 'clock', size: 'large', x: 13 + shift, y: 5, fine: true, face},
         {id: 'battery', kind: 'battery', size: 'small', x: 15 + shift, y: 18, fine: true},
     ]);
+    // (ATELIER_TEST_SUBJECT: a subject model too, only read.)
+    const subject = GLib.getenv('ATELIER_TEST_SUBJECT');
     lockSettings.set_string('style', 'bare');
     lockSettings.set_boolean('gnome-clock', false);
     lockSettings.set_boolean('password-field', false);
@@ -4696,7 +4701,8 @@ async function testLockOnOwnWallpaper() {
             Gio.File.new_for_path(source).copy(Gio.File.new_for_path(wallpaper), Gio.FileCopyFlags.OVERWRITE, null, null);
             const cutout = cutoutPath(pictureState(wallpaper), size);
             const started = GLib.get_monotonic_time();
-            const worker = Gio.Subprocess.new([python, workerPath(), '--model', model, '--input', wallpaper,
+            const worker = Gio.Subprocess.new([python, workerPath(), '--model', model,
+                ...subject ? ['--subject', subject] : [], '--input', wallpaper,
                 '--output', cutout, '--width', `${size[0]}`, '--height', `${size[1]}`],
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
             const stdout = await new Promise(resolve => worker.communicate_utf8_async(null, null,
@@ -4708,7 +4714,7 @@ async function testLockOnOwnWallpaper() {
             background.set_string('picture-uri', uriOf(wallpaper));
             background.set_string('picture-uri-dark', uriOf(wallpaper));
             background.set_string('picture-options', 'zoom');
-            lockSettings.set_string('widgets', layout(n === 0 ? 'stacked' : 'glass'));
+            lockSettings.set_string('widgets', layout(n === 0 && !own ? 'stacked' : 'glass'));
             await wallpapersSettled();
             const locked = await lockForTest();
             let backdrop = null;
@@ -4718,7 +4724,7 @@ async function testLockOnOwnWallpaper() {
                 await restPointer();
                 await Scripting.sleep(800);
                 const depth = lock().board.depth;
-                if (n === 0) {
+                if (n === 0 && !own) {
                     await screenshot('92-lock-own-stacked');
                     results.push(`INFO  stacked: the cutout ${depth.actor.visible ? 'shown' : 'off'}, ` +
                         `the tone ${lock().board.tone?.color}`);

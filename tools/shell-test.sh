@@ -17,7 +17,10 @@
 #                               ATELIER_TEST_WALLPAPER and ATELIER_TEST_MODEL,
 #                               pictures (apart by colons) and a Depth
 #                               Anything V2 .onnx, only read: the lock screen
-#                               on those wallpapers too)
+#                               on those wallpapers too; ATELIER_TEST_SUBJECT,
+#                               a BiRefNet .onnx, and ATELIER_TEST_LAYOUT,
+#                               one's own widgets as the lockscreen key keeps
+#                               them, optional)
 set -eu
 
 SUITE="${1:-main}"
