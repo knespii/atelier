@@ -30,7 +30,7 @@ import {regionStats} from '../../lib/lockLook.js';
 import {rgbToHex} from '../../lib/palette.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
 import {
-    backdropOf, pictureRegion, scopeOf, surfaceRules, vibrancyStylesheet, withBackground,
+    backdropOf, pictureRegion, scopeOf, steadied, surfaceRules, vibrancyStylesheet, withBackground,
 } from '../../lib/vibrancy.js';
 import {wallpaperShown} from '../../lib/wallpaperPalette.js';
 
@@ -519,6 +519,7 @@ export class VibrancyModule {
         const palette = this._currentPalette();
         const rules = [];
         for (const surface of this._surfaces.values()) {
+            const was = surface.polarity;
             surface.polarity = null;
             surface.backdrop = null;
             // (Solid surfaces: their colours as set.)
@@ -532,11 +533,14 @@ export class VibrancyModule {
             }
             if (!stats)
                 continue;
-            const backdrop = backdropOf(stats, look, {
+            // (Steadied, and as dark or light as it was where either would
+            // do: a stylesheet made anew restyles the whole shell.)
+            const backdrop = steadied(backdropOf(stats, look, {
                 blur: surface.blur(), tint: surface.tint(), strength: surface.strength(), layers: surface.layers(),
-            });
-            const result = surfaceRules({roots: surface.roots, scope: surface.scope, inks: surface.inks, backdrop},
-                palette);
+            }));
+            const result = surfaceRules({
+                roots: surface.roots, scope: surface.scope, inks: surface.inks, backdrop, was,
+            }, palette);
             surface.backdrop = backdrop;
             surface.polarity = result.polarity;
             rules.push(...result.rules);
