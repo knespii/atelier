@@ -1704,11 +1704,15 @@ async function testDesktop(ext) {
     await pointerAlong(gx, gy, tx, ty);
     await Scripting.sleep(300);
     const dripping = desktop._editor._drag?.preview;
+    // (Watched as it goes: asked anything once destroyed, GJS would say so
+    // in the log.)
+    let dripped = false;
+    dripping?.connect('destroy', () => (dripped = true));
     check(Boolean(dripping?.mapped) && desktop._editor._ghost.visible, 'dragged out, it drips out of it, its shadow on the cells');
     await pointerUp();
     await Scripting.sleep(400);
     check(desktop.widgets.get('weather')?.entry.x === 20 && desktop.widgets.get('weather').entry.y === 4 &&
-        !dripping.get_parent(), `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
+        dripped, `let go, it lands there (${desktop.widgets.get('weather')?.entry.x})`);
     // The clock: a click lets its faces flow out of the gallery; one dragged
     // out is a clock of that face.
     await clickAt(...centerOf(galleryButton('Clock')));
@@ -1746,9 +1750,12 @@ async function testDesktop(ext) {
     check(!desktop.widgets.has(watch?.entry.id) && !desktop._editor._drag, 'a click on its corner button removes it');
     if (desktop.widgets.has(watch?.entry.id))
         desktop.removeWidget(watch.entry.id);
-    // Clicked again, the faces flow back (out of the way of what is under them).
+    // Clicked again, the faces flow back (out of the way of what is under
+    // them), and their panel goes.
+    let flowedBack = false;
+    desktop._editor._spill?.panel.connect('destroy', () => (flowedBack = true));
     await clickAt(...centerOf(galleryButton('Clock')));
-    check(await waitFor(() => !desktop._editor._spill && !desktop._editor._spillBack?.panel.get_parent(), 2000),
+    check(await waitFor(() => !desktop._editor._spill && flowedBack, 2000),
         'the clock clicked again, its faces flow back into the gallery');
     const weather = desktop.widgets.get('weather');
     await Scripting.sleep(200);
