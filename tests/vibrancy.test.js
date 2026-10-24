@@ -36,8 +36,12 @@ export function testGlassOver() {
             `${color}: clear glass, dimmed, darker than regular`);
     }
     assertEqual(glassOver('#3a6ea5', REGULAR, {strength: 0}), '#3a6ea5', 'none of the glass shows: the wallpaper');
-    const tinted = glassOver('#ffffff', REGULAR, {layers: [{color: '#000000', alpha: 0.5}]});
-    assertEqual(tinted, '#808080', 'a layer over the glass: half of it black, half white');
+    // A blur that dims what it blurs (GNOME's, asked to): 128 × 0.75 first.
+    assertEqual(glassOver('#808080', REGULAR, {blur: 0.75}), glassOver('#606060', REGULAR), 'dimmed by the blur first');
+    const covered = glassOver('#ffffff', REGULAR, {layers: [{color: '#000000', alpha: 0.5}]});
+    assertEqual(covered, '#808080', 'a layer over the glass: half of it black, half white');
+    const tinted = glassOver('#ffffff', REGULAR, {tint: [{color: '#000000', alpha: 0.6}]});
+    assertEqual(tinted, glassOver('#666666', REGULAR), 'a tint in the glass: under its material');
     const backdrop = backdropOf({mean: '#808080', tenths: {dark: '#202020', middle: '#808080', light: '#e0e0e0'}}, REGULAR);
     assert(luminance(backdrop.dark) < luminance(backdrop.mean) && luminance(backdrop.mean) < luminance(backdrop.light),
         'where it is darkest, on the whole and where lightest');
