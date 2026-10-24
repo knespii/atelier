@@ -5429,7 +5429,34 @@ async function testLockPromptPace() {
                     results.push(`INFO  ${slow ? 'drawn without a GPU: ' : ''}${pace}`);
                 else
                     check(spread.mean <= 18.5 && spread.p95 <= 25 && long.length <= 1, `the prompt ${pace}`);
-                for (const f of moving.filter(row => row.gap > 20)) {
+                // A frame over 20 ms, and what held it up: GNOME dropping its
+                // prompt, the popup made, its form first drawn or its liquid
+                // gone, or nothing measured to speak of (the garbage
+                // collector) – never the room made, the wallpaper's glass
+                // fading in or out (once a radius GNOME's blur grew by: a
+                // frame of its own at 12 pixels).
+                const causeOf = f => {
+                    const i = frames.indexOf(f);
+                    const before = frames[i - 1];
+                    if ((f.spent['GNOME\'s prompt gone'] ?? 0) > 0)
+                        return 'GNOME drops its prompt';
+                    if ((f.spent['events followed'] ?? 0) > 1)
+                        return 'the popup made';
+                    if (before && !before.form && f.form)
+                        return 'the popup\'s form first drawn';
+                    // (Its form drawn alone, without it, the frame after.)
+                    if ([i - 1, i].some(j => frames[j - 1]?.popup && frames[j] && !frames[j].popup))
+                        return 'the popup\'s liquid gone';
+                    const spent = Object.values(f.spent).reduce((sum, took) => sum + took, 0);
+                    return f.layout + f.painting + spent < 4 ? 'nothing measured' : null;
+                };
+                const late = moving.filter(f => f.gap > 20);
+                if (!slow && (name.startsWith('down') || name === 'up 2')) {
+                    const said = late.map(f => `${ms(f.gap)} ms: ${causeOf(f) ?? `room ${f.room.toFixed(2)}`}`);
+                    check(late.every(causeOf), `the prompt ${name}, ${tag}: no frame over 20 ms but where GNOME, the ` +
+                        `popup or the garbage collector holds it up (${said.join('; ') || 'none'})`);
+                }
+                for (const f of late) {
                     const top = Object.entries(f.spent).filter(([, took]) => took >= 0.5)
                         .map(([stage, took]) => `${stage.trim()} ${ms(took)}`).join(', ');
                     results.push(`INFO      ${ms(f.gap)} ms (laid out ${ms(f.layout)}, painted ${ms(f.painting)}; room ` +
