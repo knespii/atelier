@@ -49,13 +49,14 @@ export class Dock extends EventEmitter {
      * @param {object} params
      * @param {Gio.Settings} params.settings - the dock's
      * @param {boolean} params.glass - of glass rather than dark
+     * @param {object|null} [params.look] - the glass's material (LOOK's)
      * @param {number} params.monitorIndex - the monitor it is on
      * @param {boolean} params.main - the main dock (with the pill and the
      *   shortcuts), not one on another monitor
      * @param {object} params.services - what all docks share: {windows,
      *   badges, locations, spread, hotkeys, musicPill}
      */
-    constructor({settings, glass, monitorIndex, main, services}) {
+    constructor({settings, glass, look = null, monitorIndex, main, services}) {
         super();
         this._settings = settings;
         this._services = services;
@@ -124,8 +125,8 @@ export class Dock extends EventEmitter {
             const monitor = this.monitor;
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
             const reach = horizontal || !monitor ? 0.25 : Math.min(1, SIDE_GLASS * scale / monitor.width);
-            // (Grey: the dock's colour is its own, not the wallpaper's.)
-            this._glass = new GlassSurface({monitorIndex, side: this._side, reach, neutral: true});
+            // (Of the wallpaper's colours, as the island's glass.)
+            this._glass = new GlassSurface({monitorIndex, side: this._side, reach, look});
             this._glass.add_style_class_name('atelier-dock-glass');
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
             this._container.add_style_class_name('atelier-dock-glassy');
@@ -482,6 +483,16 @@ export class Dock extends EventEmitter {
         this._iconSize = size;
         items.forEach(item => item.setIconSize(size));
         return true;
+    }
+
+    /** @returns {boolean} whether it is of glass */
+    get glass() {
+        return Boolean(this._glass);
+    }
+
+    /** @param {object|null} look - another material for its glass (LOOK's) */
+    setGlassLook(look) {
+        this._glass?.setLook(look);
     }
 
     /** @param {number} value - how much of its glass shows, 0–1 (eased) */

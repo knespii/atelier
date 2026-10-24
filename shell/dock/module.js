@@ -12,6 +12,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {pickMonitors} from '../../lib/dockGeometry.js';
 import {OTHER_DOCKS} from '../../lib/dockImport.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {AppSpread} from './appSpread.js';
 import {BadgeSource} from './badges.js';
 import {Dock} from './dock.js';
@@ -61,6 +62,15 @@ export class DockModule {
         this._dockSettings.connectObject(
             ...REBUILD_KEYS.flatMap(key => [`changed::${key}`, () => this._queueRebuild()]), this);
         this._barSettings.connectObject('changed::surface', () => this._queueRebuild(), this);
+        // Glass turned off or on: built anew, dark or of glass; regular or
+        // clear: the same glass, another look.
+        this._glassLook = new GlassLook(this._settings);
+        this._glassLook.connectObject('changed', () => {
+            if (this.docks.some(dock => dock.glass) !== this._glassy())
+                this._queueRebuild();
+            else
+                this.docks.forEach(dock => dock.setGlassLook(this._glassLook.look));
+        }, this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueRebuild(), this);
         this._sync();
     }
@@ -70,6 +80,9 @@ export class DockModule {
         Main.extensionManager.disconnectObject(this);
         this._dockSettings?.disconnectObject(this);
         this._barSettings?.disconnectObject(this);
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
         Main.layoutManager.disconnectObject(this);
         this._destroyDocks();
         this._destroyServices();
@@ -142,10 +155,15 @@ export class DockModule {
         this.services = null;
     }
 
+    // Of glass as the top bar is – unless the glass is off.
+    _glassy() {
+        return this._barSettings.get_string('surface') === 'glass' && this._glassLook.glass;
+    }
+
     _createDocks() {
         if (!this.services)
             this._createServices();
-        const glass = this._barSettings.get_string('surface') === 'glass';
+        const glass = this._glassy();
         const monitors = pickMonitors({
             mainIndex: this._mainMonitor(),
             multi: this._dockSettings.get_boolean('multi-monitor'),
@@ -154,6 +172,7 @@ export class DockModule {
         this.docks = monitors.map((monitorIndex, i) => new Dock({
             settings: this._dockSettings,
             glass,
+            look: this._glassLook.look,
             monitorIndex,
             main: i === 0,
             services: this.services,
