@@ -76,6 +76,15 @@ const shadowStyle = ({color, alpha, blur, y}) =>
 // screen's type is worked out anew: nothing to do).
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+// What of a plan the face draws (the rest – how well it reads – it only
+// keeps): the digits' weight or grade, their shadow and glass, the date
+// line's weight and shadow, and the tone.
+const drawnOf = plan => plan && {
+    digits: plan.digits && [plan.digits.weight, plan.digits.boldness, plan.digits.shadow, plan.digits.glass],
+    date: plan.date && [plan.date.weight, plan.date.boldness, plan.date.shadow],
+    tone: plan.tone,
+};
+
 /** The typeface the glass digits are drawn in until they are told another: Inter, as its own. */
 function defaultType() {
     const typeface = typefaceFor('inter');
@@ -149,6 +158,7 @@ const GlassFace = GObject.registerClass({
         this._sketched = false;
         this._rested = false;
         this._restId = 0;
+        this._settleId = 0;
         // (How long drawing the digits in full last took, ms a pixel of the drawing's.)
         this._fullCost = null;
         /** How many figures it has worked out itself (none, when the session did ahead of it). */
@@ -167,6 +177,7 @@ const GlassFace = GObject.registerClass({
         this.connect('destroy', () => {
             this._stopLearning();
             this._stopRest();
+            this._stopSettling();
         });
         this.backdrop = kept.backdrop ?? null;
         this._syncDate();
@@ -205,17 +216,36 @@ const GlassFace = GObject.registerClass({
     /**
      * @param {boolean} stretching - its clock's corner dragged in the editor,
      *   or easing to its size once let go of: the glass drawn quickly as it
-     *   goes; let go of, drawn in full (if it was drawn otherwise)
+     *   goes; let go of, drawn in full (if it was drawn otherwise) – once
+     *   the frame it was let go of in is done, in the next, as what it takes
+     *   to read there is worked out anew in that frame (board.js): drawn in
+     *   full only as that has it
      */
     set stretching(stretching) {
-        if (stretching === this._stretching)
-            return;
-        this._stretching = stretching;
-        this._rested = false;
         this._stopRest();
-        if (!stretching && this._sketched)
-            this._repaint();
-        this._sketched = false;
+        this._stopSettling();
+        if (stretching) {
+            this._stretching = true;
+            this._rested = false;
+            return;
+        }
+        if (!this._stretching)
+            return;
+        this._settleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._settleId = 0;
+            this._stretching = false;
+            this._rested = false;
+            if (this._sketched)
+                this._repaint();
+            this._sketched = false;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopSettling() {
+        if (this._settleId)
+            GLib.source_remove(this._settleId);
+        this._settleId = 0;
     }
 
     // Drawn quickly while stretched: held still a moment, in full – where
@@ -236,6 +266,17 @@ const GlassFace = GObject.registerClass({
         if (this._restId)
             GLib.source_remove(this._restId);
         this._restId = 0;
+    }
+
+    /**
+     * @param {string} size - its clock's size anew (it lays itself out for
+     *   the box it is given): the optical size its digits are drawn at
+     */
+    setSize(size) {
+        if (size === this._sizeName)
+            return;
+        this._sizeName = size;
+        this._syncFont();
     }
 
     /**
@@ -277,8 +318,12 @@ const GlassFace = GObject.registerClass({
         const planned = plan ? {digits: plan.digits ?? null, date: plan.date ?? null, tone: plan.tone ?? null} : null;
         if (same(planned, this._plan))
             return;
+        const drawn = drawnOf(this._plan);
         this._plan = planned;
         this._kept.plan = planned;
+        // (Only how well they read is another: drawn as they are.)
+        if (same(drawnOf(planned), drawn))
+            return;
         this._syncDate();
         this._syncFont();
         this._repaint();
@@ -883,6 +928,16 @@ class AtelierLockClockWidget extends ClockWidget {
             'notify::stretching', () => (face.stretching = this.stretching),
             face);
         return face;
+    }
+
+    // A glass face serves for any size as it is, told of it (for its
+    // digits' optical size): not built anew as a stretched clock takes its
+    // size.
+    fitContent(size) {
+        if (!this._ownFace || this.entry.face !== 'glass')
+            return false;
+        this._ownFace.setSize(size);
+        return true;
     }
 
     /** @returns {GlassFace|null} its glass face, when it has it */

@@ -92,11 +92,18 @@ export const DesktopWidget = GObject.registerClass({
      * @param {string} size
      */
     fill(size) {
-        for (const name of Object.keys(SIZES))
-            this.remove_style_class_name(`atelier-widget-${name}`);
+        // (Styled anew – once – only when it goes by another size.)
         const named = namedSize(size, (this._context.catalog ?? KINDS)[this.entry.kind]?.sizes);
-        this.add_style_class_name(`atelier-widget-${named}`);
+        const sized = new Set(Object.keys(SIZES).map(name => `atelier-widget-${name}`));
+        const classes = (this.get_style_class_name() ?? '').split(' ').filter(name => name && !sized.has(name));
+        const style = [...classes, `atelier-widget-${named}`].join(' ');
+        if (style !== this.get_style_class_name())
+            this.set_style_class_name(style);
         this.entry = {...this.entry, size};
+        if (this._content && this.fitContent(size)) {
+            this.emit('filled');
+            return;
+        }
         this._content?.destroy();
         this._content = new St.BoxLayout({
             style_class: 'atelier-widget-content',
@@ -141,6 +148,18 @@ export const DesktopWidget = GObject.registerClass({
      * @param {string} _size
      */
     build(_box, _size) {}
+
+    /**
+     * Before it is filled anew for another size: whether what it shows
+     * serves as it is, told of the size (a kind's face that lays itself out
+     * for any size).
+     *
+     * @param {string} _size
+     * @returns {boolean} false: built anew
+     */
+    fitContent(_size) {
+        return false;
+    }
 
     /** What a click does (open the app that has more, say). */
     activate() {}
