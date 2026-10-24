@@ -3880,6 +3880,12 @@ async function testLockWidgets() {
             `stacked: the date, the hours over the minutes (${clock._hours?.text} ${clock._minutes?.text})`);
         check(clock._minutesBox.opacity === 255 && clock._minutes.get_theme_node().get_foreground_color().alpha === 255,
             `the minutes as bright as the hours here, in the one tone (${clock._minutesBox.opacity})`);
+        // (Its font property, a copy: get_font_description() gives away the text's own.)
+        const lines = [clock._date, clock._hours, clock._minutes];
+        check(await waitFor(() => board.typography.sample &&
+            lines.every(line => line.clutter_text.font_description.get_family().split(',').includes('Inter')), 3000) &&
+            lines.every(line => Boolean(line.get_theme_node().get_text_shadow()) === Boolean(line._atelierPlan?.shadow)),
+        `in Inter, a shadow round a line only where it would not read without (${lines.map(line => line._atelierPlan?.shadow?.alpha ?? 0)})`);
         const labels = [dialog._clock._time, dialog._clock._date, dialog._clock._hint];
         check(labels.every(l => !l.visible), 'in place of GNOME\'s clock, its hint gone with it');
         lockSettings.set_boolean('gnome-clock', true);
