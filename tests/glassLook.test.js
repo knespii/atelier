@@ -39,6 +39,8 @@ export function testMaterialValues() {
     assertEqual(values.rim, [look.rim.top, look.rim.bottom, look.rim.side, look.rim.width * 2], 'the rim');
     assert(near(values.sheen[2], look.sheen.angle * Math.PI / 180) && values.sheen[3] === look.grain,
         'the sheen\'s angle in radians, the grain');
+    assert(near(values.sheen[0], look.sheen.alpha * look.sheen.surface) && values.sheen[0] < look.sheen.alpha,
+        'a surface shows a share of the sheen (type is read on it)');
     const none = materialValues(null);
     assertEqual(none.lens[3], 0, 'none: only the shape');
     assertEqual(none.tone, [1, 1, 0, 0], 'and what is behind as it is');
