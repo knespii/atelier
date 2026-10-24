@@ -24,7 +24,7 @@ import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js'
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 import {contrastLc, minimumLc} from '../lib/apca.js';
-import {luminance} from '../lib/palette.js';
+import {hexToRgb, luminance} from '../lib/palette.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
@@ -4797,6 +4797,135 @@ function stepsIn(pixels, [x, y, width, height], step = 3) {
     return most;
 }
 
+// A picture of the monitor's size, from one colour at its top to another at
+// its bottom ([r, g, b] each).
+function gradientPicture(path, [width, height], top, bottom) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
+    for (let y = 0; y < height; y++) {
+        const [r, g, b] = top.map((v, i) => Math.round(v + (bottom[i] - v) * y / Math.max(1, height - 1)));
+        pixbuf.new_subpixbuf(0, y, width, 1).fill(((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0);
+    }
+    pixbuf.savev(path, 'png', [], []);
+}
+
+// Where a screenshot differs from another (the glass clock over the
+// wallpaper, and the wallpaper alone): how many pixels, their mean, and how
+// many of them within a few levels of a colour.
+function changedPixels(shot, bare, [x, y, width, height], color = null) {
+    let [count, near] = [0, 0];
+    const sum = [0, 0, 0];
+    for (let row = y; row < y + height; row++) {
+        for (let col = x; col < x + width; col++) {
+            const here = shot.at(col, row);
+            if (colorDistance(here, bare.at(col, row)) <= 24)
+                continue;
+            count++;
+            here.forEach((v, i) => (sum[i] += v));
+            if (color && colorDistance(here, color) <= 4)
+                near++;
+        }
+    }
+    return {count, mean: sum.map(v => Math.round(v / Math.max(1, count))), near};
+}
+
+// The glass clock in each of Atelier's glass variants (lib/glassLook.js)
+// on a light wallpaper and on a dark one: regular glass; clear glass,
+// dimmer; none, solid digits in the tone – as GNOME's high contrast makes
+// them, whatever is chosen. Each as the lock screen draws it, and the
+// wallpaper alone, in tests/output/shell/glass-looks.
+async function testLockGlassLooks() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the glass clock\'s looks untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const settings = atelier()._settings;
+    const lockSettings = settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const a11y = new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'});
+    const monitor = Main.layoutManager.primaryMonitor;
+    const dir = `${OUTPUT}/glass-looks`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', false);
+    try {
+        for (const [name, top, bottom] of [['light', [0xdf, 0xe8, 0xf3], [0xf6, 0xef, 0xe2]],
+            ['dark', [0x0d, 0x12, 0x20], [0x2b, 0x34, 0x52]]]) {
+            const wallpaper = `${dir}/${name}.png`;
+            gradientPicture(wallpaper, [monitor.width, monitor.height], top, bottom);
+            background.set_string('picture-uri', uriOf(wallpaper));
+            background.set_string('picture-uri-dark', uriOf(wallpaper));
+            background.set_string('picture-options', 'zoom');
+            settings.set_string('glass-variant', 'regular');
+            await wallpapersSettled();
+            const locked = await lockForTest();
+            let clock = null;
+            try {
+                const there = () => lock()?.board?.widgets[0]?.glass;
+                check(await waitFor(() => there()?.target && there().backdrop && lock().board.tone, 15000),
+                    `locked on a ${name} wallpaper: the glass clock, its glass frosting it`);
+                clock = lock().board.widgets[0];
+                const glass = clock.glass;
+                // (The time as the test sets it.)
+                clock._sync = () => {};
+                glass.setClock('10:08');
+                await waitFor(() => !glass.changing && glass.stretch === glass.target.stretch, 2000);
+                await restPointer();
+                const area = [...glass.get_transformed_position(), glass.width, glass.height].map(Math.round);
+                const shot = async label => {
+                    await Scripting.sleep(500);
+                    await screenshotArea(`glass-looks/${name}-${label}`, ...area);
+                    return pixelsOf(`glass-looks/${name}-${label}`, area);
+                };
+                clock.hide();
+                const bare = await shot('wallpaper');
+                clock.show();
+                const tone = lock().board.tone;
+                const looks = {};
+                for (const variant of ['regular', 'clear', 'off']) {
+                    settings.set_string('glass-variant', variant);
+                    await waitFor(() => glass.variant === variant && (variant === 'off') === !glass.backdrop, 5000);
+                    looks[variant] = changedPixels(await shot(variant), bare, area, hexToRgb(tone.color));
+                }
+                const said = Object.entries(looks).map(([v, l]) => `${v} ${l.mean} of ${l.count}`).join(', ');
+                check(Object.values(looks).every(l => l.count > 2000), `the digits drawn in each (${said})`);
+                const lightness = rgb => rgb.reduce((sum, v) => sum + v, 0) / 3;
+                check(colorDistance(looks.regular.mean, looks.clear.mean) >= 3 &&
+                    (tone.dark || lightness(looks.clear.mean) < lightness(looks.regular.mean)),
+                `clear glass not as regular glass${tone.dark ? '' : ', dimmer'} (${tone.color})`);
+                check(looks.off.near > 0.8 * looks.off.count && glass.digitsMetrics?.tintAlpha === null,
+                    `none: solid digits in the tone (${looks.off.near} of ${looks.off.count} pixels ${tone.color})`);
+                // GNOME's high contrast: solid digits, whatever is chosen.
+                settings.set_string('glass-variant', 'regular');
+                await waitFor(() => glass.variant === 'regular', 3000);
+                a11y.set_boolean('high-contrast', true);
+                check(await waitFor(() => glass.variant === 'off', 3000) && glass.digitsMetrics?.tintAlpha === null,
+                    'GNOME\'s high contrast: solid digits, though regular glass is chosen');
+                a11y.reset('high-contrast');
+                check(await waitFor(() => glass.variant === 'regular' && glass.backdrop, 5000), 'and glass again without it');
+                results.push(`INFO  the glass clock on a ${name} wallpaper (tone ${tone.color}): ${said}; ` +
+                    'pictures in tests/output/shell/glass-looks');
+            } finally {
+                if (clock)
+                    delete clock._sync;
+                await locked.unlock();
+            }
+        }
+    } finally {
+        settings.reset('glass-variant');
+        a11y.reset('high-contrast');
+        ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+    }
+}
+
 // The lock screen's clock as the prompt comes up and goes, frame by frame,
 // slowed down: as the user has it, a large glass clock over a hill that
 // stands in front of its digits' feet (the depth effect on, a band of the
@@ -6634,6 +6763,7 @@ export async function run() {
             await part(testLockDepth);
             await part(testLockLook);
             await part(testLockGlassClock);
+            await part(testLockGlassLooks);
             await part(testLockClockFades);
             await part(testLockPromptPace);
             await part(testLockFreeStretch);
@@ -6690,6 +6820,7 @@ export async function run() {
         await part(testLockDepth);
         await part(testLockLook);
         await part(testLockGlassClock);
+        await part(testLockGlassLooks);
         await part(testLockClockFades);
         await part(testLockPromptPace);
         await part(testLockFreeStretch);
