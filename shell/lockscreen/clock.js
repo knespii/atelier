@@ -200,6 +200,11 @@ const GlassFace = GObject.registerClass({
             this._stopLearning();
             this._stopRest();
             this._stopSettling();
+            // (A change of the figures under way – the minute turning as the
+            // screen unlocks – ends with the face: its end must not draw on
+            // layers that are gone.)
+            this._turning = null;
+            this.remove_transition('change');
         });
         this.backdrop = kept.backdrop ?? null;
         this._syncDate();
