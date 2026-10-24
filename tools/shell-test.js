@@ -4391,11 +4391,12 @@ function differenceOf(a, b, {x, y, width, height}) {
 // wallpaper shows through, drawn from the font's own outlines (Inter, until
 // told another) and stretched as a tall typeface draws them – stems
 // longer, a "0" with straight sides, not an ellipse – from under the date
-// line down into what stands in front (a hill, here), which passes in front
-// of their feet; as tall as the box lets them without it. In the one tone of
-// the other widgets; heavier, with a shadow, as a legibility plan has it,
-// only then. As the minute turns, only the figures that change move, on a
-// layer of their own; nothing is drawn while it rests.
+// line down to the bottom of its box, whatever stands in front of them
+// there (a hill, here, in front of their feet): the depth effect on while
+// they read, off once the hill would hide too much of them. In the one
+// tone of the other widgets; heavier, with a shadow, as a legibility plan
+// has it, only then. As the minute turns, only the figures that change
+// move, on a layer of their own; nothing is drawn while it rests.
 async function testLockGlassClock() {
     const shield = Main.screenShield;
     if (!shield) {
@@ -4420,7 +4421,7 @@ async function testLockGlassClock() {
     const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
     const [, boxTop] = cellOrigin(2, 2, origin).map(v => v * scale);
     const side = (SIZES.large[1] * PITCH - GAP) * scale;
-    let hill = Math.round(boxTop + side * 0.62);
+    let hill = Math.round(boxTop + side * 0.7);
     hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
     background.set_string('picture-uri', uriOf(wallpaper));
     background.set_string('picture-uri-dark', uriOf(wallpaper));
@@ -4465,16 +4466,23 @@ async function testLockGlassClock() {
             glass.backdrop = backdrop.current;
         }
         check(Boolean(glass.backdrop), 'the glass frosts the wallpaper behind it');
-        // (Where the digits go on the monitor.)
+        // (Where the digits go on the monitor, and the bottom of the face
+        // they fill.)
         const digitsNow = () => {
-            const rect = board._followSubject(clock, clock.get_allocation_box());
-            return rect ? {...rect, feet: rect.y + rect.height} : null;
+            const digits = glass.digitsRect;
+            const [fx, fy] = glass.get_transformed_position().map((v, i) => v - [monitor.x, monitor.y][i]);
+            return digits && {x: fx + digits.x, y: fy + digits.y, width: digits.width, height: digits.height,
+                feet: fy + digits.y + digits.height, bottom: fy + glass.height};
         };
         const intoHill = d => (d.feet - hill) / d.height;
-        check(await waitFor(() => glass.stretch === glass.target.stretch, 2000) && glass.target.stretch > 1.2 &&
-            Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03,
-        `stretched down into the hill, their feet behind it (×${glass.target.stretch.toFixed(2)}, ${intoHill(digitsNow()).toFixed(2)} of them)`);
-        check(!board.depth.tooMuch && board.depth.actor.visible, 'the hill in front of them');
+        // (×2.8: the most they stretched to before, whatever the box.)
+        check(await waitFor(() => glass.stretch === glass.target.stretch, 2000) && glass.target.stretch > 2.8 &&
+            Math.abs(digitsNow().feet - digitsNow().bottom) < 1 && intoHill(digitsNow()) > STRETCH.overlap,
+        `they fill their box down to its bottom (×${glass.target.stretch.toFixed(2)}), the hill in front of ` +
+        `${Math.round(100 * intoHill(digitsNow()))} % of them`);
+        check(!board.depth.tooMuch && board.depth.actor.visible && board.depth.legibility[0]?.worst > 0,
+            `the hill in front of their feet: on, while they read (${JSON.stringify(board.depth.legibility[0])})`);
+        const filling = glass.target.stretch;
         const [faceX, faceY] = glass.get_transformed_position();
         const [, dateY] = glass.dateLine.get_transformed_position();
         check(dateY < faceY + glass.target.y && dateY + glass.dateLine.height <= faceY + glass.target.y + 1,
@@ -4512,9 +4520,9 @@ async function testLockGlassClock() {
         }
         check(lightOf(lit) > lightOf(sky) + 40 && lightOf(lit) < 250 && lit[2] > lit[0],
             `the digits a light glass the sky shows through (${lit} over ${sky})`);
-        // Taller on their stems: the "0" as wide a quarter of the way down
-        // as halfway and three quarters (an ellipse narrows), its sides
-        // straight.
+        // Taller on their stems: the "0" as wide two fifths of the way down
+        // to the hill as three and four fifths (an ellipse narrows), its
+        // sides straight once its top has turned.
         const rest = pixelsOf('91-lock-glass');
         const zero = boxes[1];
         const [top, bottom] = [faceY + zero.y, Math.min(faceY + zero.y + zero.height, hill)];
@@ -4531,9 +4539,9 @@ async function testLockGlassClock() {
             }
             return left === null ? 0 : right - left + 1;
         };
-        const widths = [0.25, 0.5, 0.75].map(widthAt);
+        const widths = [0.4, 0.6, 0.8].map(widthAt);
         check(widths[1] > zero.width * 0.8 && Math.min(widths[0], widths[2]) / widths[1] > 0.96,
-            `a "0" with straight sides, not an ellipse (${widths} px wide a quarter, half and three quarters down)`);
+            `a "0" with straight sides, not an ellipse (${widths} px wide two, three and four fifths down)`);
 
         // The minute turns: only its figure goes, the old one lifting as it
         // fades, the new one rising into place.
@@ -4632,20 +4640,24 @@ async function testLockGlassClock() {
         check(await waitFor(() => glass.fontFile?.endsWith('/fonts/Inter.ttf'), 3000), 'Inter again');
         board._planGlass = planGlass;
 
-        // The hill higher: the digits shorter, easing there.
+        // The hill higher: the digits as tall (they fill their box), more of
+        // them behind it – too much to read: the effect off, the time whole.
         hill = Math.round(boxTop + side * 0.45);
         writeCutout();
         board.depth._load();
-        const was = glass.target.stretch;
-        check(await waitFor(() => glass.target.stretch < was - 0.1, 3000) &&
-            await waitFor(() => glass.stretch === glass.target.stretch, 2000),
-        `the hill higher, they ease shorter (×${was.toFixed(2)} → ×${glass.target.stretch.toFixed(2)})`);
-        check(Math.abs(intoHill(digitsNow()) - STRETCH.overlap) < 0.03, 'their feet in it again');
+        // (As tall as they first were: but for a plan, which may weigh them
+        // anew, a little wider or narrower.)
+        const asTall = () => Math.abs(glass.target.stretch - filling) < 0.05;
+        check(await waitFor(() => board.depth.loaded && board.depth.tooMuch && !board.depth.actor.visible, 3000) &&
+            asTall() && board.depth.legibility[0]?.worst > MAX_GLYPH_COVER,
+        `the hill higher, in front of ${Math.round(100 * intoHill(digitsNow()))} % of them: the effect off, ` +
+        `the digits as tall (×${filling.toFixed(3)} → ×${glass.target.stretch.toFixed(3)}, ` +
+        `${JSON.stringify(board.depth.legibility[0])})`);
 
-        // Without the depth effect: as tall as the box lets them.
+        // Without the depth effect: as tall all the same.
         lockSettings.set_boolean('depth-effect', false);
-        check(await waitFor(() => !board.depth && glass.target.stretch > was - 0.01, 3000),
-            `without it, as tall as the box lets them (×${glass.target.stretch.toFixed(2)})`);
+        check(await waitFor(() => !board.depth, 3000) && asTall(),
+            `without it, as tall all the same (×${filling.toFixed(3)} → ×${glass.target.stretch.toFixed(3)})`);
     } finally {
         if (clock)
             delete clock._sync;

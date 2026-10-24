@@ -7,13 +7,14 @@
 // them takes (lib/lockLook.js legibilityPlan()), and they grow tall as a
 // tall typeface draws them: their stems and the sides of their bowls
 // longer, their bars, the turns of their curves and their dots as they are
-// (lib/glyphStretch.js). They stretch to the room there is: from under the
-// date line down to where the wallpaper's subject starts under them (which
-// passes in front of their feet, see board.js), or as tall as the clock's
-// box lets them; a change of it eases. As the minute turns, the figures
-// that change – only they – go: the old one lifting as it fades, the new
-// one rising into its place (lib/glassClock.js), drawn on a layer of their
-// own while they move. Nothing is drawn while it rests.
+// (lib/glyphStretch.js). They fill the clock's box, as the editor
+// stretches it (to any size, cell by cell): as large as it is wide, from
+// under the date line down to its bottom – whatever of the wallpaper's
+// subject stands in front of them there (see board.js); in a box too flat
+// for them, as tall as it is. As the minute turns, the figures that change
+// – only they – go: the old one lifting as it fades, the new one rising
+// into its place (lib/glassClock.js), drawn on a layer of their own while
+// they move. Nothing is drawn while it rests.
 //
 // (St draws a drawing area the moment it is told to – queue_repaint() – and
 // whenever it is laid out: the face draws its layers as it is laid out,
@@ -46,7 +47,6 @@ import {label} from '../desktop/widget.js';
 import {LiquidGlass, prepareLockBackdrop} from './liquidGlass.js';
 
 const DATE_GAP = 2; // between the date line and the digits, logical pixels
-const SETTLE_TIME = 450; // to a new height, ms
 // Type this light (WCAG luminance) or darker is dark type, as
 // lib/lockLook.js chosenTone() tells it: dark glass.
 const DARK = 0.18;
@@ -97,16 +97,13 @@ class AtelierGlassDigits extends St.DrawingArea {
 
 const GlassFace = GObject.registerClass({
     Properties: {
-        // How much taller than they are the digits stand, and where their top is.
-        'stretch': GObject.ParamSpec.double('stretch', null, null, GObject.ParamFlags.READWRITE, 0, 100, 1),
-        'level': GObject.ParamSpec.double('level', null, null, GObject.ParamFlags.READWRITE, -1e6, 1e6, 0),
         // How far the figures that change have gone (1 at rest).
         'change': GObject.ParamSpec.double('change', null, null, GObject.ParamFlags.READWRITE, 0, 1, 1),
     },
 }, class AtelierGlassFace extends St.Widget {
     /**
-     * @param {string} size - the clock's size (lib/widgets.js SIZES): the
-     *   optical size its digits are drawn at
+     * @param {string} size - the clock's size, named or its own (lib/
+     *   widgets.js sizeOf()): the optical size its digits are drawn at
      * @param {object} [kept] - what it was told before, by the clock it is
      *   the face of (it keeps it for the face built anew for another size):
      *   {type, plan, backdrop}
@@ -126,10 +123,10 @@ const GlassFace = GObject.registerClass({
         this._stretch = 1;
         this._level = 0;
         this._change = 1;
-        this._subject = null;
         this._target = null;
         this._metrics = null;
         this._size = [0, 0];
+        this._roomTop = null;
         this._text = '';
         this._turning = null;
         this._font = null;
@@ -158,28 +155,14 @@ const GlassFace = GObject.registerClass({
         this._syncFont();
     }
 
+    /** @returns {number} how much taller than they are the digits stand */
     get stretch() {
         return this._stretch;
     }
 
-    set stretch(value) {
-        if (value === this._stretch)
-            return;
-        this._stretch = value;
-        this.notify('stretch');
-        this._moved();
-    }
-
+    /** @returns {number} where their top is, in the face */
     get level() {
         return this._level;
-    }
-
-    set level(value) {
-        if (value === this._level)
-            return;
-        this._level = value;
-        this.notify('level');
-        this._moved();
     }
 
     get change() {
@@ -313,11 +296,6 @@ const GlassFace = GObject.registerClass({
     /** @returns {object|null} {leaving, coming}: the figures changing now (their places); null at rest */
     get changing() {
         return this._turning ? {leaving: [...this._turning.leaving], coming: [...this._turning.coming]} : null;
-    }
-
-    // (The date line follows, laid out anew; the digits are drawn then.)
-    _moved() {
-        this._repaint();
     }
 
     // Draw the layers anew as the face is laid out next: once, however
@@ -495,14 +473,17 @@ const GlassFace = GObject.registerClass({
         });
     }
 
-    // The size the digits fit the width at, and how high they are then.
-    _measure(width) {
+    // The size the digits fit the box at – as wide as it is, and in a box
+    // too flat for them, as tall as the room under the date line – and how
+    // high they are then.
+    _measure(width, room) {
         this._metrics = null;
         const font = this._font;
         if (!font || width <= 0)
             return;
+        const tall = Math.max(1, room.bottom - room.top);
         if (font.font) {
-            const size = fitSize(font.font, width, font.scaleX);
+            const size = fitSize(font.font, width, font.scaleX, tall);
             const k = size / font.font.upem;
             const {top, bottom} = font.font.figures;
             const {advance} = setLine(font.font, SAMPLE);
@@ -513,68 +494,41 @@ const GlassFace = GObject.registerClass({
             const layout = this._digits.create_pango_layout(SAMPLE);
             this._pangoLayout(layout, SAMPLE, 100);
             const [, logical] = layout.get_pixel_extents();
-            const fontSize = Math.max(8, Math.floor(100 * width * FILL / (Math.max(1, logical.width) * font.scaleX)));
+            let fontSize = Math.max(8, Math.floor(100 * width * FILL / (Math.max(1, logical.width) * font.scaleX)));
             this._pangoLayout(layout, SAMPLE, fontSize);
-            const [ink, wide] = layout.get_pixel_extents();
+            let [ink, wide] = layout.get_pixel_extents();
+            if (ink.height > tall) {
+                fontSize = Math.max(8, Math.floor(fontSize * tall / ink.height));
+                this._pangoLayout(layout, SAMPLE, fontSize);
+                [ink, wide] = layout.get_pixel_extents();
+            }
             this._metrics = {fontSize, inkY: ink.y, inkHeight: Math.max(1, ink.height), width: wide.width * font.scaleX};
         }
         this.onMeasured?.();
     }
 
-    // Under the date line, to the bottom of the box: the digits stay in it
+    // Under the date line, to the bottom of the box: the digits fill it
     // (where it is placed is where they are; placed over a hill, they go
-    // down behind it).
+    // down behind it, and the board lets the hill stand in front only
+    // while they read).
     _room() {
         const [, dateHeight] = this._date.get_preferred_height(-1);
         return {top: dateHeight + DATE_GAP * scaleFactor(), bottom: this._size[1]};
     }
 
-    // Where the digits go, for the room there is and the subject under them.
-    _retarget(animate) {
+    // Where the digits go, for the room there is.
+    _retarget(room) {
         if (!this._metrics)
             return;
-        const {top, bottom} = this._room();
-        const target = glassDigits(this._metrics.inkHeight, top, bottom, this._subject);
+        const target = glassDigits(this._metrics.inkHeight, room.top, room.bottom);
         if (this._target && Math.abs(this._target.stretch - target.stretch) < 0.005 &&
             Math.abs(this._target.y - target.y) < 0.5)
             return;
         this._target = target;
-        if (animate && this.mapped) {
-            this.ease_property('stretch', target.stretch, {duration: SETTLE_TIME, mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
-            this.ease_property('level', target.y, {duration: SETTLE_TIME, mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
-        } else {
-            this.remove_transition('stretch');
-            this.remove_transition('level');
-            // (As it is laid out: not laid out anew for it.)
-            this._stretch = target.stretch;
-            this._level = target.y;
-            this._repaint();
-        }
-    }
-
-    /**
-     * Where the wallpaper's subject starts under the digits (board.js finds it).
-     *
-     * @param {number|null} y - in the face; null for nothing there
-     */
-    setSubject(y) {
-        const subject = y === null ? null : Math.round(y);
-        if (subject === this._subject)
-            return;
-        this._subject = subject;
-        this._retarget(true);
-    }
-
-    /**
-     * @returns {object|null} {x, width, top, bottom} in the face: across
-     *   the digits, from under the date line to the bottom (where to look
-     *   for the subject); null until measured
-     */
-    get strip() {
-        if (!this._metrics)
-            return null;
-        const width = this._metrics.width;
-        return {x: (this._size[0] - width) / 2, width, ...this._room()};
+        // (As it is laid out: not laid out anew for it.)
+        this._stretch = target.stretch;
+        this._level = target.y;
+        this._repaint();
     }
 
     /** @returns {object|null} {x, y, width, height} of the digits where they go, in the face */
@@ -617,13 +571,16 @@ const GlassFace = GObject.registerClass({
         this._size = [width, height];
         // (First: laid out, it may be styled anew – another font.)
         this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
-        const measuring = !this._metrics || resized;
+        // (Measured anew for another box, or another date line over them:
+        // in a box too flat for them, the room they have is what sizes them.)
+        const room = this._room();
+        const measuring = !this._metrics || resized || room.top !== this._roomTop;
+        this._roomTop = room.top;
         if (measuring) {
-            this._measure(width);
+            this._measure(width, room);
             this._target = null;
         }
-        // (Measured anew, or the date line over them set in another font.)
-        this._retarget(false);
+        this._retarget(room);
         // The layer of the figures that change over their columns while
         // they do (where they are now, measured anew).
         const turning = this._turning;

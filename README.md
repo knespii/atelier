@@ -132,12 +132,13 @@ profile called **Original**, so there is always a way back.
   each shown where the clocks are; a part that would not read as it is is
   set a little heavier, or gets a soft shadow round its letters, and only
   that part. The glass clock is an iPhone's: the time in one line of tall
-  digits under a small date line, the font's own outlines grown taller
-  along their straight stems (curves and bars keep their weight), in Liquid
+  digits under a small date line, as large as the clock is wide and as
+  tall as it is stretched, the font's own outlines grown taller along
+  their straight stems (curves and bars keep their weight), in Liquid
   Glass – the wallpaper frosted behind them, tinted from what is behind,
-  light along their edges – and, with the depth effect, standing behind
-  what is near by a quarter of their height; as the minute turns, only the
-  figures that change rise into place.
+  light along their edges – and, with the depth effect, behind what is
+  near wherever it covers them; as the minute turns, only the figures that
+  change rise into place.
   Its font is Inter or Roboto Flex (variable fonts that come with Atelier,
   loaded into the shell only), the shell's, or a rounded or serif one
   installed, the clocks' digits in the weight and width of one's choice.
@@ -151,8 +152,9 @@ profile called **Original**, so there is always a way back.
   view out of a window stay behind them; it goes as the prompt comes up and
   the wallpaper blurs, and stays off where what stands in front would hide
   more than a quarter of any digit of a clock, or 40 % of a clock as a
-  whole (a glass clock's digits stand behind it a quarter of their height
-  on purpose: the rest of each counts, and 60 % of the clock). A
+  whole (a glass clock's digits may stand behind it a quarter of their
+  height at their feet besides – some 40 % of a digit in all – and 60 % of
+  the clock). A
   depth model, Depth Anything V2, sees how near each part of the wallpaper
   is, on this computer, in a background process of the session at the
   lowest priority, a moment after the wallpaper changes; the lock screen

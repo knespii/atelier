@@ -5,7 +5,7 @@ import GLib from 'gi://GLib';
 import {
     CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
     chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, legibility,
-    lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath, subjectTop,
+    lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath,
 } from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {fakeDepthModel, fakeSubjectModel} from './fakeOnnx.js';
@@ -276,26 +276,6 @@ export function testLegibilityWhole() {
     const off = legibility(cutoutWhere(() => true), {x: 1000, y: 0, width: 800, height: 400}, {glyphs: DIGITS});
     assertEqual([off.stays, off.worst], [true, 0], 'the cutout elsewhere: on');
     assertEqual(legibility(around, MONITOR, {glyphs: []}).stays, true, 'no digits, no box: nothing to keep legible');
-}
-
-export function testSubjectTop() {
-    // A hill over the bottom half of the picture, rising to the right (its
-    // top at row 60 on the left, 40 on the right); drawn at twice its size.
-    const [width, height] = [100, 100];
-    const cutout = {pixels: new Uint8Array(width * height * 4), width, height, rowstride: width * 4};
-    for (let x = 0; x < width; x++) {
-        for (let y = Math.round(60 - x / 5); y < height; y++)
-            cutout.pixels[y * cutout.rowstride + x * 4 + 3] = 255;
-    }
-    const shown = {x: 0, y: 0, width: 200, height: 200};
-    const left = subjectTop(cutout, shown, {x: 0, width: 40, from: 0, to: 200});
-    const right = subjectTop(cutout, shown, {x: 160, width: 40, from: 0, to: 200});
-    assert(Math.abs(left - 118) <= 4 && Math.abs(right - 86) <= 4, `where the hill starts under each (${left}, ${right})`);
-    const wide = subjectTop(cutout, shown, {x: 0, width: 200, from: 0, to: 200});
-    assert(wide > right && wide < left, `under a wide clock, once it fills a good part of it (${wide})`);
-    assertEqual(subjectTop(cutout, shown, {x: 0, width: 40, from: 0, to: 100}), null, 'nothing above the hill');
-    assertEqual(subjectTop(cutout, shown, {x: 0, width: 40, from: 150, to: 200}), 150, 'in it from the start');
-    assertEqual(subjectTop(cutout, shown, {x: 300, width: 40, from: 0, to: 200}), null, 'off the picture: nothing');
 }
 
 export function testCutoutOpacity() {

@@ -162,7 +162,7 @@ function digitShape(weight = WEIGHT) {
     date.set_text('Thursday, October 23', -1);
     const [, dateLogical] = date.get_pixel_extents();
     const top = dateLogical.height + DATE_GAP * SCALE;
-    const {stretch, y: level} = glassDigits(sampleInk.height, top, CLOCK.height, null);
+    const {stretch, y: level} = glassDigits(sampleInk.height, top, CLOCK.height);
 
     const layout = layoutAt(fontSize, TEXT);
     const [ink] = layout.get_pixel_extents();

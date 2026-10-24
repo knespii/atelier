@@ -18,9 +18,7 @@ import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {
-    cutoutOpacity, cutoutPath, legibility, lockWallpaper, pictureState, placement, subjectTop,
-} from '../../lib/depth.js';
+import {cutoutOpacity, cutoutPath, legibility, lockWallpaper, pictureState, placement} from '../../lib/depth.js';
 import {syncTextureFrame} from '../core/glass.js';
 
 Gio._promisify(Gio.File.prototype, 'read_async');
@@ -139,7 +137,7 @@ export class DepthCutout {
         this.tooMuch = false;
         /** How legible each clock stays with it (lib/depth.js legibility()), as cover() was told of them. */
         this.legibility = [];
-        /** Called when the cutout comes, goes or moves (the glass clock follows it). */
+        /** Called when the cutout comes, goes or moves (how much of the clocks it covers is looked at anew). */
         this.onChanged = null;
         this.actor.connect('destroy', () => {
             this._cancellable?.cancel();
@@ -250,18 +248,6 @@ export class DepthCutout {
         }
         this.cover(this._clocks);
         this.onChanged?.();
-    }
-
-    /**
-     * @param {object} strip - {x, width, from, to} on the monitor (see
-     *   lib/depth.js subjectTop())
-     * @param {number} [share] - of the strip's width the subject has to
-     *   stand across (see there)
-     * @returns {number|null} where what stands in front starts in it; null
-     *   without a cutout, or nothing there
-     */
-    subjectTop(strip, share = undefined) {
-        return this._shown && this._sample ? subjectTop(this._sample, this._shown, strip, share) : null;
     }
 
     /**

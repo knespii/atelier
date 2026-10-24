@@ -45,9 +45,6 @@ const DIMMED = 0.25; // what is left of the widgets while the prompt is up
 const SMALLEST = 0.35; // how small a clock gets to go up over the popup
 const SHIFT_TIME = 250; // moving on when the popup changes size
 const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
-// How much of a glass clock's width the subject has to stand across, for
-// its digits to end there.
-const ACROSS = 0.97;
 // A clock's date line, kept in front of the subject: this much round it
 // too (logical pixels), besides its shadow's reach.
 const IN_FRONT_PAD = 2;
@@ -119,8 +116,8 @@ export class LockBoard {
             claude: () => null,
             openSettings: () => {},
             locked: !interactive,
-            // (A glass clock measured anew: the subject under it looked for
-            // again, and what its digits take to read there.)
+            // (A glass clock measured anew: how much of it the subject
+            // covers looked at again, and what its digits take to read there.)
             depthChanged: () => {
                 this._queueDepth();
                 this._queueGlass();
@@ -199,8 +196,6 @@ export class LockBoard {
         } else {
             this._depth.destroy();
             this._depth = null;
-            // (Nothing in front of the glass clocks any more: as tall as they get.)
-            this.widgets.forEach(widget => widget.glass?.setSubject(null));
         }
         this._queueDepth();
     }
@@ -250,10 +245,9 @@ export class LockBoard {
             // (In the editor, one pointed at is in front, to be moved.)
             if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
                 this.layer.set_child_below_sibling(widget, depth.actor);
-                const box = widget.get_allocation_box();
-                if (this._followSubject(widget, box))
-                    this._planGlass(widget);
-                clocks.push(this._legible(widget, box));
+                // (A glass clock's digits as they read where they are now.)
+                this._planGlass(widget);
+                clocks.push(this._legible(widget, widget.get_allocation_box()));
                 // The date over it in front of the subject, as on an iPhone:
                 // the clock goes behind it, the date never does.
                 const line = this._dateLineOf(widget);
@@ -281,9 +275,10 @@ export class LockBoard {
 
     // What of a clock has to stay legible, on the monitor (lib/depth.js
     // legibility()): each of its digits' ink – a glass face's as it draws
-    // them, their feet into the subject on purpose (STRETCH.overlap), its
-    // digits' box the clock as a whole; another face's as its labels lay
-    // them out (no colon, no AM or PM), a face with hands as a whole.
+    // them, down to the bottom of its box, their feet free to stand behind
+    // the subject (STRETCH.overlap), its digits' box the clock as a whole;
+    // another face's as its labels lay them out (no colon, no AM or PM), a
+    // face with hands as a whole.
     _legible(widget, box) {
         const glass = widget.glass;
         if (glass) {
@@ -341,23 +336,6 @@ export class LockBoard {
         }
         const own = actor.get_allocation_box();
         return {x, y, width: own.get_width(), height: own.get_height()};
-    }
-
-    // A glass clock's digits stretch down to where the subject stands
-    // right across them (a hill sloping under them: its lowest point there),
-    // so that it hides the feet of every digit – not a straight edge above
-    // the ground where it is lower; what it covers of them counts then.
-    _followSubject(widget, box) {
-        const glass = widget.glass;
-        const strip = glass?.strip;
-        if (!strip)
-            return null;
-        const {x, y} = this._rectIn(glass, widget, box);
-        const span = {x: x + strip.x, width: strip.width, from: y + strip.top, to: y + strip.bottom};
-        const top = this._depth.subjectTop(span, ACROSS) ?? this._depth.subjectTop(span);
-        glass.setSubject(top === null ? null : top - y);
-        const digits = glass.digitsRect;
-        return digits ? {...digits, x: x + digits.x, y: y + digits.y, glass: true} : null;
     }
 
     /** @returns {LockTypography} the widgets' type */

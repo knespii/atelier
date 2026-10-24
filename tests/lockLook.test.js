@@ -194,25 +194,14 @@ export function testLegibilityPlanForGlass() {
 
 export function testGlassDigits() {
     const ink = 100;
-    // No subject: as tall as the box lets them, up to the most.
-    assertEqual(glassDigits(ink, 40, 200, null), {stretch: 1.6, y: 40});
-    assertEqual(glassDigits(ink, 40, 600, null).stretch, STRETCH.max, 'never taller than the most');
-    assertEqual(glassDigits(ink, 40, 100, null).stretch, STRETCH.min, 'never squashed');
-    // A subject under them: down into it, its top a little above their feet.
-    const subject = 40 + 2 * ink * (1 - STRETCH.overlap);
-    const {stretch, y} = glassDigits(ink, 40, 400, subject);
-    const feet = y + stretch * ink;
-    assert(y === 40 && Math.abs(stretch - 2) < 1e-9, `from under the date (${y}, ${stretch})`);
-    assert(Math.abs((feet - subject) / (stretch * ink) - STRETCH.overlap) < 1e-9, `their feet in it (${feet})`);
-    // Far below: as tall as they get, moved down to meet it.
-    const low = glassDigits(ink, 40, 500, 350);
-    assert(low.stretch === STRETCH.max && low.y > 40 &&
-        Math.abs(350 - low.y - (1 - STRETCH.overlap) * low.stretch * ink) < 1e-9, `moved down to it (${low.y})`);
-    // Right under the date: as short as they go, from under it.
-    assertEqual(glassDigits(ink, 40, 400, 60), {stretch: STRETCH.min, y: 40});
-    // Under the box or over the top: as without one.
-    assertEqual(glassDigits(ink, 40, 200, 500), glassDigits(ink, 40, 200, null));
-    assertEqual(glassDigits(ink, 40, 200, 10), glassDigits(ink, 40, 200, null));
+    // From under the date line to the bottom of the box, whatever its size.
+    assertEqual(glassDigits(ink, 40, 200), {stretch: 1.6, y: 40});
+    assertEqual(glassDigits(ink, 26, 540), {stretch: 5.14, y: 26}, 'a tall box: far past the most they once took (×2.8)');
+    const {stretch, y} = glassDigits(ink, 26, 517);
+    assert(y === 26 && Math.abs(y + stretch * ink - 517) < 1e-9, `their feet on the box's bottom (×${stretch})`);
+    assertEqual(glassDigits(ink, 40, 900).stretch, STRETCH.max, 'never taller than the most');
+    assertEqual(glassDigits(ink, 40, 100).stretch, STRETCH.min, 'never squashed');
+    assertEqual(glassDigits(0, 40, 200), {stretch: 1, y: 40}, 'not measured: as they are');
 }
 
 export function testChosenTone() {
