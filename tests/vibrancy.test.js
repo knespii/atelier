@@ -5,7 +5,7 @@ import {lookOf} from '../lib/glassLook.js';
 import {buildPalette, hexToOklch, luminance} from '../lib/palette.js';
 import {
     COLOURED, INKS, LIGHT_BIAS, MARK_LC, REFERENCE, SLACK, backdropOf, designedOf, glassOver, inkOn, lcOf, needOf,
-    pictureRegion, polarityOn, scopeOf, surfaceRules, vibrancyStylesheet, withBackground,
+    pictureRegion, polarityOn, scopeOf, steadied, surfaceRules, vibrancyStylesheet, withBackground,
 } from '../lib/vibrancy.js';
 import {assert, assertEqual} from './util.js';
 
@@ -64,6 +64,23 @@ export function testPolarity() {
             biased++;
     }
     assert(biased > 0, 'where dark type is only a little better, light type stays');
+    // Where either would do about as well, it stays as it was.
+    let kept = 0;
+    for (let level = 100; level <= 200; level += 2) {
+        const grey = `#${level.toString(16).padStart(2, '0').repeat(3)}`;
+        const backdrop = on(grey);
+        if (polarityOn(backdrop, 'dark') === 'dark' && polarityOn(backdrop, 'light') === 'light')
+            kept++;
+        assert(polarityOn(backdrop) === polarityOn(backdrop, 'light'), `${grey}: as light type was`);
+    }
+    assert(kept > 0, 'dark type stays dark until light is clearly better');
+}
+
+export function testSteadied() {
+    const backdrop = {dark: '#3d3d3d', mean: '#7f8081', light: '#fefefe'};
+    assertEqual(steadied(backdrop), {dark: '#404040', mean: '#808080', light: '#ffffff'}, 'to the nearest 8');
+    // A rectangle a little wider, a little different: the same.
+    assertEqual(steadied(on('#9aa8b8')), steadied(on('#9ba9b9')), 'a hair apart, the same');
 }
 
 export function testNeeds() {
