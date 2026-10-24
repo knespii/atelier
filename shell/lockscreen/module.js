@@ -52,6 +52,7 @@ export class LockModule {
         this._settleId = 0;
         this._unlocking = false;
         this._room = 0;
+        this._popup = null;
         this._following = null;
         this._status = null;
         this._glass = null;
@@ -229,7 +230,19 @@ export class LockModule {
         // (Over the main monitor's wallpaper, wherever that monitor is.)
         this._board.layer.set_position(monitor.x, monitor.y);
         const top = (island ? island.y + island.height - monitor.y : 0) + GAP * scale;
-        this._board.makeRoom(progress, this._field?.standing ? this._field.rect : null, top, GAP * scale, animate);
+        this._board.makeRoom(progress, this._popupRect(progress), top, GAP * scale, animate);
+    }
+
+    // Where the popup is, while it stands in for GNOME's prompt – and was,
+    // while the room made for it goes: GNOME drops its prompt once it is
+    // down, the room follows a moment later (a clock over the popup comes
+    // down as it went up). Null for GNOME's own prompt.
+    _popupRect(progress) {
+        if (this._field?.standing)
+            this._popup = this._field.rect;
+        else if (progress === 0 || this._progress() > 0)
+            this._popup = null;
+        return this._popup;
     }
 
     // GNOME's time and date (and the hint under them, which would be left
@@ -301,6 +314,7 @@ export class LockModule {
         this._observer?.destroy();
         this._observer = null;
         this._stopFollowing();
+        this._popup = null;
         // (Unlocked, GNOME's prompt goes as it is: hidden.)
         this._field?.destroy({restore: !this._unlocking});
         this._field = null;
