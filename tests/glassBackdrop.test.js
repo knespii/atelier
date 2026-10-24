@@ -257,7 +257,8 @@ export function testRimSteps() {
     for (const variant of ['regular', 'clear']) {
         const {rim} = LOOK[variant];
         const steps = rimSteps(rim);
-        assert(steps.top + steps.bottom + 2 * steps.side <= 15, `${variant}: added up a few times (${JSON.stringify(steps)})`);
+        assert(steps.top + steps.bottom + 2 * steps.side <= 15,
+            `${variant}: added up a few times (${JSON.stringify(steps)})`);
         for (const edge of ['top', 'bottom', 'side'])
             near(steps[edge] * steps.unit, rim[edge], 0.025, `${variant}: along the ${edge}s as the look has it`);
         assert(steps.top > steps.side && steps.side > steps.bottom, `${variant}: strongest along the tops`);

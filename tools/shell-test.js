@@ -5238,10 +5238,11 @@ function paceOf(frames, calls, since, moved) {
 // from Escape until the clock is back and still, the frames come as often as
 // the display shows them – but the first time up, which makes what is kept
 // for the next (and where the shell draws without a GPU, ATELIER_TEST_SLOW:
-// only said) – and the glass clock is not drawn anew at all, however GNOME
-// restyles its lock screen as the key focus comes and goes; the popup's
-// liquid only as large as it flows. What each frame cost where goes in
-// tests/output/shell/pace.
+// only said), none over 20 ms for the room made or the wallpaper's glass
+// fading in and out (made once, as the lock screen showed) – and the glass
+// clock is not drawn anew at all, however GNOME restyles its lock screen as
+// the key focus comes and goes; the popup's liquid only as large as it
+// flows. What each frame cost where goes in tests/output/shell/pace.
 async function testLockPromptPace() {
     const shield = Main.screenShield;
     if (!shield) {
