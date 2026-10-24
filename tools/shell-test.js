@@ -3838,6 +3838,27 @@ async function lockForTest() {
     };
 }
 
+// The lock screen's wallpaper and its glass (shell/lockscreen/glass.js), as
+// they are: GNOME's own blur of each wallpaper (off while Atelier's lock
+// screen is there), whether the glass is over them or under them (at rest),
+// how opaque it is over them, and each wallpaper's glass – its blur, its
+// look and how often it was made.
+function wallpaperGlass(module) {
+    const group = Main.screenShield._dialog?._backgroundGroup ?? null;
+    const glass = module?._glass;
+    const panes = glass?.panes ?? [];
+    const over = Boolean(glass?.layer) && group?.get_last_child() === glass.layer;
+    return {
+        own: group?.get_children().map(w => w.get_effect('blur')).filter(Boolean) ?? [],
+        over,
+        under: Boolean(glass?.layer) && group?.get_first_child() === glass.layer,
+        shown: over ? glass.layer.opacity : 0,
+        blurs: panes.map(pane => pane.get_effect('atelier-lock-blur')),
+        looks: panes.map(pane => pane.get_effect('atelier-glass')?.look),
+        made: panes.map(pane => pane.made),
+    };
+}
+
 // The clock's faces spilled out of an editor's gallery: each sample within
 // its place, all of them on the panel or scrolled to.
 function facesFit(spill) {
@@ -3898,15 +3919,16 @@ async function testLockWidgets() {
         await Scripting.sleep(500);
         await screenshot('83-lock-widgets');
 
-        const blurs = () => dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
-        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+        const glass = () => wallpaperGlass(lock());
+        check(glass().own.length > 0 && glass().own.every(e => !e.enabled) && glass().shown === 0,
             'the wallpaper sharp until the password is asked');
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
         check(await waitFor(() => clock.get_paint_opacity() === 0, 2000) && board.layer.opacity === 255,
             'and the widgets make room for it: the clock goes, all of it');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
-            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => glass().shown === 255 && glass().over && glass().own.every(e => !e.enabled) &&
+            glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+        `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${glass().blurs.map(e => e.radius)})`);
     } finally {
         await locked.unlock();
     }
@@ -3969,7 +3991,7 @@ async function testLockPasswordField() {
     ]));
     lockSettings.set_boolean('gnome-clock', false);
     const widget = id => lock().board.widgets.find(w => w.entry.id === id);
-    const blurs = () => shield._dialog._backgroundGroup.get_children().map(w => w.get_effect('blur')).filter(Boolean);
+    const glass = () => wallpaperGlass(lock());
     let locked = await lockForTest();
     try {
         check(await waitFor(() => lock()?.island?.actor && lock().board?.widgets.length === 2 &&
@@ -3977,7 +3999,7 @@ async function testLockPasswordField() {
         const clock = widget('clock');
         // (Where it is at rest: in the popup's way, as checked below.)
         const clockBottom = clock.stacked.get_transformed_position()[1] + clock.stacked.get_transformed_size()[1];
-        check(blurs().length > 0 && blurs().every(e => e.radius === 0 && !e.enabled),
+        check(glass().own.length > 0 && glass().own.every(e => !e.enabled) && glass().shown === 0,
             'the wallpaper sharp until the password is asked');
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
@@ -4018,8 +4040,9 @@ async function testLockPasswordField() {
         check(entry.text === 'a' && prompt._entry.text === '', `the key that woke it is in the popup (${entry.text})`);
         check(entry.contains(global.stage.key_focus), 'which has the keyboard');
         check(!findActor(form, a => a instanceof St.Button), 'no buttons: Enter sends it, Escape goes back');
-        check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
-            `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
+        check(await waitFor(() => glass().shown === 255 && glass().over && glass().own.every(e => !e.enabled) &&
+            glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
+        `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${glass().blurs.map(e => e.radius)})`);
         check(await waitFor(() => lock().room === 1 && !clock.get_transition('translation_y'), 2000),
             'the prompt is up, room made for it');
         const box = actor => {
@@ -4046,7 +4069,7 @@ async function testLockPasswordField() {
         check(await waitFor(() => lock().state.phase === 'locked' && !field().form, 3000), 'Escape: back to the clock');
         check(await waitFor(() => !sheet() && lock().room === 0 && clock.translation_y === 0 && clock.scale_x === 1 &&
             clock._colon.opacity === 0 && clock._minutesBox.translation_y === 0 &&
-            widget('date').opacity === 255 && blurs().every(e => e.radius === 0), 2000),
+            widget('date').opacity === 255 && glass().shown === 0, 2000),
         'the popup draws back, the clock comes down, stacked again, the wallpaper is sharp again');
         await Scripting.sleep(600);
 
@@ -5189,10 +5212,8 @@ async function testLockPromptPace() {
             ]);
             const now = () => GLib.get_monotonic_time() / 1000;
             const tag = `at ${density}×, a clock of ${[clock.width, clock.height].map(Math.round).join('×')} px`;
-            // (How much the wallpaper is blurred: by whichever of its blurs is on.)
-            const wallpaperActor = shield._dialog._backgroundGroup.get_children().find(w => w.get_effect('blur'));
-            const blurred = () => Math.max(0, ...(wallpaperActor?.get_effects() ?? [])
-                .filter(e => e instanceof Shell.BlurEffect && e.enabled).map(e => e.radius));
+            // (How opaque the wallpaper's glass is over it.)
+            const frosted = () => wallpaperGlass(module).shown;
             // (The popup's liquid, timed and measured once it is there.)
             const liquid = () => field?._popup?._paint ?? null;
             let liquidSize = null;
@@ -5209,11 +5230,12 @@ async function testLockPromptPace() {
                     island: module.island?.actor?.translation_y ?? 0,
                     popup: paint ? 1 : 0,
                     form: field?.form?.opacity ?? 0,
-                    blur: blurred(),
+                    glass: frosted(),
+                    made: wallpaperGlass(module).made.join('/'),
                 };
             };
             const moved = (a, b) => a.popup || b.popup ||
-                ['room', 'clock', 'island', 'form', 'blur'].some(key => a[key] !== b[key]);
+                ['room', 'clock', 'island', 'form', 'glass'].some(key => a[key] !== b[key]);
             const phases = [];
             // A while, from start() until done() (or for so long), and a
             // little after. (While it rests, every frame counts: the
@@ -5234,6 +5256,10 @@ async function testLockPromptPace() {
             };
             const drawn = () => [glass._digits.repaints, glass._moving.repaints];
             const before = drawn();
+            // (The wallpaper's glass, made as the lock screen showed.)
+            const made = wallpaperGlass(module).made;
+            check(made.length > 0 && made.every(n => n === 1) && wallpaperGlass(module).under,
+                `the wallpaper's glass made once as the lock screen showed, under the wallpaper while it rests (${made})`);
             // (What it is drawn from: anew, once, if that changes meanwhile –
             // the board's frosted wallpaper made late, on a slow machine.)
             const sources = () => [glass.backdrop, JSON.stringify(glass._plan)];
@@ -5251,6 +5277,8 @@ async function testLockPromptPace() {
                 check(JSON.stringify(drawn()) === JSON.stringify(before), notDrawn);
             else
                 results.push(`INFO  its frosted wallpaper or its plan came anew meanwhile: ${notDrawn}`);
+            check(JSON.stringify(wallpaperGlass(module).made) === JSON.stringify(made),
+                `nor the wallpaper's glass made anew: it only fades in and out (${made} → ${wallpaperGlass(module).made})`);
             const share = liquidSize ? liquidSize[0] * liquidSize[1] / (monitor.width * monitor.height) : 1;
             check(share < 0.25, `the popup's liquid only round it, not over the monitor (${liquidSize?.map(Math.round).join('×')})`);
 
@@ -5276,13 +5304,13 @@ async function testLockPromptPace() {
                     const top = Object.entries(f.spent).filter(([, took]) => took >= 0.5)
                         .map(([stage, took]) => `${stage.trim()} ${ms(took)}`).join(', ');
                     results.push(`INFO      ${ms(f.gap)} ms (laid out ${ms(f.layout)}, painted ${ms(f.painting)}; room ` +
-                        `${f.room.toFixed(2)}, clock ${f.clock}, blur ${f.blur}${top ? `; ${top}` : ''})`);
+                        `${f.room.toFixed(2)}, clock ${f.clock}, glass ${f.glass}${top ? `; ${top}` : ''})`);
                 }
                 GLib.file_set_contents(`${dir}/${density}x-${name.replace(' ', '-')}.txt`, `${[
-                    ['frame', 'gap', 'moving', 'layout', 'painting', 'room', 'clock', 'blur', 'island', 'popup', 'form',
+                    ['frame', 'gap', 'moving', 'layout', 'painting', 'room', 'clock', 'glass', 'made', 'island', 'popup', 'form',
                         ...names.map(n => n.trim())].join('\t'),
                     ...frames.map((f, i) => [i, ms(f.gap), f.moving ? 1 : 0, ms(f.layout), ms(f.painting),
-                        f.room.toFixed(3), f.clock, f.blur, Math.round(f.island), f.popup, f.form,
+                        f.room.toFixed(3), f.clock, f.glass, f.made, Math.round(f.island), f.popup, f.form,
                         ...names.map(n => ms(f.spent[n] ?? 0))].join('\t')),
                 ].join('\n')}\n`);
             }
@@ -6292,8 +6320,7 @@ async function testLockLook() {
     locked = await lockForTest();
     try {
         check(await waitFor(() => lock()?.board?.widgets.length > 0, 3000), 'locked again, on a colourful wallpaper');
-        const dialog = shield._dialog;
-        const wallpapers = () => dialog._backgroundGroup.get_children();
+        const glass = () => wallpaperGlass(lock());
         // (Away from the widgets, the popup and the island: the red half –
         // once the lock screen shows its wallpaper: locked by hand, GNOME
         // fades to black until the pointer moves.)
@@ -6307,11 +6334,10 @@ async function testLockLook() {
         }
         await clickAt(300, 800);
         check(await waitFor(() => lock().room === 1 && lock()._glass.progress === 1, 3000), 'the prompt is up');
-        const glass = wallpapers().map(w => w.get_effect('atelier-glass'));
-        check(glass.length > 0 && glass.every(e => e?.enabled && e.look[0] > 1.2),
+        check(glass().shown === 255 && glass().looks.length > 0 && glass().looks.every(look => look?.[0] > 1.2),
             'the wallpaper turns to glass, its colours a little richer');
-        check(wallpapers().every(w => w.get_effect('blur').radius >= 80 && w.get_effect('blur').brightness > 0.8),
-            `blurred as GNOME has it, darkened far less (${wallpapers().map(w => w.get_effect('blur').brightness)})`);
+        check(glass().blurs.every(e => e.radius >= 80 && e.brightness > 0.8) && glass().own.every(e => !e.enabled),
+            `blurred as GNOME has it, darkened far less (${glass().blurs.map(e => e.brightness.toFixed(2))})`);
         await restPointer();
         await Scripting.sleep(300);
         await screenshot('89b-lock-glass');
@@ -6319,8 +6345,8 @@ async function testLockLook() {
         check(chromaOf(sharp) > 100 && chromaOf(blurred) >= 0.85 * chromaOf(sharp) && lightOf(blurred) >= 0.7 * lightOf(sharp),
             `its colours kept (chroma ${chromaOf(sharp)} → ${chromaOf(blurred)}, light ${Math.round(lightOf(sharp))} → ${Math.round(lightOf(blurred))})`);
         await pressKey(Clutter.KEY_Escape);
-        check(await waitFor(() => lock().room === 0 && wallpapers().every(w => !w.get_effect('atelier-glass').enabled &&
-            !w.get_effect('blur').enabled), 3000), 'Escape: sharp again, no glass');
+        check(await waitFor(() => lock().room === 0 && glass().shown === 0 && glass().own.every(e => !e.enabled), 3000),
+            'Escape: sharp again, no glass');
         // Unlocked: sharp again as the lock screen goes, by itself.
         await clickAt(300, 800);
         await waitFor(() => lock().room === 1 && lock()._field?.form, 3000);
@@ -6332,7 +6358,7 @@ async function testLockLook() {
         check(await waitFor(() => {
             progress.push(lock()._glass.progress);
             return lock()._glass.progress === 0;
-        }, 2000) && progress.some(p => p > 0 && p < 1) && wallpapers().every(w => !w.get_effect('blur').enabled),
+        }, 2000) && progress.some(p => p > 0 && p < 1) && glass().shown === 0 && glass().own.every(e => !e.enabled),
         `unlocked, the wallpaper comes sharp again, step by step (${progress.length} steps)`);
     } finally {
         await locked.unlock();

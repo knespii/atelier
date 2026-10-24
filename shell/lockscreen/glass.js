@@ -2,32 +2,34 @@
 // as GNOME blurs it, but its colours kept – a little richer, darkened far
 // less than GNOME darkens it, and only towards the edges. The type stays
 // legible by itself: a soft shadow round each widget's type, and
-// the popup is black. One small shader on each wallpaper, under GNOME's
-// blur (both are cached: nothing is drawn anew while it rests).
+// the popup is black.
 //
-// As the prompt comes up the blur grows, and GNOME's blur draws the
-// wallpaper smaller the more it blurs it, making what it draws into anew
-// each time that size changes (lib/lockBlur.js) – on a large monitor a
-// frame of its own, twice or three times each way. So the wallpaper has a
-// blur for each of those sizes, each blurring as GNOME's does and keeping
-// what it draws into: GNOME's own for the size it draws at as GNOME has
-// it, Atelier's for the others; the one for the blur there is now blurs,
-// the others are left out.
+// The glass is each wallpaper drawn a second time and made glass once – one
+// small shader on it, under GNOME's blur at its fullest – laid over the
+// wallpaper, which stays sharp: as the prompt comes up the glass fades in
+// over it, and out again as the prompt goes. Nothing is blurred anew
+// meanwhile (GNOME's blur keeps what it has drawn while what it blurs stays
+// as it is): the glass is only drawn more or less opaque, a frame as cheap
+// as any. (A blur's radius animated would have GNOME's blur draw it all
+// anew each frame, and make what it draws into anew each time the size it
+// draws at changes: on a large monitor, a frame of its own.) At rest the
+// glass lies under the wallpaper, where it can't be seen but is drawn –
+// made as the lock screen shows, and made anew should the wallpaper change:
+// the prompt finds it ready.
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
+import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
-import {blurDownscale, blurSteps} from '../../lib/lockBlur.js';
 import {backgroundGroupOf, wallpapersOf} from './gnome.js';
 
 const EFFECT_NAME = 'atelier-glass';
-// Atelier's blurs of a wallpaper, each for a size (how many times smaller
-// it is drawn): this, a dash and the size.
 const BLUR_NAME = 'atelier-lock-blur';
 /** The glass at its fullest: how much light is left, how rich the colours, how dark the corners. */
 export const GLASS = {brightness: 0.86, saturation: 1.3, vignette: 0.38};
@@ -58,47 +60,62 @@ const GlassEffect = GObject.registerClass(
 class AtelierLockGlassEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
-        this._saturation = this.get_uniform_location('saturation');
-        this._vignette = this.get_uniform_location('vignette');
-        this._look = null;
-        this.setLook(1, 0);
+        this.set_uniform_float(this.get_uniform_location('saturation'), 1, [GLASS.saturation]);
+        this.set_uniform_float(this.get_uniform_location('vignette'), 1, [GLASS.vignette]);
     }
 
     vfunc_build_pipeline() {
         this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, DECLARATIONS, CODE, false);
     }
 
-    /**
-     * @param {number} saturation - 1 as it is, more richer
-     * @param {number} vignette - how much darker the corners are, 0 … 1
-     */
-    setLook(saturation, vignette) {
-        if (this._look?.[0] === saturation && this._look[1] === vignette)
-            return;
-        this._look = [saturation, vignette];
-        this.set_uniform_float(this._saturation, 1, [saturation]);
-        this.set_uniform_float(this._vignette, 1, [vignette]);
-        this.queue_repaint();
-    }
-
     /** @returns {number[]} [saturation, vignette] */
     get look() {
-        return this._look;
+        return [GLASS.saturation, GLASS.vignette];
     }
 });
 
-// A wallpaper's size as GNOME's blur takes it: as it is laid out, on whole
-// pixels (as it will be, before it is).
-function sizeOf(wallpaper) {
-    if (!wallpaper.has_allocation())
-        return [wallpaper.width, wallpaper.height].map(Math.ceil);
-    const box = wallpaper.get_allocation_box();
-    return [Math.ceil(box.x2) - Math.floor(box.x1), Math.ceil(box.y2) - Math.floor(box.y1)];
-}
+// A wallpaper's glass: the wallpaper as GNOME draws it there (its own,
+// which follows the wallpaper as GNOME's does), blurred as GNOME blurs it at
+// its fullest over the shader – GNOME's blur outermost, as it was on the
+// wallpaper. It is drawn only as it is made, and anew if the wallpaper
+// changes; else what GNOME's blur keeps is laid over the wallpaper as it is.
+// (Not a copy of GNOME's wallpaper: GNOME restyles that whenever the key
+// focus comes and goes, and it would be made anew each time. Never
+// flattened to be drawn less opaque: that would make a picture of all of
+// it whenever the room made changes.)
+const GlassPane = GObject.registerClass(
+class AtelierLockGlassPane extends Clutter.Actor {
+    _init(wallpaper, monitorIndex) {
+        super._init({
+            x: wallpaper.x,
+            y: wallpaper.y,
+            width: wallpaper.width,
+            height: wallpaper.height,
+            offscreen_redirect: 0,
+        });
+        /** The wallpaper it is the glass of. */
+        this.wallpaper = wallpaper;
+        const background = new Background.BackgroundManager({container: this, monitorIndex, controlPosition: false});
+        this.connect('destroy', () => background.destroy());
+        this.add_effect_with_name(BLUR_NAME,
+            new Shell.BlurEffect({mode: Shell.BlurMode.ACTOR, brightness: GLASS.brightness}));
+        this.add_effect_with_name(EFFECT_NAME, new GlassEffect());
+        /** How many times it has been drawn (made). */
+        this.made = 0;
+    }
 
-// Atelier's blurs of a wallpaper (not GNOME's own).
-const blursOf = wallpaper =>
-    wallpaper.get_effects().filter(effect => effect.get_name()?.startsWith(`${BLUR_NAME}-`));
+    vfunc_paint(context) {
+        this.made++;
+        super.vfunc_paint(context);
+    }
+
+    /** @param {number} radius - of GNOME's blur at its fullest, pixels */
+    setRadius(radius) {
+        const blur = this.get_effect(BLUR_NAME);
+        if (blur.radius !== radius)
+            blur.radius = radius;
+    }
+});
 
 export class LockGlass {
     /**
@@ -111,11 +128,23 @@ export class LockGlass {
         this._blur = blur;
         this._progress = 0;
         this._releasing = null;
+        // The wallpapers' glass: over them as it shows, under them at rest.
+        this._layer = null;
     }
 
     /** @returns {number} how much glass there is: 0 sharp … 1 */
     get progress() {
         return this._progress;
+    }
+
+    /** @returns {Clutter.Actor|null} what holds the wallpapers' glass, in GNOME's background group */
+    get layer() {
+        return this._layer;
+    }
+
+    /** @returns {Clutter.Actor[]} each wallpaper's glass (its blur, its look and how often it was made) */
+    get panes() {
+        return this._layer?.get_children() ?? [];
     }
 
     /** @param {number} progress - 0 sharp … 1 glass, as the prompt comes up */
@@ -126,53 +155,53 @@ export class LockGlass {
 
     _paint(progress) {
         this._progress = progress;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const fullest = Math.round(this._blur.radius * scale);
-        const radius = Math.round(fullest * progress);
-        const brightness = 1 - (1 - GLASS.brightness) * progress;
-        for (const wallpaper of wallpapersOf(this._dialog)) {
-            const glass = this._glassOf(wallpaper, fullest);
-            // (The others left out, as they are.)
-            const blur = this._blurFor(wallpaper, radius, fullest);
-            for (const effect of [wallpaper.get_effect('blur'), ...blursOf(wallpaper)]) {
-                if (effect === blur)
-                    effect.set({radius, brightness, enabled: true});
-                else
-                    effect.set({radius: 0, enabled: false});
-            }
-            glass.setLook(1 + (GLASS.saturation - 1) * progress, GLASS.vignette * progress);
-            glass.enabled = progress > 0;
+        const layer = this._sync();
+        if (!layer)
+            return;
+        const group = layer.get_parent();
+        if (progress > 0) {
+            if (group.get_last_child() !== layer)
+                group.set_child_above_sibling(layer, null);
+            layer.opacity = Math.round(255 * progress);
+        } else {
+            if (group.get_first_child() !== layer)
+                group.set_child_below_sibling(layer, null);
+            layer.opacity = 255;
         }
     }
 
-    // The blur that blurs a wallpaper this much: the one for the size it
-    // draws the wallpaper at (GNOME's, if Atelier has none for it); none
-    // for no blur.
-    _blurFor(wallpaper, radius, fullest) {
-        if (radius <= 0)
+    // The glass of each wallpaper there is, as blurred as GNOME blurs it at
+    // the scale there is, GNOME's own blur off. (GNOME makes the wallpapers
+    // anew with the monitors, and the glass goes with them: made anew too.)
+    _sync() {
+        const group = backgroundGroupOf(this._dialog);
+        const wallpapers = wallpapersOf(this._dialog);
+        if (!group || wallpapers.length === 0)
             return null;
-        const [width, height] = sizeOf(wallpaper);
-        const step = blurDownscale(width, height, radius);
-        if (step === blurDownscale(width, height, fullest))
-            return wallpaper.get_effect('blur');
-        return wallpaper.get_effect(`${BLUR_NAME}-${step}`) ?? wallpaper.get_effect('blur');
-    }
-
-    // A wallpaper's glass – with, before it, Atelier's blurs for the sizes
-    // the wallpaper is drawn at on the way to GNOME's blur at its fullest
-    // (but that one, GNOME's): they blur the glass as GNOME's does. (GNOME
-    // makes the wallpapers anew with the monitors: each gets its own.)
-    _glassOf(wallpaper, fullest) {
-        let glass = wallpaper.get_effect(EFFECT_NAME);
-        if (glass)
-            return glass;
-        for (const step of blurSteps(...sizeOf(wallpaper), fullest).slice(0, -1)) {
-            wallpaper.add_effect_with_name(`${BLUR_NAME}-${step}`,
-                new Shell.BlurEffect({mode: Shell.BlurMode.ACTOR, radius: 0, enabled: false}));
+        for (const wallpaper of wallpapers) {
+            const own = wallpaper.get_effect('blur');
+            if (own.enabled)
+                own.enabled = false;
         }
-        glass = new GlassEffect();
-        wallpaper.add_effect_with_name(EFFECT_NAME, glass);
-        return glass;
+        const panes = this.panes;
+        if (panes.length !== wallpapers.length || panes.some((pane, i) => pane.wallpaper !== wallpapers[i])) {
+            this._layer?.destroy();
+            // (Never flattened to be drawn less opaque, as an actor is: it
+            // is drawn wallpaper by wallpaper.)
+            const layer = new Clutter.Actor({name: 'atelier-lock-glass', offscreen_redirect: 0});
+            // (GNOME's are one for each monitor, in their order.)
+            wallpapers.forEach((wallpaper, i) => layer.add_child(new GlassPane(wallpaper,
+                wallpaper.get_children().find(child => child instanceof Meta.BackgroundActor)?.monitor ?? i)));
+            layer.connect('destroy', () => {
+                if (this._layer === layer)
+                    this._layer = null;
+            });
+            group.insert_child_below(layer, null);
+            this._layer = layer;
+        }
+        const radius = Math.round(this._blur.radius * St.ThemeContext.get_for_stage(global.stage).scale_factor);
+        this.panes.forEach(pane => pane.setRadius(radius));
+        return this._layer;
     }
 
     /**
@@ -213,10 +242,9 @@ export class LockGlass {
     /** GNOME's own blur again, as it set it (Atelier turned off while locked). */
     restore() {
         this._stopReleasing();
+        this._layer?.destroy();
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         for (const wallpaper of wallpapersOf(this._dialog)) {
-            blursOf(wallpaper).forEach(blur => wallpaper.remove_effect(blur));
-            wallpaper.remove_effect_by_name(EFFECT_NAME);
             wallpaper.get_effect('blur').set({
                 radius: Math.round(this._blur.radius * scale),
                 brightness: this._blur.brightness,
