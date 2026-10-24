@@ -408,7 +408,7 @@
     <key name="widgets" type="s">
       <default>'[]'</default>
       <summary>Widgets on the lock screen</summary>
-      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
+      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets. A glass clock's size may also be its own, so many columns by so many rows, e.g. “9x11”.</description>
     </key>
     <key name="style" type="s">
       <choices>

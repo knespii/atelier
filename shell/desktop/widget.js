@@ -8,7 +8,7 @@ import GioUnix from 'gi://GioUnix';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
-import {SIZES, pixelSize} from '../../lib/widgets.js';
+import {KINDS, SIZES, namedSize, pixelSize} from '../../lib/widgets.js';
 
 // What the card holds fills it; while editing, its buttons sit in the top
 // right corner and the handle to stretch it on the bottom right one, a
@@ -71,7 +71,7 @@ export const DesktopWidget = GObject.registerClass({
         this.resize(entry.size);
     }
 
-    /** @param {string} size - square, card, large or wide */
+    /** @param {string} size - square, card, large or wide (or one of its own, "9x11") */
     resize(size) {
         this.fill(size);
         this.fit();
@@ -79,14 +79,17 @@ export const DesktopWidget = GObject.registerClass({
 
     /**
      * Lay out what it shows for a size. The card keeps the size it has
-     * until fit() (while it is being stretched, say).
+     * until fit() (while it is being stretched, say). Of a size of its own,
+     * it is styled as the size it goes by: of its kind's, the nearest to it
+     * (in the context's catalog, the lock screen's say).
      *
      * @param {string} size
      */
     fill(size) {
         for (const name of Object.keys(SIZES))
             this.remove_style_class_name(`atelier-widget-${name}`);
-        this.add_style_class_name(`atelier-widget-${size}`);
+        const named = namedSize(size, (this._context.catalog ?? KINDS)[this.entry.kind]?.sizes);
+        this.add_style_class_name(`atelier-widget-${named}`);
         this.entry = {...this.entry, size};
         this._content?.destroy();
         this._content = new St.BoxLayout({

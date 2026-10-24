@@ -29,8 +29,8 @@ import {
 } from '../../lib/lockLook.js';
 import {labelFont} from '../../lib/lockType.js';
 import {
-    LOCK_CLOCK_FACES, LOCK_KINDS, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
-    nearestSize, nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout,
+    LOCK_CLOCK_FACES, LOCK_KINDS, allowsSize, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize,
+    namedSize, nearestSize, nearestSpot, newId, nextSize, parseLayout, pixelSize, placeAt, serializeLayout, sizeOf,
 } from '../../lib/widgets.js';
 import {holdLabelFont} from '../core/fonts.js';
 import {DateWidget} from '../desktop/kinds/time.js';
@@ -111,6 +111,7 @@ export class LockBoard {
         this.layer.connect('notify::mapped', () => this.layer.mapped && this._tone());
         // What the widgets read: nothing here opens an app or the network.
         this._context = {
+            catalog: LOCK_KINDS,
             style: () => (this._look === 'analogue' ? 'analogue' : 'modern'),
             sources: {},
             claude: () => null,
@@ -817,7 +818,9 @@ export class LockBoard {
         const layout = this._shownLayout();
         const entry = layout.find(e => e.id === id);
         const sizes = LOCK_KINDS[entry.kind].sizes;
-        for (let size = nextSize(entry.kind, entry.size, LOCK_KINDS), n = 1; n < sizes.length;
+        // (From a size of its own, any of them: the first first.)
+        const tries = sizes.includes(entry.size) ? sizes.length - 1 : sizes.length;
+        for (let size = nextSize(entry.kind, entry.size, LOCK_KINDS), n = 0; n < tries;
             size = nextSize(entry.kind, size, LOCK_KINDS), n++) {
             let resized = {...entry, size};
             if (!fits(layout, resized, this._grid)) {
@@ -840,16 +843,37 @@ export class LockBoard {
             return;
         this._layout = this._layout.map(entry => (entry.id === id ? {...entry, [key]: value} : entry));
         widget.entry = {...widget.entry, [key]: value};
-        this._save();
+        // A size of its own only as long as it may have it (a clock given
+        // another face than glass): else the nearest of its kind's.
+        const entry = this._shownLayout().find(e => e.id === id);
+        if (allowsSize(entry, entry.size, LOCK_KINDS)) {
+            this._save();
+        } else {
+            const named = this._namedFor(entry);
+            this._keep({...entry, ...named});
+            widget.entry = {...widget.entry, ...named};
+        }
         widget.resize(widget.entry.size);
+        this._place();
+    }
+
+    // Of the sizes its kind comes in, the one nearest to a widget's own
+    // that fits where it is; or else the one nearest to it, where there is
+    // room for it (wherever it is shown, if nowhere).
+    _namedFor(entry) {
+        const layout = this._shownLayout();
+        const size = nearestSize(layout, entry, this._grid, ...sizeOf(entry.size), LOCK_KINDS);
+        if (size !== entry.size)
+            return {size};
+        const named = namedSize(entry.size, LOCK_KINDS[entry.kind].sizes);
+        return {size: named, ...findSpot(layout, {...entry, size: named}, this._grid)};
     }
 
     setWidgetSize(id, size) {
         const widget = this._widgets.get(id);
         const layout = this._shownLayout();
         const entry = layout.find(e => e.id === id);
-        if (!widget || !entry || !LOCK_KINDS[entry.kind]?.sizes.includes(size) ||
-            !fits(layout, {...entry, size}, this._grid))
+        if (!widget || !entry || !allowsSize(entry, size, LOCK_KINDS) || !fits(layout, {...entry, size}, this._grid))
             return false;
         this._keep({...entry, size});
         if (widget.entry.size !== size)

@@ -4669,6 +4669,203 @@ async function testLockGlassClock() {
     kept.forEach(([key, value]) => background.set_string(key, value));
 }
 
+// The glass clock stretched to a size of its own on the mock lock screen, as
+// an iPhone's clock is dragged taller: its corner dragged with the pointer,
+// it follows it, its digits filling it as it goes, and the shadow shows the
+// whole cells it lands on; let go, it takes them and keeps them. Over a
+// hill in the wallpaper, the hill stands in front of the digits' feet while
+// they read, and not once they are stretched far down into it. Given
+// another face, it takes the nearest of the clock's sizes; a click on its
+// corner gives it the first of them. On the lock screen, as it was left;
+// and a widget on the desktop still takes the nearest of its sizes.
+async function testLockFreeStretch() {
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const size = [monitor.width, monitor.height];
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    // (Pixels of so many cells.)
+    const px = n => (n * PITCH - GAP) * scale;
+    const saved = () => JSON.parse(lockSettings.get_string('widgets')).find(e => e.id === 'clock');
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', false);
+    const editor = atelier().modules.get('lockscreen-editor');
+    lockSettings.set_string('edit-request', 'free');
+    check(await waitFor(() => editor?.preview?._board.widgets[0]?.glass?.target, 3000),
+        'the mock lock screen, a large glass clock on it');
+    if (!editor?.preview)
+        return;
+    const board = editor.preview._board;
+    const ghost = editor.preview._editor._ghost;
+    const clock = board.widgets.find(w => w.entry.id === 'clock');
+    await Scripting.sleep(800);
+    const large = clock.glass.target.stretch;
+    // (Where the digits are on the monitor, and the bottom of the face they fill.)
+    const digitsNow = () => {
+        const glass = clock.glass;
+        const digits = glass?.digitsRect;
+        const [fx, fy] = glass.get_transformed_position().map((v, i) => v - [monitor.x, monitor.y][i]);
+        return digits && {y: fy + digits.y, height: digits.height, feet: fy + digits.y + digits.height,
+            bottom: fy + glass.height};
+    };
+    const fills = d => Boolean(d) && Math.abs(d.feet - d.bottom) < 1;
+
+    // Dragged by its corner a cell and a bit right, three and a bit down.
+    let [hx, hy] = centerOf(clock._editHandle);
+    const [dx, dy] = [(PITCH + 10) * scale, (3 * PITCH + 10) * scale];
+    await pointerDown(hx, hy);
+    await pointerAlong(hx, hy, hx + dx, hy + dy);
+    await Scripting.sleep(300);
+    const live = [clock.width, clock.height];
+    check(Math.abs(live[0] - (px(8) + dx)) <= 1 && Math.abs(live[1] - (px(8) + dy)) <= 1 && ghost.visible &&
+        Math.abs(ghost.width - px(9)) < 1 && Math.abs(ghost.height - px(11)) < 1,
+    `stretched, it follows the pointer (${live.map(Math.round).join('×')}), the shadow on the whole cells it lands ` +
+    `on (${Math.round(ghost.width)}×${Math.round(ghost.height)})`);
+    check(fills(digitsNow()) && clock.glass.target.stretch > large,
+        `its digits fill it as it goes (×${large.toFixed(2)} → ×${clock.glass.target.stretch.toFixed(2)})`);
+    await screenshot('95-lock-free-stretching');
+    await pointerUp();
+    check(await waitFor(() => clock.width === px(9) && clock.height === px(11), 1000) && saved()?.size === '9x11' &&
+        clock.entry.size === '9x11', `let go, it takes them and keeps them (${saved()?.size})`);
+    await waitFor(() => clock.glass?.target, 1000);
+    const filled = digitsNow();
+    const stretch = clock.glass.target.stretch;
+    // (×2.8: the most they stretched to before, whatever the box.)
+    check(fills(filled) && stretch > large && stretch > 2.8,
+        `its digits fill it, from under the date line to its bottom (×${stretch.toFixed(2)}; a large clock's ` +
+        `×${large.toFixed(2)}, at most ×2.8 before)`);
+    results.push(`INFO  the glass clock of 9 × 11 cells: its face ${Math.round(clock.glass.width)}×` +
+        `${Math.round(clock.glass.height)} of ${clock.width}×${clock.height}, its digits ${Math.round(filled.height)} tall`);
+    await restPointer();
+    await Scripting.sleep(400);
+    await screenshot('95b-lock-free-9x11');
+
+    // A hill in front of a third of the digits' height: more than the
+    // quarter at their feet they may lose, but they read.
+    const dir = `${OUTPUT}/free`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/hill.png`;
+    const hill = Math.round(filled.feet - filled.height / 3);
+    hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+    const cutout = cutoutPath(pictureState(wallpaper), size);
+    GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+    hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff,
+        {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`});
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    lockSettings.set_boolean('depth-effect', true);
+    const depth = () => board.depth;
+    check(await waitFor(() => depth()?.loaded && depth().legibility.length === 1, 5000) &&
+        !depth().tooMuch && depth().actor.visible && depth().legibility[0].worst > 0,
+    `the hill in front of a third of them: on, they read (${JSON.stringify(depth()?.legibility[0])})`);
+    await Scripting.sleep(1500);
+    await screenshot('95c-lock-free-hill');
+
+    // Stretched far down into it: off, the time whole.
+    [hx, hy] = centerOf(clock._editHandle);
+    await pointerDown(hx, hy);
+    await pointerAlong(hx, hy, hx + 5 * scale, hy + (3 * PITCH + 10) * scale);
+    await Scripting.sleep(300);
+    await pointerUp();
+    await restPointer();
+    check(await waitFor(() => saved()?.size === '9x14' && clock.height === px(14), 1000) && fills(digitsNow()),
+        `stretched further, as far again (${saved()?.size}, ×${clock.glass?.target?.stretch.toFixed(2)})`);
+    const far = digitsNow();
+    check(await waitFor(() => depth().tooMuch && !depth().actor.visible, 2000) &&
+        depth().legibility[0].worst > MAX_GLYPH_COVER,
+    `down into the hill, ${Math.round(100 * (far.feet - hill) / far.height)} % of them behind it: off, the time ` +
+    `whole (${JSON.stringify(depth().legibility[0])})`);
+    await Scripting.sleep(400);
+    await screenshot('95d-lock-free-too-far');
+
+    // Another face: the nearest of the clock's sizes; the glass one again,
+    // as it is.
+    board.setWidgetOption('clock', 'face', 'stacked');
+    check(saved()?.face === 'stacked' && saved().size === 'tall' && clock.entry.size === 'tall' &&
+        clock.height === px(12), `another face: the nearest of the clock's sizes (${saved()?.size})`);
+    board.setWidgetOption('clock', 'face', 'glass');
+    check(saved()?.face === 'glass' && saved().size === 'tall' && Boolean(clock.glass), 'the glass face again: as it is');
+    // A click on its corner, from a size of its own: the first of the clock's.
+    check(board.setWidgetSize('clock', '9x11') && saved()?.size === '9x11', 'a size of its own again');
+    await Scripting.sleep(300);
+    await clickAt(...centerOf(clock._editHandle));
+    await Scripting.sleep(300);
+    check(saved()?.size === 'large' && clock.entry.size === 'large',
+        `a click on its corner: the first of the clock's sizes (${saved()?.size})`);
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !editor.preview, 3000), 'Escape and the mock lock screen goes');
+
+    // On the lock screen, as it was left.
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: '9x11', x: 2, y: 2, fine: true, face: 'glass'},
+    ]));
+    if (Main.screenShield) {
+        const lock = () => atelier().lockModules?.get('lockscreen');
+        const locked = await lockForTest();
+        try {
+            check(await waitFor(() => lock()?.board?.widgets[0]?.glass?.target && lock().board.depth?.loaded, 5000),
+                'locked: the clock of its own size there');
+            const there = lock().board.widgets[0];
+            const glass = there.glass;
+            const [, fy] = glass.get_transformed_position();
+            const feet = fy + glass.digitsRect.y + glass.digitsRect.height;
+            check(there.entry.size === '9x11' && there.width === px(9) && there.height === px(11) &&
+                Math.abs(feet - fy - glass.height) < 1 && lock().board.depth.actor.visible,
+            `9 × 11 cells, its digits filling them, the hill in front of their feet (×${glass.target.stretch.toFixed(2)})`);
+            await restPointer();
+            await Scripting.sleep(800);
+            await screenshot('95e-lock-free-locked');
+        } finally {
+            await locked.unlock();
+        }
+    } else {
+        results.push('INFO  no lock screen here (no GDM): the clock of its own size unlocked only');
+    }
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+    kept.forEach(([key, value]) => background.set_string(key, value));
+
+    // On the desktop, a widget stretched to an odd size still takes the
+    // nearest of its sizes.
+    const desktop = atelier().modules.get('desktop');
+    if (!desktop) {
+        results.push('INFO  no desktop module: its widgets\' sizes unchecked');
+        return;
+    }
+    const {findSpot} = await import('../lib/widgets.js');
+    const desktopSettings = atelier()._settings.get_child('desktop');
+    desktop.edit();
+    await Scripting.sleep(800);
+    const spot = findSpot(desktop._shownLayout(), {id: '', size: 'card'}, desktop.grid);
+    const added = spot && desktop.addWidget('clock', {}, spot);
+    if (check(Boolean(added), `a clock on the desktop where a card fits (${JSON.stringify(spot)})`)) {
+        await Scripting.sleep(400);
+        const [cx, cy] = centerOf(added._editHandle);
+        // (Three cells and a bit wider, two and a bit taller – as tall as
+        // a clock gets on the desktop, and a little past it: nearest a card.)
+        await pointerDown(cx, cy);
+        await pointerAlong(cx, cy, cx + (3 * PITCH + 10) * scale, cy + (2 * PITCH + 14) * scale);
+        await Scripting.sleep(300);
+        const shadow = desktop._editor._ghost;
+        const shown = [shadow.width, shadow.height].map(Math.round);
+        await pointerUp();
+        const desktopSaved = JSON.parse(desktopSettings.get_string('widgets')).find(e => e.id === added.entry.id);
+        check(desktopSaved?.size === 'card' && added.entry.size === 'card' && shown[0] === px(8) && shown[1] === px(4) &&
+            await waitFor(() => added.width === px(8) && added.height === px(4), 1000),
+        `on the desktop, stretched to an odd size, a widget takes the nearest of its sizes (${desktopSaved?.size}, ` +
+        `the shadow ${shown.join('×')})`);
+        desktop.removeWidget(added.entry.id);
+    }
+    desktop.stopEditing();
+    await waitFor(() => !desktop.editing && !desktop._closing?.actor, 2000);
+}
+
 // The lock screen on wallpapers of one's own (ATELIER_TEST_WALLPAPER, one
 // or more, apart by colons), each cutout made by the worker with a real
 // depth model (ATELIER_TEST_MODEL, only read), as someone has it: a large
@@ -5380,6 +5577,7 @@ export async function run() {
             await part(testLockDepth);
             await part(testLockLook);
             await part(testLockGlassClock);
+            await part(testLockFreeStretch);
             await part(testLockOnOwnWallpaper);
             await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
             await part(testLockFonts);
@@ -5432,6 +5630,7 @@ export async function run() {
         await part(testLockDepth);
         await part(testLockLook);
         await part(testLockGlassClock);
+        await part(testLockFreeStretch);
         await part(testLockOnOwnWallpaper);
         await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
         await part(testLockFonts);

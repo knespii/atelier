@@ -125,7 +125,9 @@ profile called **Original**, so there is always a way back.
   whenever GNOME asks for something else). Clocks – a stacked one too, the
   date over big hours over dimmer minutes – the date, and the weather and
   the battery in a line can be placed anywhere on it, on a mock lock screen
-  opened from the settings' Lock Screen page. Their type is in a tone of the
+  opened from the settings' Lock Screen page; dragged by its corner, a
+  widget takes the nearest of its sizes, the glass clock any size, cell by
+  cell. Their type is in a tone of the
   palette's hue, light or dark, picked from the wallpaper behind them so
   that it is legible there (contrast as APCA measures it), or in a color
   of one's own – any, or one of the wallpaper's that the settings offer,
