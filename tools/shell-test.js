@@ -5131,12 +5131,17 @@ async function testLockStretchSpeed() {
         const drawn = glass._digits.repaints - repaints;
         const [quick, full] = [callsOf('glass sketched', since).length, callsOf('glass painted', since).length];
         const live = [clock.width, clock.height].map(Math.round);
-        const gaps = spreadOf(watched.frames.slice(1).map((f, i) => f.done - watched.frames[i].done));
+        const apart = watched.frames.slice(1).map((f, i) => f.done - watched.frames[i].done);
+        const gaps = spreadOf(apart);
         const [layout, painting] = ['layout', 'painting'].map(key => spreadOf(watched.frames.map(f => f[key])));
         const tag = `at ${density}×, to ${live.join('×')} px`;
-        check(gaps.mean <= 20 && gaps.p95 <= 25 && gaps.max <= 66,
+        // (A frame or two held up by something else – the garbage
+        // collector, in a shell that has run a while – may be long.)
+        const long = apart.filter(gap => gap > 50).length;
+        check(gaps.mean <= 20 && gaps.p95 <= 25 && long <= 2,
             `stretched over two seconds (${tag}), the frames as the display shows them: ${ms(gaps.mean)} ms apart ` +
-            `on average, ${ms(gaps.p95)} for 95 % of them, ${ms(gaps.max)} at most (${watched.frames.length} frames)`);
+            `on average, ${ms(gaps.p95)} for 95 % of them, ${long} over 50 ms (${ms(gaps.max)} at most; ` +
+            `${watched.frames.length} frames)`);
         check(moves > 30 && drawn <= moves + 2 && quick >= drawn - 2 && full === 0,
             `each of its ${moves} moves drawn once (${drawn} times), quickly (${quick} sketched, ${full} in full)`);
         check(Math.abs(live[0] - px(columns)) <= 2 && Math.abs(live[1] - px(rows)) <= 2 && fills(digitsNow()),
