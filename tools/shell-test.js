@@ -34,7 +34,7 @@ import * as dockHiding from './dock-tests/hiding.js';
 import * as dockLaunchers from './dock-tests/launchers.js';
 import * as dockWindows from './dock-tests/windows.js';
 import {
-    MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutPath, modelPath, pictureState, workerPath,
+    MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutOpacity, cutoutPath, modelPath, pictureState, workerPath,
 } from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
@@ -4368,13 +4368,14 @@ function fakeBattery() {
     };
 }
 
-// A screenshot's pixels, read once: at(x, y) gives [r, g, b].
-function pixelsOf(name) {
+// A screenshot's pixels, read once: at(x, y) gives [r, g, b] – of the point
+// of the screen, for a screenshot of an area with its corner there.
+function pixelsOf(name, [left, top] = [0, 0]) {
     const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
     const [pixels, stride, channels] = [pixbuf.get_pixels(), pixbuf.get_rowstride(), pixbuf.get_n_channels()];
     return {
         at(x, y) {
-            const i = Math.round(y) * stride + Math.round(x) * channels;
+            const i = Math.round(y - top) * stride + Math.round(x - left) * channels;
             return [pixels[i], pixels[i + 1], pixels[i + 2]];
         },
     };
@@ -4673,6 +4674,348 @@ async function testLockGlassClock() {
     }
     ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
     kept.forEach(([key, value]) => background.set_string(key, value));
+}
+
+// A band of the screen, row by row, its pixels sorted in two by how much two
+// screenshots of it differ there: {row, differ, same} – the columns where
+// they differ by more than `apart`, and those where by no more than `alike`;
+// of each, only those with one of the other near them (whatever lies under
+// both, a wallpaper darker towards the corners, is as good as the same).
+function sortedRows(a, b, [x, y, width, height], apart, alike, near = 8) {
+    // (How far each column is from the nearest of a kind.)
+    const distances = (kinds, kind) => {
+        const to = kinds.map(() => Infinity);
+        for (let i = 0, last = -Infinity; i < kinds.length; i++) {
+            last = kinds[i] === kind ? i : last;
+            to[i] = i - last;
+        }
+        for (let i = kinds.length - 1, last = Infinity; i >= 0; i--) {
+            last = kinds[i] === kind ? i : last;
+            to[i] = Math.min(to[i], last - i);
+        }
+        return to;
+    };
+    const rows = [];
+    for (let row = Math.round(y); row < y + height; row++) {
+        const cols = [];
+        for (let col = Math.round(x); col < x + width; col++)
+            cols.push(col);
+        const kinds = cols.map(col => {
+            const d = colorDistance(a.at(col, row), b.at(col, row));
+            return d > apart ? 'differ' : d <= alike ? 'same' : null;
+        });
+        const [toDiffer, toSame] = [distances(kinds, 'differ'), distances(kinds, 'same')];
+        rows.push({
+            row,
+            differ: cols.filter((_, i) => kinds[i] === 'differ' && toSame[i] <= near),
+            same: cols.filter((_, i) => kinds[i] === 'same' && toDiffer[i] <= near),
+        });
+    }
+    return rows;
+}
+
+// How far apart the two sets of each row (sortedRows()) are in a
+// screenshot, the mean colour of one from the other's: at the most, and on
+// average, over the rows with enough of both.
+function setsApart(pixels, rows) {
+    const mean = (cols, row) => [0, 1, 2].map(i => cols.reduce((sum, col) => sum + pixels.at(col, row)[i], 0) / cols.length);
+    const apart = rows.filter(({differ, same}) => differ.length >= 4 && same.length >= 4)
+        .map(({row, differ, same}) => colorDistance(mean(differ, row), mean(same, row)));
+    return {most: Math.max(0, ...apart), mean: apart.length > 0 ? apart.reduce((a, b) => a + b, 0) / apart.length : 0};
+}
+
+// How much a screenshot changes from a pixel to the one a few to its right,
+// at the most, over a rectangle of it (a sky over a hill, blurred: hardly).
+function stepsIn(pixels, [x, y, width, height], step = 3) {
+    let most = 0;
+    for (let row = Math.round(y); row < y + height; row += 2) {
+        for (let col = Math.round(x); col + step < x + width; col++)
+            most = Math.max(most, colorDistance(pixels.at(col, row), pixels.at(col + step, row)));
+    }
+    return most;
+}
+
+// The lock screen's clock as the prompt comes up and goes, frame by frame,
+// slowed down: as the user has it, a large glass clock over a hill that
+// stands in front of its digits' feet (the depth effect on, a band of the
+// subject round its date line too, which stays in front of it), the date
+// and the battery beside it. As the prompt comes up, the clock – its glass,
+// its date line – goes with the subject in front of it as one picture, as
+// the subject goes (lib/depth.js cutoutOpacity()): no digit's glass ever
+// where the hill stands in front of it, the wallpaper alone where the clock
+// was once the prompt is a third of the way up; as the prompt goes, they
+// come back so, as they were. The other widgets dim. With the lock screen's
+// own popup (Escape takes the prompt away, as GNOME does when it times out;
+// a wrong password and the screen unlocking leave the clock away), then
+// with GNOME's prompt. The frames, with what each shows, are kept in
+// tests/output/shell/fades.
+async function testLockClockFades() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the clock going with the prompt untested');
+        return;
+    }
+    const {GlassBackdrop} = await import('../shell/lockscreen/liquidGlass.js');
+    const SLOW = 6;
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const size = [monitor.width, monitor.height];
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
+    const [boxLeft, boxTop] = cellOrigin(2, 2, origin).map((v, i) => [monitor.x, monitor.y][i] + v * scale);
+    const side = (SIZES.large[1] * PITCH - GAP) * scale;
+    // (A sky over a hill in front of the lower part of the clock's box.)
+    const hill = Math.round(boxTop - monitor.y + side * 0.7);
+    const dir = `${OUTPUT}/fades`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/hill.png`;
+    hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    const cutout = cutoutPath(pictureState(wallpaper), size);
+    GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+    const cutoutText = {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`};
+    hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff, cutoutText);
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+        {id: 'date', kind: 'date', size: 'square', x: 12, y: 2, fine: true},
+        {id: 'battery', kind: 'battery', size: 'line', x: 2, y: 12, fine: true},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('depth-effect', true);
+    const realBattery = fakeBattery();
+    await wallpapersSettled();
+    // (The clock's box and round it, on the screen: the island, the popup,
+    // GNOME's prompt and the other widgets are elsewhere.)
+    const area = [boxLeft - 30, boxTop - 40, side + 60, side + 70].map(Math.round);
+    const corner = [area[0], area[1]];
+    const shown = room => Math.round(255 * cutoutOpacity(room));
+    const dimmed = room => Math.round(255 * (1 - 0.75 * room));
+    try {
+        for (const popup of [true, false]) {
+            const take = popup ? 'popup' : 'gnome';
+            lockSettings.set_boolean('password-field', popup);
+            const locked = await lockForTest();
+            let backdrop = null;
+            let clock = null;
+            try {
+                check(await waitFor(() => lock()?.board?.depth?.loaded &&
+                    lock().board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 5000),
+                `locked, ${popup ? 'the lock screen\'s own popup' : 'GNOME\'s prompt'} to ask: the glass clock, the hill`);
+                const board = lock().board;
+                const depth = board.depth;
+                clock = board.widgets.find(w => w.entry.id === 'clock');
+                const others = board.widgets.filter(w => w !== clock);
+                const glass = clock.glass;
+                // (The time as the test sets it, and the frosted wallpaper
+                // as the board gives the glass, unless it does.)
+                clock._sync = () => {};
+                glass.setClock('10:08');
+                await waitFor(() => !glass.changing, 2000);
+                if (!glass.backdrop) {
+                    backdrop = new GlassBackdrop();
+                    backdrop.setMonitor(size, scale);
+                    await waitFor(() => backdrop.current, 10000);
+                    glass.backdrop = backdrop.current;
+                }
+                await waitFor(() => glass.stretch === glass.target.stretch, 2000);
+                // The subject round the date line too, which stays in front of it.
+                const [lx, ly] = glass.dateLine.get_transformed_position().map(Math.round);
+                const [lw, lh] = glass.dateLine.get_transformed_size().map(Math.round);
+                rectsPicture(cutout, size, [[0, ly - monitor.y - 30, size[0], ly - monitor.y + lh], [0, hill, ...size]],
+                    0x3f8a2aff, 0x00000000, cutoutText);
+                depth._load();
+                check(await waitFor(() => depth.loaded && depth.actor.visible && !depth.tooMuch &&
+                    depth._inFront[0]?.actor === glass.dateLine, 3000),
+                `on: the hill in front of their feet, the subject round the date line, which stays in front (${JSON.stringify(depth.legibility[0])})`);
+                await restPointer();
+                await Scripting.sleep(600);
+                // At rest; without the cutout; without the clock and the cutout.
+                const still = async (name, hidden = []) => {
+                    hidden.forEach(actor => actor.hide());
+                    await screenshotArea(`fades/${take}-${name}`, ...area);
+                    hidden.forEach(actor => actor.show());
+                    return pixelsOf(`fades/${take}-${name}`, corner);
+                };
+                const rest = await still('rest');
+                const uncut = await still('uncut', [depth.actor]);
+                const bare = await still('bare', [clock, depth.actor]);
+                await Scripting.sleep(300);
+                // The glass at the digits' feet behind the hill (where it shows
+                // without the cutout), the hill beside it; the glass over the
+                // sky, the sky beside it; the date line's letters, the sky
+                // round them (in the hole the cutout has for it).
+                const [faceX, faceY] = glass.get_transformed_position();
+                const boxes = glass.glyphBoxes.map(b => ({x: faceX + b.x, y: faceY + b.y, width: b.width, height: b.height}));
+                const [left, right] = [Math.min(...boxes.map(b => b.x)) - 4, Math.max(...boxes.map(b => b.x + b.width)) + 4];
+                const [top, feet] = [Math.min(...boxes.map(b => b.y)), Math.max(...boxes.map(b => b.y + b.height))];
+                const hillOnScreen = monitor.y + hill;
+                const feetRows = sortedRows(uncut, rest, [left, hillOnScreen + 6, right - left, feet - 3 - hillOnScreen - 6], 20, 4);
+                const glassRows = sortedRows(rest, bare, [left, top + 8, right - left, hillOnScreen - 8 - top - 8], 24, 4);
+                const dateRows = sortedRows(rest, bare, [lx, ly, lw, lh], 24, 4);
+                const count = (rows, set) => rows.reduce((sum, row) => sum + row[set].length, 0);
+                check([feetRows, glassRows, dateRows].every(rows => count(rows, 'differ') > 100 && count(rows, 'same') > 100),
+                    `the glass at their feet behind the hill, over the sky, the date line's letters found (${
+                        [feetRows, glassRows, dateRows].map(rows => `${count(rows, 'differ')}/${count(rows, 'same')}`)})`);
+                const face = [faceX + 1, faceY + 1, glass.width - 2, glass.height - 2];
+
+                // Frames from start() until done(), slowed down: one whenever
+                // what shows of the clock has changed enough (and now and then
+                // besides), with the room made then and how much of the clock,
+                // of the subject and of the other widgets shows.
+                const record = async (name, start, done, every = 6) => {
+                    const frames = [];
+                    const motion = St.Settings.get();
+                    motion.slow_down_factor = SLOW;
+                    try {
+                        const started = start();
+                        const until = GLib.get_monotonic_time() + 40 * 1000000;
+                        let last = null;
+                        while (GLib.get_monotonic_time() < until) {
+                            const now = {
+                                time: GLib.get_monotonic_time(),
+                                room: lock().room,
+                                clock: clock.get_paint_opacity(),
+                                subject: depth.actor.get_paint_opacity(),
+                                others: others.map(w => w.get_paint_opacity()),
+                            };
+                            const end = done(now);
+                            if (!last || Math.abs(now.clock - last.clock) >= every ||
+                                (now.clock !== last.clock && [0, 255].includes(now.clock)) || now.time - last.time > 400000 || end) {
+                                now.file = `fades/${take}-${name}-${String(frames.length).padStart(3, '0')}`;
+                                frames.push(now);
+                                await screenshotArea(now.file, ...area);
+                                last = now;
+                            }
+                            if (end)
+                                break;
+                            await Scripting.sleep(4);
+                        }
+                        await started;
+                    } finally {
+                        motion.slow_down_factor = 1;
+                    }
+                    // What each shows, kept beside them.
+                    for (const frame of frames) {
+                        const pixels = pixelsOf(frame.file, corner);
+                        frame.feet = setsApart(pixels, feetRows).most;
+                        frame.glass = setsApart(pixels, glassRows).mean;
+                        frame.date = setsApart(pixels, dateRows).mean;
+                        frame.steps = frame.clock === 0 ? stepsIn(pixels, face) : null;
+                    }
+                    GLib.file_set_contents(`${dir}/${take}-${name}.txt`, `${[
+                        'frame\troom\tclock\tsubject\tothers\tfeet\tglass\tdate\tsteps',
+                        ...frames.map(f => [GLib.path_get_basename(f.file), f.room.toFixed(3), f.clock, f.subject,
+                            f.others.join('/'), f.feet.toFixed(1), f.glass.toFixed(1), f.date.toFixed(1), f.steps ?? '-'].join('\t')),
+                    ].join('\n')}\n`);
+                    return frames;
+                };
+                // What the frames of the prompt coming up (or going) show.
+                const checkFrames = (name, frames, coming) => {
+                    const what = `${take}, ${name}`;
+                    const fading = frames.filter(f => f.clock > 0 && f.clock < 255);
+                    check(fading.length >= 5, `${what}: ${frames.length} frames, ${fading.length} of them while the clock fades`);
+                    check(frames.every(f => f.clock === f.subject && Math.abs(f.clock - shown(f.room)) <= 1),
+                        `${what}: frame by frame, the clock as much there as the subject in front of it, as the room has it (${
+                            frames.map(f => f.clock).join(' ')})`);
+                    const feet = Math.max(...frames.map(f => f.feet));
+                    check(feet <= 3, `${what}: no digit's glass where the hill stands in front of it, in any frame (at most ${
+                        feet.toFixed(1)} apart, the glass's ${setsApart(uncut, feetRows).most.toFixed(0)} without the hill)`);
+                    if (!coming) {
+                        const gone = frames.filter(f => f.clock === 0);
+                        const steps = Math.max(...gone.map(f => f.steps));
+                        check(gone.length > 0 && steps <= 3 && gone.every(f => f.glass <= 2 && f.date <= 2),
+                            `${what}: gone, the wallpaper alone where it was (${gone.length} frames, at most ${steps} from a pixel to the next)`);
+                    }
+                    // (No pop: what shows of the digits and of the date line
+                    // goes one way, as the clock does.)
+                    const oneWay = key => frames.every((f, i) => i === 0 ||
+                        (coming ? f[key] >= frames[i - 1][key] - 2 : f[key] <= frames[i - 1][key] + 2));
+                    check(oneWay('glass') && oneWay('date'),
+                        `${what}: its glass and its date line ${coming ? 'come' : 'go'} one way (${
+                            frames.map(f => f.glass.toFixed(0)).join(' ')} | ${frames.map(f => f.date.toFixed(0)).join(' ')})`);
+                    check(frames.every(f => f.others.every(o => Math.abs(o - dimmed(f.room)) <= 1)),
+                        `${what}: the other widgets ${coming ? 'brighten again' : 'dim'} as the room has it (${frames.at(-1).others})`);
+                };
+
+                // The prompt comes up.
+                const up = await record('up', () => pressKey(Clutter.KEY_a), now => now.room >= 0.5);
+                checkFrames('up', up, false);
+                check(await waitFor(() => lock().room === 1, 10000), 'the prompt up');
+                await Scripting.sleep(300);
+                await screenshotArea(`fades/${take}-full`, ...area);
+                const full = pixelsOf(`fades/${take}-full`, corner);
+                const [fullSteps, fullGlass] = [stepsIn(full, face), setsApart(full, glassRows).mean];
+                check(clock.get_paint_opacity() === 0 && fullSteps <= 3 && fullGlass <= 2,
+                    `at its full height, only the blurred wallpaper where the clock was (at most ${fullSteps} from a pixel to the next, ${
+                        fullGlass.toFixed(1)} where its glass was)`);
+                // Escape: the prompt goes, the clock comes back with the
+                // subject in front of it, as it was.
+                const down = await record('down', () => pressKey(Clutter.KEY_Escape), now => now.room === 0 && now.clock === 255);
+                checkFrames('down', down, true);
+                const back = pixelsOf(down.at(-1).file, corner);
+                const asItWas = differenceOf(rest, back, {x: area[0], y: area[1], width: area[2], height: area[3]});
+                check(down.at(-1).room === 0 && asItWas < 1, `back as it was (${asItWas.toFixed(2)} apart)`);
+                if (popup) {
+                    // (The popup brought up again by a key.)
+                    const upAgain = async () => {
+                        await pressKey(Clutter.KEY_a);
+                        return waitFor(() => lock().room === 1 && lock()._field?.form, 5000);
+                    };
+                    // GNOME timing out back to the clock (its idle watch): so too.
+                    check(await upAgain(), 'the prompt up again');
+                    const timedOut = await record('timeout', async () => shield._dialog._escape(),
+                        now => now.room === 0 && now.clock === 255, 12);
+                    const feet = Math.max(...timedOut.map(f => f.feet));
+                    check(timedOut.at(-1).room === 0 && feet <= 3 &&
+                        timedOut.every(f => f.clock === f.subject && Math.abs(f.clock - shown(f.room)) <= 1),
+                    `timed out, back to the clock: it comes back with the subject in front of it, frame by frame (${
+                        timedOut.length} frames, the glass at most ${feet.toFixed(1)} apart from the hill there)`);
+                    // A wrong password, the right one: the clock stays away,
+                    // and as the screen unlocks (the wallpaper coming sharp).
+                    check(await upAgain(), 'and again');
+                    const stays = async ms => {
+                        let away = true;
+                        for (const until = GLib.get_monotonic_time() + ms * 1000; GLib.get_monotonic_time() < until;) {
+                            away &&= clock.get_paint_opacity() === 0 && depth.actor.get_paint_opacity() === 0;
+                            await Scripting.sleep(20);
+                        }
+                        return away;
+                    };
+                    const verifier = locked.verifiers.at(-1);
+                    await typeText('wrong');
+                    await pressKey(Clutter.KEY_Return);
+                    await waitFor(() => verifier.answers.length === 1, 2000);
+                    verifier.emit('show-message', 'gdm-password', 'Sorry, that didn\'t work. Please try again.', 3);
+                    verifier.emit('verification-failed', 'gdm-password', true);
+                    verifier.emit('ask-question', 'gdm-password', 'Password:', true);
+                    check(await stays(1300) && lock().state.phase === 'ready' && lock()._field.form,
+                        'a wrong password: the clock stays away, the popup asks again');
+                    await typeText('right');
+                    await pressKey(Clutter.KEY_Return);
+                    await waitFor(() => verifier.answers.length === 2, 2000);
+                    verifier.emit('verification-complete');
+                    check(lock().state.phase === 'success' && await stays(500),
+                        'unlocked: the clock stays away as the lock screen goes');
+                }
+                results.push(`INFO  ${take}: frames in tests/output/shell/fades (${up.length} up, ${down.length} down)`);
+            } finally {
+                if (clock)
+                    delete clock._sync;
+                backdrop?.destroy();
+                await locked.unlock();
+            }
+        }
+    } finally {
+        realBattery();
+        ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+    }
 }
 
 // The glass clock stretched to a size of its own on the mock lock screen, as
@@ -5622,6 +5965,7 @@ export async function run() {
             await part(testLockDepth);
             await part(testLockLook);
             await part(testLockGlassClock);
+            await part(testLockClockFades);
             await part(testLockFreeStretch);
             await part(testLockOnOwnWallpaper);
             await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
@@ -5675,6 +6019,7 @@ export async function run() {
         await part(testLockDepth);
         await part(testLockLook);
         await part(testLockGlassClock);
+        await part(testLockClockFades);
         await part(testLockFreeStretch);
         await part(testLockOnOwnWallpaper);
         await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
