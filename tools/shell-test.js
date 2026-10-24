@@ -2017,8 +2017,9 @@ function actorWith(root, name) {
 // of the bar, the island, the dock and each widget on what is behind it;
 // the palette's colours in their hue; an open page over windows as set;
 // all of it as set again with the glass off. (The glass drawn here is
-// still the old one, darker; its tint is cleared, as Liquid Glass has
-// none, so that what is predicted is near what is drawn.)
+// Liquid Glass, smoky in the dark style: what is predicted – its blur, its
+// tint, its material – is what is drawn, but for the light its edges
+// catch and its sheen.)
 async function testVibrancy(ext) {
     const modules = ext.stateObj.modules;
     const vibrancy = modules.get('vibrancy');
@@ -2044,11 +2045,6 @@ async function testVibrancy(ext) {
     const light = makePicture('vibrancy-light', LIGHT);
     const dark = makePicture('vibrancy-dark', DARK);
     const halves = makePicture('vibrancy-halves', LIGHT, DARK);
-    const clearGlass = Gio.File.new_for_path(`${OUTPUT}/clear-glass.css`);
-    GLib.file_set_contents(clearGlass.get_path(), '.atelier-glass StWidget.atelier-glass-tint { background-color: transparent; }\n');
-    // (The theme as it is now: GNOME makes it anew for another style,
-    // taking the stylesheets loaded over to the new one.)
-    const theme = () => St.ThemeContext.get_for_stage(global.stage).get_theme();
 
     const ink = actor => (actor?.get_stage() ? hexOf(actor.get_theme_node().get_foreground_color()) : null);
     const fill = actor => hexOf(actor.get_theme_node().get_background_color());
@@ -2084,7 +2080,6 @@ async function testVibrancy(ext) {
         // glass alone), a clock at the left and the date at the right; a
         // palette of the sea.
         desktopInterface.set_string('color-scheme', 'prefer-dark');
-        theme().load_stylesheet(clearGlass);
         dockSettings.set_boolean('show-show-apps-button', true);
         bar.set_string('sides', 'capsules');
         bar.set_string('surface', 'glass');
@@ -2208,7 +2203,6 @@ async function testVibrancy(ext) {
         settings.reset('glass-variant');
         check(await settle(() => isDark(ink(widget('clock')))), 'and back');
     } finally {
-        theme().unload_stylesheet(clearGlass);
         desktopInterface.set_string('color-scheme', scheme);
         await closeTestWindows();
         ['show-show-apps-button', 'transparency-mode'].forEach(key => dockSettings.reset(key));

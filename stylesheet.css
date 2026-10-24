@@ -1127,11 +1127,11 @@
 }
 
 .atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.32);
+  background-color: rgba(12, 12, 14, 0.22);
 }
 
 .atelier-glass-smoky-clear .atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.16);
+  background-color: rgba(12, 12, 14, 0.11);
 }
 
 .atelier-glass-light .atelier-glass-tint {

@@ -63,8 +63,8 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-notification-button.atelier-notification-button-quiet { background-color: transparent; color: ${d.onSurfaceVariant}; }
 .atelier-island .atelier-notification-button:focus,
 .atelier-island .atelier-notification-content:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
-.atelier-glass.atelier-glass-smoky .atelier-glass-tint { background-color: ${rgba(d.surface, 0.32)}; }
-.atelier-glass.atelier-glass-smoky-clear .atelier-glass-tint { background-color: ${rgba(d.surface, 0.16)}; }
+.atelier-glass.atelier-glass-smoky .atelier-glass-tint { background-color: ${rgba(d.surface, 0.22)}; }
+.atelier-glass.atelier-glass-smoky-clear .atelier-glass-tint { background-color: ${rgba(d.surface, 0.11)}; }
 .atelier-glass.atelier-glass-light .atelier-glass-tint { background-color: ${rgba(l.surface, 0.15)}; }
 .atelier-glass.atelier-glass-light-clear .atelier-glass-tint { background-color: ${rgba(l.surface, 0.08)}; }
 .atelier-glass.atelier-glass-deep .atelier-glass-tint { background-color: ${rgba(d.surface, 0.68)}; }

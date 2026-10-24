@@ -26,7 +26,7 @@ import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js'
 const MAX_RECTS = 32;
 const BLUR_RADIUS = 40; // logical pixels
 // How bright the blur leaves the wallpaper, in the light style and the dark.
-const BLUR_BRIGHTNESS = {light: 1, smoky: 0.85};
+const BLUR_BRIGHTNESS = {light: 1, smoky: 0.92};
 
 // The widgets' rectangles (and the liquid), each with the light it catches;
 // the sheen runs across the one a pixel is nearest to.

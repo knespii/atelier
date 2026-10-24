@@ -27,7 +27,7 @@ import {
 
 const BLUR_RADIUS = 36; // logical pixels
 // How bright the blur leaves the wallpaper, under light glass and smoky.
-const BLUR_BRIGHTNESS = {light: 1, smoky: 0.85};
+const BLUR_BRIGHTNESS = {light: 1, smoky: 0.92};
 // Live glass is blurred over the bounds of its shapes, in steps of this many
 // logical pixels (so it isn't made anew every frame they change).
 const LIVE_STEP = 64;
