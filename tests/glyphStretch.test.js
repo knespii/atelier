@@ -300,6 +300,24 @@ export function testTurnsMoveAsTheyAre() {
     }
 }
 
+export function testBarsKeepTheirPlace() {
+    // A "4": its crossbar as thick, and as far up the height that grows
+    // as it was drawn (a typeface's own tall figures have it so).
+    const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const glyph = glyphOf(font, '4');
+    const {commands, ink} = font.outline(glyph);
+    const height = font.figures.top - font.figures.bottom;
+    // (Right of the stem: the crossbar alone.)
+    const x = ink.x2 - 50;
+    const [[foot, head]] = runs(commands, 'x', x);
+    for (const stretch of TALL) {
+        const [bar] = runs(font.stretched(glyph, stretch), 'x', x);
+        assert(near(bar[1] - bar[0], head - foot, 1e-6), `× ${stretch}: as thick (${bar})`);
+        const [was, is] = [foot / (height - (head - foot)), bar[0] / (stretch * height - (head - foot))];
+        assert(near(is, was, 0.01), `× ${stretch}: as far up (${was} → ${is})`);
+    }
+}
+
 export function testStretchIsQuick() {
     // Once a glyph's profile is made, stretching it again (a frame of a
     // stretch being dragged) takes a few hundredths of a millisecond.
