@@ -5282,6 +5282,341 @@ async function testLockFreeStretch() {
     await waitFor(() => !desktop.editing && !desktop._closing?.actor, 2000);
 }
 
+// The main monitor at a scale (its mode as it is): a 3840 × 2160 one at 2
+// is a 1920 × 1080 stage, drawn in twice the detail.
+async function setMonitorScale(scale) {
+    const state = await displayConfig('GetCurrentState', null,
+        '(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})');
+    const [serial, monitors] = state.recursiveUnpack();
+    const [[connector], modes] = monitors[0];
+    const mode = modes.find(m => m[6]['is-current']);
+    await displayConfig('ApplyMonitorsConfig', new GLib.Variant('(uua(iiduba(ssa{sv}))a{sv})',
+        [serial, 1, [[0, 0, scale, 0, true, [[connector, mode[0], {}]]]], {}]));
+}
+
+// Of some numbers: their mean, the 95th percentile and the largest.
+function spreadOf(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    return {
+        n: sorted.length,
+        mean: sorted.reduce((sum, v) => sum + v, 0) / Math.max(1, sorted.length),
+        p95: sorted[Math.min(sorted.length - 1, Math.floor(0.95 * sorted.length))] ?? 0,
+        max: sorted.at(-1) ?? 0,
+    };
+}
+
+const ms = v => v.toFixed(1);
+
+// How long the calls to some methods take: each wrapped on its object (as
+// its own), the milliseconds of each call kept by name (and when each
+// began, in calls), nested calls counted in each; add() wraps more (none
+// twice), undo() gives them all back.
+function timeCalls(targets) {
+    const spent = {};
+    const calls = [];
+    const undo = [];
+    const wrapped = new Map();
+    const add = more => {
+        for (const [name, object, method] of more) {
+            if (typeof object?.[method] !== 'function' || wrapped.get(object)?.has(method))
+                continue;
+            wrapped.set(object, new Set([...wrapped.get(object) ?? [], method]));
+            const original = object[method];
+            const own = Object.hasOwn(object, method);
+            spent[name] ??= [];
+            object[method] = function (...args) {
+                const start = GLib.get_monotonic_time();
+                try {
+                    return original.apply(this, args);
+                } finally {
+                    const took = (GLib.get_monotonic_time() - start) / 1000;
+                    spent[name].push(took);
+                    calls.push({name, start: start / 1000, took});
+                }
+            };
+            undo.push(() => (own ? (object[method] = original) : delete object[method]));
+        }
+    };
+    add(targets);
+    return {spent, calls, add, undo: () => undo.reverse().forEach(f => f())};
+}
+
+// The frames the stage draws meanwhile: when each was done (after-paint),
+// how long it took to lay out (from before-update, once the laters ran, to
+// before-paint) and to paint.
+function watchFrames() {
+    const frames = [];
+    let frame = null;
+    const ids = [
+        global.stage.connect('before-update', () => (frame = {update: GLib.get_monotonic_time()})),
+        global.stage.connect('before-paint', () => frame && (frame.paint = GLib.get_monotonic_time())),
+        global.stage.connect('after-paint', () => {
+            const now = GLib.get_monotonic_time();
+            frames.push({done: now / 1000, layout: frame?.paint ? (frame.paint - frame.update) / 1000 : 0,
+                painting: frame?.paint ? (now - frame.paint) / 1000 : 0});
+            frame = null;
+        }),
+    ];
+    return {frames, stop: () => ids.forEach(id => global.stage.disconnect(id))};
+}
+
+// The pointer from one point to another over a while, the button held: a
+// move every few milliseconds, as a mouse reports them, wherever the hand
+// is by then (however long the shell takes to show each).
+async function pointerSweep(x1, y1, x2, y2, duration, every = 8) {
+    const start = GLib.get_monotonic_time();
+    for (;;) {
+        const t = Math.min(1, (GLib.get_monotonic_time() - start) / 1000 / duration);
+        virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(), x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+        if (t >= 1)
+            return;
+        await Scripting.sleep(every);
+    }
+}
+
+// The glass clock stretched on the mock lock screen as someone does it, its
+// glass frosting the wallpaper, the depth effect on: its corner dragged from
+// a large clock, held still a moment, then on over two seconds to a big one
+// – 30 × 16 cells, about as many pixels as a laptop's large clock has at
+// 150 % (ATELIER_TEST_STRETCH another, "17x14"; ATELIER_TEST_SCALE the
+// monitor at that scale meanwhile: see tools/shell-test.sh). The frames
+// come as often as the display shows them, each move drawn once, quickly,
+// its digits filling the clock; held still, it is drawn in full (where
+// that is quick); let go, it takes its cells, eases to them and lands drawn
+// in full, as a drawing made anew has it, what it takes to read there and
+// the subject in front of it looked at once it rests. What each move costs
+// where goes in the results.
+async function testLockStretchSpeed() {
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const [columns, rows] = (GLib.getenv('ATELIER_TEST_STRETCH') ?? '30x16').split('x').map(Number);
+    const wantedScale = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
+    const scaled = wantedScale > 0 && wantedScale !== global.stage.get_resource_scale();
+    if (scaled) {
+        const width = global.stage.width;
+        await setMonitorScale(wantedScale);
+        await waitFor(() => global.stage.width !== width, 5000);
+        await Scripting.sleep(2000);
+    }
+    const editor = atelier().modules.get('lockscreen-editor');
+    let timed = null;
+    try {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const size = [monitor.width, monitor.height];
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const density = global.stage.get_resource_scale();
+        const px = n => (n * PITCH - GAP) * scale;
+        const dir = `${OUTPUT}/speed`;
+        GLib.mkdir_with_parents(dir, 0o755);
+        // A hill over the lower part of the clock's box, the depth effect's
+        // cutout of it.
+        const wallpaper = `${dir}/hill.png`;
+        const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
+        const [, boxTop] = cellOrigin(2, 2, origin).map(v => v * scale);
+        const hill = Math.round(boxTop + px(rows) * 0.6);
+        hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+        const cutout = cutoutPath(pictureState(wallpaper), size);
+        GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+        hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff,
+            {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`});
+        background.set_string('picture-uri', uriOf(wallpaper));
+        background.set_string('picture-uri-dark', uriOf(wallpaper));
+        background.set_string('picture-options', 'zoom');
+        lockSettings.set_string('widgets', JSON.stringify([
+            {id: 'clock', kind: 'clock', size: 'large', x: 2, y: 2, fine: true, face: 'glass'},
+        ]));
+        lockSettings.set_boolean('gnome-clock', false);
+        lockSettings.set_boolean('password-field', false);
+        lockSettings.set_boolean('depth-effect', true);
+        lockSettings.set_string('edit-request', GLib.uuid_string_random());
+        const clockThere = () => editor?.preview?._board.widgets[0];
+        if (!check(await waitFor(() => clockThere()?.glass?.target && clockThere().glass.backdrop &&
+            editor.preview._board.depth?.loaded, 15000),
+        'the mock lock screen, a large glass clock on it, its glass frosting the wallpaper, the depth effect on'))
+            return;
+        const board = editor.preview._board;
+        const lockEditor = editor.preview._editor;
+        const clock = clockThere();
+        // (The time as it is now: no minute turns meanwhile.)
+        clock._clock.disconnectObject(clock);
+        const glass = clock.glass;
+        await restPointer();
+        await Scripting.sleep(1000);
+        // (Where the digits' feet are on the monitor, and the bottom of the face they fill.)
+        const digitsNow = () => {
+            const face = clock.glass;
+            const digits = face?.digitsRect;
+            const [, fy] = face.get_transformed_position();
+            return digits && {feet: fy + digits.y + digits.height, bottom: fy + face.height};
+        };
+        const fills = d => Boolean(d) && Math.abs(d.feet - d.bottom) < 1;
+
+        // Each part of a move timed: the editor's, the face's, the glass's,
+        // the board's.
+        timed = timeCalls([
+            ['move (editor)', lockEditor, '_stretch'],
+            ['  size it lands on', board, 'sizeFor'],
+            ['  shadow on the grid', lockEditor, '_showGhost'],
+            ['face laid out', glass, '_allocate'],
+            ['  digits measured', glass, '_measure'],
+            ['  drawing area laid out', glass._digits, 'allocate'],
+            ['  drawing area drawn', glass._digits, 'queue_repaint'],
+            ['    digits drawn', glass, 'paintLayer'],
+            ['      line placed', glass, '_line'],
+            ['        outlines stretched', glass._font?.font, 'stretched'],
+            ['      glass painted', glass._glass, 'paint'],
+            ['      glass sketched', glass._glass, 'sketch'],
+            ['depth looked at', board, '_syncDepthCover'],
+            ['  legibility', board.depth, 'cover'],
+            ['plans made', board, '_planGlass'],
+            ['  digits planned', board, '_digitsPlan'],
+            ['    frosted wallpaper behind', board, '_frostedBehind'],
+            ['tone', board, '_tone'],
+            ['size kept', board, 'setWidgetSize'],
+            ['  layout saved', board, '_save'],
+            ['  filled for it', clock, 'fill'],
+        ]);
+        const callsOf = (name, since = 0) => timed.calls.filter(c => c.name.trim() === name && c.start >= since);
+        const now = () => GLib.get_monotonic_time() / 1000;
+
+        // Held still on the way: drawn in full (quick enough, at that size).
+        const [hx, hy] = centerOf(clock._editHandle);
+        const to = (c, r) => [hx + px(c) - px(8), hy + px(r) - px(8)];
+        await pointerDown(hx, hy);
+        await pointerSweep(hx, hy, ...to(10, 10), 500);
+        const stopped = now();
+        await Scripting.sleep(600);
+        const sketched = callsOf('glass sketched').length > 0;
+        const rested = callsOf('glass painted', stopped).length;
+        if (density === 1)
+            check(sketched && rested === 1, `drawn quickly as it goes, held still a moment: in full (${rested} times)`);
+        else
+            results.push(`INFO  stretching the glass clock at ${density}×: held still, drawn in full ${rested} times`);
+
+        // On over two seconds: the frames as often as the display shows
+        // them, each move drawn once, quickly, its digits filling it.
+        const repaints = glass._digits.repaints;
+        const watched = watchFrames();
+        const since = now();
+        await pointerSweep(...to(10, 10), ...to(columns, rows), 2000);
+        await Scripting.sleep(100);
+        watched.stop();
+        const during = Object.keys(timed.spent).map(name => [name, callsOf(name.trim(), since)]);
+        const moves = callsOf('move (editor)', since).length;
+        const drawn = glass._digits.repaints - repaints;
+        const [quick, full] = [callsOf('glass sketched', since).length, callsOf('glass painted', since).length];
+        const live = [clock.width, clock.height].map(Math.round);
+        const apart = watched.frames.slice(1).map((f, i) => f.done - watched.frames[i].done);
+        const gaps = spreadOf(apart);
+        const [layout, painting] = ['layout', 'painting'].map(key => spreadOf(watched.frames.map(f => f[key])));
+        const tag = `at ${density}×, to ${live.join('×')} px`;
+        // (A frame or two held up by something else – the garbage
+        // collector, in a shell that has run a while – may be long.)
+        const long = apart.filter(gap => gap > 50).length;
+        check(gaps.mean <= 20 && gaps.p95 <= 25 && long <= 2,
+            `stretched over two seconds (${tag}), the frames as the display shows them: ${ms(gaps.mean)} ms apart ` +
+            `on average, ${ms(gaps.p95)} for 95 % of them, ${long} over 50 ms (${ms(gaps.max)} at most; ` +
+            `${watched.frames.length} frames)`);
+        check(moves > 30 && drawn <= moves + 2 && quick >= drawn - 2 && full === 0,
+            `each of its ${moves} moves drawn once (${drawn} times), quickly (${quick} sketched, ${full} in full)`);
+        check(Math.abs(live[0] - px(columns)) <= 2 && Math.abs(live[1] - px(rows)) <= 2 && fills(digitsNow()),
+            `its digits fill it as it goes (×${clock.glass.target?.stretch.toFixed(2)})`);
+        results.push(`INFO  stretching the glass clock (${tag}): laying a frame out ${ms(layout.mean)} ms ` +
+            `(${ms(layout.max)} at most), painting it ${ms(painting.mean)} ms (${ms(painting.max)}); a move:`);
+        for (const [name, calls] of during.filter(([, calls]) => calls.length > 0)) {
+            const took = calls.map(c => c.took);
+            results.push(`INFO  ${name}: ${ms(took.reduce((sum, v) => sum + v, 0) / Math.max(1, moves))} ms ` +
+                `(${calls.length} calls, ${ms(Math.max(...took))} ms at most)`);
+        }
+
+        // Let go: its cells, eased to; then drawn in full, as a drawing
+        // made anew has it; looked at once it rests.
+        const released = watchFrames();
+        const letGo = now();
+        await pointerUp();
+        const saved = () => JSON.parse(lockSettings.get_string('widgets')).find(e => e.id === 'clock')?.size;
+        check(await waitFor(() => clock.width === px(columns) && clock.height === px(rows) && !clock.stretching, 2000) &&
+            saved() === `${columns}x${rows}` && clock.entry.size === saved(),
+        `let go, it takes its cells and keeps them (${saved()}), eased to in ${Math.round(now() - letGo)} ms`);
+        await Scripting.sleep(400);
+        released.stop();
+        const lastSketch = Math.max(letGo, ...callsOf('glass sketched', letGo).map(c => c.start));
+        const inFull = callsOf('glass painted', lastSketch);
+        const [x, y] = clock.glass.get_transformed_position();
+        const [width, height] = clock.glass.get_transformed_size();
+        const area = [x, y, width, height].map(Math.round);
+        await screenshotArea('96-lock-stretched', ...area);
+        clock.glass._repaint();
+        await Scripting.sleep(300);
+        await screenshotArea('96b-lock-stretched-drawn-anew', ...area);
+        const [landed, anew] = ['96-lock-stretched', '96b-lock-stretched-drawn-anew'].map(pixelsOf);
+        // (Every other pixel each way: as good, and four times as quick.)
+        let [difference, compared] = [0, 0];
+        for (let row = 0; row < area[3]; row += 2) {
+            for (let col = 0; col < area[2]; col += 2, compared++)
+                difference += colorDistance(landed.at(col, row), anew.at(col, row));
+        }
+        difference /= Math.max(1, compared);
+        check(inFull.length >= 1 && !clock.glass.stretching && fills(digitsNow()) && difference < 0.5,
+            `and its digits drawn in full once it rests (${inFull.length} times), as a drawing made anew has them ` +
+            `(${difference.toFixed(2)} apart)`);
+        const after = spreadOf(released.frames.slice(1).map((f, i) => f.done - released.frames[i].done));
+        const took = name => callsOf(name, letGo).filter(c => c.took >= 0.05).map(c => ms(c.took)).join(' + ') || '0';
+        results.push(`INFO  let go: frames ${ms(after.mean)} ms apart on average, ${ms(after.max)} at most; its size ` +
+            `kept ${took('size kept')} ms (the layout saved ${took('layout saved')}, filled for it ` +
+            `${took('filled for it')}, the tone ${took('tone')}); drawn in full ` +
+            `${inFull.map(c => ms(c.took)).join(' + ')} ms; planned ${took('digits planned')} ms`);
+        // (Away from it: one pointed at stays in front of the subject.)
+        await pointerTo(global.stage.width - 20, global.stage.height - 20);
+        check(await waitFor(() => board.depth.legibility.length === 1, 2000) &&
+            callsOf('digits planned', letGo).length > 0,
+        'what it takes to read there, and how much the subject covers of it, looked at once it rests ' +
+        `(${JSON.stringify(board.depth.legibility[0])})`);
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => !editor.preview, 3000);
+
+        // On the desktop, a clock stretched through the sizes it comes in,
+        // as smoothly.
+        const desktop = atelier().modules.get('desktop');
+        if (!desktop)
+            return;
+        const {findSpot} = await import('../lib/widgets.js');
+        desktop.edit();
+        await Scripting.sleep(800);
+        const spot = findSpot(desktop._shownLayout(), {id: '', size: 'card'}, desktop.grid);
+        const added = spot && desktop.addWidget('clock', {}, spot);
+        if (check(Boolean(added), `a clock on the desktop where a card fits (${JSON.stringify(spot)})`)) {
+            await Scripting.sleep(400);
+            const [cx, cy] = centerOf(added._editHandle);
+            await pointerDown(cx, cy);
+            const desktopFrames = watchFrames();
+            await pointerSweep(cx, cy, cx + px(8) - px(4), cy, 1000);
+            desktopFrames.stop();
+            await pointerUp();
+            const apart = spreadOf(desktopFrames.frames.slice(1).map((f, i) => f.done - desktopFrames.frames[i].done));
+            check(apart.mean <= 20 && apart.p95 <= 25,
+                `and a clock on the desktop stretched to the next of its sizes: frames ${ms(apart.mean)} ms apart ` +
+                `on average, ${ms(apart.p95)} for 95 % of them, ${ms(apart.max)} at most`);
+            desktop.removeWidget(added.entry.id);
+        }
+        desktop.stopEditing();
+        await waitFor(() => !desktop.editing && !desktop._closing?.actor, 2000);
+    } finally {
+        timed?.undo();
+        editor?.preview?.destroy();
+        ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        if (scaled) {
+            const width = global.stage.width;
+            await setMonitorScale(1);
+            await waitFor(() => global.stage.width !== width, 5000);
+            await Scripting.sleep(1000);
+        }
+    }
+}
+
 // The lock screen on wallpapers of one's own (ATELIER_TEST_WALLPAPER, one
 // or more, apart by colons), each cutout made by the worker with a real
 // depth model (ATELIER_TEST_MODEL, only read), as someone has it: a large
@@ -5995,6 +6330,7 @@ export async function run() {
             await part(testLockGlassClock);
             await part(testLockClockFades);
             await part(testLockFreeStretch);
+            await part(testLockStretchSpeed);
             await part(testLockOnOwnWallpaper);
             await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
             await part(testLockFonts);
@@ -6049,6 +6385,7 @@ export async function run() {
         await part(testLockGlassClock);
         await part(testLockClockFades);
         await part(testLockFreeStretch);
+        await part(testLockStretchSpeed);
         await part(testLockOnOwnWallpaper);
         await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
         await part(testLockFonts);

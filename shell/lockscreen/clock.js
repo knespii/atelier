@@ -14,12 +14,16 @@
 // for them, as tall as it is. As the minute turns, the figures that change
 // – only they – go: the old one lifting as it fades, the new one rising
 // into its place (lib/glassClock.js), drawn on a layer of their own while
-// they move. Nothing is drawn while it rests.
+// they move. Nothing is drawn while it rests. Stretched in the editor, its
+// glass is drawn quickly as it goes, a frame at a time (liquidGlass.js
+// sketch(): its frost and tint, the light along its edges), and in full
+// once let go of – or once held still a moment, where that is quick too.
 //
 // (St draws a drawing area the moment it is told to – queue_repaint() – and
-// whenever it is laid out: the face draws its layers as it is laid out,
-// once a frame however often it is asked, and nothing it does while one is
-// being drawn may lay it out, or St would throw away what it draws into.)
+// whenever it is laid out at another size: the face draws its layers as it
+// is laid out, once a frame however often it is asked, and nothing it does
+// while one is being drawn may lay it out, or St would throw away what it
+// draws into.)
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -53,6 +57,11 @@ const DARK = 0.18;
 // What the glass draws round the digits besides them – its rim and the
 // light on its edges – without a shadow, logical pixels.
 const RIM_REACH = 6;
+// Stretched and held still this long (ms), the digits are drawn in full –
+// where that takes no longer than this (ms): the pointer may move on
+// meanwhile, and a frame drawn in full must not hold it up.
+const REST_TIME = 250;
+const QUICK_ENOUGH = 8;
 
 const scaleFactor = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
 
@@ -66,6 +75,15 @@ const shadowStyle = ({color, alpha, blur, y}) =>
 // Whether a type or a plan is the one there is (told again, as the lock
 // screen's type is worked out anew: nothing to do).
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// What of a plan the face draws (the rest – how well it reads – it only
+// keeps): the digits' weight or grade, their shadow and glass, the date
+// line's weight and shadow, and the tone.
+const drawnOf = plan => plan && {
+    digits: plan.digits && [plan.digits.weight, plan.digits.boldness, plan.digits.shadow, plan.digits.glass],
+    date: plan.date && [plan.date.weight, plan.date.boldness, plan.date.shadow],
+    tone: plan.tone,
+};
 
 /** The typeface the glass digits are drawn in until they are told another: Inter, as its own. */
 function defaultType() {
@@ -136,6 +154,13 @@ const GlassFace = GObject.registerClass({
         this._paintedAt = null;
         this._dirty = false;
         this._allocating = false;
+        this._stretching = false;
+        this._sketched = false;
+        this._rested = false;
+        this._restId = 0;
+        this._settleId = 0;
+        // (How long drawing the digits in full last took, ms a pixel of the drawing's.)
+        this._fullCost = null;
         /** How many figures it has worked out itself (none, when the session did ahead of it). */
         this.workedOut = 0;
         this._type = kept.type ?? defaultType();
@@ -149,7 +174,11 @@ const GlassFace = GObject.registerClass({
         });
         // (Out of sight, a change of the figures ends where it was going.)
         this.connect('notify::mapped', () => !this.mapped && this._settle());
-        this.connect('destroy', () => this._stopLearning());
+        this.connect('destroy', () => {
+            this._stopLearning();
+            this._stopRest();
+            this._stopSettling();
+        });
         this.backdrop = kept.backdrop ?? null;
         this._syncDate();
         this._syncFont();
@@ -177,6 +206,77 @@ const GlassFace = GObject.registerClass({
         // (A frame of the change: only the layer of the figures that change.)
         if (this._turning)
             this._moving.queue_repaint();
+    }
+
+    /** @returns {boolean} whether its clock is being stretched (its glass drawn quickly meanwhile) */
+    get stretching() {
+        return this._stretching;
+    }
+
+    /**
+     * @param {boolean} stretching - its clock's corner dragged in the editor,
+     *   or easing to its size once let go of: the glass drawn quickly as it
+     *   goes; let go of, drawn in full (if it was drawn otherwise) – once
+     *   the frame it was let go of in is done, in the next, as what it takes
+     *   to read there is worked out anew in that frame (board.js): drawn in
+     *   full only as that has it
+     */
+    set stretching(stretching) {
+        this._stopRest();
+        this._stopSettling();
+        if (stretching) {
+            this._stretching = true;
+            this._rested = false;
+            return;
+        }
+        if (!this._stretching)
+            return;
+        this._settleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._settleId = 0;
+            this._stretching = false;
+            this._rested = false;
+            if (this._sketched)
+                this._repaint();
+            this._sketched = false;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopSettling() {
+        if (this._settleId)
+            GLib.source_remove(this._settleId);
+        this._settleId = 0;
+    }
+
+    // Drawn quickly while stretched: held still a moment, in full – where
+    // that is quick enough (as long as it last took, for as many pixels).
+    _waitForRest(pixels) {
+        this._stopRest();
+        this._restId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, REST_TIME, () => {
+            this._restId = 0;
+            if (this._stretching && (this._fullCost ?? Infinity) * pixels <= QUICK_ENOUGH && this._digits.mapped) {
+                this._rested = true;
+                this._digits.queue_repaint();
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _stopRest() {
+        if (this._restId)
+            GLib.source_remove(this._restId);
+        this._restId = 0;
+    }
+
+    /**
+     * @param {string} size - its clock's size anew (it lays itself out for
+     *   the box it is given): the optical size its digits are drawn at
+     */
+    setSize(size) {
+        if (size === this._sizeName)
+            return;
+        this._sizeName = size;
+        this._syncFont();
     }
 
     /**
@@ -218,8 +318,12 @@ const GlassFace = GObject.registerClass({
         const planned = plan ? {digits: plan.digits ?? null, date: plan.date ?? null, tone: plan.tone ?? null} : null;
         if (same(planned, this._plan))
             return;
+        const drawn = drawnOf(this._plan);
         this._plan = planned;
         this._kept.plan = planned;
+        // (Only how well they read is another: drawn as they are.)
+        if (same(drawnOf(planned), drawn))
+            return;
         this._syncDate();
         this._syncFont();
         this._repaint();
@@ -569,8 +673,8 @@ const GlassFace = GObject.registerClass({
         const [width, height] = [box.get_width(), box.get_height()];
         const resized = width !== this._size[0] || height !== this._size[1];
         this._size = [width, height];
-        // (First: laid out, it may be styled anew – another font.)
-        this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
+        // (First: styled anew, it may take another font.)
+        this._digits.ensure_style();
         // (Measured anew for another box, or another date line over them:
         // in a box too flat for them, the room they have is what sizes them.)
         const room = this._room();
@@ -581,21 +685,27 @@ const GlassFace = GObject.registerClass({
             this._target = null;
         }
         this._retarget(room);
+        // (Stretched to another size: drawn quickly again, till it rests.)
+        if (resized)
+            this._rested = false;
         // The layer of the figures that change over their columns while
         // they do (where they are now, measured anew).
         const turning = this._turning;
         if (measuring && turning)
             turning.box = this._turningBox(turning.before, turning.leaving, turning.coming) ?? turning.box;
-        const drawn = this._moving.repaints;
+        // The layers laid out – St draws one the moment it is laid out at
+        // another size, as it is to be now – and drawn anew once, if
+        // anything changed and St hasn't.
+        const drawn = [this._digits.repaints, this._moving.repaints];
+        this._digits.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
         const columns = turning?.box;
         this._moving.allocate(columns ? new Clutter.ActorBox({x1: columns.x1, y1: 0, x2: columns.x2, y2: height})
             : new Clutter.ActorBox());
-        // Drawn anew, once (St has drawn the layer of the figures that
-        // change if it was laid out anew just now).
         if (this._dirty) {
             this._dirty = false;
-            this._digits.queue_repaint();
-            if (turning && this._moving.repaints === drawn)
+            if (this._digits.repaints === drawn[0])
+                this._digits.queue_repaint();
+            if (turning && this._moving.repaints === drawn[1])
                 this._moving.queue_repaint();
         }
         // The date line just over the digits, in the middle (unless it is
@@ -643,24 +753,33 @@ const GlassFace = GObject.registerClass({
         if (!this._metrics || !this._text || !this._font)
             return;
         const look = {tone: this._tone(), at: this._onMonitor(layer), scale: scaleFactor(), ...this._material()};
-        if (layer === this._digits)
+        if (layer === this._digits) {
             this._paintedAt = look.at;
-        if (!this._font.font) {
-            if (layer === this._digits)
-                this._paintPango(cr, look);
+            const since = GLib.get_monotonic_time();
+            const quick = this._stretching && !this._rested;
+            if (this._font.font)
+                this._paintDigits(cr, {...look, quick});
+            else
+                this._paintPango(cr, {...look, quick});
+            // (Drawn quickly: in full once it rests a moment. In full: how
+            // long that takes, for so many of the drawing's pixels.)
+            const target = cr.getTarget();
+            const pixels = Math.max(1, target.getWidth() * target.getHeight());
+            if (quick) {
+                this._sketched = true;
+                this._waitForRest(pixels);
+            } else {
+                this._fullCost = (GLib.get_monotonic_time() - since) / 1000 / pixels;
+            }
             return;
         }
+        if (!this._font.font)
+            return;
         const line = this._line(this._text, this._stretch, this._level);
         const bounds = boxRound(line.map(g => g.box));
         if (!bounds)
             return;
-        const boxes = line.map(g => g.box).filter(Boolean);
         const turning = this._turning;
-        if (layer === this._digits) {
-            const staying = turning ? line.filter(g => !turning.coming.includes(g.index)) : line;
-            this._paintGlyphs(cr, this._glass, staying, {...look, bounds, glyphBoxes: boxes});
-            return;
-        }
         if (!turning)
             return;
         // The figures that change, in the layer's own place: the old ones
@@ -697,8 +816,23 @@ const GlassFace = GObject.registerClass({
         }
     }
 
-    // Glyphs in glass: their outlines, one path, the material over it.
-    _paintGlyphs(cr, glass, glyphs, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow, dx = 0, dy = 0}) {
+    // The digits that stay where they are (all of them, unless the minute
+    // turns), from the font's outlines.
+    _paintDigits(cr, look) {
+        const line = this._line(this._text, this._stretch, this._level);
+        const bounds = boxRound(line.map(g => g.box));
+        if (!bounds)
+            return;
+        const turning = this._turning;
+        const staying = turning ? line.filter(g => !turning.coming.includes(g.index)) : line;
+        this._paintGlyphs(cr, this._glass, staying, {...look, bounds, glyphBoxes: line.map(g => g.box).filter(Boolean)});
+    }
+
+    // Glyphs in glass: their outlines, one path, the material over it (or,
+    // quick, a sketch of it).
+    _paintGlyphs(cr, glass, glyphs, {
+        bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow, dx = 0, dy = 0, quick = false,
+    }) {
         if (glyphs.length === 0)
             return;
         const {font, scaleX} = this._font;
@@ -706,7 +840,10 @@ const GlassFace = GObject.registerClass({
         traceLine(cr, glyphs, {scale: this._metrics.fontSize / font.upem, scaleX, dx, dy});
         const path = cr.copyPath();
         cr.newPath();
-        glass.paint(cr, path, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow});
+        if (quick)
+            glass.sketch(cr, path, {bounds, tone, at, scale, tintAlpha, opacity});
+        else
+            glass.paint(cr, path, {bounds, glyphBoxes, tone, at, scale, tintAlpha, opacity, shadow});
     }
 
     // Where the font has no file to draw from, Pango draws the digits,
@@ -752,7 +889,7 @@ const GlassFace = GObject.registerClass({
         });
     }
 
-    _paintPango(cr, {tone, at, scale, tintAlpha, opacity, shadow}) {
+    _paintPango(cr, {tone, at, scale, tintAlpha, opacity, shadow, quick}) {
         const layout = PangoCairo.create_layout(cr);
         const boxes = this._pangoBoxes(layout, this._stretch, this._level);
         const [ink] = layout.get_pixel_extents();
@@ -766,7 +903,10 @@ const GlassFace = GObject.registerClass({
         const path = cr.copyPath();
         cr.newPath();
         const bounds = boxRound(boxes);
-        this._glass.paint(cr, path, {bounds, glyphBoxes: boxes, tone, at, scale, tintAlpha, opacity, shadow});
+        if (quick)
+            this._glass.sketch(cr, path, {bounds, tone, at, scale, tintAlpha, opacity});
+        else
+            this._glass.paint(cr, path, {bounds, glyphBoxes: boxes, tone, at, scale, tintAlpha, opacity, shadow});
     }
 });
 
@@ -778,11 +918,26 @@ class AtelierLockClockWidget extends ClockWidget {
         // (What its glass face is told, kept for one built anew: for another size.)
         this._glassKept ??= {};
         const face = new GlassFace(size, this._glassKept);
-        face.onMeasured = () => this._context.depthChanged?.();
+        face.onMeasured = () => this._context.depthChanged?.(this);
+        // (Stretched in the editor: drawn quickly till it is let go of.)
+        face.stretching = this.stretching;
         box.add_child(face);
         // (Moved – dragged in the editor –, the glass shows what is behind it there.)
-        this.connectObject('notify::allocation', () => face.followMove(), face);
+        this.connectObject(
+            'notify::allocation', () => face.followMove(),
+            'notify::stretching', () => (face.stretching = this.stretching),
+            face);
         return face;
+    }
+
+    // A glass face serves for any size as it is, told of it (for its
+    // digits' optical size): not built anew as a stretched clock takes its
+    // size.
+    fitContent(size) {
+        if (!this._ownFace || this.entry.face !== 'glass')
+            return false;
+        this._ownFace.setSize(size);
+        return true;
     }
 
     /** @returns {GlassFace|null} its glass face, when it has it */

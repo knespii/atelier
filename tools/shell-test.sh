@@ -27,7 +27,9 @@ SUITE="${1:-main}"
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 ROOT="$REPO/tests/output/shell"
-MONITORS="--virtual-monitor 1920x1080"
+# (ATELIER_TEST_MONITOR=3840x2160, say, and ATELIER_TEST_SCALE=2: a part
+# that measures how fast something is drawn does it at that scale.)
+MONITORS="--virtual-monitor ${ATELIER_TEST_MONITOR:-1920x1080}"
 if [ "$SUITE" = two-monitors ]; then
     # The main monitor and a smaller one beside it.
     ROOT="$REPO/tests/output/shell-two-monitors"
