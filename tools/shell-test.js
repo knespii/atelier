@@ -1993,8 +1993,8 @@ async function testDesktop(ext) {
     desktop.removeWidget('github');
     check(!desktop.widgets.has('github') && !settings.get_string('widgets').includes('github'), 'a widget can be removed');
     ['style', 'widgets', 'github-user', 'photo'].forEach(key => settings.reset(key));
-    await Scripting.sleep(400);
-    check(desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 'and the layout follows the settings');
+    check(await waitFor(() => desktop.widgets.size === 3 && !desktop.widgets.has('weather'), 4000),
+        'and the layout follows the settings');
 
     // Another layout (another profile's): the clock pours over to its new
     // place, the weather spreads out of its middle, the calendar draws into
@@ -2009,7 +2009,8 @@ async function testDesktop(ext) {
     ]));
     // (Once the shell draws smoothly: a moment later.)
     check(desktop.widgets.has('calendar'), 'not at once, while the shell may still be busy');
-    await waitFor(() => desktop.widgets.has('weather'), 4000);
+    // (As it starts flowing: on a slow machine, a frame after the weather is made.)
+    await waitFor(() => desktop.widgets.has('weather') && desktop._flowing, 4000);
     const flowWeather = desktop.widgets.get('weather');
     const kinds = () => desktop._flowing?.steps.map(step => `${step.widget.entry.kind} ${step.kind}`).sort().join(', ');
     check(kinds() === 'calendar gather, clock pour, weather spread' && flowClock.melted && flowWeather?.melted &&
@@ -5779,10 +5780,14 @@ async function testLockStretchSpeed() {
         // (A frame or two held up by something else – the garbage
         // collector, in a shell that has run a while – may be long.)
         const long = apart.filter(gap => gap > 50).length;
-        check(gaps.mean <= 20 && gaps.p95 <= 25 && long <= 2,
-            `stretched over two seconds (${tag}), the frames as the display shows them: ${ms(gaps.mean)} ms apart ` +
-            `on average, ${ms(gaps.p95)} for 95 % of them, ${long} over 50 ms (${ms(gaps.max)} at most; ` +
-            `${watched.frames.length} frames)`);
+        const pace = `stretched over two seconds (${tag}), the frames as the display shows them: ${ms(gaps.mean)} ms ` +
+            `apart on average, ${ms(gaps.p95)} for 95 % of them, ${long} over 50 ms (${ms(gaps.max)} at most; ` +
+            `${watched.frames.length} frames)`;
+        // (Where the shell draws without a GPU – the GNOME 50 container – only said.)
+        if (GLib.getenv('ATELIER_TEST_SLOW'))
+            results.push(`INFO  drawn without a GPU: ${pace}`);
+        else
+            check(gaps.mean <= 20 && gaps.p95 <= 25 && long <= 2, pace);
         check(moves > 30 && drawn <= moves + 2 && quick >= drawn - 2 && full === 0,
             `each of its ${moves} moves drawn once (${drawn} times), quickly (${quick} sketched, ${full} in full)`);
         check(Math.abs(live[0] - px(columns)) <= 2 && Math.abs(live[1] - px(rows)) <= 2 && fills(digitsNow()),
@@ -5804,10 +5809,15 @@ async function testLockStretchSpeed() {
         check(await waitFor(() => clock.width === px(columns) && clock.height === px(rows) && !clock.stretching, 2000) &&
             saved() === `${columns}x${rows}` && clock.entry.size === saved(),
         `let go, it takes its cells and keeps them (${saved()}), eased to in ${Math.round(now() - letGo)} ms`);
-        await Scripting.sleep(400);
+        // (Drawn in full once it rests – on a machine drawing without a GPU,
+        // later than the display's pace.)
+        const lastSketch = () => Math.max(letGo, ...callsOf('glass sketched', letGo).map(c => c.start));
+        const slow = Boolean(GLib.getenv('ATELIER_TEST_SLOW'));
+        await waitFor(() => callsOf('glass painted', lastSketch()).length > 0, slow ? 5000 : 400);
+        // (And the editor's grid round it still: it settles as slowly there.)
+        await Scripting.sleep(slow ? 1500 : 500);
         released.stop();
-        const lastSketch = Math.max(letGo, ...callsOf('glass sketched', letGo).map(c => c.start));
-        const inFull = callsOf('glass painted', lastSketch);
+        const inFull = callsOf('glass painted', lastSketch());
         const [x, y] = clock.glass.get_transformed_position();
         const [width, height] = clock.glass.get_transformed_size();
         const area = [x, y, width, height].map(Math.round);
