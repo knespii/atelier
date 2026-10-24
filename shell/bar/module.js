@@ -19,6 +19,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {COME_OUT_TIME, EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {GlassSurface} from '../core/glass.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {ContentPage} from '../island/page.js';
 import {CompactBar} from './compact.js';
 import {ClaudeIndicator, WeatherIndicator} from './indicators.js';
@@ -41,9 +42,13 @@ const ISLAND_PADDING = 6; // of the one island, beyond the icons at its ends
 // behind all of it, or GNOME's bar. Glass or black; its shape changes
 // every frame the island does, without anything being laid out anew.
 class Surface {
-    constructor(glass) {
+    /**
+     * @param {boolean} glass - of glass, not black
+     * @param {object|null} look - the glass's material (LOOK's)
+     */
+    constructor(glass, look) {
         this._glass = glass;
-        this.actor = new GlassSurface({reach: 0.1, solid: !glass});
+        this.actor = new GlassSurface({reach: 0.1, solid: !glass, look});
         if (!glass)
             this.actor.add_style_class_name('atelier-capsule');
         // (Never the target of a drag and drop.)
@@ -53,6 +58,11 @@ class Surface {
 
     get glass() {
         return this._glass;
+    }
+
+    /** @returns {number[]|null} its shape as GlassSurface.setShape() took it */
+    get shape() {
+        return this.actor.visible ? this.actor.shape : null;
     }
 
     hide() {
@@ -151,6 +161,9 @@ export class BarModule {
             'changed::island-shape', () => this._sync(),
             'changed::compact', () => this._sync(),
             this);
+        // (Glass off, its surfaces are black.)
+        this._glassLook = new GlassLook(this._settings);
+        this._glassLook.connectObject('changed', () => this._sync(), this);
         for (const box of [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox])
             box.connectObject('notify::allocation', () => this._queuePlace(), this);
         Main.layoutManager.panelBox.connectObject(
@@ -184,6 +197,10 @@ export class BarModule {
         this._island?.setMinPageWidth(0);
         this._island?.disconnectObject(this);
         this._island = null;
+        this._modules.get('island')?.setGlassPartner(null);
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
         this._overview?.disconnectObject(this);
         this._overview = null;
         this._timeouts.forEach(id => GLib.source_remove(id));
@@ -224,7 +241,8 @@ export class BarModule {
         const bar = this._barSettings;
         const style = bar.get_string('style');
         const notch = bar.get_string('island-shape') === 'notch';
-        const glass = bar.get_string('surface') === 'glass';
+        const glass = bar.get_string('surface') === 'glass' && this._glassLook.glass;
+        const look = this._glassLook.look;
         // GNOME's bar keeps its shape, made of glass when the rest is.
         const glassBar = style === 'gnome' && glass;
         const capsules = style !== 'gnome' && bar.get_string('sides') === 'capsules';
@@ -241,9 +259,11 @@ export class BarModule {
         else
             Main.panel.remove_style_class_name(CAPSULES);
         // Without a background of its own, the bar shows the overview's
-        // background too: the blurred wallpaper rather than GNOME's grey.
+        // background too: the blurred wallpaper rather than GNOME's grey
+        // (with the glass's grain, against banding).
         if (style !== 'gnome') {
             this._backdrop ??= new OverviewBackdrop();
+            this._backdrop.setGrain(look?.grain ?? 0);
         } else {
             this._backdrop?.destroy();
             this._backdrop = null;
@@ -259,7 +279,15 @@ export class BarModule {
         const count = style === 'island' || glassBar ? 1 : capsules ? 2 : 0;
         if (this._surfaces.length !== count || this._surfaces.some(surface => surface.glass !== glass)) {
             this._surfaces.forEach(surface => surface.destroy());
-            this._surfaces = Array.from({length: count}, () => new Surface(glass));
+            this._surfaces = Array.from({length: count}, () => new Surface(glass, look));
+        }
+        // (Regular or clear.)
+        if (glass)
+            this._surfaces.forEach(surface => surface.actor.setLook(look));
+        // Only the one island of glass is one glass with the island's.
+        if (!(style === 'island' && glass)) {
+            this._surfaces.forEach(surface => surface.actor.setPartner(null));
+            this._modules.get('island')?.setGlassPartner(null);
         }
         if (style !== 'island')
             this._island?.setMinPageWidth(0);
@@ -283,9 +311,25 @@ export class BarModule {
             'notify::x', () => this._place(),
             'notify::width', () => this._place(),
             'notify::visible', () => this._place(),
+            // (The one island of glass is one glass with the island's.)
+            'notify::y', () => this._syncPartners(),
+            'notify::height', () => this._syncPartners(),
+            'notify::translation-y', () => this._syncPartners(),
+            'notify::opacity', () => this._syncPartners(),
             'destroy', () => (this._island = null),
             this);
         this._queuePlace();
+    }
+
+    // The one island and the island, of glass, are one glass: each knows
+    // the other's shape, to bend and catch the light as one.
+    _syncPartners() {
+        const surface = this._surfaces[0];
+        if (this._stopped || this._look?.style !== 'island' || !surface?.glass)
+            return;
+        const islandModule = this._modules.get('island');
+        surface.actor.setPartner(islandModule?.glassShape ?? null);
+        islandModule?.setGlassPartner(surface.shape);
     }
 
     /**
@@ -356,6 +400,7 @@ export class BarModule {
         const panel = Main.panel;
         if (!Main.layoutManager.panelBox.visible || !panel.visible || this._tucked) {
             this._surfaces.forEach(surface => surface.hide());
+            this._syncPartners();
             return;
         }
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -402,6 +447,7 @@ export class BarModule {
                 this._surfaces[0].show([x1, panelY, x2 - x1, panel.height], 0, NOTCH_RADIUS * scale, EAR_RADIUS * scale);
             else
                 this._surfaces[0].show([x1, y, x2 - x1, height], height / 2, height / 2, 0);
+            this._syncPartners();
             return;
         }
 

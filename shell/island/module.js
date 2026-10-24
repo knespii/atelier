@@ -18,6 +18,7 @@ import {effectiveWallpaper} from '../../lib/profiles.js';
 import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {switcherWidth} from '../switcherContent.js';
 import {CalendarBridge} from './calendar.js';
 import {GlancePage} from './glance.js';
@@ -75,6 +76,7 @@ export class IslandModule {
         this._ear = 0;
         this._sheet = null;
         this._liquid = null;
+        this._partner = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -173,8 +175,9 @@ export class IslandModule {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this.togglePowerMenu());
 
-        // What it is made of and its shape follow the top bar's look; its
-        // glass and the ears of a notch follow it every frame it changes.
+        // What it is made of and its shape follow the top bar's look (and
+        // the glass's variant: off, it is black); its glass and the ears of
+        // a notch follow it every frame it changes.
         this._barSettings = this._settings.get_child('bar');
         this._barSettings.connectObject(
             'changed::surface', () => this._syncLook(),
@@ -182,6 +185,8 @@ export class IslandModule {
             'changed::style', () => this._syncLook(),
             'changed::compact', () => this._syncLook(),
             this);
+        this._glassLook = new GlassLook(this._settings);
+        this._glassLook.connectObject('changed', () => this._syncLook(), this);
         this._island.connectObject(
             'notify::x', () => this._syncShape(),
             'notify::y', () => this._syncShape(),
@@ -202,6 +207,9 @@ export class IslandModule {
         Main.wm.removeKeybinding('atelier-power-menu');
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
         this._sheet?.destroy();
         this._sheet = null;
         this._liquid?.destroy();
@@ -310,8 +318,9 @@ export class IslandModule {
             return null;
         // The drop is of the island's stuff, and the island is drawn along
         // with it, so they flow into each other.
-        const glass = this._barSettings.get_string('surface') === 'glass';
-        this._liquid = new GlassSurface({solid: !glass});
+        const glass = this._glassy();
+        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look});
+        this._liquid.setPartner(this._partner);
         Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
         const sheet = new LiquidSheet(island, this._liquid, form);
         Main.layoutManager.uiGroup.insert_child_above(sheet, this._liquid);
@@ -499,10 +508,45 @@ export class IslandModule {
             this._island.relayout();
     }
 
+    // Of glass, as the top bar has it – unless the glass is off.
+    _glassy() {
+        return this._barSettings.get_string('surface') === 'glass' && this._glassLook.glass;
+    }
+
+    /**
+     * The shape of the glass the island lies in, which its own glass is one
+     * with (the bar's one island), as GlassSurface.setPartner() takes it.
+     *
+     * @param {number[]|null} shape - on the stage, null for none
+     */
+    setGlassPartner(shape) {
+        if (JSON.stringify(shape) === JSON.stringify(this._partner))
+            return;
+        this._partner = shape;
+        this._glass?.setPartner(shape);
+        this._liquid?.setPartner(shape);
+    }
+
+    /**
+     * @returns {number[]|null} the island's shape on the stage, as its glass
+     *   has it ([x, y, width, height, radius, bottomRadius, ear]); null
+     *   while it isn't shown
+     */
+    get glassShape() {
+        const island = this._island;
+        if (this._stopped || !island?.visible || island.opacity === 0)
+            return null;
+        const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const node = island.get_theme_node();
+        // (Moved by its translation as it comes out.)
+        return [island.x, island.y + island.translation_y, island.width, island.height,
+            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
+    }
+
     _syncLook() {
         const island = this._island;
         const notch = this._barSettings.get_string('island-shape') === 'notch';
-        const glass = this._barSettings.get_string('surface') === 'glass';
+        const glass = this._glassy();
         const style = this._barSettings.get_string('style');
         // A notch curves into the top edge – unless it is part of one island
         // with the whole bar, whose shape has the ears then.
@@ -515,7 +559,8 @@ export class IslandModule {
             island.remove_style_class_name('atelier-island-notch');
 
         if (glass && !this._glass) {
-            this._glass = new GlassSurface({reach: GLASS_REACH});
+            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look});
+            this._glass.setPartner(this._partner);
             Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
             island.add_style_class_name('atelier-island-glass');
         } else if (!glass && this._glass) {
@@ -523,6 +568,10 @@ export class IslandModule {
             this._glass.destroy();
             this._glass = null;
         }
+        // (Regular or clear.)
+        this._glass?.setLook(this._glassLook.look);
+        if (glass)
+            this._liquid?.setLook(this._glassLook.look);
         // Black ears; glass draws its own.
         const ears = this._ear > 0 && !glass;
         if (ears && !this._ears) {

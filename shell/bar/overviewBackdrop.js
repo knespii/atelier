@@ -3,7 +3,8 @@
 // came and went as a band across the top while the overview opened and
 // closed. Here the wallpaper stays and blurs as the overview opens (the
 // blurred copy fading in over the sharp one, following the overview), so
-// the bar has the wallpaper behind it all the way.
+// the bar has the wallpaper behind it all the way. The glass's fine grain
+// lies over the blur, which would band without it.
 
 import Clutter from 'gi://Clutter';
 import Shell from 'gi://Shell';
@@ -11,6 +12,8 @@ import St from 'gi://St';
 
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {GrainEffect} from '../core/glassMaterial.js';
 
 const BLUR_RADIUS = 48; // logical pixels
 const BLUR_BRIGHTNESS = 0.6;
@@ -27,6 +30,7 @@ export class OverviewBackdrop {
         this.actor.add_child(this._sharp);
         this.actor.add_child(this._blurred);
         this._managers = [];
+        this._grain = 0;
 
         Main.layoutManager.connectObject('monitors-changed', () => this._build(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
@@ -44,21 +48,41 @@ export class OverviewBackdrop {
         Main.layoutManager.monitors.forEach((_, monitorIndex) => {
             this._managers.push(new Background.BackgroundManager({container: this._sharp, monitorIndex}));
             const blurred = new Background.BackgroundManager({container: this._blurred, monitorIndex});
-            blurred.connect('changed', () => this._blur(blurred));
-            this._blur(blurred);
+            blurred.connect('changed', () => this._blur(blurred.backgroundActor));
+            this._blur(blurred.backgroundActor);
             this._managers.push(blurred);
         });
     }
 
-    _blur(manager) {
-        const actor = manager.backgroundActor;
+    _blur(actor) {
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        actor.remove_effect_by_name('atelier-grain');
         actor.remove_effect_by_name('atelier-blur');
+        // (An actor's first effect is drawn last: the grain over the blur.)
+        if (this._grain > 0) {
+            const grain = new GrainEffect();
+            grain.setGrain(this._grain);
+            actor.add_effect_with_name('atelier-grain', grain);
+        }
         actor.add_effect_with_name('atelier-blur', new Shell.BlurEffect({
             mode: Shell.BlurMode.ACTOR,
             radius: BLUR_RADIUS * scale,
             brightness: BLUR_BRIGHTNESS,
         }));
+    }
+
+    /** @param {number} amount - of the grain over the blur, 0 for none */
+    setGrain(amount) {
+        if (amount === this._grain)
+            return;
+        this._grain = amount;
+        this._blurred.get_children().forEach(actor => {
+            const grain = actor.get_effect('atelier-grain');
+            if (grain && amount > 0)
+                grain.setGrain(amount);
+            else
+                this._blur(actor);
+        });
     }
 
     _syncBlur() {

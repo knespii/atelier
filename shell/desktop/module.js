@@ -26,6 +26,7 @@ import {
     placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {paintStage} from '../core/compat.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {LiquidPaint} from '../core/liquid.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
@@ -187,6 +188,9 @@ export class DesktopModule {
             'changed::glass', () => this._syncLook(false),
             'changed::card-opacity', () => this._syncLook(false),
             this);
+        // (Glass off, the cards are solid.)
+        this._glassLook = new GlassLook(this._settings);
+        this._glassLook.connectObject('changed', () => this._syncLook(false), this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queueArea(), this);
         Main.overview.connectObject(
             'shown', () => this._layer && (this._layer.opacity = 0),
@@ -263,6 +267,9 @@ export class DesktopModule {
         global.display.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         this._desktopSettings?.disconnectObject(this);
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
         this._widgets.forEach(widget => this._dropWidget(widget));
         this._widgets.clear();
         this._layer?.destroy();
@@ -450,7 +457,7 @@ export class DesktopModule {
      */
     _syncLook(rebuild) {
         const style = this._desktopSettings.get_string('style');
-        const glass = style === 'modern' && this._desktopSettings.get_boolean('glass');
+        const glass = style === 'modern' && this._desktopSettings.get_boolean('glass') && this._glassLook.glass;
         for (const name of ['modern', 'analogue'])
             this._layer.remove_style_class_name(`atelier-desktop-${name}`);
         this._layer.add_style_class_name(`atelier-desktop-${style}`);
@@ -459,13 +466,15 @@ export class DesktopModule {
         else
             this._layer.remove_style_class_name('atelier-desktop-glassy');
         if (glass && !this._glass) {
-            this._glass = new DesktopGlass();
+            this._glass = new DesktopGlass(this._glassLook.look);
             this._layer.insert_child_at_index(this._glass, 0);
             this._glass.setArea(this._area);
         } else if (!glass && this._glass) {
             this._glass.destroy();
             this._glass = null;
         }
+        // (Regular or clear.)
+        this._glass?.setLook(this._glassLook.look);
         // (As see-through as the settings have them: inline, over the look.)
         this._cardStyle = cardStyle(glass ? 'glassy' : style, this._desktopSettings.get_double('card-opacity'));
         this._widgets.forEach(widget => !widget.melted && widget.set_style(this._cardStyle || null));
