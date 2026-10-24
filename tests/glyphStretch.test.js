@@ -222,15 +222,20 @@ export function testStroke() {
 
 // The fonts the glass clock draws its figures in: Inter as the glass face
 // sets it (its weight and width, a large clock's optical size) and heavy,
-// Roboto Flex, and the shell's Cantarell where the system has it.
+// Roboto Flex, and where the system has them the shell's Cantarell and the
+// rounded and serif typefaces' first family.
 function clockFonts() {
     const {weight, width} = styleFor(typefaceFor('inter'), 'glass');
     const typeface = id => TYPEFACES.find(t => t.id === id);
+    const installed = id => typeface(id).families.map(family => [family, systemFontFile(family, weight)])
+        .find(([, path]) => path) ?? [id, null];
     return [
         ['Inter', bundledFile('Inter.ttf'), typeface('inter').axes, weight],
         ['Inter', bundledFile('Inter.ttf'), typeface('inter').axes, 800],
         ['Roboto Flex', bundledFile('RobotoFlex.ttf'), typeface('flex').axes, weight],
         ['Cantarell', systemFontFile('Cantarell'), null, weight],
+        [...installed('rounded'), null, weight],
+        [...installed('serif'), null, weight],
     ].filter(([, path]) => path).map(([name, path, fontAxes, fontWeight]) => {
         const {variations} = variationsFor(fontAxes, {weight: fontWeight, width, size: 400});
         return {name: `${name} ${variations}`, font: fontAt(path, variations)};
