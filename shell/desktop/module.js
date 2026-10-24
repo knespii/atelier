@@ -23,10 +23,11 @@ import {addToSelection} from '../../lib/photos.js';
 import {keepWidgets} from '../../lib/profiles.js';
 import {
     CLOCK_FACES, KINDS, cardGlass, cardStyle, cellOrigin, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize, nearestSpot, newId, nextSize, parseLayout,
-    placeAt, serializeLayout,
+    pixelSize, placeAt, serializeLayout,
 } from '../../lib/widgets.js';
 import {paintStage} from '../core/compat.js';
 import {LiquidPaint} from '../core/liquid.js';
+import {blurOf, glassLayers, layersOf} from '../core/vibrancy.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
 import {CalendarWidget} from './kinds/calendar.js';
@@ -87,6 +88,10 @@ const LOOK_TIME = 700;
 // What a widget shows, of its entry in the layout (not where it is).
 const PLACE_KEYS = ['x', 'y', 'grid', 'places', 'fine'];
 const options = entry => JSON.stringify(Object.entries(entry).filter(([key]) => !PLACE_KEYS.includes(key)).sort());
+
+// The kinds whose cards of glass hold type (a photo is a picture, a note
+// paper of its own).
+const VIBRANT_KINDS = ['clock', 'date', 'calendar', 'weather', 'github', 'claude', 'slack'];
 
 export class DesktopModule {
     /**
@@ -477,6 +482,58 @@ export class DesktopModule {
         if (rebuild)
             this._widgets.forEach(widget => widget.resize(widget.entry.size));
         this.syncGlass();
+        this._syncVibrancy();
+    }
+
+    // On cards of glass, each widget's type follows what is behind its card
+    // (shell/core/vibrancy.js): the wallpaper where it rests on its cell,
+    // under the card's own colour (as it is before it melts, while it
+    // flows), as much of the glass as shows.
+    _syncVibrancy() {
+        const vibrancy = this._glass ? this._modules.get('vibrancy') : null;
+        for (const widget of this._widgets.values()) {
+            const wanted = vibrancy && VIBRANT_KINDS.includes(widget.entry.kind);
+            if (wanted && !widget._vibrant) {
+                widget._vibrant = vibrancy.surface({
+                    id: `widget-${widget.entry.id}`,
+                    inks: 'widget',
+                    roots: ['.atelier-widget'],
+                    rect: () => this._restRect(widget),
+                    blur: () => blurOf(this._glass),
+                    tint: () => glassLayers(this._glass),
+                    strength: () => cardGlass(this._desktopSettings.get_double('card-opacity')),
+                    layers: () => {
+                        if (!widget.melted)
+                            widget._vibrantLayers = layersOf(widget);
+                        return widget._vibrantLayers ?? [];
+                    },
+                });
+                widget.add_style_class_name(widget._vibrant.scope);
+            } else if (!wanted && widget._vibrant) {
+                this._dropVibrancy(widget);
+            } else {
+                widget._vibrant?.update();
+            }
+        }
+    }
+
+    _dropVibrancy(widget) {
+        if (!widget._vibrant)
+            return;
+        widget.remove_style_class_name(widget._vibrant.scope);
+        widget._vibrant.destroy();
+        widget._vibrant = null;
+    }
+
+    // Where a widget rests on the stage: on its cell, as big as its size
+    // (not where it is dragged or flows).
+    _restRect(widget) {
+        if (!this._area || !this._origin)
+            return null;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [x, y] = cellOrigin(widget.entry.x, widget.entry.y, this._origin);
+        const [width, height] = pixelSize(widget.entry.size);
+        return {x: this._area.x + x * scale, y: this._area.y + y * scale, width: width * scale, height: height * scale};
     }
 
     /** Make the widgets anew, e.g. when another kind became known. */
@@ -773,6 +830,7 @@ export class DesktopModule {
     }
 
     _dropWidget(widget) {
+        this._dropVibrancy(widget);
         widget._menu?.destroy();
         widget._menu = null;
         widget.disconnectObject(this);
@@ -819,6 +877,7 @@ export class DesktopModule {
             this._startFlow([...gone, ...steps]);
         }
         this.syncGlass();
+        this._syncVibrancy();
     }
 
     /** The glass under the widgets follows them. */
