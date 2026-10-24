@@ -5056,6 +5056,255 @@ async function testLockClockFades() {
     }
 }
 
+// Of the frames drawn in a while (watchFrames()), from the first after it
+// began: how far apart those that showed something moving came, each from
+// the one before it – the first from when the while began (what set it
+// going is done in it); and the calls timed (timeCalls()) in each, from the
+// frame before it on. A frame shows something moving when what is sampled
+// of it differs from the frame before it.
+function paceOf(frames, calls, since, moved) {
+    const shown = frames.filter(f => f.done > since);
+    const rows = shown.map((frame, i) => {
+        const from = i > 0 ? shown[i - 1].done : since;
+        const inIt = calls.filter(c => c.start > from && c.start <= frame.done);
+        const spent = {};
+        for (const {name, took} of inIt)
+            spent[name] = (spent[name] ?? 0) + took;
+        return {...frame, gap: frame.done - from, moving: i === 0 || moved(frame, shown[i - 1]), spent};
+    });
+    const gaps = rows.filter(row => row.moving).map(row => row.gap);
+    return {rows, gaps, spread: spreadOf(gaps)};
+}
+
+// The lock screen's prompt coming up and going again as the user has it: a
+// big glass clock of a size of its own (17 × 14 cells: ATELIER_TEST_PROMPT_CLOCK
+// another) over a hill that stands in front of its digits' feet, its glass
+// frosting the wallpaper, the battery beside it, the lock screen's own popup
+// to ask (ATELIER_TEST_SCALE: the monitor at that scale meanwhile, as for
+// testLockStretchSpeed). Twice: as the prompt comes up, while it rests and
+// from Escape until the clock is back and still, the frames come as often as
+// the display shows them – but the first time up, which makes what is kept
+// for the next (and where the shell draws without a GPU, ATELIER_TEST_SLOW:
+// only said) – and the glass clock is not drawn anew at all, however GNOME
+// restyles its lock screen as the key focus comes and goes; the popup's
+// liquid only as large as it flows. What each frame cost where goes in
+// tests/output/shell/pace.
+async function testLockPromptPace() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the pace of the prompt untested');
+        return;
+    }
+    const {GlassBackdrop} = await import('../shell/lockscreen/liquidGlass.js');
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const [columns, rows] = (GLib.getenv('ATELIER_TEST_PROMPT_CLOCK') ?? '17x14').split('x').map(Number);
+    const wantedScale = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
+    const scaled = wantedScale > 0 && wantedScale !== global.stage.get_resource_scale();
+    if (scaled) {
+        const width = global.stage.width;
+        await setMonitorScale(wantedScale);
+        await waitFor(() => global.stage.width !== width, 5000);
+        await Scripting.sleep(2000);
+    }
+    const realBattery = fakeBattery();
+    let timed = null;
+    try {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const size = [monitor.width, monitor.height];
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const density = global.stage.get_resource_scale();
+        const px = n => (n * PITCH - GAP) * scale;
+        const dir = `${OUTPUT}/pace`;
+        GLib.mkdir_with_parents(dir, 0o755);
+        // A hill in front of the lower part of the clock's box, the depth
+        // effect's cutout of it.
+        const origin = gridOrigin(monitor.width / scale, monitor.height / scale);
+        const [, boxTop] = cellOrigin(2, 2, origin).map(v => v * scale);
+        const hill = Math.round(boxTop + px(rows) * 0.7);
+        const wallpaper = `${dir}/hill.png`;
+        hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+        const cutout = cutoutPath(pictureState(wallpaper), size);
+        GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+        hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff,
+            {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`});
+        background.set_string('picture-uri', uriOf(wallpaper));
+        background.set_string('picture-uri-dark', uriOf(wallpaper));
+        background.set_string('picture-options', 'zoom');
+        lockSettings.set_string('widgets', JSON.stringify([
+            {id: 'clock', kind: 'clock', size: `${columns}x${rows}`, x: 2, y: 2, fine: true, face: 'glass'},
+            {id: 'battery', kind: 'battery', size: 'line', x: columns + 3, y: 2, fine: true},
+        ]));
+        lockSettings.set_boolean('gnome-clock', false);
+        lockSettings.set_boolean('password-field', true);
+        lockSettings.set_boolean('depth-effect', true);
+        await wallpapersSettled();
+        const locked = await lockForTest();
+        let backdrop = null;
+        let clock = null;
+        try {
+            const clockThere = () => lock()?.board?.widgets.find(w => w.entry.id === 'clock');
+            check(await waitFor(() => lock()?.board?.depth?.loaded && clockThere()?.glass?.target, 8000),
+                `locked: a glass clock of ${columns} × ${rows} cells, the hill in front of its digits' feet`);
+            const module = lock();
+            const board = module.board;
+            const depth = board.depth;
+            clock = clockThere();
+            const glass = clock.glass;
+            // (The time as the test sets it; the frosted wallpaper as the
+            // board gives the glass, once made – or made here.)
+            clock._sync = () => {};
+            glass.setClock('10:08');
+            if (!await waitFor(() => glass.backdrop, 15000)) {
+                backdrop = new GlassBackdrop();
+                backdrop.setMonitor(size, scale);
+                await waitFor(() => backdrop.current, 10000);
+                glass.backdrop = backdrop.current;
+            }
+            await waitFor(() => !glass.changing && glass.stretch === glass.target.stretch, 2000);
+            check(Boolean(glass.backdrop) && depth.actor.visible && !depth.tooMuch,
+                `its glass frosting the wallpaper, the depth effect on (${JSON.stringify(depth.legibility[0])})`);
+            await restPointer();
+            await Scripting.sleep(1500);
+
+            // What each frame costs where: Atelier's parts, and GNOME's.
+            const field = module._field;
+            timed = timeCalls([
+                ['events followed', module, '_dispatch'],
+                ['room made', module, '_makeRoom'],
+                ['  wallpaper to glass', module._glass, '_paint'],
+                ['  island', module._island, 'reveal'],
+                ['  widgets make room', board, 'makeRoom'],
+                ['GNOME\'s prompt moved', shield._dialog, '_setTransitionProgress'],
+                ['GNOME\'s prompt gone', shield._dialog, '_maybeDestroyAuthPrompt'],
+                ['tone', board, '_tone'],
+                ['glass planned', board, '_planGlass'],
+                ['depth looked at', board, '_syncDepthCover'],
+                ['face laid out', glass, '_allocate'],
+                ['  digits drawn', glass, 'paintLayer'],
+            ]);
+            const now = () => GLib.get_monotonic_time() / 1000;
+            const tag = `at ${density}×, a clock of ${[clock.width, clock.height].map(Math.round).join('×')} px`;
+            // (How much the wallpaper is blurred: by whichever of its blurs is on.)
+            const wallpaperActor = shield._dialog._backgroundGroup.get_children().find(w => w.get_effect('blur'));
+            const blurred = () => Math.max(0, ...(wallpaperActor?.get_effects() ?? [])
+                .filter(e => e instanceof Shell.BlurEffect && e.enabled).map(e => e.radius));
+            // (The popup's liquid, timed and measured once it is there.)
+            const liquid = () => field?._popup?._paint ?? null;
+            let liquidSize = null;
+            const sample = () => {
+                const paint = liquid();
+                if (paint) {
+                    timed.add([['popup\'s liquid', paint, 'setShapes']]);
+                    if (paint.has_allocation())
+                        liquidSize ??= [paint.width, paint.height];
+                }
+                return {
+                    room: module.room,
+                    clock: clock.get_paint_opacity(),
+                    island: module.island?.actor?.translation_y ?? 0,
+                    popup: paint ? 1 : 0,
+                    form: field?.form?.opacity ?? 0,
+                    blur: blurred(),
+                };
+            };
+            const moved = (a, b) => a.popup || b.popup ||
+                ['room', 'clock', 'island', 'form', 'blur'].some(key => a[key] !== b[key]);
+            const phases = [];
+            // A while, from start() until done() (or for so long), and a
+            // little after. (While it rests, every frame counts: the
+            // padlock's wave runs.)
+            const phase = async (name, start, done, rest = 0) => {
+                const watched = watchFrames(sample);
+                const since = now();
+                await start();
+                if (rest > 0)
+                    await Scripting.sleep(rest);
+                else
+                    await waitFor(done, 10000);
+                const until = now();
+                await Scripting.sleep(150);
+                watched.stop();
+                phases.push({name, ...paceOf(watched.frames.filter(f => f.done <= until + 20), timed.calls, since,
+                    rest > 0 ? () => true : moved)});
+            };
+            const drawn = () => [glass._digits.repaints, glass._moving.repaints];
+            const before = drawn();
+            // (What it is drawn from: anew, once, if that changes meanwhile –
+            // the board's frosted wallpaper made late, on a slow machine.)
+            const sources = () => [glass.backdrop, JSON.stringify(glass._plan)];
+            const drawnFrom = sources();
+            for (const round of [1, 2]) {
+                await phase(`up ${round}`, () => pressKey(Clutter.KEY_a),
+                    () => module.room === 1 && field.form?.opacity === 255 && !liquid());
+                await phase(`rest ${round}`, async () => {}, null, 1500);
+                await phase(`down ${round}`, () => pressKey(Clutter.KEY_Escape),
+                    () => module.room === 0 && clock.get_paint_opacity() === 255 && !liquid() && !field.form);
+                await Scripting.sleep(1000);
+            }
+            const notDrawn = `the glass clock not drawn anew as the prompt comes up and goes, twice (${before} → ${drawn()})`;
+            if (sources().every((source, i) => source === drawnFrom[i]))
+                check(JSON.stringify(drawn()) === JSON.stringify(before), notDrawn);
+            else
+                results.push(`INFO  its frosted wallpaper or its plan came anew meanwhile: ${notDrawn}`);
+            const share = liquidSize ? liquidSize[0] * liquidSize[1] / (monitor.width * monitor.height) : 1;
+            check(share < 0.25, `the popup's liquid only round it, not over the monitor (${liquidSize?.map(Math.round).join('×')})`);
+
+            // Frame by frame, what each while cost where.
+            const names = Object.keys(timed.spent);
+            const slow = Boolean(GLib.getenv('ATELIER_TEST_SLOW'));
+            for (const {name, rows: frames, spread} of phases) {
+                const moving = frames.filter(f => f.moving);
+                // (Two display frames late, and more: as long as a frame held
+                // up by something else – the garbage collector – may be.)
+                const long = moving.filter(f => f.gap > 40);
+                const [layout, painting] = ['layout', 'painting'].map(key => spreadOf(moving.map(f => f[key])));
+                const pace = `${name}, ${tag}: frames ${ms(spread.mean)} ms apart on average, ${ms(spread.p95)} for 95 % ` +
+                    `of them, ${ms(spread.max)} at most, ${long.length} over 40 ms (${spread.n} frames; laid out ` +
+                    `${ms(layout.mean)} ms, ${ms(layout.max)} at most, painted ${ms(painting.mean)}, ${ms(painting.max)})`;
+                // (The first time up, what is kept for the next is made – and,
+                // the first time in the shell, the shaders: only said.)
+                if (slow || name === 'up 1')
+                    results.push(`INFO  ${slow ? 'drawn without a GPU: ' : ''}${pace}`);
+                else
+                    check(spread.mean <= 18.5 && spread.p95 <= 25 && long.length <= 1, `the prompt ${pace}`);
+                for (const f of moving.filter(row => row.gap > 20)) {
+                    const top = Object.entries(f.spent).filter(([, took]) => took >= 0.5)
+                        .map(([stage, took]) => `${stage.trim()} ${ms(took)}`).join(', ');
+                    results.push(`INFO      ${ms(f.gap)} ms (laid out ${ms(f.layout)}, painted ${ms(f.painting)}; room ` +
+                        `${f.room.toFixed(2)}, clock ${f.clock}, blur ${f.blur}${top ? `; ${top}` : ''})`);
+                }
+                GLib.file_set_contents(`${dir}/${density}x-${name.replace(' ', '-')}.txt`, `${[
+                    ['frame', 'gap', 'moving', 'layout', 'painting', 'room', 'clock', 'blur', 'island', 'popup', 'form',
+                        ...names.map(n => n.trim())].join('\t'),
+                    ...frames.map((f, i) => [i, ms(f.gap), f.moving ? 1 : 0, ms(f.layout), ms(f.painting),
+                        f.room.toFixed(3), f.clock, f.blur, Math.round(f.island), f.popup, f.form,
+                        ...names.map(n => ms(f.spent[n] ?? 0))].join('\t')),
+                ].join('\n')}\n`);
+            }
+        } finally {
+            if (clock)
+                delete clock._sync;
+            backdrop?.destroy();
+            await locked.unlock();
+        }
+    } finally {
+        timed?.undo();
+        realBattery();
+        ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        if (scaled) {
+            const width = global.stage.width;
+            await setMonitorScale(1);
+            await waitFor(() => global.stage.width !== width, 5000);
+            await Scripting.sleep(1000);
+        }
+    }
+}
+
 // The glass clock stretched to a size of its own on the mock lock screen, as
 // an iPhone's clock is dragged taller: its corner dragged with the pointer,
 // it follows it, its digits filling it as it goes, and the shadow shows the
@@ -5353,8 +5602,9 @@ function timeCalls(targets) {
 
 // The frames the stage draws meanwhile: when each was done (after-paint),
 // how long it took to lay out (from before-update, once the laters ran, to
-// before-paint) and to paint.
-function watchFrames() {
+// before-paint) and to paint – and, with sample(), what was there to see
+// in it, as it was painted.
+function watchFrames(sample = null) {
     const frames = [];
     let frame = null;
     const ids = [
@@ -5363,7 +5613,7 @@ function watchFrames() {
         global.stage.connect('after-paint', () => {
             const now = GLib.get_monotonic_time();
             frames.push({done: now / 1000, layout: frame?.paint ? (frame.paint - frame.update) / 1000 : 0,
-                painting: frame?.paint ? (now - frame.paint) / 1000 : 0});
+                painting: frame?.paint ? (now - frame.paint) / 1000 : 0, ...sample?.()});
             frame = null;
         }),
     ];
@@ -6349,6 +6599,7 @@ export async function run() {
             await part(testLockLook);
             await part(testLockGlassClock);
             await part(testLockClockFades);
+            await part(testLockPromptPace);
             await part(testLockFreeStretch);
             await part(testLockStretchSpeed);
             await part(testLockOnOwnWallpaper);
@@ -6404,6 +6655,7 @@ export async function run() {
         await part(testLockLook);
         await part(testLockGlassClock);
         await part(testLockClockFades);
+        await part(testLockPromptPace);
         await part(testLockFreeStretch);
         await part(testLockStretchSpeed);
         await part(testLockOnOwnWallpaper);
