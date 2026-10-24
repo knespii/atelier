@@ -1,22 +1,31 @@
 // The glass clock's material, Liquid Glass as an iPhone's lock screen has
-// it: the digits a translucent membrane over the wallpaper. Behind them the
-// wallpaper is frosted – blurred, its colours richer, the light coming
-// through brighter (or, through dark glass, dimmer) – and tinted in the
-// tone (lib/lockLook.js) with a hint of the colour behind; light catches
-// their upper edges and leaves by their lower ones, a darker line runs
-// inside those, and along their edges the glass bends what is behind (what
-// lies further out drawn in, lighter). As opaque as asked, and with a soft
-// shadow round them when asked: a contrast plan's means.
+// it, and as all of Atelier's glass looks (lib/glassLook.js: regular or
+// clear glass; none, solid digits in the tone): the digits a translucent
+// membrane over the wallpaper. Behind them the wallpaper is frosted –
+// blurred, its colours richer, the light coming through brighter (or,
+// through dark glass, dimmer) – under a light veil (clear glass: a dimming
+// under it) and tinted in the tone (lib/lockLook.js) with a hint of the
+// colour behind. Along their edges the glass bends what is behind, as a
+// lens about each glyph's middle (what lies further out drawn in, lighter,
+// red a little further than blue: a hint of colour at the very rim); the
+// light from above catches their edges – strongly along the tops of their
+// strokes, faintly along their bottoms, in between along their sides – a
+// soft sheen runs across each from its top left, and a fine grain keeps
+// the gradients from banding. As opaque as asked, and with a soft shadow
+// round them when asked: a contrast plan's means.
 //
 // The frosted wallpaper – the backdrop – is the whole monitor's, made once
-// for a wallpaper (lib/glassBackdrop.js) as GNOME draws it there, and kept
-// in Atelier's cache as a small PNG (Cairo in gjs reads pictures from PNG
-// files only); digits drawn anywhere on the monitor take their part of it.
-// Made in the session ahead of time, or on the lock screen when it isn't
-// there yet: the decoding in GdkPixbuf's threads, the blur a pass at a time
-// when the shell is idle, never holding anything up. Drawn, the digits are
-// filled once, as a mask, and the rest is that mask laid over the backdrop
-// and the light (a few milliseconds for a large clock): they can change at
+// for a wallpaper and a look (lib/glassBackdrop.js) as GNOME draws it
+// there, and kept in Atelier's cache as a small PNG (Cairo in gjs reads
+// pictures from PNG files only); digits drawn anywhere on the monitor take
+// their part of it. Made in the session ahead of time, or on the lock
+// screen when it isn't there yet: the decoding in GdkPixbuf's threads, the
+// blur a pass at a time when the shell is idle, never holding anything up.
+// Drawn, the digits are filled once, as a mask; all that is smooth of the
+// membrane – the frost, the band where it bends, the veils, the tint, the
+// sheen – is drawn small and laid over that mask as large again, the light
+// along the edges is the shape moved by a pixel or two, added up, and the
+// grain a tile (a few milliseconds for a large clock): they can change at
 // 60 frames a second.
 //
 // Only Cairo, GdkPixbuf, Gio and GLib here (tools/render-glass.js draws
@@ -29,9 +38,10 @@ import GLib from 'gi://GLib';
 
 import {lockWallpaper, pictureState, placement} from '../../lib/depth.js';
 import {
-    DIM, GLASS, TINT_GRADIENT, backdropKey, backdropSize, backdropTransform, backgroundPixels, frostSteps, glassTint,
-    glyphCells, meanColor, parseColor, pictureArea,
+    DIM, GLASS, TINT_GRADIENT, backdropKey, backdropSize, backdropTransform, backgroundPixels, frostOf, frostSteps,
+    glassTint, glyphCells, grainNoise, lensOf, meanColor, parseColor, pictureArea, rimSteps, sheenLine,
 } from '../../lib/glassBackdrop.js';
+import {lookOf, resolveVariant} from '../../lib/glassLook.js';
 import {hexToRgb} from '../../lib/palette.js';
 
 Gio._promisify(Gio.File.prototype, 'read_async');
@@ -45,22 +55,11 @@ Gio._promisify(Gio.OutputStream.prototype, 'close_async');
 
 const KEPT = 4; // backdrops kept: the newest (the light style's and the dark one's, another monitor's)
 
-// How the glass bends light in a band along its edge: what lies further
-// out drawn in, as if what is behind each glyph were this much smaller,
-// about its middle.
-const LENS = 0.8;
-// The band: as deep as the shape blurred this much (logical pixels) runs
-// in from the edge, strongest at the edge; and how much lighter it is, on
-// light glass and on dark.
-const BAND = {blur: 6, light: [0.22, 0.08]};
-// The rim: light caught along the upper and left edges – the shape less
-// itself moved away from the light, by the rim's width (logical pixels) –
-// brighter at the top than at the bottom; and where the light leaves it,
-// lower and right, a thinner one. On dark glass half as bright.
-const RIM = {width: 1.6, light: [-0.45, -1], alpha: [0.9, 0.4], exit: {width: 0.9, alpha: 0.45}};
-// Inside the lower edges, a little further in, a darker line (the glass
-// is thick there), faint.
-const INNER = {width: 2.6, alpha: 0.08};
+// How much lighter the band along the edge where the glass bends what is
+// behind is, on light glass and on dark.
+const BAND_LIGHT = [0.22, 0.08];
+// How much of the light – along its edges, its sheen – dark glass catches.
+const DARK_LIGHT = 0.5;
 // A soft shadow round the shape (outside it only), at its fullest – as a
 // plan's is given (lib/lockLook.js legibilityPlan()): its alpha, its blur
 // (as CSS's, logical pixels) and how far down it falls; black round light
@@ -69,6 +68,12 @@ const SHADOW = {alpha: 0.6, blur: 12, y: 1, glow: 1.2};
 // The tint's alpha, without a backdrop to frost (none made yet): more of
 // it, in place of the frost.
 const BARE_TINT = 1.35;
+// What is smooth of the glass is drawn this many logical pixels a pixel
+// (the frost is blurred by fourteen, its band by as many), as large again
+// it is as fine.
+const SMOOTH_PIXEL = 2;
+// The grain's tile, pixels each way (of the drawing's: it repeats).
+const GRAIN_TILE = 128;
 
 /** @returns {string} the folder of the frosted backdrops */
 export function backdropDir() {
@@ -86,18 +91,23 @@ export function backdropDir() {
  *   (lib/glassBackdrop.js backgroundPixels())
  * @param {number[]} options.monitor - [width, height], pixels
  * @param {number} [options.scale] - the shell's scale factor
+ * @param {object} [options.look] - the glass's look (lib/glassLook.js
+ *   lookOf()): how rich and bright the frost comes out
  * @param {string} [options.dir] - where it is kept (backdropDir())
  * @returns {object|null} null for a picture that can't be read, or a style
  *   the glass doesn't follow (tiled, spanned)
  */
-export function backdropSpec({path, style, colors = {primary: '#000000'}, monitor, scale = 1, dir = backdropDir()}) {
+export function backdropSpec({
+    path, style, colors = {primary: '#000000'}, monitor, scale = 1, look = lookOf('regular'), dir = backdropDir(),
+}) {
     const picture = path ? pictureState(path) : null;
     if (!picture || !placement(style, monitor, [1, 1]) || !(monitor[0] > 0 && monitor[1] > 0))
         return null;
-    const key = backdropKey(picture, {monitor, scale, style, colors});
+    const frost = frostOf(look);
+    const key = backdropKey(picture, {monitor, scale, style, colors, frost});
     return {
-        path, style, colors, monitor, scale, key,
-        size: backdropSize(monitor, scale),
+        path, style, colors, monitor, scale, frost, key,
+        size: backdropSize(monitor, scale, frost.sigma),
         file: GLib.build_filenamev([dir, `${key}.png`]),
     };
 }
@@ -107,10 +117,11 @@ export function backdropSpec({path, style, colors = {primary: '#000000'}, monito
  * @param {Gio.Settings} iface - org.gnome.desktop.interface
  * @param {number[]} monitor - [width, height] of the main monitor, pixels
  * @param {number} scale - the shell's scale factor
+ * @param {object} [look] - as for backdropSpec()
  * @returns {object|null} backdropSpec() of what GNOME's lock screen shows
  *   (lib/depth.js lockWallpaper())
  */
-export function lockBackdropSpec(background, iface, monitor, scale) {
+export function lockBackdropSpec(background, iface, monitor, scale, look = lookOf('regular')) {
     return backdropSpec({
         path: lockWallpaper(background, iface),
         style: background.get_string('picture-options'),
@@ -121,6 +132,7 @@ export function lockBackdropSpec(background, iface, monitor, scale) {
         },
         monitor,
         scale,
+        look,
     });
 }
 
@@ -252,7 +264,7 @@ async function frostedPixels(spec) {
     }
     const pixels = await stepwise(frostSteps(canvas.get_pixels(), {
         width, height, channels: canvas.get_n_channels(), rowstride: canvas.get_rowstride(),
-    }, {sigma: size.sigma}));
+    }, {sigma: size.sigma, saturation: spec.frost.saturation, lift: spec.frost.lift}));
     return {pixels, shift: area?.shift ?? [0, 0]};
 }
 
@@ -338,10 +350,11 @@ export async function loadBackdrop(spec, made = null, cancellable = null) {
  * @param {Gio.Settings} options.iface
  * @param {number[]} options.monitor
  * @param {number} options.scale
+ * @param {object|null} [options.look] - none: no glass, no backdrop
  * @returns {Promise<boolean>} whether there is one now
  */
-export async function prepareLockBackdrop({background, iface, monitor, scale}) {
-    const spec = lockBackdropSpec(background, iface, monitor, scale);
+export async function prepareLockBackdrop({background, iface, monitor, scale, look = lookOf('regular')}) {
+    const spec = look ? lockBackdropSpec(background, iface, monitor, scale, look) : null;
     if (!spec)
         return false;
     await makeBackdrop(spec);
@@ -350,16 +363,19 @@ export async function prepareLockBackdrop({background, iface, monitor, scale}) {
 
 /**
  * The backdrop of the wallpaper GNOME's lock screen shows on the main
- * monitor, kept as it changes: the one made, or made now when there is
- * none (unless it is only to be shown).
+ * monitor, for the glass's look, kept as either changes: the one made, or
+ * made now when there is none (unless it is only to be shown); none for no
+ * glass.
  */
 export class GlassBackdrop {
     /**
      * @param {object} [options]
      * @param {boolean} [options.make] - make it when it isn't there yet
+     * @param {string} [options.variant] - lib/glassLook.js VARIANTS
      */
-    constructor({make = true} = {}) {
+    constructor({make = true, variant = 'regular'} = {}) {
         this._make = make;
+        this._look = lookOf(variant);
         this._background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
         this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         this._monitor = null;
@@ -394,10 +410,20 @@ export class GlassBackdrop {
         this._load();
     }
 
+    /** @param {string} variant - the glass's (lib/glassLook.js VARIANTS): 'off', none */
+    setVariant(variant) {
+        const look = lookOf(variant);
+        if (look === this._look)
+            return;
+        this._look = look;
+        this._load();
+    }
+
     async _load() {
         if (!this._monitor || !this._signals)
             return;
-        const spec = lockBackdropSpec(this._background, this._interface, this._monitor, this._scale);
+        const spec = this._look
+            ? lockBackdropSpec(this._background, this._interface, this._monitor, this._scale, this._look) : null;
         // (The one there, or on its way.)
         if (spec && (spec.key === this._current?.key || spec.key === this._loading))
             return;
@@ -581,15 +607,103 @@ class Masks {
     }
 }
 
+// The grain's tiles, one for each amplitude, made once.
+const grains = new Map();
+
+/**
+ * Fine grain against banding, for a look's amplitude (lib/glassLook.js
+ * grain): each pixel a little lighter or darker, in a tile that repeats, a
+ * pixel of it one of the drawing's. Made the first time it is asked for
+ * (some milliseconds: ahead of time, in the session, see clock.js
+ * GlassWarmUp), kept after.
+ *
+ * @param {number} amplitude - how much lighter or darker, on average
+ * @param {number} [density] - the drawing's device pixels per pixel
+ * @returns {Cairo.SurfacePattern}
+ */
+export function grainPattern(amplitude, density = 1) {
+    let tile = grains.get(amplitude);
+    if (!tile) {
+        tile = new Cairo.ImageSurface(Cairo.Format.ARGB32, GRAIN_TILE, GRAIN_TILE);
+        const cr = new Cairo.Context(tile);
+        cr.setOperator(Cairo.Operator.SOURCE);
+        grainNoise(GRAIN_TILE * GRAIN_TILE).forEach((v, i) => {
+            const white = v > 0 ? 1 : 0;
+            cr.setSourceRGBA(white, white, white, Math.abs(v) * 2 * amplitude);
+            cr.rectangle(i % GRAIN_TILE, Math.floor(i / GRAIN_TILE), 1, 1);
+            cr.fill();
+        });
+        cr.$dispose();
+        grains.set(amplitude, tile);
+    }
+    tile.setDeviceScale(density, density);
+    const pattern = new Cairo.SurfacePattern(tile);
+    pattern.setExtend(Cairo.Extend.REPEAT);
+    pattern.setFilter(Cairo.Filter.NEAREST);
+    return pattern;
+}
+
+/**
+ * The variant of glass the lock screen's glass clocks are drawn in, kept
+ * as it changes: Atelier's glass-variant setting – none ('off': solid
+ * digits) while GNOME's high contrast is on (lib/glassLook.js
+ * resolveVariant()).
+ */
+export class GlassVariant {
+    /**
+     * @param {Gio.Settings|null} settings - Atelier's; none: regular glass
+     * @param {Function} [onChanged] - called when the variant changes
+     */
+    constructor(settings, onChanged = null) {
+        this._settings = settings;
+        this._onChanged = onChanged;
+        const a11y = 'org.gnome.desktop.a11y.interface';
+        this._a11y = Gio.SettingsSchemaSource.get_default()?.lookup(a11y, true)?.has_key('high-contrast')
+            ? new Gio.Settings({schema_id: a11y}) : null;
+        this._variant = this._resolve();
+        this._signals = [
+            ...settings ? [[settings, settings.connect('changed::glass-variant', () => this._sync())]] : [],
+            ...this._a11y ? [[this._a11y, this._a11y.connect('changed::high-contrast', () => this._sync())]] : [],
+        ];
+    }
+
+    /** @returns {string} one of lib/glassLook.js VARIANTS */
+    get variant() {
+        return this._variant;
+    }
+
+    _resolve() {
+        return resolveVariant(this._settings?.get_string('glass-variant') ?? 'regular',
+            {highContrast: this._a11y?.get_boolean('high-contrast') ?? false});
+    }
+
+    _sync() {
+        const variant = this._resolve();
+        if (variant === this._variant)
+            return;
+        this._variant = variant;
+        this._onChanged?.(variant);
+    }
+
+    destroy() {
+        this._signals?.forEach(([settings, id]) => settings.disconnect(id));
+        this._signals = null;
+        this._onChanged = null;
+    }
+}
+
 /**
  * The material: draws a shape (the digits) in it, over what is drawn
  * already where it lies on the monitor. The shape is filled once, as a
- * mask; all else is that mask laid over the backdrop, the tint and the
- * light, as a GPU would blend them (and about as cheaply).
+ * mask; all else is that mask laid over the membrane (drawn small: smooth
+ * all of it), the grain and the light, as a GPU would blend them (and about
+ * as cheaply).
  */
 export class LiquidGlass {
     constructor() {
         this._backdrop = null;
+        // (Its red, green and blue apart: for the lens to bend each its own way.)
+        this._channels = null;
         this._behind = new Map();
         this._masks = new Masks();
         // (What sketch() fills the shape with, while it serves.)
@@ -606,6 +720,9 @@ export class LiquidGlass {
         if (backdrop === this._backdrop)
             return;
         this._backdrop = backdrop;
+        // (Let go of at once: the garbage collector can't tell how large they are.)
+        this._channels?.forEach(channel => channel.finish());
+        this._channels = null;
         this._behind.clear();
         this._forgetSketch();
     }
@@ -660,105 +777,95 @@ export class LiquidGlass {
      *   blur, y} (blur and y logical pixels; legibilityPlan()'s); null none
      * @param {number} [options.scale] - the shell's scale factor
      * @param {object[]} [options.glyphBoxes] - each glyph's {x, y, width,
-     *   height}, for the lens to bend light about each one's middle
+     *   height}, for the lens to bend light about each one's middle, and
+     *   its sheen
+     * @param {string} [options.variant] - the glass's (lib/glassLook.js
+     *   VARIANTS): 'off', solid in the tone
      */
     paint(cr, path, {
         bounds, tone, at = [0, 0], tintAlpha = GLASS.tintAlpha, opacity = GLASS.opacity, shadow = 0, scale = 1,
-        glyphBoxes = null,
+        glyphBoxes = null, variant = 'regular',
     }) {
         if (!(bounds.width > 0 && bounds.height > 0))
             return;
-        const masks = this._masks;
+        const look = lookOf(variant);
         const light = !tone.dark;
         const halo = typeof shadow === 'number'
             ? shadow > 0 && {...SHADOW, alpha: SHADOW.alpha * Math.min(1, shadow)}
             : shadow?.alpha > 0 && {y: 0, ...shadow, blur: Math.max(1, shadow.blur ?? SHADOW.blur)};
         // What is drawn round the shape (the shadow's reach, or the rim's).
         const placed = this._areaOf(cr, bounds,
-            Math.ceil((halo ? 2.5 * halo.blur + Math.abs(halo.y) : 2 * RIM.width + 2) * scale));
+            Math.ceil((halo ? 2.5 * halo.blur + Math.abs(halo.y) : 2 * (look?.rim.width ?? 0) + 2) * scale));
         if (!placed)
             return;
         // (Drawn in full: what a sketch was drawn with is let go of.)
         this._forgetSketch();
         const {area, density} = placed;
         const shape = this._shapeOf(path, area, density);
-        const {step, away, toward} = this._moves(shape, density, scale);
 
         cr.save();
         cr.identityMatrix();
         cr.rectangle(area.x, area.y, area.width, area.height);
         cr.clip();
-
-        if (halo) {
-            // The shape blurred (by about the blur, as CSS blurs a shadow),
-            // a little lower, outside the shape only: under the glass it
-            // would show through.
-            const blurred = masks.blurred('halo', shape, area, density, halo.blur * scale);
-            const outside = masks.over('halo:outside', area, density, c => {
-                c.setOperator(Cairo.Operator.SOURCE);
-                c.setSourceSurface(blurred, area.x, area.y + step(halo.y * scale));
-                c.paint();
-                c.setOperator(Cairo.Operator.DEST_OUT);
-                c.setSourceSurface(shape, area.x, area.y);
-                c.paint();
-            }, false);
-            if (light)
-                cr.setSourceRGBA(0, 0, 0, Math.min(1, halo.alpha));
-            else
-                cr.setSourceRGBA(1, 1, 1, Math.min(1, halo.alpha * SHADOW.glow));
-            cr.maskSurface(outside, area.x, area.y);
+        if (halo)
+            this._halo(cr, {area, density, path, halo, light, scale});
+        if (look) {
+            const membrane = this._membrane({
+                area, path, bounds, tone, at, tintAlpha, opacity, scale, glyphBoxes, look,
+            });
+            cr.setSourceSurface(membrane.surface, membrane.x, membrane.y);
+            cr.getSource().setFilter(Cairo.Filter.BILINEAR);
+            cr.maskSurface(shape, area.x, area.y);
+            cr.setSource(grainPattern(look.grain, density));
+            cr.maskSurface(shape, area.x, area.y);
+            this._rim(cr, {area, density, path, shape, look, strength: light ? 1 : DARK_LIGHT, scale});
+        } else {
+            this._solid(cr, {area, shape, tone});
         }
-
-        cr.pushGroup();
-        this._membrane(cr, {area, density, shape, bounds, tone, at, tintAlpha, scale, glyphBoxes});
-        // (As opaque as asked.)
-        cr.setOperator(Cairo.Operator.DEST_IN);
-        cr.setSourceRGBA(0, 0, 0, Math.min(1, Math.max(0, opacity)));
-        cr.paint();
-        cr.popGroupToSource();
-        cr.maskSurface(shape, area.x, area.y);
-
-        // The light on its edges, and the darker line inside the lower ones.
-        // (Masks, not strokes: no lines where a font's outlines overlap.)
-        const strength = light ? 1 : 0.5;
-        cr.setSourceRGBA(0, 0, 0, INNER.alpha * strength);
-        cr.maskSurface(masks.less('inner', area, density, shape, toward(INNER.width)), area.x, area.y);
-        this._rim(cr, {area, density, shape, bounds, strength, away});
-        cr.setSourceRGBA(1, 1, 1, RIM.exit.alpha * strength);
-        cr.maskSurface(masks.less('exit', area, density, shape, toward(RIM.exit.width)), area.x, area.y);
         cr.restore();
     }
 
     /**
      * Draw the shape in glass quickly: a frame at a time while it changes
-     * size (its clock stretched in the editor). The frost and the tint –
-     * made once for the drawing and kept while they serve, as fine as the
-     * stage's pixels (the frost is blurred: none finer) – and the light
-     * along its upper edges, as paint() draws them; without the band along
-     * its edges, the lines inside its lower ones and a shadow. As paint()
-     * takes it (but for the shadow and the glyphs' boxes).
+     * size (its clock stretched in the editor). The frost, the veils and
+     * the tint – made once for the drawing and kept while they serve, as
+     * fine as the stage's pixels (the frost is blurred: none finer) – and
+     * the light along the tops of its strokes, as paint() draws them;
+     * without the band along its edges, the light along its other edges,
+     * its sheen and grain, and a shadow. As paint() takes it (but for the
+     * shadow and the glyphs' boxes).
      *
      * @param {Cairo.Context} cr
      * @param {Function|Cairo.Path} path
-     * @param {object} options - bounds, tone, at, tintAlpha, opacity, scale
+     * @param {object} options - bounds, tone, at, tintAlpha, opacity, scale,
+     *   variant
      */
-    sketch(cr, path, {bounds, tone, at = [0, 0], tintAlpha = GLASS.tintAlpha, opacity = GLASS.opacity, scale = 1}) {
+    sketch(cr, path, {
+        bounds, tone, at = [0, 0], tintAlpha = GLASS.tintAlpha, opacity = GLASS.opacity, scale = 1, variant = 'regular',
+    }) {
         if (!(bounds.width > 0 && bounds.height > 0))
             return;
-        const placed = this._areaOf(cr, bounds, Math.ceil((2 * RIM.width + 2) * scale));
+        const look = lookOf(variant);
+        const placed = this._areaOf(cr, bounds, Math.ceil((2 * (look?.rim.width ?? 0) + 2) * scale));
         if (!placed)
             return;
         const {area, density} = placed;
         const shape = this._shapeOf(path, area, density);
-        const {away} = this._moves(shape, density, scale);
-        const material = this._material({area, bounds, tone, at, tintAlpha, opacity});
         // (No clip of its own: the masks are as large as the area.)
         cr.save();
         cr.identityMatrix();
-        cr.setSourceSurface(material.surface, material.x, material.y);
-        cr.getSource().setFilter(Cairo.Filter.BILINEAR);
-        cr.maskSurface(shape, area.x, area.y);
-        this._rim(cr, {area, density, shape, bounds, strength: tone.dark ? 0.5 : 1, away});
+        if (look) {
+            const material = this._material({area, bounds, tone, at, tintAlpha, opacity, look});
+            cr.setSourceSurface(material.surface, material.x, material.y);
+            cr.getSource().setFilter(Cairo.Filter.BILINEAR);
+            cr.maskSurface(shape, area.x, area.y);
+            // (The light along the tops of its strokes: the strongest of it.)
+            const down = this._step(look.rim.width * scale, density);
+            cr.setSourceRGBA(1, 1, 1, look.rim.top * (tone.dark ? DARK_LIGHT : 1));
+            cr.maskSurface(this._masks.less('rim', area, density, shape, [shape, 0, down]), area.x, area.y);
+        } else {
+            this._solid(cr, {area, shape, tone});
+        }
         cr.restore();
     }
 
@@ -790,49 +897,268 @@ export class LiquidGlass {
 
     // The shape filled, as a mask over the area.
     _shapeOf(path, area, density) {
-        const append = typeof path === 'function' ? path : c => c.appendPath(path);
         return this._masks.over('shape', area, density, c => {
-            append(c);
+            appendTo(c, path);
             c.fill();
         });
     }
 
-    // The shape moved a width (logical pixels) away from the light, or
-    // toward it, on whole pixels of the drawing's (one at least each way it
-    // goes at all), for masks.less(); step() such a move.
-    _moves(shape, density, scale) {
-        const [lx, ly] = RIM.light;
-        const [ux, uy] = [lx / Math.hypot(lx, ly), ly / Math.hypot(lx, ly)];
-        const step = v => Math.sign(v) * Math.max(Math.abs(v) > 0.2 ? 1 : 0, Math.round(Math.abs(v * density))) /
+    // What lies outside the shape, as a mask over the area: this opaque
+    // (the shape cut out of it).
+    _outside(name, path, area, density, alpha = 1) {
+        return this._masks.over(name, area, density, c => {
+            c.setOperator(Cairo.Operator.SOURCE);
+            c.setSourceRGBA(0, 0, 0, alpha);
+            c.paint();
+            appendTo(c, path);
+            c.setOperator(Cairo.Operator.CLEAR);
+            c.fill();
+        }, false);
+    }
+
+    // A length (logical pixels, scaled) on whole pixels of the drawing's,
+    // one at least where it is any: what the masks are moved by.
+    _step(length, density) {
+        return Math.sign(length) * Math.max(Math.abs(length) > 0.2 ? 1 : 0, Math.round(Math.abs(length * density))) /
             density;
+    }
+
+    // The grid what is smooth of the glass is drawn on: a pixel of it
+    // SMOOTH_PIXEL logical pixels, over the area and one of its pixels round
+    // it; its own coordinates are the drawing's from (x, y) on.
+    _smoothGrid(area, scale) {
+        const density = 1 / (SMOOTH_PIXEL * scale);
         return {
-            step,
-            away: w => [shape, step(-ux * w * scale), step(-uy * w * scale)],
-            toward: w => [shape, step(ux * w * scale), step(uy * w * scale)],
+            density,
+            x: area.x - 1 / density,
+            y: area.y - 1 / density,
+            width: Math.ceil(area.width * density) + 2,
+            height: Math.ceil(area.height * density) + 2,
         };
     }
 
-    // The light caught along the shape's upper and left edges, brighter at
-    // its top than at its bottom.
-    _rim(cr, {area, density, shape, bounds: {y, height}, strength, away}) {
-        const rim = new Cairo.LinearGradient(0, y, 0, y + height);
-        rim.addColorStopRGBA(0, 1, 1, 1, RIM.alpha[0] * strength);
-        rim.addColorStopRGBA(1, 1, 1, 1, RIM.alpha[1] * strength);
-        cr.setSource(rim);
-        cr.maskSurface(this._masks.less('rim', area, density, shape, away(RIM.width)), area.x, area.y);
+    // No glass: the shape solid, in the tone.
+    _solid(cr, {area, shape, tone}) {
+        const [r, g, b] = hexToRgb(tone.color).map(v => v / 255);
+        cr.setSourceRGB(r, g, b);
+        cr.maskSurface(shape, area.x, area.y);
+    }
+
+    // A soft shadow round the shape: the shape blurred (by about the blur,
+    // as CSS blurs a shadow; drawn small, it is as soft), a little lower,
+    // outside the shape only – under the glass it would show through.
+    _halo(cr, {area, density, path, halo, light, scale}) {
+        const masks = this._masks;
+        const grid = this._smoothGrid(area, scale);
+        const local = {x: 0, y: 0, width: grid.width / grid.density, height: grid.height / grid.density};
+        const filled = masks.surface('halo:shape', grid.width, grid.height, grid.density);
+        let c = new Cairo.Context(filled);
+        c.translate(-grid.x, -grid.y);
+        appendTo(c, path);
+        c.fill();
+        c.$dispose();
+        const blurred = masks.blurred('halo', filled, local, grid.density, halo.blur * scale);
+        const coloured = masks.surface('halo:coloured', grid.width, grid.height, grid.density, Cairo.Format.ARGB32);
+        c = new Cairo.Context(coloured);
+        if (light)
+            c.setSourceRGBA(0, 0, 0, Math.min(1, halo.alpha));
+        else
+            c.setSourceRGBA(1, 1, 1, Math.min(1, halo.alpha * SHADOW.glow));
+        c.maskSurface(blurred, 0, 0);
+        c.$dispose();
+        cr.setSourceSurface(coloured, grid.x, grid.y + this._step(halo.y * scale, density));
+        cr.getSource().setFilter(Cairo.Filter.BILINEAR);
+        cr.maskSurface(this._outside('halo:outside', path, area, density), area.x, area.y);
+    }
+
+    // The membrane: the backdrop (the frost as light glass lets it through;
+    // dark glass, less of it), what the glass bends at its edges, the
+    // look's veils, the tint and the sheen – smooth all of it, drawn small
+    // – as opaque as asked. {surface, x, y}: where it lies in the drawing.
+    _membrane({area, path, bounds, tone, at, tintAlpha, opacity, scale, glyphBoxes, look}) {
+        const grid = this._smoothGrid(area, scale);
+        const surface = this._masks.surface('membrane', grid.width, grid.height, grid.density, Cairo.Format.ARGB32,
+            false);
+        const cr = new Cairo.Context(surface);
+        const light = !tone.dark;
+        // (Where its own coordinates lie on the monitor.)
+        const origin = [at[0] + grid.x, at[1] + grid.y];
+        cr.setOperator(Cairo.Operator.SOURCE);
+        if (this._backdrop) {
+            this._setBackdrop(cr, origin, [0, 0], 1);
+            cr.paint();
+            cr.setOperator(Cairo.Operator.OVER);
+            this._bend(cr, {grid, origin, path, bounds, glyphBoxes, look, light, scale});
+            // (Darker: as multiplied, black over an opaque backdrop.)
+            if (!light) {
+                cr.setSourceRGBA(0, 0, 0, 1 - DIM);
+                cr.paint();
+            }
+        } else {
+            cr.setSourceRGBA(0, 0, 0, 0);
+            cr.paint();
+            cr.setOperator(Cairo.Operator.OVER);
+        }
+        this._veils(cr, look);
+        cr.translate(-grid.x, -grid.y);
+        this._tint(cr, {bounds, tone, at, tintAlpha});
+        this._sheen(cr, {bounds, glyphBoxes, look, strength: light ? 1 : DARK_LIGHT});
+        cr.identityMatrix();
+        cr.setOperator(Cairo.Operator.DEST_IN);
+        cr.setSourceRGBA(0, 0, 0, Math.min(1, Math.max(0, opacity)));
+        cr.paint();
+        cr.$dispose();
+        return {surface, x: grid.x, y: grid.y};
+    }
+
+    // Where the glass bends what is behind: a band in from the edge as deep
+    // as the look's lens (what is outside the shape, blurred: strongest at
+    // the edge), what is behind each glyph drawn there through a lens about
+    // its middle – red, green and blue each bent its own way – twice over
+    // (at the very edge, mostly bent) and a little lighter. In the grid's
+    // coordinates, on the frost.
+    _bend(cr, {grid, origin, path, bounds, glyphBoxes, look, light, scale}) {
+        const masks = this._masks;
+        const local = {x: 0, y: 0, width: grid.width / grid.density, height: grid.height / grid.density};
+        const outside = masks.surface('membrane:outside', grid.width, grid.height, grid.density, Cairo.Format.A8,
+            false);
+        let c = new Cairo.Context(outside);
+        c.setOperator(Cairo.Operator.SOURCE);
+        c.setSourceRGBA(0, 0, 0, 1);
+        c.paint();
+        c.translate(-grid.x, -grid.y);
+        appendTo(c, path);
+        c.setOperator(Cairo.Operator.CLEAR);
+        c.fill();
+        c.$dispose();
+        const band = masks.blurred('membrane:band', outside, local, grid.density, look.lens.width * scale);
+        const bent = masks.surface('membrane:bent', grid.width, grid.height, grid.density, Cairo.Format.ARGB32, false);
+        c = new Cairo.Context(bent);
+        // Each glyph's cell, the outer ones to the grid's ends.
+        const cells = glyphCells(glyphBoxes, bounds);
+        const edges = cells.map(cell => cell.x - grid.x);
+        edges[0] = 0;
+        edges.push(local.width);
+        const channels = look.aberration > 0 ? this._channelsOf() : null;
+        cells.forEach((cell, i) => {
+            const lens = lensOf([cell.box.width / 2, cell.box.height / 2], look.lens.shift * scale, look.aberration);
+            const center = [cell.center[0] - grid.x, cell.center[1] - grid.y];
+            c.save();
+            c.rectangle(edges[i], 0, edges[i + 1] - edges[i], local.height);
+            c.clip();
+            c.setOperator(Cairo.Operator.SOURCE);
+            this._setBackdrop(c, origin, center, lens.green, channels?.[1]);
+            c.paint();
+            if (channels) {
+                c.setOperator(Cairo.Operator.ADD);
+                this._setBackdrop(c, origin, center, lens.red, channels[0]);
+                c.paint();
+                this._setBackdrop(c, origin, center, lens.blue, channels[2]);
+                c.paint();
+            }
+            c.restore();
+        });
+        c.$dispose();
+        for (let i = 0; i < 2; i++) {
+            cr.setSourceSurface(bent, 0, 0);
+            cr.maskSurface(band, 0, 0);
+        }
+        cr.setSourceRGBA(1, 1, 1, BAND_LIGHT[light ? 0 : 1]);
+        cr.maskSurface(band, 0, 0);
+    }
+
+    // The backdrop's red, green and blue each on its own (opaque: added up,
+    // the backdrop again), made once for a backdrop.
+    _channelsOf() {
+        if (!this._channels) {
+            const {surface} = this._backdrop;
+            const [width, height] = [surface.getWidth(), surface.getHeight()];
+            this._channels = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(([r, g, b]) => {
+                const channel = new Cairo.ImageSurface(Cairo.Format.ARGB32, width, height);
+                const cr = new Cairo.Context(channel);
+                cr.setOperator(Cairo.Operator.SOURCE);
+                cr.setSourceSurface(surface, 0, 0);
+                cr.paint();
+                cr.setOperator(Cairo.Operator.MULTIPLY);
+                cr.setSourceRGB(r, g, b);
+                cr.paint();
+                cr.$dispose();
+                return channel;
+            });
+        }
+        return this._channels;
+    }
+
+    // The look's veils over the frost: dark under light (clear glass dims
+    // what is behind it, to keep what is on it legible).
+    _veils(cr, look) {
+        if (look.dim > 0) {
+            cr.setSourceRGBA(0, 0, 0, look.dim);
+            cr.paint();
+        }
+        if (look.veil > 0) {
+            cr.setSourceRGBA(1, 1, 1, look.veil);
+            cr.paint();
+        }
+    }
+
+    // A soft sheen across each glyph, as the look has it: from where the
+    // light comes from, fading out a part of the way across.
+    _sheen(cr, {bounds, glyphBoxes, look, strength}) {
+        const {angle, alpha, reach} = look.sheen;
+        if (!(alpha > 0 && reach > 0))
+            return;
+        for (const cell of glyphCells(glyphBoxes, bounds)) {
+            const sheen = new Cairo.LinearGradient(...sheenLine(cell.box, angle));
+            sheen.addColorStopRGBA(0, 1, 1, 1, alpha * strength);
+            sheen.addColorStopRGBA(Math.min(1, reach), 1, 1, 1, 0);
+            cr.save();
+            cr.rectangle(cell.x, bounds.y, cell.width, bounds.height);
+            cr.clip();
+            cr.setSource(sheen);
+            cr.paint();
+            cr.restore();
+        }
+    }
+
+    // The light from above along the shape's edges, as the look has it:
+    // along the tops of its strokes strongest, along their bottoms
+    // faintest, along their sides in between. What lies outside the shape,
+    // moved a rim's width down (up, aside), lies on the shape just under
+    // its tops (over its bottoms, inside its sides): added up so many times
+    // over as each needs (quick, done that way), then only on the shape.
+    _rim(cr, {area, density, path, shape, look, strength, scale}) {
+        const steps = rimSteps(look.rim, strength);
+        const outside = this._outside('rim:outside', path, area, density, steps.unit);
+        const w = this._step(look.rim.width * scale, density);
+        const rim = this._masks.over('rim', area, density, c => {
+            c.setOperator(Cairo.Operator.ADD);
+            for (const [dx, dy, times] of [[0, w, steps.top], [0, -w, steps.bottom], [w, 0, steps.side],
+                [-w, 0, steps.side]]) {
+                c.setSourceSurface(outside, area.x + dx, area.y + dy);
+                for (let i = 0; i < times; i++)
+                    c.paint();
+            }
+            c.setOperator(Cairo.Operator.DEST_IN);
+            c.setSourceSurface(shape, area.x, area.y);
+            c.paint();
+        });
+        cr.setSourceRGB(1, 1, 1);
+        cr.maskSurface(rim, area.x, area.y);
     }
 
     // What fills the shape in a sketch: the frost as the membrane has it
-    // (without the band) and the tint over it, its gradient as the shape's
-    // bounds were, as opaque as asked; as fine as the stage's pixels.
-    // Kept while it covers the area (made with room to grow right and down,
-    // as a stretched clock grows – as far as the monitor goes, at most) and
-    // the glass is as it was. {surface, x, y}: where its picture lies in the
-    // drawing (a pixel round what it covers: Cairo draws a picture made
-    // larger fastest where all it reads is in it).
-    _material({area, bounds, tone, at, tintAlpha, opacity}) {
+    // (without the band), the veils and the tint over it, its gradient as
+    // the shape's bounds were, as opaque as asked; as fine as the stage's
+    // pixels. Kept while it covers the area (made with room to grow right
+    // and down, as a stretched clock grows – as far as the monitor goes, at
+    // most) and the glass is as it was. {surface, x, y}: where its picture
+    // lies in the drawing (a pixel round what it covers: Cairo draws a
+    // picture made larger fastest where all it reads is in it).
+    _material({area, bounds, tone, at, tintAlpha, opacity, look}) {
         const backdrop = this._backdrop;
-        const key = [backdrop?.key ?? '', ...at, tone.color, Boolean(tone.dark), tintAlpha, opacity].join(' ');
+        const key = [backdrop?.key ?? '', ...at, tone.color, Boolean(tone.dark), tintAlpha, opacity, look.dim,
+            look.veil].join(' ');
         const kept = this._sketch;
         const covers = ({covered: [x1, y1, x2, y2]}) =>
             area.x >= x1 && area.y >= y1 && area.x + area.width <= x2 && area.y + area.height <= y2;
@@ -857,6 +1183,7 @@ export class LiquidGlass {
                 cr.paint();
             }
         }
+        this._veils(cr, look);
         cr.translate(-x, -y);
         this._tint(cr, {bounds, tone, at, tintAlpha});
         cr.setOperator(Cairo.Operator.DEST_IN);
@@ -865,44 +1192,6 @@ export class LiquidGlass {
         cr.$dispose();
         this._sketch = {key, surface, x, y, covered: [x1, y1, x2, y2]};
         return this._sketch;
-    }
-
-    // What fills the shape: the backdrop (the frost as light glass lets it
-    // through; dark glass, less of it), the band at the edge bending it, and
-    // the tint.
-    _membrane(cr, {area, density, shape, bounds, tone, at, tintAlpha, scale, glyphBoxes}) {
-        const backdrop = this._backdrop;
-        const masks = this._masks;
-        const light = !tone.dark;
-        if (backdrop) {
-            this._setBackdrop(cr, at, [0, 0], 1);
-            cr.paint();
-            // Each glyph's cell, whole pixels, the outer ones to the area's ends.
-            const cells = glyphCells(glyphBoxes, bounds);
-            const edges = cells.map(cell => Math.round(cell.x));
-            edges[0] = area.x;
-            edges.push(area.x + area.width);
-            // (What is not the shape, blurred: inside, strongest at the edge.
-            // Outside it, the shape cuts it away.)
-            const outside = masks.over('outside', area, density, c => {
-                c.setOperator(Cairo.Operator.SOURCE);
-                c.paint();
-                c.setOperator(Cairo.Operator.DEST_OUT);
-                c.setSourceSurface(shape, area.x, area.y);
-                c.paint();
-            }, false);
-            const band = masks.blurred('band', outside, area, density, BAND.blur * scale);
-            cr.setSourceSurface(this._lensed(area, density, cells, edges, at), area.x, area.y);
-            cr.maskSurface(band, area.x, area.y);
-            // (Darker: as multiplied, black over an opaque backdrop.)
-            if (!light) {
-                cr.setSourceRGBA(0, 0, 0, 1 - DIM);
-                cr.paint();
-            }
-            cr.setSourceRGBA(1, 1, 1, BAND.light[light ? 0 : 1]);
-            cr.maskSurface(band, area.x, area.y);
-        }
-        this._tint(cr, {bounds, tone, at, tintAlpha});
     }
 
     // The tint over what is drawn: the tone, with a hint of the colour
@@ -920,44 +1209,11 @@ export class LiquidGlass {
         cr.paint();
     }
 
-    // The backdrop through the lens about each glyph's middle: drawn small
-    // (about as fine as the backdrop is) and large again, it is blended
-    // through a mask as it is – drawn through the lens there and then, each
-    // pixel would cost Cairo several times as much.
-    _lensed(area, density, cells, edges, at) {
-        const step = Math.max(1, Math.floor(1 / Math.max(...this._backdrop.factor)));
-        const [columns, rows] = [Math.ceil(area.width / step) + 1, Math.ceil(area.height / step) + 1];
-        // (Drawn in the area's own coordinates: where it lies on the monitor
-        // is where the area does, the glyphs' middles in it.)
-        const small = this._masks.surface('lens:small', columns, rows, 1 / step, Cairo.Format.ARGB32, false);
-        const origin = [at[0] + area.x, at[1] + area.y];
-        let cr = new Cairo.Context(small);
-        cr.setOperator(Cairo.Operator.SOURCE);
-        cells.forEach((cell, i) => {
-            const left = i === 0 ? 0 : edges[i] - area.x;
-            const right = i === cells.length - 1 ? columns * step : edges[i + 1] - area.x;
-            cr.save();
-            cr.rectangle(left, 0, right - left, rows * step);
-            cr.clip();
-            this._setBackdrop(cr, origin, [cell.center[0] - area.x, cell.center[1] - area.y], LENS);
-            cr.paint();
-            cr.restore();
-        });
-        cr.$dispose();
-        const large = this._masks.surface('lens', Math.round(area.width * density), Math.round(area.height * density),
-            density, Cairo.Format.ARGB32, false);
-        cr = new Cairo.Context(large);
-        cr.setOperator(Cairo.Operator.SOURCE);
-        cr.setSourceSurface(small, 0, 0);
-        cr.paint();
-        cr.$dispose();
-        return large;
-    }
-
-    // The backdrop as the source, where it lies behind the drawing, through
-    // a lens about a point; the matrix the identity again after.
-    _setBackdrop(cr, at, center, lens) {
-        const {surface, factor, shift} = this._backdrop;
+    // The backdrop (or one of its colours) as the source, where it lies
+    // behind the drawing, through a lens about a point; the matrix the
+    // identity again after.
+    _setBackdrop(cr, at, center, lens, surface = this._backdrop.surface) {
+        const {factor, shift} = this._backdrop;
         const {x, y, scaleX, scaleY} = backdropTransform({at, factor, center, lens, shift});
         cr.identityMatrix();
         cr.translate(x, y);
@@ -968,4 +1224,12 @@ export class LiquidGlass {
         source.setExtend(Cairo.Extend.PAD);
         cr.identityMatrix();
     }
+}
+
+// The shape added to a context's path: drawn by a function, or a path copied.
+function appendTo(cr, path) {
+    if (typeof path === 'function')
+        path(cr);
+    else
+        cr.appendPath(path);
 }

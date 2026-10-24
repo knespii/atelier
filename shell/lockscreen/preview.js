@@ -63,7 +63,8 @@ class LockPreview {
                 Math.round((monitor.width - clock.width) / 2), Math.round(monitor.height / 3)));
         }
 
-        this._board = new LockBoard(lockSettings, {interactive: true, palette: settings.get_child('palette')});
+        this._board = new LockBoard(lockSettings,
+            {interactive: true, palette: settings.get_child('palette'), atelier: settings});
         this._board.setHome(this.actor);
 
         this.actor.ease({opacity: 255, duration: FADE_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
@@ -119,7 +120,7 @@ export class LockPreviewModule {
     enable() {
         this._lockSettings = this._settings.get_child('lockscreen');
         this._lockSettings.connectObject('changed::edit-request', () => this.open(), this);
-        this._warmUp = new GlassWarmUp(this._lockSettings);
+        this._warmUp = new GlassWarmUp(this._lockSettings, this._settings);
     }
 
     /** Edit the lock screen's widgets. */
