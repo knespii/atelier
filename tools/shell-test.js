@@ -1,6 +1,7 @@
 // Automation script for tools/shell-test.sh. GNOME Shell imports it, calls
 // run() once startup is complete and exits when it returns.
 
+import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
@@ -19,6 +20,7 @@ import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PointerWatcher from 'resource:///org/gnome/shell/ui/pointerWatcher.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
@@ -1511,6 +1513,414 @@ async function testBarStyles(ext) {
         right.translation_x === 0 && Main.panel.has_style_class_name('atelier-bar-clean'),
     'back to the spread bar on the wallpaper');
     powerToggle.visible = batteryShown;
+}
+
+// Pictures of the glass on wallpapers (ATELIER_TEST_WALLPAPER, pictures
+// apart by colons, only read; GNOME's own otherwise): the one island as a
+// notch at rest and with the glance, capsules beside a floating island,
+// the dock and the widgets – in each variant. Only pictures, to look at.
+async function testGlassPictures(ext) {
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const desktopSettings = settings.get_child('desktop');
+    const islandModule = ext.stateObj.modules.get('island');
+    const island = islandModule.island;
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const dir = `${OUTPUT}/glass-pictures`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const sources = (GLib.getenv('ATELIER_TEST_WALLPAPER') ?? '').split(':').filter(Boolean);
+    const wallpapers = sources.length > 0 ? sources : ['/usr/share/backgrounds/gnome/amber-d.jxl'];
+    const copies = `${GLib.get_user_data_dir()}/atelier/wallpapers`;
+    GLib.mkdir_with_parents(copies, 0o755);
+    // (On the screen only.)
+    const shot = (name, x, y, width, height) => {
+        const [x1, y1] = [Math.max(0, Math.round(x)), Math.max(0, Math.round(y))];
+        const [x2, y2] = [Math.min(global.stage.width, Math.round(x + width)), Math.min(global.stage.height, Math.round(y + height))];
+        return screenshotArea(`glass-pictures/${name}`, x1, y1, x2 - x1, y2 - y1);
+    };
+    try {
+        for (const [n, source] of wallpapers.entries()) {
+            const wallpaper = `${copies}/glass-${GLib.path_get_basename(source)}`;
+            Gio.File.new_for_path(source).copy(Gio.File.new_for_path(wallpaper), Gio.FileCopyFlags.OVERWRITE, null, null);
+            background.set_string('picture-uri', uriOf(wallpaper));
+            background.set_string('picture-uri-dark', uriOf(wallpaper));
+            background.set_string('picture-options', 'zoom');
+            await wallpapersSettled();
+            for (const variant of ['regular', 'clear', 'off']) {
+                settings.set_string('glass-variant', variant);
+                const name = `${n}-${variant}`;
+                // The one island, a notch, as the user has it.
+                bar.set_string('style', 'island');
+                bar.set_string('island-shape', 'notch');
+                bar.set_string('surface', 'glass');
+                bar.set_boolean('compact', true);
+                desktopSettings.set_string('style', 'modern');
+                desktopSettings.set_boolean('glass', true);
+                await restPointer();
+                await Scripting.sleep(900);
+                await shot(`${name}-top`, global.stage.width / 2 - 450, 0, 900, 60);
+                await pointerTo(...centerOf(island));
+                await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
+                await Scripting.sleep(700);
+                await shot(`${name}-glance`, island.x - 40, 0, island.width + 80, island.y + island.height + 30);
+                await restPointer();
+                await waitFor(() => island.page === null, 2000);
+                // Capsules beside a floating island.
+                bar.set_string('style', 'grouped');
+                bar.set_string('sides', 'capsules');
+                bar.set_string('island-shape', 'floating');
+                bar.set_boolean('compact', false);
+                await Scripting.sleep(900);
+                await shot(`${name}-capsules`, global.stage.width / 2 - 450, 0, 900, 60);
+                // The dock, and the widgets.
+                const dock = ext.stateObj.modules.get('dock')?.dock;
+                if (dock) {
+                    await waitFor(() => !dock.hidden, 2000);
+                    const [x, y] = dock.container.get_transformed_position();
+                    const [width, height] = dock.container.get_transformed_size();
+                    await shot(`${name}-dock`, x - 24, y - 24, width + 48, height + 48);
+                }
+                const desktop = ext.stateObj.modules.get('desktop');
+                if (desktop) {
+                    const area = desktop.area;
+                    await shot(`${name}-widgets`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
+                }
+            }
+        }
+    } finally {
+        ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
+        ['style', 'glass'].forEach(key => desktopSettings.reset(key));
+        settings.reset('glass-variant');
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        await wallpapersSettled();
+    }
+}
+
+// Grey bands across a picture of the monitor's size: [top, bottom, grey]
+// each, the rest of another grey.
+function bandsPicture(path, [width, height], bands, rest) {
+    const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, width, height);
+    const grey = v => ((v << 24) | (v << 16) | (v << 8) | 0xff) >>> 0;
+    pixbuf.fill(grey(rest));
+    for (const [top, bottom, v] of bands)
+        pixbuf.new_subpixbuf(0, top, width, bottom - top).fill(grey(v));
+    pixbuf.savev(path, 'png', [], []);
+}
+
+// Wide light and dark stripes at 45°, of the monitor's size: lines for the
+// glass's edges to bend.
+function stripesPicture(path, [width, height], stripe) {
+    const surface = new Cairo.ImageSurface(Cairo.Format.RGB24, width, height);
+    const cr = new Cairo.Context(surface);
+    cr.setSourceRGB(0.12, 0.13, 0.16);
+    cr.paint();
+    cr.setSourceRGB(0.93, 0.9, 0.84);
+    for (let x = -height; x < width + height; x += 2 * stripe) {
+        cr.moveTo(x, 0);
+        cr.lineTo(x + stripe, 0);
+        cr.lineTo(x + stripe + height, height);
+        cr.lineTo(x + height, height);
+        cr.closePath();
+    }
+    cr.fill();
+    surface.writeToPNG(path);
+    cr.$dispose();
+}
+
+// The mean of a column of a screenshot's pixels, x1 … x2 across, at y.
+function rowOf(pixels, x1, x2, y) {
+    const sum = [0, 0, 0];
+    for (let x = x1; x <= x2; x++)
+        pixels.at(x, y).forEach((v, i) => (sum[i] += v));
+    return sum.map(v => v / (x2 - x1 + 1));
+}
+
+// Liquid Glass (shell/core/glassMaterial.js): what is behind bends near the
+// glass's edges, not in its middle, red more than blue only there; the
+// edges catch a light from above – the top's the most, the bottom's the
+// least – which leans towards the pointer when it is near (only then, and
+// only for the glass it is near); at rest nothing is drawn; 'off' and
+// GNOME's high contrast make the surfaces solid; the overview's blurred
+// wallpaper has the grain.
+async function testLiquidGlass(ext) {
+    const {LOOK, REST_LIGHT} = await import('../lib/glassLook.js');
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const islandModule = ext.stateObj.modules.get('island');
+    const island = islandModule.island;
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const a11y = new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'});
+    const monitor = Main.layoutManager.primaryMonitor;
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const dir = `${OUTPUT}/liquid-glass`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const show = async path => {
+        background.set_string('picture-uri', uriOf(path));
+        background.set_string('picture-uri-dark', uriOf(path));
+        background.set_string('picture-options', 'zoom');
+        await wallpapersSettled();
+    };
+    // Dark and light bands across, a light one between y 300 and 600.
+    const px = v => Math.round(v * scale);
+    const bands = `${dir}/bands.png`;
+    bandsPicture(bands, [monitor.width, monitor.height],
+        [[px(300), px(600), 235], [px(900), monitor.height, 235]], 25);
+    let glass = null;
+    // How often a surface's light changed (and it was drawn again for it).
+    const changes = new Map();
+    const count = surface => {
+        if (!surface || changes.has(surface))
+            return;
+        changes.set(surface, 0);
+        const original = surface.setLights;
+        surface.setLights = function (lights) {
+            const changed = original.call(this, lights);
+            if (changed)
+                changes.set(surface, changes.get(surface) + 1);
+            return changed;
+        };
+    };
+    try {
+        bar.set_string('surface', 'glass');
+        await show(bands);
+        await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
+        await Scripting.sleep(500);
+        const GlassSurface = islandModule._glass?.constructor;
+        if (!check(Boolean(GlassSurface && islandModule._glass.look), 'the island\'s glass is Liquid Glass'))
+            return;
+        // A big glass over the bands, its top edge 8 pixels above where a
+        // light band turns dark – a straight line of the wallpaper.
+        glass = new GlassSurface({monitorIndex: Main.layoutManager.primaryIndex, reach: 1, look: LOOK.regular});
+        Main.layoutManager.uiGroup.add_child(glass);
+        const [x0, y0, w, h] = [monitor.x + px(560), monitor.y + px(592), px(800), px(260)];
+        glass.setShape(x0, y0, w, h, px(24));
+        const mid = Math.round(x0 + w / 2);
+        const profile = async name => {
+            await Scripting.sleep(300);
+            await screenshotArea(`liquid-glass/${name}`, x0, y0, w, h);
+            const pixels = pixelsOf(`liquid-glass/${name}`, [x0, y0]);
+            return y => rowOf(pixels, mid - 10, mid + 10, y);
+        };
+        // (No rim, no sheen: the lens alone, and the same glass without it.)
+        const material = LOOK.regular;
+        const bare = {...material, rim: {...material.rim, top: 0, bottom: 0, side: 0}, sheen: {...material.sheen, alpha: 0}};
+        glass._mask.setMaterial(bare, scale);
+        const lensed = await profile('lens');
+        glass._mask.setMaterial({...bare, aberration: 0, lens: {...material.lens, shift: 0}}, scale);
+        const flat = await profile('no-lens');
+        glass._mask.setMaterial(material, scale);
+        const grey = ([r, g, b]) => (r + g + b) / 3;
+        const between = (row, at) => {
+            const below = Math.floor(at);
+            return grey(row(below)) * (1 - (at - below)) + grey(row(below + 1)) * (at - below);
+        };
+        // How much farther in the glass without the lens looks as the
+        // lensed one does at y.
+        const from = y => {
+            const target = grey(lensed(y));
+            let [best, error] = [0, Infinity];
+            for (let d = 0; d <= px(24); d += 0.25) {
+                const off = Math.abs(between(flat, y + d) - target);
+                if (off < error)
+                    [best, error] = [d, off];
+            }
+            return best;
+        };
+        const nearEdge = [1, 3, 6].map(d => from(y0 + px(d)));
+        const middle = [40, 100, 160].map(d => Math.abs(grey(lensed(y0 + px(d))) - grey(flat(y0 + px(d)))));
+        check(nearEdge.every(d => d >= px(2)) && nearEdge[0] > nearEdge[2] && middle.every(d => d <= 2),
+            `near the top edge the wallpaper's line is looked at from farther in, less so farther from the edge ` +
+            `(${nearEdge.map(d => d.toFixed(1))} px at 1, 3, 6 px in); in the middle, as it is (${middle.map(Math.round)})`);
+        // Red from farther in than blue: where the light band turns dark,
+        // red and blue apart within the lens, not beyond it.
+        const apart = y => {
+            const [r, , b] = lensed(y);
+            return r - b;
+        };
+        const inside = apart(y0 + px(40));
+        const rim = Math.max(...[1, 2, 3, 4].map(d => Math.abs(apart(y0 + px(d)) - inside)));
+        const beyond = Math.max(...[20, 28].map(d => Math.abs(apart(y0 + px(d)) - inside)));
+        check(rim >= 4 && beyond <= 2,
+            `red and blue apart at the rim only (by ${rim.toFixed(1)} there, ${beyond.toFixed(1)} past the lens)`);
+        // (To look at: stripes bending at its edges.)
+        const stripes = `${dir}/stripes.png`;
+        stripesPicture(stripes, [monitor.width, monitor.height], px(90));
+        await show(stripes);
+        glass.setShape(x0, monitor.y + px(300), w, px(300), px(40));
+        await Scripting.sleep(300);
+        await screenshotArea('liquid-glass/stripes', x0 - px(60), monitor.y + px(240), w + px(120), px(420));
+        await show(bands);
+
+        // The rim: in the light band, flat, the top edge catches the light
+        // the most, the bottom the least.
+        glass.setShape(x0, monitor.y + px(380), w, px(140), px(24));
+        const [top, bottom] = [monitor.y + px(380), monitor.y + px(520) - 1];
+        await Scripting.sleep(300);
+        await screenshotArea('liquid-glass/rim', x0, top, w, bottom - top + 1);
+        const rimPixels = pixelsOf('liquid-glass/rim', [x0, top]);
+        const at = y => grey(rowOf(rimPixels, mid - 10, mid + 10, y));
+        const topLight = at(top) - at(top + px(6));
+        const bottomLight = at(bottom) - at(bottom - px(6));
+        check(topLight > bottomLight + 10 && bottomLight > 2,
+            `the top edge catches the light more than the bottom (${topLight.toFixed(1)} vs ${bottomLight.toFixed(1)})`);
+        await screenshotArea('liquid-glass/rim-wide', x0 - 40, top - 40, w + 80, bottom - top + 81);
+
+        // The light leans towards the pointer near the glass – and only
+        // that glass gets a new light.
+        count(glass);
+        count(islandModule._glass);
+        const dock = ext.stateObj.modules.get('dock')?.dock;
+        count(dock?._glass);
+        const before = new Map(changes);
+        await pointerTo(x0 - px(30), top + px(70));
+        await Scripting.sleep(200);
+        const leaning = glass.light;
+        check(leaning[0] < -0.05 && leaning[1] < 0, `beside it on the left, the light leans left (${leaning.map(v => v.toFixed(2))})`);
+        check(changes.get(glass) > before.get(glass) &&
+            changes.get(islandModule._glass) === before.get(islandModule._glass) &&
+            (!dock || changes.get(dock._glass) === before.get(dock._glass)),
+        `only the glass the pointer is near gets a new light (${[...changes.values()]})`);
+        await screenshotArea('liquid-glass/rim-leaning', x0 - 40, top - 40, w + 80, bottom - top + 81);
+        const left = pixelsOf('liquid-glass/rim-leaning', [x0 - 40, top - 40]);
+        const still = pixelsOf('liquid-glass/rim-wide', [x0 - 40, top - 40]);
+        const side = (pixels, x) => grey(pixels.at(x, top + px(70)));
+        check(side(left, x0) - side(left, x0 + px(6)) > side(still, x0) - side(still, x0 + px(6)) + 2,
+            'its left edge catches more of it');
+        await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
+        await Scripting.sleep(200);
+        check(glass.light[0] === REST_LIGHT[0] && glass.light[1] === REST_LIGHT[1], 'away, from above again');
+
+        // Still, nothing is drawn.
+        let frames = 0;
+        const paintId = global.stage.connect('after-paint', () => frames++);
+        await Scripting.sleep(1500);
+        global.stage.disconnect(paintId);
+        check(frames <= 1, `at rest, nothing is drawn (${frames} frames in 1.5 s)`);
+        glass.destroy();
+        glass = null;
+
+        // The pointer across the screen far from any glass: no surface gets
+        // a new light; along the top bar, only the island's glass does.
+        const desktop = ext.stateObj.modules.get('desktop');
+        count(desktop?._glass);
+        const surfaces = [islandModule._glass, dock?._glass, desktop?._glass].filter(Boolean);
+        const areas = surfaces.flatMap(surface => surface.lightAreas());
+        const reach = LOOK.regular.light.near * scale + px(20);
+        const distance = ([ax, ay, aw, ah], [x, y]) =>
+            Math.hypot(Math.max(ax - x, 0, x - ax - aw), Math.max(ay - y, 0, y - ay - ah));
+        // The longest stretch across the middle of the screen far from all.
+        const lane = monitor.y + monitor.height / 2;
+        let [run, start] = [null, null];
+        for (let x = monitor.x + px(20); x <= monitor.x + monitor.width - px(20); x += px(10)) {
+            if (!areas.every(area => distance(area, [x, lane]) > reach)) {
+                start = null;
+                continue;
+            }
+            start ??= x;
+            if (!run || x - start > run[1] - run[0])
+                run = [start, x];
+        }
+        const snapshot = new Map(changes);
+        // (What it costs: the frames drawn meanwhile, and the time a new
+        // light takes.)
+        const cost = frames => `${frames.length} frames, ` +
+            `${(frames.reduce((sum, f) => sum + f.painting, 0) / Math.max(1, frames.length)).toFixed(2)} ms painting each`;
+        const timing = timeCalls([['light', islandModule._glass, 'setLights']]);
+        if (run && run[1] - run[0] >= px(300)) {
+            const watch = watchFrames();
+            await pointerSweep(run[0], lane, run[1], lane, 800);
+            await Scripting.sleep(200);
+            watch.stop();
+            check([...changes].every(([surface, n]) => n === snapshot.get(surface)),
+                `the pointer across the screen far from the glass: no glass gets a new light (${run[0]}–${run[1]})`);
+            results.push(`INFO  the pointer far from the glass for 0.8 s: ${cost(watch.frames)}`);
+        } else {
+            results.push('INFO  no stretch far from all glass here: the far sweep untested');
+        }
+        const [ix, iy] = [island.x + island.width / 2, island.y + island.height / 2];
+        const watch = watchFrames();
+        await pointerSweep(ix - px(300), iy + px(30), ix + px(300), iy + px(30), 600);
+        await Scripting.sleep(200);
+        watch.stop();
+        timing.undo();
+        check(changes.get(islandModule._glass) > snapshot.get(islandModule._glass) &&
+            (!dock || changes.get(dock._glass) === snapshot.get(dock._glass)),
+        `along the top bar, the island's glass gets a new light, the dock's not (${[...changes.values()]})`);
+        const lights = timing.spent.light ?? [];
+        results.push(`INFO  the pointer along the island for 0.6 s: ${cost(watch.frames)}; ` +
+            `${changes.get(islandModule._glass) - snapshot.get(islandModule._glass)} new lights of ${lights.length} ` +
+            `looks, ${(lights.reduce((a, b) => a + b, 0) / Math.max(1, lights.length)).toFixed(3)} ms each`);
+
+        // With GNOME's animations off, the light stays above.
+        iface.set_boolean('enable-animations', false);
+        await Scripting.sleep(200);
+        await pointerTo(island.x - px(30), iy);
+        await Scripting.sleep(200);
+        const fixed = islandModule._glass.light;
+        check(fixed[0] === REST_LIGHT[0] && fixed[1] === REST_LIGHT[1], 'animations off: the light stays above');
+        iface.reset('enable-animations');
+        await restPointer();
+
+        // Clear: another look, live; off, and with high contrast: solid.
+        settings.set_string('glass-variant', 'clear');
+        await Scripting.sleep(300);
+        check(islandModule._glass?.look?.dim === LOOK.clear.dim &&
+            (!desktop?._glass || desktop._glass.look?.dim === LOOK.clear.dim),
+        'clear: the island and the widgets are of clear glass');
+        const solid = () => !islandModule._glass && !island.has_style_class_name('atelier-island-glass') &&
+            !desktop?._glass && !(ext.stateObj.modules.get('dock')?.dock?.glass ?? false);
+        settings.set_string('glass-variant', 'off');
+        check(await waitFor(solid, 2000), 'off: the island, the widgets and the dock are solid');
+        // (GNOME's one pointer watcher: no light to follow it for, none.)
+        check(PointerWatcher.getPointerWatcher()._watches.length === 0, 'and nothing watches the pointer for a light');
+        await screenshotIsland('liquid-glass/off', 80);
+        settings.set_string('glass-variant', 'regular');
+        check(await waitFor(() => !solid(), 2000), 'regular again: glass again');
+        a11y.set_boolean('high-contrast', true);
+        check(await waitFor(solid, 2000), 'GNOME\'s high contrast: solid, whatever is chosen');
+        a11y.reset('high-contrast');
+        check(await waitFor(() => !solid(), 2000), 'and glass again without it');
+
+        // The overview's blurred wallpaper has the grain (none with the
+        // glass off): on a flat wallpaper, its pixels apart.
+        bar.set_string('style', 'grouped');
+        const flatPicture = `${dir}/flat.png`;
+        bandsPicture(flatPicture, [monitor.width, monitor.height], [], 128);
+        await show(flatPicture);
+        const spread = async name => {
+            Main.overview.show();
+            await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 4000);
+            await Scripting.sleep(300);
+            await screenshotArea(`liquid-glass/${name}`, monitor.x, monitor.y + px(200), px(16), px(400));
+            Main.overview.hide();
+            await waitFor(() => !Main.overview.visible, 4000);
+            const pixels = pixelsOf(`liquid-glass/${name}`, [monitor.x, monitor.y + px(200)]);
+            const values = [];
+            for (let y = px(200); y < px(600); y += 3)
+                values.push(pixels.at(monitor.x + px(8), monitor.y + y)[1]);
+            const mean = values.reduce((a, b) => a + b, 0) / values.length;
+            return Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length);
+        };
+        const grainy = await spread('overview-grain');
+        settings.set_string('glass-variant', 'off');
+        await Scripting.sleep(300);
+        const smooth = await spread('overview-no-grain');
+        check(grainy > smooth + 0.4 && grainy < 4,
+            `the overview's blurred wallpaper has a fine grain (spread ${grainy.toFixed(2)} vs ${smooth.toFixed(2)} without)`);
+    } finally {
+        glass?.destroy();
+        changes.forEach((_, surface) => delete surface.setLights);
+        iface.reset('enable-animations');
+        a11y.reset('high-contrast');
+        settings.reset('glass-variant');
+        ['style', 'surface'].forEach(key => bar.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        await restPointer();
+        await wallpapersSettled();
+    }
 }
 
 // A made-up GitHub page: a year with something every few days.
@@ -6636,6 +7046,8 @@ export async function run() {
         await part(testTrayApp, ext);
         await part(testOverviewBar);
         await part(testBarStyles, ext);
+        await part(testLiquidGlass, ext);
+        await part(testGlassPictures, ext);
         await part(testFullscreen, ext);
         await part(testClaude, ext);
         await part(testDesktop, ext);
