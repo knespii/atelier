@@ -53,6 +53,8 @@ const ONLY = GLib.getenv('ATELIER_TEST_ONLY')?.split(',').filter(Boolean) ?? nul
 async function part(test, ...args) {
     if (ONLY && !ONLY.includes(test.name))
         return;
+    // (In the log as it starts: a run that times out shows where it was.)
+    console.log(`shell-test part: ${test.name} (${results.length} checks so far)`);
     try {
         await test(...args);
     } catch (e) {
@@ -5255,12 +5257,17 @@ async function testLockFonts() {
             await Scripting.sleep(50);
             return found();
         };
+        // (Before Pango 1.57 a weight alone set the variable one's wght; from
+        // 1.57 on (GNOME 50) only variations asked for are set – which is
+        // why labelFont() always asks for them.)
+        const weightSetsAxis = Pango.version() < 15700;
+        const variable = found => found.startsWith('Inter') && (!weightSetsAxis || found.includes('wght=450'));
         const within = await interAt(24, 450);
-        check(within.includes('wght=450'), `at 18 points, "Inter" is this one, at weight 450 (${within})`);
+        check(variable(within), `at 18 points, "Inter" is this one${weightSetsAxis ? ', at weight 450' : ''} (${within})`);
         for (const px of [16, 80]) {
             const outside = await interAt(px, 450);
             results.push(`INFO  the static Inter ${staticInter ? 'is' : 'isn\'t'} installed; "Inter" at ${px}px, weight 450: ${outside}`);
-            check(staticInter ? !outside.includes('@') : outside.includes('wght=450'),
+            check(staticInter ? !outside.includes('@') : variable(outside),
                 `at ${px}px, "Inter" is ${staticInter ? 'the static one (its weights in hundreds)' : 'this one'} (${outside})`);
         }
         const inter = typefaceFor('inter');

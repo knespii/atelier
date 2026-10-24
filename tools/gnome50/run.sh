@@ -26,7 +26,7 @@ else
 fi
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
     --security-opt label=disable --memory 6g \
-    -v "$REPO:/atelier:ro" -v "$OUT:/out" -e ATELIER_OUTPUT_ROOT=/out/run -e ATELIER_TEST_ONLY -e ATELIER_SHELL_MODE \
+    -v "$REPO:/atelier:ro" -v "$OUT:/out" -e ATELIER_OUTPUT_ROOT=/out/run -e ATELIER_TEST_ONLY -e ATELIER_SHELL_MODE -e ATELIER_TEST_TIMEOUT \
     -w /atelier "$IMAGE" sh -c "
         gnome-shell --version
         # GNOME 50 wants a system bus (login, parental controls): a private
