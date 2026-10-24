@@ -1,21 +1,21 @@
 // The glass clock's material (shell/lockscreen/liquidGlass.js) drawn over
-// wallpapers, next to the look before it, as pictures to look at: on the
-// lock screen the user has – a laptop's 2560×1600 panel at 150 % (GNOME's
+// wallpapers, in each of Atelier's glass variants (lib/glassLook.js:
+// regular, clear and off, solid), as pictures to look at: on the lock
+// screen the user has – a laptop's 2560×1600 panel at 150 % (GNOME's
 // fractional scaling: the stage in logical pixels, 1704×1065, drawings in
 // the panel's), the large glass clock at cell 13, 2 of its 34×20 grid –
 // its digits a stand-in for the clock's ("10:52" in Inter, stretched tall
-// as the glass face stretches them). Each picture: before, the glass at
-// rest, and the glass as a contrast plan may raise it (more opaque, more
-// tint, a shadow) – as the lock screen's legibility plan has it (its
-// APCA, lib/lockLook.js legibilityPlan(): a heavier weight, a shadow, more
-// opaque glass; the digits measured as their glass comes out, glassInk()).
-// The backdrops are made as the shell makes them, and timed, as is drawing
-// the digits. With no arguments, the wallpapers in Atelier's library and a
-// synthetic one; or the pictures given.
+// as the glass face stretches them). Each as the lock screen's legibility
+// plan has it (its APCA, lib/lockLook.js legibilityPlan(): a heavier
+// weight, a shadow, more opaque glass; the digits measured as their glass
+// comes out, glassInk() – solid ones as they are), and up close. The
+// backdrops are made as the shell makes them, and timed, as is drawing the
+// digits, in full and quickly. With no arguments, the wallpapers in
+// Atelier's library and a synthetic one; or the pictures given.
 //
 //   gjs -m tools/render-glass.js [picture…]
 //
-// Into tests/output/glass-material/ (left out of git).
+// Into tests/output/glass-material/ (left out of version control).
 
 import Cairo from 'cairo';
 import GdkPixbuf from 'gi://GdkPixbuf';
@@ -27,6 +27,7 @@ import System from 'system';
 
 import {placement} from '../lib/depth.js';
 import {GLASS, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
+import {VARIANTS, lookOf} from '../lib/glassLook.js';
 import {glassDigits, glassInk, legibilityPlan, lockTone, regionIn, regionStats} from '../lib/lockLook.js';
 import {contrastRatio} from '../lib/palette.js';
 import {wallpaperDir} from '../lib/paths.js';
@@ -186,59 +187,6 @@ function digitShape(weight = WEIGHT) {
     return {path, bounds, glyphBoxes, fontSize, stretch, level, date, top};
 }
 
-// Today's glass (clock.js before the material): a light tint, more of it
-// at the top, a bright rim and a soft shadow round it.
-const TINT = [0.66, 0.44];
-const RIM = [0.6, 0.14];
-const SHADOW = [[16, 0.035], [9, 0.05], [4, 0.07]];
-
-function paintBefore(cr, path, tone, {y, height}) {
-    const [r, g, b] = [1, 3, 5].map(i => parseInt(tone.color.slice(i, i + 2), 16) / 255);
-    const dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4;
-    const scale = SCALE;
-    const [top, bottom] = [y, y + height];
-    cr.setLineJoin(Cairo.LineJoin.ROUND);
-    cr.pushGroup();
-    cr.appendPath(path);
-    for (const [lineWidth, alpha] of SHADOW) {
-        if (dark)
-            cr.setSourceRGBA(1, 1, 1, alpha * 1.4);
-        else
-            cr.setSourceRGBA(0, 0, 0, alpha);
-        cr.setLineWidth(lineWidth * scale);
-        cr.strokePreserve();
-    }
-    cr.setOperator(Cairo.Operator.DEST_OUT);
-    cr.setSourceRGBA(0, 0, 0, 1);
-    cr.fill();
-    cr.popGroupToSource();
-    cr.paint();
-
-    cr.newPath();
-    cr.appendPath(path);
-    const tint = new Cairo.LinearGradient(0, top, 0, bottom);
-    tint.addColorStopRGBA(0, r, g, b, TINT[0]);
-    tint.addColorStopRGBA(1, r, g, b, TINT[1]);
-    cr.setSource(tint);
-    cr.fill();
-
-    const rim = new Cairo.LinearGradient(0, top, 0, bottom);
-    rim.addColorStopRGBA(0, 1, 1, 1, RIM[0] * (dark ? 0.5 : 1));
-    rim.addColorStopRGBA(1, 1, 1, 1, RIM[1] * (dark ? 0.5 : 1));
-    cr.pushGroup();
-    cr.appendPath(path);
-    cr.setSource(rim);
-    cr.fill();
-    cr.setOperator(Cairo.Operator.DEST_OUT);
-    cr.translate(0, 1.6 * scale);
-    cr.appendPath(path);
-    cr.setSourceRGBA(0, 0, 0, 1);
-    cr.fill();
-    cr.identityMatrix();
-    cr.popGroupToSource();
-    cr.paint();
-}
-
 // One look: the sharp wallpaper, the date line in the tone, the digits
 // drawn into a surface of the clock's size (as the face's drawing area
 // is) and laid over it.
@@ -320,79 +268,80 @@ async function renderWallpaper(path, {cache, work}, shape) {
     const stats = regionStats(sharp.sample, regionIn(rect, MONITOR[0] / MONITOR[1], 400 / 250));
     const text = {size: shape.fontSize, weight: WEIGHT};
     const tone = lockTone(stats, {dim: 0.86, text});
-
-    const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, dir: cache});
-    let start = GLib.get_monotonic_time();
-    const made = await makeBackdrop(spec);
-    const making = ms(start);
-    start = GLib.get_monotonic_time();
-    const backdrop = await loadBackdrop(spec, null);
-    const loaded = ms(start);
-    // The digits measured as their glass comes out there, as the lock
-    // screen's board plans them (lib/lockLook.js glassInk(): the frosted
-    // wallpaper behind them, where it is lightest, under the tint); and,
-    // to compare, as a flat tint over the wallpaper.
-    const {monitor: [mw, mh], factor: [fx, fy], shift: [sx, sy]} = backdrop;
-    const frostedStats = regionStats(backdrop.sample,
-        [(ink.x + sx / fx) / mw, (ink.y + sy / fy) / mh, ink.width / mw, ink.height / mh]);
-    const plan = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86, ink: glassInk(tone, frostedStats)});
-    const flat = legibilityPlan({...text, tone, stats, glass: tintShown(), dim: 0.86});
-    const planned = {...glassFor(plan.glass), shadow: plan.shadow};
-    const plannedShape = plan.weight === WEIGHT ? shape : digitShape(plan.weight);
-
-    const glass = new LiquidGlass();
-    glass.backdrop = backdrop;
-    const options = {bounds: shape.bounds, tone, at: [CLOCK.x, CLOCK.y], scale: SCALE, glyphBoxes: shape.glyphBoxes};
-    const before = render(sharp.surface, shape, cr => paintBefore(cr, shape.path, tone, shape.bounds), tone);
-    const rest = render(sharp.surface, shape, cr => glass.paint(cr, shape.path, options), tone);
-    const plannedOptions = {...options, ...planned, bounds: plannedShape.bounds, glyphBoxes: plannedShape.glyphBoxes};
-    const raised = render(sharp.surface, plannedShape, cr => glass.paint(cr, plannedShape.path, plannedOptions), tone);
-    const said = [
-        plan.weight !== WEIGHT && `weight ${plan.weight}`,
-        plan.shadow && `shadow ${plan.shadow.alpha} blur ${plan.shadow.blur}`,
-        planned.opacity !== GLASS.opacity && `opacity ${planned.opacity.toFixed(2)}`,
-        planned.tintAlpha !== GLASS.tintAlpha && `tint ${planned.tintAlpha.toFixed(2)}`,
-    ].filter(Boolean);
-    sideBySide([
-        {name: 'before', surface: before.surface},
-        {name: `glass at rest (tint ${GLASS.tintAlpha}, opacity ${GLASS.opacity})`, surface: rest.surface},
-        {name: `as the plan has it (Lc ${plan.lc?.toFixed(0)} of ${plan.need?.toFixed(0)}): ` +
-            `${said.join(', ') || 'as at rest'}`, surface: raised.surface},
-    ], GLib.build_filenamev([OUTPUT, `${name}.png`]), name);
-    closeUp(rest.surface, GLib.build_filenamev([OUTPUT, `${name}-close.png`]));
-
-    // Drawing the digits again and again, as a change of them would.
-    const repaint = draw => {
-        const clock = surfaceOf(CLOCK.width, CLOCK.height);
-        start = GLib.get_monotonic_time();
-        for (let i = 0; i < REPAINTS; i++) {
-            const cr = new Cairo.Context(clock);
-            cr.setOperator(Cairo.Operator.CLEAR);
-            cr.paint();
-            cr.setOperator(Cairo.Operator.OVER);
-            draw(cr);
-            cr.$dispose();
-        }
-        return ms(start) / REPAINTS;
-    };
-    const paintBeforeMs = repaint(cr => paintBefore(cr, shape.path, tone, shape.bounds));
-    const paintGlassMs = repaint(cr => glass.paint(cr, shape.path, options));
-    const paintRaisedMs = repaint(cr => glass.paint(cr, plannedShape.path, plannedOptions));
-
-    const frosted = glass.behind({x: CLOCK.x + shape.bounds.x, y: CLOCK.y + shape.bounds.y,
-        width: shape.bounds.width, height: shape.bounds.height});
-    const tint = glassTint(tone, frosted);
     const around = stats.mean;
-    const color = glassColor({frosted, tint, dark: tone.dark, behind: around});
-    print(`${name}: tone ${tone.color}${tone.dark ? ' (dark)' : ''}, frosted ${frosted}, tint ${tint}; ` +
-        `glass ${color} (WCAG contrast ${contrastRatio(color, around).toFixed(2)} with ${around}); ` +
-        `the plan: Lc ${plan.lc?.toFixed(1)} of ${plan.need?.toFixed(1)}, ${said.join(', ') || 'nothing'}, ` +
-        `reaches ${plan.reaches?.toFixed(1)} (a flat tint: Lc ${flat.lc?.toFixed(1)}, ` +
-        `${flat.shadow ? `shadow ${flat.shadow.alpha}` : 'no shadow'})`);
-    print(`    backdrop ${spec.size.width}×${spec.size.height}: made in ${making.toFixed(1)} ms` +
-        `${made ? '' : ' (there already)'}, loaded in ${loaded.toFixed(1)} ms; ` +
-        `drawing the digits: before ${paintBeforeMs.toFixed(2)} ms, glass ${paintGlassMs.toFixed(2)} ms, ` +
-        `as planned ${paintRaisedMs.toFixed(2)} ms`);
+    const looks = [];
+    const timings = [];
+    for (const variant of VARIANTS) {
+        const look = lookOf(variant);
+        // The backdrop for the look (none for no glass), made as the shell
+        // makes it.
+        let backdrop = null;
+        let made = '';
+        if (look) {
+            const spec = backdropSpec({path, style: STYLE, monitor: MONITOR, scale: SCALE, look, dir: cache});
+            const start = GLib.get_monotonic_time();
+            const fresh = await makeBackdrop(spec);
+            made = `backdrop ${spec.size.width}×${spec.size.height} made in ${ms(start).toFixed(1)} ms` +
+                `${fresh ? '' : ' (there already)'}`;
+            backdrop = await loadBackdrop(spec, null);
+        }
+        // What it takes the digits to read there, as the lock screen's
+        // board plans them (lib/lockLook.js: glass type measured as its
+        // material comes out over the frost, glassInk(); no glass, solid).
+        let frostedStats = null;
+        if (backdrop) {
+            const {monitor: [mw, mh], factor: [fx, fy], shift: [sx, sy]} = backdrop;
+            frostedStats = regionStats(backdrop.sample,
+                [(ink.x + sx / fx) / mw, (ink.y + sy / fy) / mh, ink.width / mw, ink.height / mh]);
+        }
+        const plan = legibilityPlan({...text, tone, stats, glass: look ? tintShown() : null, dim: 0.86,
+            ink: look ? glassInk(tone, frostedStats, look) : null});
+        const planned = {...glassFor(plan.glass), shadow: plan.shadow};
+        const plannedShape = plan.weight === WEIGHT ? shape : digitShape(plan.weight);
+        const glass = new LiquidGlass();
+        glass.backdrop = backdrop;
+        const options = {...planned, bounds: plannedShape.bounds, tone, at: [CLOCK.x, CLOCK.y], scale: SCALE,
+            glyphBoxes: plannedShape.glyphBoxes, variant};
+        const drawn = render(sharp.surface, plannedShape, cr => glass.paint(cr, plannedShape.path, options), tone);
+        const said = [
+            plan.weight !== WEIGHT && `weight ${plan.weight}`,
+            plan.shadow && `shadow ${plan.shadow.alpha}`,
+            look && planned.opacity !== GLASS.opacity && `opacity ${planned.opacity.toFixed(2)}`,
+            look && planned.tintAlpha !== GLASS.tintAlpha && `tint ${planned.tintAlpha.toFixed(2)}`,
+        ].filter(Boolean);
+        const reads = `Lc ${plan.lc?.toFixed(0)} of ${plan.need?.toFixed(0)}`;
+        looks.push({name: `${variant} (${reads}: ${said.join(', ') || 'as it is'})`, surface: drawn.surface});
+        closeUp(drawn.surface, GLib.build_filenamev([OUTPUT, `${name}-${variant}-close.png`]));
+        // Drawing the digits again and again, as a change of them would.
+        const repaint = draw => {
+            const clock = surfaceOf(CLOCK.width, CLOCK.height);
+            const start = GLib.get_monotonic_time();
+            for (let i = 0; i < REPAINTS; i++) {
+                const cr = new Cairo.Context(clock);
+                cr.setOperator(Cairo.Operator.CLEAR);
+                cr.paint();
+                cr.setOperator(Cairo.Operator.OVER);
+                draw(cr);
+                cr.$dispose();
+            }
+            return ms(start) / REPAINTS;
+        };
+        const paintMs = repaint(cr => glass.paint(cr, plannedShape.path, options));
+        const sketchMs = repaint(cr => glass.sketch(cr, plannedShape.path, options));
+        let colour = '';
+        if (backdrop) {
+            const frosted = glass.behind({x: ink.x, y: ink.y, width: ink.width, height: ink.height});
+            const tint = glassTint(tone, frosted);
+            const color = glassColor({frosted, tint, dark: tone.dark, ...planned, behind: around, look});
+            const contrast = contrastRatio(color, around).toFixed(2);
+            colour = `frosted ${frosted}, tint ${tint}, glass ${color} (WCAG ${contrast} with ${around}); `;
+        }
+        timings.push(`    ${variant}: ${colour}reaches Lc ${plan.reaches?.toFixed(1)}; ${made ? `${made}; ` : ''}` +
+            `drawing the digits ${paintMs.toFixed(2)} ms, quickly ${sketchMs.toFixed(2)} ms`);
+    }
+    sideBySide(looks, GLib.build_filenamev([OUTPUT, `${name}.png`]), name);
+    print(`${name}: tone ${tone.color}${tone.dark ? ' (dark)' : ''}, the wallpaper round the digits ${around}`);
+    timings.forEach(line => print(line));
 }
 
 // The files in a folder.
