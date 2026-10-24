@@ -443,3 +443,54 @@ export async function testGlassPainted() {
     assertEqual(dense(15, 15), [0, 0, 0, 0], 'at 150 %: nothing far from it');
     assert(dense(150, 45)[1] > dense(150, 75)[1] + 40, `at 150 %: light along its top (${dense(150, 45)})`);
 }
+
+// Drawn quickly, as a clock being stretched is: the frost and the tint
+// where the shape is, as the glass in full has them away from its edges,
+// and the light along its top; nothing round it. What it is filled with is
+// made once while it serves (the shape larger, as a clock grows), and let
+// go of once the glass is drawn in full.
+export async function testGlassSketched() {
+    const dir = freshDir('glass-sketch');
+    const path = twoColourPicture(dir);
+    const spec = backdropSpec({path, style: 'zoom', monitor: [640, 360], scale: 1, dir});
+    await makeBackdrop(spec);
+    const backdrop = await loadBackdrop(spec);
+    const glass = new LiquidGlass();
+    glass.backdrop = backdrop;
+    const tone = {color: '#f4f4f4', dark: false};
+    const draw = (how, name, {width = 120, height = 40, density = 1, ...options} = {}) => {
+        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, Math.ceil(200 * density), Math.ceil(100 * density));
+        surface.setDeviceScale(density, density);
+        const cr = new Cairo.Context(surface);
+        glass[how](cr, c => c.rectangle(40, 30, width, height),
+            {bounds: {x: 40, y: 30, width, height}, tone, at: [220, 130], ...options});
+        cr.$dispose();
+        return pixelsOf(surface, dir, name);
+    };
+    const full = draw('paint', 'full', {opacity: 1});
+    const quick = draw('sketch', 'quick', {opacity: 1});
+    const made = glass._sketch;
+    for (const [x, y] of [[60, 50], [140, 50], [100, 58]]) {
+        const [a, b] = [full(x, y), quick(x, y)];
+        assert(a.every((v, i) => Math.abs(v - b[i]) <= 3), `inside, as in full (${a} | ${b} at ${x}, ${y})`);
+    }
+    assert(quick(60, 50)[0] > quick(60, 50)[2] && quick(140, 50)[2] > quick(140, 50)[0],
+        `red behind its left, blue behind its right (${quick(60, 50)} | ${quick(140, 50)})`);
+    assert(quick(100, 30)[1] > quick(100, 50)[1] + 40, `light caught along its top (${quick(100, 30)})`);
+    assertEqual([quick(10, 10), quick(100, 72)], [[0, 0, 0, 0], [0, 0, 0, 0]], 'nothing round it');
+
+    // Larger, as a clock grows: what it is filled with serves still.
+    const larger = draw('sketch', 'larger', {opacity: 1, width: 140, height: 50});
+    assert(glass._sketch === made && larger(170, 70)[3] === 255, `made once (${larger(170, 70)} at its new corner)`);
+    assert(draw('sketch', 'clear', {opacity: 0.3})(60, 50)[3] < 140, 'less opaque, as asked');
+    draw('paint', 'full-again');
+    assertEqual(glass._sketch, null, 'drawn in full: let go of');
+
+    // At 150 %, in its pixels; and without a backdrop, the tint alone.
+    const dense = draw('sketch', 'dense', {opacity: 1, density: 1.5});
+    assert(dense(90, 75)[0] > dense(90, 75)[2] && dense(210, 75)[2] > dense(210, 75)[0] && dense(90, 75)[3] === 255,
+        `at 150 %: red behind its left, blue behind its right (${dense(90, 75)} | ${dense(210, 75)})`);
+    assertEqual(dense(15, 15), [0, 0, 0, 0], 'at 150 %: nothing far from it');
+    glass.backdrop = null;
+    assert(draw('sketch', 'bare', {opacity: 1})(60, 50)[3] > 100, 'without a backdrop, the tint alone');
+}

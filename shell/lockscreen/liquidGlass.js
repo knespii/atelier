@@ -449,6 +449,9 @@ export class GlassBackdrop {
 // nothing behind for the garbage collector, which can't tell how large
 // they are.
 const MASK_STEP = 32;
+// A sketch's frost and tint are made with this much room (logical pixels)
+// at least to grow right and down, or half as much again as they cover.
+const MATERIAL_ROOM = 128;
 
 class Masks {
     constructor() {
@@ -587,6 +590,8 @@ export class LiquidGlass {
         this._backdrop = null;
         this._behind = new Map();
         this._masks = new Masks();
+        // (What sketch() fills the shape with, while it serves.)
+        this._sketch = null;
     }
 
     /** @returns {object|null} the backdrop it frosts (GlassBackdrop's current) */
@@ -600,6 +605,7 @@ export class LiquidGlass {
             return;
         this._backdrop = backdrop;
         this._behind.clear();
+        this._sketch = null;
     }
 
     /**
@@ -651,49 +657,23 @@ export class LiquidGlass {
         bounds, tone, at = [0, 0], tintAlpha = GLASS.tintAlpha, opacity = GLASS.opacity, shadow = 0, scale = 1,
         glyphBoxes = null,
     }) {
-        const {x, y, width, height} = bounds;
-        if (!(width > 0 && height > 0))
+        if (!(bounds.width > 0 && bounds.height > 0))
             return;
         const masks = this._masks;
-        const append = typeof path === 'function' ? path : c => c.appendPath(path);
         const light = !tone.dark;
         const halo = typeof shadow === 'number'
             ? shadow > 0 && {...SHADOW, alpha: SHADOW.alpha * Math.min(1, shadow)}
             : shadow?.alpha > 0 && {y: 0, ...shadow, blur: Math.max(1, shadow.blur ?? SHADOW.blur)};
-        // What is drawn round the shape (the shadow's reach, or the rim's),
-        // as far as the drawing is clipped (only some glyphs drawn anew).
-        const reach = Math.ceil((halo ? 2.5 * halo.blur + Math.abs(halo.y) : 2 * RIM.width + 2) * scale);
-        cr.save();
-        cr.identityMatrix();
-        const [cx1, cy1, cx2, cy2] = cr.clipExtents();
-        cr.restore();
-        // (On whole pixels of the drawing's – its device pixels, at 150 %
-        // half again as many: the masks lie on them pixel on pixel, which
-        // Cairo does fastest.)
-        const [density] = cr.getTarget().getDeviceScale();
-        const [left, top] = [Math.max(cx1, x - reach), Math.max(cy1, y - reach)].map(v => Math.floor(v * density));
-        const [right, bottom] = [Math.min(cx2, x + width + reach), Math.min(cy2, y + height + reach)]
-            .map(v => Math.ceil(v * density));
-        if (!(right > left && bottom > top))
+        // What is drawn round the shape (the shadow's reach, or the rim's).
+        const placed = this._areaOf(cr, bounds,
+            Math.ceil((halo ? 2.5 * halo.blur + Math.abs(halo.y) : 2 * RIM.width + 2) * scale));
+        if (!placed)
             return;
-        const area = {
-            x: left / density,
-            y: top / density,
-            width: Math.ceil((right - left) / MASK_STEP) * MASK_STEP / density,
-            height: Math.ceil((bottom - top) / MASK_STEP) * MASK_STEP / density,
-        };
-
-        const shape = masks.over('shape', area, density, c => {
-            append(c);
-            c.fill();
-        });
-        const [lx, ly] = RIM.light;
-        const [ux, uy] = [lx / Math.hypot(lx, ly), ly / Math.hypot(lx, ly)];
-        // (Whole pixels of the drawing's, one at least each way it goes at all.)
-        const step = v => Math.sign(v) * Math.max(Math.abs(v) > 0.2 ? 1 : 0, Math.round(Math.abs(v * density))) /
-            density;
-        const away = w => [shape, step(-ux * w * scale), step(-uy * w * scale)];
-        const toward = w => [shape, step(ux * w * scale), step(uy * w * scale)];
+        // (Drawn in full: what a sketch was drawn with is let go of.)
+        this._sketch = null;
+        const {area, density} = placed;
+        const shape = this._shapeOf(path, area, density);
+        const {step, away, toward} = this._moves(shape, density, scale);
 
         cr.save();
         cr.identityMatrix();
@@ -734,14 +714,147 @@ export class LiquidGlass {
         const strength = light ? 1 : 0.5;
         cr.setSourceRGBA(0, 0, 0, INNER.alpha * strength);
         cr.maskSurface(masks.less('inner', area, density, shape, toward(INNER.width)), area.x, area.y);
+        this._rim(cr, {area, density, shape, bounds, strength, away});
+        cr.setSourceRGBA(1, 1, 1, RIM.exit.alpha * strength);
+        cr.maskSurface(masks.less('exit', area, density, shape, toward(RIM.exit.width)), area.x, area.y);
+        cr.restore();
+    }
+
+    /**
+     * Draw the shape in glass quickly: a frame at a time while it changes
+     * size (its clock stretched in the editor). The frost and the tint –
+     * made once for the drawing and kept while they serve, as fine as the
+     * stage's pixels (the frost is blurred: none finer) – and the light
+     * along its upper edges, as paint() draws them; without the band along
+     * its edges, the lines inside its lower ones and a shadow. As paint()
+     * takes it (but for the shadow and the glyphs' boxes).
+     *
+     * @param {Cairo.Context} cr
+     * @param {Function|Cairo.Path} path
+     * @param {object} options - bounds, tone, at, tintAlpha, opacity, scale
+     */
+    sketch(cr, path, {bounds, tone, at = [0, 0], tintAlpha = GLASS.tintAlpha, opacity = GLASS.opacity, scale = 1}) {
+        if (!(bounds.width > 0 && bounds.height > 0))
+            return;
+        const placed = this._areaOf(cr, bounds, Math.ceil((2 * RIM.width + 2) * scale));
+        if (!placed)
+            return;
+        const {area, density} = placed;
+        const shape = this._shapeOf(path, area, density);
+        const {away} = this._moves(shape, density, scale);
+        const material = this._material({area, bounds, tone, at, tintAlpha, opacity});
+        // (No clip of its own: the masks are as large as the area.)
+        cr.save();
+        cr.identityMatrix();
+        cr.setSourceSurface(material.surface, material.x, material.y);
+        cr.getSource().setFilter(Cairo.Filter.BILINEAR);
+        cr.maskSurface(shape, area.x, area.y);
+        this._rim(cr, {area, density, shape, bounds, strength: tone.dark ? 0.5 : 1, away});
+        cr.restore();
+    }
+
+    // Where a paint draws, in the drawing (logical pixels): round the
+    // shape's bounds as far as it reaches, as far as the drawing is clipped
+    // (only some glyphs drawn anew); null for nowhere.
+    _areaOf(cr, {x, y, width, height}, reach) {
+        cr.save();
+        cr.identityMatrix();
+        const [cx1, cy1, cx2, cy2] = cr.clipExtents();
+        cr.restore();
+        // (On whole pixels of the drawing's – its device pixels, at 150 %
+        // half again as many: the masks lie on them pixel on pixel, which
+        // Cairo does fastest.)
+        const [density] = cr.getTarget().getDeviceScale();
+        const [left, top] = [Math.max(cx1, x - reach), Math.max(cy1, y - reach)].map(v => Math.floor(v * density));
+        const [right, bottom] = [Math.min(cx2, x + width + reach), Math.min(cy2, y + height + reach)]
+            .map(v => Math.ceil(v * density));
+        if (!(right > left && bottom > top))
+            return null;
+        const area = {
+            x: left / density,
+            y: top / density,
+            width: Math.ceil((right - left) / MASK_STEP) * MASK_STEP / density,
+            height: Math.ceil((bottom - top) / MASK_STEP) * MASK_STEP / density,
+        };
+        return {area, density};
+    }
+
+    // The shape filled, as a mask over the area.
+    _shapeOf(path, area, density) {
+        const append = typeof path === 'function' ? path : c => c.appendPath(path);
+        return this._masks.over('shape', area, density, c => {
+            append(c);
+            c.fill();
+        });
+    }
+
+    // The shape moved a width (logical pixels) away from the light, or
+    // toward it, on whole pixels of the drawing's (one at least each way it
+    // goes at all), for masks.less(); step() such a move.
+    _moves(shape, density, scale) {
+        const [lx, ly] = RIM.light;
+        const [ux, uy] = [lx / Math.hypot(lx, ly), ly / Math.hypot(lx, ly)];
+        const step = v => Math.sign(v) * Math.max(Math.abs(v) > 0.2 ? 1 : 0, Math.round(Math.abs(v * density))) /
+            density;
+        return {
+            step,
+            away: w => [shape, step(-ux * w * scale), step(-uy * w * scale)],
+            toward: w => [shape, step(ux * w * scale), step(uy * w * scale)],
+        };
+    }
+
+    // The light caught along the shape's upper and left edges, brighter at
+    // its top than at its bottom.
+    _rim(cr, {area, density, shape, bounds: {y, height}, strength, away}) {
         const rim = new Cairo.LinearGradient(0, y, 0, y + height);
         rim.addColorStopRGBA(0, 1, 1, 1, RIM.alpha[0] * strength);
         rim.addColorStopRGBA(1, 1, 1, 1, RIM.alpha[1] * strength);
         cr.setSource(rim);
-        cr.maskSurface(masks.less('rim', area, density, shape, away(RIM.width)), area.x, area.y);
-        cr.setSourceRGBA(1, 1, 1, RIM.exit.alpha * strength);
-        cr.maskSurface(masks.less('exit', area, density, shape, toward(RIM.exit.width)), area.x, area.y);
-        cr.restore();
+        cr.maskSurface(this._masks.less('rim', area, density, shape, away(RIM.width)), area.x, area.y);
+    }
+
+    // What fills the shape in a sketch: the frost as the membrane has it
+    // (without the band) and the tint over it, its gradient as the shape's
+    // bounds were, as opaque as asked; as fine as the stage's pixels.
+    // Kept while it covers the area (made with room to grow right and down,
+    // as a stretched clock grows – as far as the monitor goes, at most) and
+    // the glass is as it was. {surface, x, y}: where its picture lies in the
+    // drawing (a pixel round what it covers: Cairo draws a picture made
+    // larger fastest where all it reads is in it).
+    _material({area, bounds, tone, at, tintAlpha, opacity}) {
+        const backdrop = this._backdrop;
+        const key = [backdrop?.key ?? '', ...at, tone.color, Boolean(tone.dark), tintAlpha, opacity].join(' ');
+        const kept = this._sketch;
+        const covers = ({covered: [x1, y1, x2, y2]}) =>
+            area.x >= x1 && area.y >= y1 && area.x + area.width <= x2 && area.y + area.height <= y2;
+        if (kept?.key === key && covers(kept))
+            return kept;
+        const [mw, mh] = backdrop?.monitor ?? [Infinity, Infinity];
+        const room = (end, size, edge) => Math.max(end, Math.min(end + Math.max(MATERIAL_ROOM, size / 2), edge));
+        // (On whole pixels of the stage's.)
+        const [x1, y1] = [Math.floor(area.x), Math.floor(area.y)];
+        const x2 = Math.ceil(room(area.x + area.width, area.width, mw - at[0]));
+        const y2 = Math.ceil(room(area.y + area.height, area.height, mh - at[1]));
+        const [x, y] = [x1 - 1, y1 - 1];
+        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, x2 + 1 - x, y2 + 1 - y);
+        const cr = new Cairo.Context(surface);
+        if (backdrop) {
+            // (Where it lies on the monitor.)
+            this._setBackdrop(cr, [at[0] + x, at[1] + y], [0, 0], 1);
+            cr.paint();
+            if (tone.dark) {
+                cr.setSourceRGBA(0, 0, 0, 1 - DIM);
+                cr.paint();
+            }
+        }
+        cr.translate(-x, -y);
+        this._tint(cr, {bounds, tone, at, tintAlpha});
+        cr.setOperator(Cairo.Operator.DEST_IN);
+        cr.setSourceRGBA(0, 0, 0, Math.min(1, Math.max(0, opacity)));
+        cr.paint();
+        cr.$dispose();
+        this._sketch = {key, surface, x, y, covered: [x1, y1, x2, y2]};
+        return this._sketch;
     }
 
     // What fills the shape: the backdrop (the frost as light glass lets it
@@ -751,7 +864,6 @@ export class LiquidGlass {
         const backdrop = this._backdrop;
         const masks = this._masks;
         const light = !tone.dark;
-        const {x, y, width, height} = bounds;
         if (backdrop) {
             this._setBackdrop(cr, at, [0, 0], 1);
             cr.paint();
@@ -780,11 +892,17 @@ export class LiquidGlass {
             cr.setSourceRGBA(1, 1, 1, BAND.light[light ? 0 : 1]);
             cr.maskSurface(band, area.x, area.y);
         }
+        this._tint(cr, {bounds, tone, at, tintAlpha});
+    }
+
+    // The tint over what is drawn: the tone, with a hint of the colour
+    // behind the shape, more of it at the top.
+    _tint(cr, {bounds: {x, y, width, height}, tone, at, tintAlpha}) {
         const tint = hexToRgb(glassTint(tone, this.behind({x: at[0] + x, y: at[1] + y, width, height})))
             .map(v => v / 255);
         // (Each end as opaque as it gets at most: a plan's most opaque glass
         // has the tint whole at the top.)
-        const alpha = tintAlpha * (backdrop ? 1 : BARE_TINT);
+        const alpha = tintAlpha * (this._backdrop ? 1 : BARE_TINT);
         const gradient = new Cairo.LinearGradient(0, y, 0, y + height);
         gradient.addColorStopRGBA(0, ...tint, Math.min(1, alpha * TINT_GRADIENT[0]));
         gradient.addColorStopRGBA(1, ...tint, Math.min(1, alpha * TINT_GRADIENT[1]));
