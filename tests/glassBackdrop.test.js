@@ -574,6 +574,34 @@ export async function testGlassPainted() {
     assert(dense(165, 45)[1] > dense(165, 75)[1] + 40, `at 150 %: light along its top (${dense(165, 45)})`);
 }
 
+// Drawn again – as a clock is whenever anything about it changes – the
+// glass comes out the same: nothing it keeps from one drawing to the next
+// adds up (the band where it bends, blurred, once grew stronger each time).
+export async function testGlassDrawnAgain() {
+    const dir = freshDir('glass-again');
+    const spec = backdropSpec({path: twoColourPicture(dir), style: 'zoom', monitor: [640, 360], scale: 1, dir});
+    await makeBackdrop(spec);
+    const glass = new LiquidGlass();
+    glass.backdrop = await loadBackdrop(spec);
+    const shape = cr => {
+        cr.rectangle(40, 20, 30, 60);
+        cr.rectangle(100, 20, 40, 60);
+    };
+    const boxes = [{x: 40, y: 20, width: 30, height: 60}, {x: 100, y: 20, width: 40, height: 60}];
+    const drawn = Array.from({length: 3}, (_, i) => {
+        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, 200, 100);
+        const cr = new Cairo.Context(surface);
+        glass.paint(cr, shape, {bounds: {x: 40, y: 20, width: 100, height: 60}, glyphBoxes: boxes,
+            tone: {color: '#e4f9df', dark: false}, at: [220, 130]});
+        cr.$dispose();
+        return pixelsOf(surface, dir, `again-${i}`);
+    });
+    for (const [x, y] of [[55, 50], [45, 25], [120, 50], [101, 75]]) {
+        assertEqual(drawn[2](x, y), drawn[0](x, y), `drawn a third time as the first, at ${x}, ${y}`);
+        assertEqual(drawn[1](x, y), drawn[0](x, y), `and a second, at ${x}, ${y}`);
+    }
+}
+
 // Drawn quickly, as a clock being stretched is: the frost, the veils and
 // the tint where the shape is, as the glass in full has them away from its
 // edges and its sheen, and the light along its top; nothing round it. What

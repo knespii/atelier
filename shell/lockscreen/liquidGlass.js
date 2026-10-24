@@ -552,7 +552,9 @@ class Masks {
     blurred(name, mask, area, density, reach) {
         const [width, height] = [Math.round(area.width * density), Math.round(area.height * density)];
         const [columns, rows] = [Math.ceil(area.width / reach) + 2, Math.ceil(area.height / reach) + 2];
-        // (Each drawn all over, with SOURCE: none of them cleared first.)
+        // (Each drawn all over, with SOURCE: none of them cleared first –
+        // but the halves, as SOURCE through an alpha only blends with what
+        // was there: each drawing would blur more than the one before.)
         const out = this.surface(name, width, height, density, Cairo.Format.ARGB32, false);
         const other = this.surface(`${name}:half`, width, height, density, Cairo.Format.ARGB32, false);
         [[out, 0], [other, reach / 2]].forEach(([large, offset], i) => {
@@ -563,7 +565,7 @@ class Masks {
             cr.getSource().setFilter(Cairo.Filter.GOOD);
             cr.paint();
             cr.$dispose();
-            const colour = this.surface(`${name}:${i}:colour`, columns, rows, 1 / reach, Cairo.Format.ARGB32, false);
+            const colour = this.surface(`${name}:${i}:colour`, columns, rows, 1 / reach, Cairo.Format.ARGB32);
             cr = new Cairo.Context(colour);
             cr.setOperator(Cairo.Operator.SOURCE);
             cr.setSourceSurface(small, 0, 0);
