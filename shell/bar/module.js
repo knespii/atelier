@@ -433,8 +433,11 @@ export class BarModule {
     // at rest.
     _syncVibrancy(glass) {
         const vibrancy = glass ? this._modules.get('vibrancy') : null;
-        const ids = vibrancy && this._surfaces.length === 1 ? ['bar']
-            : vibrancy && this._surfaces.length === 2 ? ['bar-left', 'bar-right'] : [];
+        let ids = [];
+        if (vibrancy && this._surfaces.length === 1)
+            ids = [this._look.glassBar ? 'bar-gnome' : 'bar'];
+        else if (vibrancy && this._surfaces.length === 2)
+            ids = ['bar-left', 'bar-right'];
         if (this._vibrant.map(surface => surface.id).join() === ids.join()) {
             this._vibrant.forEach(surface => surface.update());
             return;
