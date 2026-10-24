@@ -4706,6 +4706,9 @@ async function testLockFreeStretch() {
     const clock = board.widgets.find(w => w.entry.id === 'clock');
     await Scripting.sleep(800);
     const large = clock.glass.target.stretch;
+    // (How big its date line is, as the stylesheet sets it.)
+    const dateSize = () => clock.glass.dateLine.get_theme_node().get_font().get_size();
+    const largeDate = dateSize();
     // (Where the digits are on the monitor, and the bottom of the face they fill.)
     const digitsNow = () => {
         const glass = clock.glass;
@@ -4820,6 +4823,12 @@ async function testLockFreeStretch() {
     `${Math.round(clock.glass?.digitsRect?.width)} of its ${clock.glass?.width} px wide`);
     await Scripting.sleep(300);
     await screenshot('95f-lock-free-flat');
+    // As wide as a square clock: styled as one, its date line as small (10
+    // points of a large clock's 15).
+    check(board.setWidgetSize('clock', '4x9') && clock.has_style_class_name('atelier-widget-square') &&
+        await waitFor(() => clock.glass.dateLine.get_stage() && Math.abs(dateSize() / largeDate - 10 / 15) < 0.01, 1000),
+    `4 × 9 cells: styled as a square clock, its date line as small (${(dateSize() / largeDate).toFixed(3)} of a ` +
+    'large one\'s)');
     // A click on its corner, from a size of its own: the first of the clock's.
     await clickAt(...centerOf(clock._editHandle));
     await Scripting.sleep(300);
