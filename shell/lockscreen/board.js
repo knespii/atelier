@@ -506,12 +506,19 @@ export class LockBoard {
         };
     }
 
+    // Where a widget goes for the room made, as far as the progress has it:
+    // eased there (for a change of the popup), or set – unless it is there
+    // already, as it mostly is: a clock set where it is is drawn anew all
+    // the same, and with it, as it fades, all of the group of the clocks,
+    // offscreen, a frame at a time.
     _shift(widget, room, progress, animate) {
         const {dx = 0, dy = 0, scale = 1, pivot} = room ?? {};
         if (pivot)
             widget.set_pivot_point(...pivot);
         const s = 1 + (scale - 1) * progress;
         const values = {translation_x: dx * progress, translation_y: dy * progress, scale_x: s, scale_y: s};
+        if (MOVED.every(name => widget[name] === values[name] && !widget.get_transition(name)))
+            return;
         if (animate) {
             widget.ease({...values, duration: SHIFT_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         } else {
