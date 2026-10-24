@@ -19,11 +19,13 @@
 // sketch(): its frost and tint, the light along its edges), and in full
 // once let go of – or once held still a moment, where that is quick too.
 //
-// (St draws a drawing area the moment it is told to – queue_repaint() – and
-// whenever it is laid out at another size: the face draws its layers as it
-// is laid out, once a frame however often it is asked, and nothing it does
-// while one is being drawn may lay it out, or St would throw away what it
-// draws into.)
+// (St draws a drawing area the moment it is told to – queue_repaint() – and,
+// as the face's layers have it, whenever it is laid out at another size: the
+// face draws its layers as it is laid out, once a frame however often it is
+// asked, and nothing it does while one is being drawn may lay it out, or St
+// would throw away what it draws into. Restyled – as GNOME's lock screen is,
+// all of it, whenever the key focus comes to it or goes – they are drawn
+// anew only if what the digits are drawn in is another.)
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -98,8 +100,30 @@ class AtelierGlassDigits extends St.DrawingArea {
     _init(face, params) {
         super._init(params);
         this._face = face;
+        this._laidOut = null;
         /** How many times it has been drawn. */
         this.repaints = 0;
+    }
+
+    // St draws a drawing area whenever it is laid out: this one only at
+    // another size (or in another detail) – laid out again as it is, it
+    // keeps what it has drawn.
+    vfunc_allocate(box) {
+        const content = this.get_theme_node().get_content_box(box);
+        const size = [content.get_width(), content.get_height(), this.get_resource_scale()];
+        if (this._laidOut?.every((value, i) => value === size[i])) {
+            this.set_allocation(box);
+            return;
+        }
+        this._laidOut = size;
+        super.vfunc_allocate(box);
+    }
+
+    // St draws a drawing area anew as it is restyled: this one only if the
+    // face finds what the digits are drawn in another (it has them drawn
+    // then, once).
+    vfunc_style_changed() {
+        this._face.restyled(this);
     }
 
     vfunc_repaint() {
@@ -168,11 +192,8 @@ const GlassFace = GObject.registerClass({
         this._plan = kept.plan ?? null;
         /** Called when the digits are measured anew (the depth effect follows them). */
         this.onMeasured = null;
-        // (Another colour, or another font for Pango to find.)
-        this._digits.connect('style-changed', () => {
-            this._syncFont();
-            this._repaint();
-        });
+        // (What of their style the digits were last drawn in: restyled().)
+        this._style = null;
         // (Out of sight, a change of the figures ends where it was going.)
         this.connect('notify::mapped', () => !this.mapped && this._settle());
         this.connect('destroy', () => {
@@ -402,6 +423,32 @@ const GlassFace = GObject.registerClass({
     /** @returns {object|null} {leaving, coming}: the figures changing now (their places); null at rest */
     get changing() {
         return this._turning ? {leaving: [...this._turning.leaving], coming: [...this._turning.coming]} : null;
+    }
+
+    /**
+     * A layer of the digits restyled: they are drawn anew – once, as the
+     * face is laid out next – only if what they are drawn in is another:
+     * the colour of their type (but for a tone planned), the font Pango
+     * draws them in, or the shell's family. Not when only what is round
+     * them was restyled, as GNOME's lock screen is whenever the key focus
+     * comes to it or goes (as the prompt comes up and goes): a large
+     * clock's glass takes a while to draw. (The layer of the figures that
+     * change is drawn from the digits' style.)
+     *
+     * @param {St.DrawingArea} layer
+     */
+    restyled(layer) {
+        if (layer !== this._digits)
+            return;
+        const node = layer.get_theme_node();
+        const {red, green, blue, alpha} = node.get_foreground_color();
+        const style = JSON.stringify([[red, green, blue, alpha], node.get_font().to_string(), shellFamily()]);
+        if (style === this._style)
+            return;
+        this._style = style;
+        // (Another colour, or another font for Pango to find.)
+        this._syncFont();
+        this._repaint();
     }
 
     // Draw the layers anew as the face is laid out next: once, however
