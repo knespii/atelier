@@ -4836,22 +4836,25 @@ async function testQuitWithControlCentreOpen(ext) {
         'and a notification waits behind it');
 }
 
-// The shell quits with the island's layout, the bar's place and the
-// dock's place, row and check still to come (in its Timers): none of it
-// may run once GNOME has taken its UI down (tools/shell-test.sh checks the
-// log).
+// The shell quits with the island's layout, the bar's place, the desktop's
+// area and the dock's place, row and check still to come (in its Timers):
+// none of it may run once GNOME has taken its UI down (tools/shell-test.sh
+// checks the log).
 function testQuitWithWorkQueued(ext) {
     const modules = ext.stateObj.modules;
     const island = modules.get('island');
     const bar = modules.get('bar');
+    const desktop = modules.get('desktop');
     const dock = modules.get('dock')?.dock;
     island?._queueLayout();
     bar?._queuePlace();
+    desktop?._queueArea();
     dock?._queueRedisplay();
     dock?.queuePlace();
     dock?.intellihide.queueCheck();
-    check(island?._laterId && bar?._laterId && ['redisplay', 'place', 'check'].every(name => dock?.timers.has(name)),
-        'layout, places and a check still to come as the shell quits');
+    check(island?._laterId && bar?._laterId && desktop?._laterId &&
+        ['redisplay', 'place', 'check'].every(name => dock?.timers.has(name)),
+        'layout, places, the desktop\'s area and a check still to come as the shell quits');
 }
 
 // A picture for the wallpaper: one colour, or the left half one and the

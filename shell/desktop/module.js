@@ -107,6 +107,7 @@ export class DesktopModule {
         this._editor = null;
         this._saving = false;
         this._laterId = 0;
+        this._stopped = false;
         /** extra kinds of widgets, by name: other modules (notes) add theirs */
         this.kinds = new Map(Object.entries(WIDGETS));
     }
@@ -195,6 +196,7 @@ export class DesktopModule {
         global.display.connectObject('workareas-changed', () => this._queueArea(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject(
             'notify::scale-factor', () => this._queueArea(), this);
+        Main.layoutManager.uiGroup.connectObject('destroy', () => this._stop(), this);
         this._modules.connectObject(
             'started', (_, id) => {
                 if (id === 'claude')
@@ -259,6 +261,7 @@ export class DesktopModule {
         this._laterId = 0;
         this._modules.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        Main.layoutManager.uiGroup.disconnectObject(this);
         Main.overview.disconnectObject(this);
         global.display.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
@@ -420,7 +423,7 @@ export class DesktopModule {
     }
 
     _queueArea() {
-        if (this._laterId)
+        if (this._laterId || this._stopped)
             return;
         this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
             this._laterId = 0;
@@ -544,6 +547,8 @@ export class DesktopModule {
     // (flowing there), and the desktop's new look fading in.
     _settleWhenCalm() {
         this._cancelCalm();
+        if (this._stopped)
+            return;
         const settle = flow => {
             if (this._loadPending) {
                 this._loadPending = false;
@@ -575,6 +580,19 @@ export class DesktopModule {
         if (this._calmId)
             GLib.source_remove(this._calmId);
         this._calmId = 0;
+    }
+
+    // When the shell quits, GNOME takes its UI down with uiGroup while JS
+    // still runs, then turns the main loop a while longer, and the work
+    // areas change as the top bar goes: nothing that waits may lay out or
+    // settle the widgets then (being edited, they went down with the
+    // editor).
+    _stop() {
+        this._stopped = true;
+        this._cancelCalm();
+        if (this._laterId)
+            global.compositor.get_laters().remove(this._laterId);
+        this._laterId = 0;
     }
 
     /** @param {boolean} [flow] - animated, for another layout (not while editing) */
