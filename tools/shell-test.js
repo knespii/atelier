@@ -4660,11 +4660,39 @@ async function testLockGlassClock() {
         `the hill higher, in front of ${Math.round(100 * intoHill(digitsNow()))} % of them: the effect off, ` +
         `the digits as tall (×${filling.toFixed(3)} → ×${glass.target.stretch.toFixed(3)}, ` +
         `${JSON.stringify(board.depth.legibility[0])})`);
+        // GNOME's prompt up and away again: the clock goes wholly and comes
+        // back, frame by frame on the cutout's curve of the room made, the
+        // cutout there or not.
+        const withThePrompt = async () => {
+            const off = [];
+            let frames = 0;
+            const sampler = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+            sampler.connect('new-frame', () => {
+                const room = lock().room;
+                frames++;
+                if (Math.abs(clock.get_paint_opacity() - Math.round(255 * cutoutOpacity(room))) > 1)
+                    off.push(room.toFixed(2));
+            });
+            sampler.start();
+            await clickAt(monitor.x + 300, monitor.y + 800);
+            const gone = await waitFor(() => lock().room === 1, 3000) && clock.get_paint_opacity() === 0;
+            await pressKey(Clutter.KEY_Escape);
+            const back = await waitFor(() => lock().room === 0, 3000) && clock.get_paint_opacity() === 255;
+            sampler.stop();
+            return {gone, back, off, frames};
+        };
+        let prompt = await withThePrompt();
+        check(prompt.gone && prompt.back && prompt.off.length === 0,
+            `the effect off, the clock still goes wholly with the prompt and comes back, as the cutout would (${
+                prompt.frames} frames, off the curve in ${prompt.off.length})`);
 
         // Without the depth effect: as tall all the same.
         lockSettings.set_boolean('depth-effect', false);
         check(await waitFor(() => !board.depth, 3000) && asTall(),
             `without it, as tall all the same (×${filling.toFixed(3)} → ×${glass.target.stretch.toFixed(3)})`);
+        prompt = await withThePrompt();
+        check(prompt.gone && prompt.back && prompt.off.length === 0,
+            `and it goes wholly with the prompt and comes back so (${prompt.frames} frames, off the curve in ${prompt.off.length})`);
     } finally {
         if (clock)
             delete clock._sync;
