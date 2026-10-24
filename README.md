@@ -114,10 +114,13 @@ profile called **Original**, so there is always a way back.
   a little richer, darker only towards the corners – the island comes out of the top edge with a padlock in a
   ring of ticks, and a popup of its own – the user's picture and name over
   the field, Enter sends it – spreads out of a drop in the middle of the
-  screen, while a clock of hours over minutes puts its minutes beside its
-  hours, as a digital clock, and goes up over the popup if it is still in
-  its way. A wave runs round the ring while GNOME checks the password (or a
-  face, with a PAM module such as Howdy), the ring shows faintly while a
+  screen. Meanwhile the clocks go, wholly (with the depth effect, together
+  with what stands in front of them, as one picture), and come back so as
+  the prompt goes; the other widgets dim. With the popup, a clock of hours
+  over minutes stays instead: it puts its minutes beside its hours, as a
+  digital clock, and goes up over the popup if it is still in its way. A
+  wave runs round the ring while GNOME checks the password (or a face,
+  with a PAM module such as Howdy), the ring shows faintly while a
   fingerprint reader waits, on a failure the ring cramps up in red as the
   padlock gives a jerky shake, and as the screen unlocks it springs open and
   hops for joy in a green ring that spreads out a little. What is typed goes
@@ -151,9 +154,10 @@ profile called **Original**, so there is always a way back.
   wallpaper – a hill, a town, a person, the frame of a window – stands in
   front of the lock screen's own clocks, as on an iPhone, but never in
   front of the date over a clock, and the sky, distant mountains or the
-  view out of a window stay behind them; it goes as the prompt comes up and
-  the wallpaper blurs, and stays off where what stands in front would hide
-  more than a quarter of any digit of a clock, or 40 % of a clock as a
+  view out of a window stay behind them; it goes with the clocks as the
+  prompt comes up and the wallpaper blurs, and stays off where what stands
+  in front would hide more than a quarter of any digit of a clock, or 40 %
+  of a clock as a
   whole (a glass clock's digits may stand behind it a quarter of their
   height at their feet besides – some 40 % of a digit in all – and 60 % of
   the clock). A

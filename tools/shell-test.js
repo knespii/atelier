@@ -3902,7 +3902,8 @@ async function testLockWidgets() {
             'the wallpaper sharp until the password is asked');
         await clickAt(...centerOf(clock));
         check(await waitFor(() => lock()?.state.phase === 'ready', 3000), 'a click on it brings up the prompt');
-        check(await waitFor(() => board.layer.opacity < 100, 2000), 'and the widgets make room for it');
+        check(await waitFor(() => clock.get_paint_opacity() === 0, 2000) && board.layer.opacity === 255,
+            'and the widgets make room for it: the clock goes, all of it');
         check(await waitFor(() => blurs().every(e => e.enabled && e.radius >= 80 && e.brightness > 0.8 && e.brightness < 0.9), 2000),
             `the wallpaper turns to glass: blurred as GNOME has it, darkened less (${blurs().map(e => e.radius)})`);
     } finally {
@@ -4025,8 +4026,8 @@ async function testLockPasswordField() {
             clockY >= lock().island.actor.y + lock().island.actor.height &&
             Math.abs((hours.x + minutes.x + minutes.w) / 2 - (monitor.x + monitor.width / 2)) <= 40,
         `in its way at first, it is over it then, under the island (${Math.round(clockY)}–${Math.round(hours.y + hours.h)} over ${Math.round(formY)})`);
-        check(clock.opacity === 255 && lock().board.layer.opacity === 255 && widget('date').opacity < 100,
-            'and stays bright, the other widgets dim');
+        check(clock.get_paint_opacity() === 255 && widget('date').get_paint_opacity() === 64,
+            `and stays bright, the other widgets dim (${widget('date').get_paint_opacity()})`);
         await restPointer();
         await screenshot('87-lock-room');
         // Escape, as in GNOME's prompt: back to the clock.
@@ -4180,11 +4181,13 @@ async function testLockDepth() {
             'locked: the cutout made of the wallpaper is there');
         const board = lock().board;
         const depth = board.depth;
-        const children = board.layer.get_children();
         const clock = board.widgets.find(w => w.entry.id === 'clock');
         const date = board.widgets.find(w => w.entry.id === 'date');
-        check(children.indexOf(clock) < children.indexOf(depth.actor) &&
-            children.indexOf(depth.actor) < children.indexOf(date), 'over the clock, under the date');
+        // (The clock and the cutout in a group of their own: one picture.)
+        const group = depth.actor.get_parent();
+        const [inGroup, children] = [group.get_children(), board.layer.get_children()];
+        check(clock.get_parent() === group && inGroup.indexOf(clock) < inGroup.indexOf(depth.actor) &&
+            children.indexOf(group) < children.indexOf(date), 'over the clock, under the date');
         check(JSON.stringify(depth.shown) === JSON.stringify({x: 0, y: -180, width: 1920, height: 1440}) &&
             depth.actor.x === 0 && depth.actor.y === -180 && depth.actor.width === 1920,
         `over the wallpaper as GNOME zooms it (${JSON.stringify(depth.shown)})`);
@@ -4204,13 +4207,16 @@ async function testLockDepth() {
         check(edges.every(([inside, outside]) => isGreen(inside) && !isGreen(outside)),
             `exactly over it: its edge within a few pixels of the wallpaper's (${JSON.stringify(edges)})`);
 
-        // The prompt: it goes as the wallpaper blurs, and comes back.
+        // The prompt: it goes with the clock as the wallpaper blurs, and
+        // comes back with it; the date dims.
         await clickAt(mx + 300, my + 900);
         check(await waitFor(() => lock()?.state.phase === 'ready' && lock().room === 1, 3000) &&
-            !depth.actor.visible && depth.actor.opacity === 0, 'the prompt up, the cutout gone (the wallpaper blurs)');
+            !depth.actor.mapped && depth.actor.get_paint_opacity() === 0 && clock.get_paint_opacity() === 0 &&
+            date.get_paint_opacity() === 64, 'the prompt up, the cutout gone with the clock (the wallpaper blurs), the date dim');
         await pressKey(Clutter.KEY_Escape);
-        check(await waitFor(() => lock().room === 0 && depth.actor.visible && depth.actor.opacity === 255, 3000),
-            'back to the clock, back again');
+        check(await waitFor(() => lock().room === 0 && depth.actor.mapped && depth.actor.get_paint_opacity() === 255 &&
+            clock.get_paint_opacity() === 255 && date.get_paint_opacity() === 255, 3000),
+        'back to the clock, both back again');
 
         // A clock right under the subject: the effect turns off.
         lockSettings.set_string('widgets', JSON.stringify([{

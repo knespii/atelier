@@ -111,7 +111,8 @@ export class LockModule {
             if (this._lockSettings.get_boolean('password-field'))
                 this._field = new PasswordField(this._island);
         }
-        this._board = new LockBoard(this._lockSettings, {palette: this._settings.get_child('palette')});
+        this._board = new LockBoard(this._lockSettings,
+            {palette: this._settings.get_child('palette'), ownPopup: Boolean(this._field)});
         if (!placeOverBackground(this._dialog, this._board.layer)) {
             this._board.destroy();
             this._board = null;

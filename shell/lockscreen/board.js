@@ -9,10 +9,12 @@
 // show – a click goes through to GNOME's lock screen, which brings up the
 // prompt; in the editor (a mock lock screen in the session, see
 // preview.js) they are moved and stretched as on the desktop. When the
-// password is asked, they make room for the prompt. With the depth effect,
-// the wallpaper's subject stands over the clocks (depth.js) – but not over
-// the date over a clock – under the other widgets, while it leaves each of
-// their digits legible.
+// password is asked, they make room for the prompt: the clocks go, the
+// other widgets dim. With the depth effect, the wallpaper's subject stands
+// over the clocks (depth.js) – but not over the date over a clock – under
+// the other widgets, while it leaves each of their digits legible; on the
+// lock screen, the clocks and the subject are one picture, which goes as
+// the prompt comes up and comes back as one.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -24,6 +26,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {minimumLc} from '../../lib/apca.js';
+import {cutoutOpacity} from '../../lib/depth.js';
 import {
     STRETCH, TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
 } from '../../lib/lockLook.js';
@@ -41,7 +44,7 @@ import {LockTypography} from './typography.js';
 import {LockBatteryWidget, LockWeatherWidget} from './widgets.js';
 
 const WIDGETS = {clock: LockClockWidget, date: DateWidget, weather: LockWeatherWidget, battery: LockBatteryWidget};
-const DIMMED = 0.25; // what is left of the widgets while the prompt is up
+const DIMMED = 0.25; // what is left of the widgets but the clocks while the prompt is up
 const SMALLEST = 0.35; // how small a clock gets to go up over the popup
 const SHIFT_TIME = 250; // moving on when the popup changes size
 const MOVED = ['translation_x', 'translation_y', 'scale_x', 'scale_y'];
@@ -74,10 +77,13 @@ export class LockBoard {
      * @param {object} [options]
      * @param {boolean} [options.interactive] - the widgets take clicks (in the editor)
      * @param {Gio.Settings} [options.palette] - Atelier's palette settings
+     * @param {boolean} [options.ownPopup] - the lock screen's own popup asks
+     *   for the password (a clock of hours over minutes stays, over it)
      */
-    constructor(settings, {interactive = false, palette = null} = {}) {
+    constructor(settings, {interactive = false, palette = null, ownPopup = false} = {}) {
         this._settings = settings;
         this._interactive = interactive;
+        this._ownPopup = ownPopup;
         /** The kinds there are here, with their sizes (the editor's catalog). */
         this.catalog = LOCK_KINDS;
         /** The clock's faces on offer here: the glass one too. */
@@ -90,7 +96,6 @@ export class LockBoard {
         this._look = null;
         this._depth = null;
         this._depthLater = 0;
-        this._progress = 0;
         this._toneNow = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
@@ -109,6 +114,23 @@ export class LockBoard {
         });
         // (Each label's size is known once it is styled, on the stage.)
         this.layer.connect('notify::mapped', () => this.layer.mapped && this._tone());
+        // On the lock screen, the clocks and the subject in front of them
+        // (the depth effect's cutout) in a group of their own, the other
+        // widgets over it: as the prompt comes up, the group goes as one
+        // picture – drawn offscreen while it fades, so that no clock shows
+        // through what stands in front of it (makeRoom()). (A clock of hours
+        // over minutes that stays, over the popup, is under it.)
+        this._clockGroup = null;
+        if (!interactive) {
+            this._clockGroup = new St.Widget({
+                reactive: false,
+                offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
+            });
+            this._clockGroup.add_constraint(new Clutter.BindConstraint({
+                source: this.layer, coordinate: Clutter.BindCoordinate.SIZE,
+            }));
+            this.layer.add_child(this._clockGroup);
+        }
         // What the widgets read: nothing here opens an app or the network.
         this._context = {
             catalog: LOCK_KINDS,
@@ -189,8 +211,7 @@ export class LockBoard {
         if (wanted) {
             this._depth = new DepthCutout();
             this._depth.onChanged = () => this._queueDepth();
-            this.layer.add_child(this._depth.actor);
-            this._depth.follow(this._progress);
+            (this._clockGroup ?? this.layer).add_child(this._depth.actor);
             this._syncDepthDim();
             if (this._area)
                 this._depth.setMonitor([this._area.width, this._area.height]);
@@ -240,12 +261,17 @@ export class LockBoard {
         const clocks = [];
         const inFront = [];
         for (const widget of this.widgets) {
+            const parent = widget.get_parent();
             // (One being dragged in the editor is over everything until it lands.)
-            if (widget.get_parent() !== this.layer || widget.has_style_pseudo_class('dragged'))
+            if (!parent || (parent !== this.layer && parent !== this._clockGroup) ||
+                widget.has_style_pseudo_class('dragged'))
                 continue;
+            // (Under or over the cutout beside it; on the lock screen, what
+            // is out of the group of the clocks, under or over that group.)
+            const subject = depth.actor.get_parent() === parent ? depth.actor : this._clockGroup;
             // (In the editor, one pointed at is in front, to be moved.)
             if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
-                this.layer.set_child_below_sibling(widget, depth.actor);
+                parent.set_child_below_sibling(widget, subject);
                 // (A glass clock's digits as they read where they are now.)
                 this._planGlass(widget);
                 clocks.push(this._legible(widget, widget.get_allocation_box()));
@@ -255,7 +281,7 @@ export class LockBoard {
                 if (line)
                     inFront.push({actor: line, pad: IN_FRONT_PAD * scaleFactor() + this._reachOf(line)});
             } else {
-                this.layer.set_child_above_sibling(widget, depth.actor);
+                parent.set_child_above_sibling(widget, subject);
             }
         }
         depth.cover(clocks);
@@ -375,7 +401,7 @@ export class LockBoard {
         // (On the lock screen a click goes through to GNOME's.)
         widget.reactive = this._interactive;
         widget.connectObject('filled', () => this._tone(), this);
-        this.layer.add_child(widget);
+        this._house(widget);
         widget.connect('notify::allocation', () => this._queueDepth());
         if (this._interactive)
             widget.connect('notify::hover', () => this._queueDepth());
@@ -385,12 +411,28 @@ export class LockBoard {
         return widget;
     }
 
+    // A widget on the layer: on the lock screen, a clock in the group of
+    // the clocks, under the subject – but a clock of hours over minutes
+    // that stays over the popup, under the group –, anything else over it.
+    _house(widget) {
+        const group = this._clockGroup;
+        if (!group || widget.entry.kind !== 'clock')
+            this.layer.add_child(widget);
+        else if (this._ownPopup && widget.stacked)
+            this.layer.insert_child_below(widget, group);
+        else
+            group.insert_child_below(widget, this._depth?.actor ?? null);
+    }
+
     /**
-     * Make room for the prompt in the middle, as it comes up: the widgets
-     * dim. Over them, with the lock screen's own popup, a clock of hours
-     * over minutes stays bright, its minutes go beside its hours as on a
-     * digital clock, and it goes up over the popup if it is still in its
-     * way (smaller, if it has to be, to fit under the island).
+     * Make room for the prompt in the middle, as it comes up: the clocks go
+     * – with the subject in front of them, as one picture, gone once the
+     * prompt is a third of the way up and the wallpaper blurs (lib/depth.js
+     * cutoutOpacity()), back as one as it goes – and the other widgets dim.
+     * With the lock screen's own popup, a clock of hours over minutes stays
+     * instead, its minutes go beside its hours as on a digital clock, and it
+     * goes up over the popup if it is still in its way (smaller, if it has
+     * to be, to fit under the island).
      *
      * @param {number} progress - from the clock (0) to the prompt (1)
      * @param {number[]|null} popup - [x, y, width, height] in the layer;
@@ -401,14 +443,23 @@ export class LockBoard {
      *   following the progress)
      */
     makeRoom(progress, popup, top, gap, animate = false) {
-        this._progress = progress;
-        this._depth?.follow(progress);
+        const shown = Math.round(255 * cutoutOpacity(progress));
+        const group = this._clockGroup;
+        if (group) {
+            group.opacity = shown;
+            // (Nothing of it drawn while the prompt is up.)
+            group.visible = shown > 0;
+        }
         const dim = Math.round(255 * (1 - (1 - DIMMED) * progress));
-        this.layer.opacity = popup ? 255 : dim;
         for (const widget of this.widgets) {
             widget.setInline?.(popup ? progress : 0);
             const room = popup ? this._roomFor(widget, popup, top, gap) : null;
-            widget.opacity = !popup || room ? 255 : dim;
+            // (A clock out of the group – one that stays over the popup,
+            // when GNOME's prompt asks after all – goes on its own.)
+            if (room || widget.get_parent() === group)
+                widget.opacity = 255;
+            else
+                widget.opacity = widget.entry.kind === 'clock' ? shown : dim;
             this._shift(widget, room, progress, animate);
         }
     }
