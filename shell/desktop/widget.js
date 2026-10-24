@@ -46,6 +46,12 @@ class AtelierWidgetCardLayout extends Clutter.LayoutManager {
 });
 
 export const DesktopWidget = GObject.registerClass({
+    Properties: {
+        // Its corner dragged in the editor (and easing to the size it takes
+        // once let go of): what it shows is cut off at its edges, and what
+        // is drawn of it may be drawn quickly meanwhile.
+        'stretching': GObject.ParamSpec.boolean('stretching', null, null, GObject.ParamFlags.READWRITE, false),
+    },
     Signals: {
         'menu-request': {},
         // (Filled anew: for a size, say.)
@@ -112,11 +118,20 @@ export const DesktopWidget = GObject.registerClass({
         this.set_size(width * scale, height * scale);
     }
 
+    /** @returns {boolean} whether it is being stretched */
+    get stretching() {
+        return this._stretching ?? false;
+    }
+
     /** @param {boolean} stretching - what it shows is cut off at its edges */
     set stretching(stretching) {
+        stretching = Boolean(stretching);
+        if (stretching === this.stretching)
+            return;
         this._stretching = stretching;
         if (this._content)
             this._content.clip_to_allocation = stretching;
+        this.notify('stretching');
     }
 
     /**

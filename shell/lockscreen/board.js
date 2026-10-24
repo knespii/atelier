@@ -118,8 +118,11 @@ export class LockBoard {
             openSettings: () => {},
             locked: !interactive,
             // (A glass clock measured anew: how much of it the subject
-            // covers looked at again, and what its digits take to read there.)
-            depthChanged: () => {
+            // covers looked at again, and what its digits take to read there
+            // – once it rests, if it is being stretched.)
+            depthChanged: widget => {
+                if (widget?.stretching)
+                    return;
                 this._queueDepth();
                 this._queueGlass();
             },
@@ -243,8 +246,9 @@ export class LockBoard {
             // (One being dragged in the editor is over everything until it lands.)
             if (widget.get_parent() !== this.layer || widget.has_style_pseudo_class('dragged'))
                 continue;
-            // (In the editor, one pointed at is in front, to be moved.)
-            if (widget.entry.kind === 'clock' && !(this._interactive && widget.hover)) {
+            // (In the editor, one pointed at is in front, to be moved; and
+            // one easing to the size it was stretched to, till it rests.)
+            if (widget.entry.kind === 'clock' && !(this._interactive && (widget.hover || widget.stretching))) {
                 this.layer.set_child_below_sibling(widget, depth.actor);
                 // (A glass clock's digits as they read where they are now.)
                 this._planGlass(widget);
@@ -376,7 +380,15 @@ export class LockBoard {
         widget.reactive = this._interactive;
         widget.connectObject('filled', () => this._tone(), this);
         this.layer.add_child(widget);
-        widget.connect('notify::allocation', () => this._queueDepth());
+        // (Stretched in the editor, it shows its size as it goes, no more:
+        // how it reads there, and how much the subject covers of it, are
+        // looked at once it rests.)
+        widget.connect('notify::allocation', () => !widget.stretching && this._queueDepth());
+        widget.connect('notify::stretching', () => {
+            this._queueDepth();
+            if (!widget.stretching)
+                this._queueGlass();
+        });
         if (this._interactive)
             widget.connect('notify::hover', () => this._queueDepth());
         this._widgets.set(entry.id, widget);
@@ -623,7 +635,8 @@ export class LockBoard {
     // (shell/lockscreen/clock.js), nothing when it is told what it has.
     _planGlass(widget) {
         const glass = widget.glass;
-        if (!glass || this._gone)
+        // (Being stretched: once it rests.)
+        if (!glass || this._gone || widget.stretching)
             return;
         const backdrop = this._backdrop.current;
         if (glass.backdrop !== backdrop)
