@@ -193,7 +193,8 @@ export function testBackdropKey() {
 
 export function testFrostOf() {
     assertEqual(frostOf(LOOK.regular), {sigma: FROST.sigma, saturation: LOOK.regular.saturation,
-        lift: LOOK.regular.brightness - 1}, 'richer and brighter as the look has it');
+        lift: LOOK.regular.brightness - 1 + FROST.glow}, 'richer and brighter as the look has it, and glowing');
+    near(frostOf(LOOK.regular).lift, 0.7, 0.05, 'as bright as the clock was before the look was shared');
     assert(frostOf(LOOK.clear).saturation < frostOf(LOOK.regular).saturation &&
         frostOf(LOOK.clear).lift < frostOf(LOOK.regular).lift, 'clear glass: less so');
     assertEqual(frostOf(null), {sigma: FROST.sigma, saturation: 1, lift: 0}, 'no look: only blurred');
@@ -482,7 +483,8 @@ const lightOf = rgba => (rgba[0] + rgba[1] + rgba[2]) / 3;
 // A picture of one grey.
 function greyPicture(dir) {
     const path = GLib.build_filenamev([dir, 'grey.png']);
-    GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(new Uint8Array(64 * 36 * 3).fill(110)), GdkPixbuf.Colorspace.RGB,
+    // (Dark enough that the frost's glow leaves room for the light added.)
+    GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(new Uint8Array(64 * 36 * 3).fill(70)), GdkPixbuf.Colorspace.RGB,
         false, 8, 64, 36, 64 * 3).savev(path, 'png', [], []);
     return path;
 }
