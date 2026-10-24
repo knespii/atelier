@@ -24,7 +24,7 @@ import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js'
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
 import {contrastLc, minimumLc} from '../lib/apca.js';
-import {luminance} from '../lib/palette.js';
+import {hexToOklch, luminance} from '../lib/palette.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
@@ -1511,6 +1511,222 @@ async function testBarStyles(ext) {
         right.translation_x === 0 && Main.panel.has_style_class_name('atelier-bar-clean'),
     'back to the spread bar on the wallpaper');
     powerToggle.visible = batteryShown;
+}
+
+// The first actor in a tree with a style class.
+function actorWith(root, name) {
+    for (const child of root?.get_children?.() ?? []) {
+        if (hasClass(child, name))
+            return child;
+        const found = actorWith(child, name);
+        if (found)
+            return found;
+    }
+    return null;
+}
+
+// Vibrancy: type and icons on glass read on what is behind the glass –
+// over a light wallpaper dark, over a dark one as they are set; each side
+// of the bar, the island, the dock and each widget on what is behind it;
+// the palette's colours in their hue; an open page over windows as set;
+// all of it as set again with the glass off. (The glass drawn here is
+// still the old one, darker; its tint is cleared, as Liquid Glass has
+// none, so that what is predicted is near what is drawn.)
+async function testVibrancy(ext) {
+    const modules = ext.stateObj.modules;
+    const vibrancy = modules.get('vibrancy');
+    const desktop = modules.get('desktop');
+    const islandModule = modules.get('island');
+    const dock = () => modules.get('dock')?.dock ?? null;
+    if (!check(vibrancy && desktop && islandModule && dock(), 'vibrancy, the island, the desktop and the dock running'))
+        return;
+    const island = islandModule.island;
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const desktopSettings = settings.get_child('desktop');
+    const dockSettings = settings.get_child('dock');
+    const paletteSettings = settings.get_child('palette');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
+    const showWallpaper = path => ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(path)));
+    const LIGHT = '#efe6d2';
+    const DARK = '#141a24';
+    const light = makePicture('vibrancy-light', LIGHT);
+    const dark = makePicture('vibrancy-dark', DARK);
+    const halves = makePicture('vibrancy-halves', LIGHT, DARK);
+    const clearGlass = Gio.File.new_for_path(`${OUTPUT}/vibrancy-clear-glass.css`);
+    GLib.file_set_contents(clearGlass.get_path(), '.atelier-glass StWidget.atelier-glass-tint { background-color: transparent; }\n');
+    const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
+
+    const ink = actor => (actor?.get_stage() ? hexOf(actor.get_theme_node().get_foreground_color()) : null);
+    const fill = actor => hexOf(actor.get_theme_node().get_background_color());
+    const isDark = color => color !== null && luminance(color) < 0.05;
+    // What shows it: the island's time, a button on each side of the bar
+    // (the workspaces' on the left, the system menu on the right), the
+    // dock's Show Applications icon, a widget at the left and one at the
+    // right (their type, the date's weekday in the palette's colour).
+    const time = () => islandModule._idle._time;
+    const leftButton = () => Main.panel.statusArea.activities;
+    const rightButton = () => Main.panel.statusArea.quickSettings;
+    const showApps = () => actorWith(dock()?.container, 'show-apps-icon');
+    const widget = id => desktop.widgets.get(id);
+    const weekday = () => widget('date')?._weekday;
+    const polarity = id => vibrancy.surfaceOf(id)?.polarity ?? null;
+    const legible = (actor, id) => {
+        const backdrop = vibrancy.surfaceOf(id)?.backdrop;
+        return backdrop ? Math.abs(contrastLc(ink(actor), isDark(ink(actor)) ? backdrop.dark : backdrop.light)) : 0;
+    };
+    const shown = () => ({
+        time: ink(time()), left: ink(leftButton()), right: ink(rightButton()), dock: ink(showApps()),
+        clock: ink(widget('clock')), date: ink(widget('date')), weekday: ink(weekday()),
+    });
+    const settle = async predicate => {
+        const ok = await waitFor(predicate, 8000);
+        await Scripting.sleep(500);
+        return ok;
+    };
+
+    try {
+        // Glass everywhere: the sides of the bar in capsules at the edges,
+        // the island, the dock, the widgets' cards (as see-through as the
+        // glass alone), a clock at the left and the date at the right; a
+        // palette of the sea.
+        theme.load_stylesheet(clearGlass);
+        dockSettings.set_boolean('show-show-apps-button', true);
+        bar.set_string('sides', 'capsules');
+        bar.set_string('surface', 'glass');
+        desktopSettings.set_string('style', 'modern');
+        desktopSettings.set_boolean('glass', true);
+        desktopSettings.set_double('card-opacity', 0.4);
+        desktopSettings.set_string('widgets', JSON.stringify([
+            {id: 'clock', kind: 'clock', size: 'square', x: 2, y: 4, fine: true},
+            {id: 'date', kind: 'date', size: 'square', x: 30, y: 4, fine: true},
+        ]));
+        paletteSettings.set_string('source', 'preset');
+        paletteSettings.set_string('preset', 'sea');
+        await restPointer();
+        showWallpaper(dark);
+        await wallpapersSettled();
+        check(await settle(() => widget('date')?.mapped && !desktop._flowing && showApps() &&
+            ['island', 'bar-left', 'bar-right', 'dock-0', 'widget-clock', 'widget-date'].every(id => polarity(id) === 'light')),
+        `on a dark wallpaper, light type everywhere (${['island', 'bar-left', 'bar-right', 'dock-0', 'widget-clock', 'widget-date'].map(polarity)})`);
+        const asSet = shown();
+        check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => asSet[part] === '#ffffff'),
+            `all of it as it is set, white (${JSON.stringify(asSet)})`);
+        check(vibrancy.stylesheet === null, `no colours of its own (${vibrancy.stylesheet})`);
+        await screenshot('96a-vibrancy-dark');
+
+        // A light wallpaper: dark type, as emphatic as it is set – readable
+        // on the glass as it is predicted.
+        showWallpaper(light);
+        await wallpapersSettled();
+        check(await settle(() => isDark(ink(time())) && isDark(ink(widget('clock')))),
+            `on a light wallpaper, dark type (${JSON.stringify(shown())})`);
+        const onLight = shown();
+        check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => isDark(onLight[part])),
+            `the bar's sides, the island, the dock and the widgets (${JSON.stringify(onLight)})`);
+        check(legible(time(), 'island') >= 60 && legible(leftButton(), 'bar-left') >= 60 &&
+            legible(widget('clock'), 'widget-clock') >= 60,
+        `legible on their glass (Lc ${[legible(time(), 'island'), legible(leftButton(), 'bar-left'),
+            legible(widget('clock'), 'widget-clock')].map(lc => lc.toFixed(0))})`);
+        const dots = actorWith(leftButton(), 'workspace-dot');
+        check(!dots || isDark(fill(dots)), `the workspaces' dots too (${dots && fill(dots)})`);
+        const primary = JSON.parse(paletteSettings.get_string('current')).dark.primary;
+        const [, chroma, hue] = hexToOklch(onLight.weekday);
+        const hueDistance = Math.abs(((hue - hexToOklch(primary)[2] + 540) % 360) - 180);
+        check(hueDistance < 6 && chroma > 0.03 && hexToOklch(onLight.weekday)[0] < hexToOklch(primary)[0],
+            `the date's weekday the palette's ${primary}, deeper (${onLight.weekday}, ${hueDistance.toFixed(1)}° off)`);
+        const date = actorWith(island, 'atelier-island-date');
+        check(!date?.visible || Math.abs(contrastLc(ink(date), vibrancy.surfaceOf('island').backdrop.dark)) <
+            Math.abs(contrastLc(ink(time()), vibrancy.surfaceOf('island').backdrop.dark)),
+        'the island\'s date quieter than its time');
+        await screenshot('96b-vibrancy-light');
+
+        // Open over the wallpaper, the glance is dark too; over a window
+        // (live glass, what it shows not known), as set.
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        const glanceTime = () => actorWith(island.page, 'atelier-glance-time');
+        check(glanceTime() && isDark(ink(glanceTime())), `the glance over the wallpaper, dark (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('96c-vibrancy-glance-light', 420);
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+        await Scripting.sleep(400);
+        const window = await openTestWindow('vibrancy-under-island');
+        const [restX, restY, restWidth] = island.restRect();
+        await moveTestWindow(window, [restX + restWidth / 2 - 400, restY + 40, 800, 500]);
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        check(polarity('island-windows') === 'light' && glanceTime() && ink(glanceTime()) === '#ffffff',
+            `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('96d-vibrancy-glance-window', 420);
+        // In the light style, its windows are taken to be light.
+        const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        desktopInterface.set_string('color-scheme', 'prefer-light');
+        check(await settle(() => polarity('island-windows') === 'dark' && isDark(ink(glanceTime()))),
+            `over a window, in the light style, dark (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('96d2-vibrancy-glance-window-light-style', 420);
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        await wallpapersSettled();
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+
+        // A dock more opaque near windows: dark type on its clear glass
+        // away from them, light on its dark wash near one – in a class of
+        // its own, no stylesheet made anew as windows come and go.
+        dockSettings.set_string('transparency-mode', 'DYNAMIC');
+        const container = () => dock().container;
+        const scope = 'atelier-vibrant-dock-0';
+        check(await settle(() => vibrancy.surfaceOf('dock-0-near')?.polarity === 'light' &&
+            vibrancy.surfaceOf('dock-0')?.polarity === 'dark' && hasClass(container(), scope)),
+        `a dock dark near windows: its type light there, dark away (${['dock-0', 'dock-0-near'].map(polarity)})`);
+        const sheet = vibrancy.stylesheet;
+        check(isDark(ink(showApps())), `away from windows, dark (${ink(showApps())})`);
+        // (Just above it: near, not over it – the dock would go out of its way.)
+        const rect = dock().staticRect;
+        await moveTestWindow(window, [rect.x, rect.y - 324, rect.width, 320]);
+        check(await settle(() => hasClass(container(), `${scope}-near`) && !hasClass(container(), scope)) &&
+            ink(showApps()) === '#ffffff' && vibrancy.stylesheet === sheet,
+        `a window near: light, the same stylesheet (${ink(showApps())}, ${vibrancy.stylesheet === sheet})`);
+        const shotY = rect.y - 120;
+        await screenshotArea('96f-vibrancy-dock-near-window', rect.x - 40, shotY, rect.width + 80, global.stage.height - shotY);
+        await closeTestWindows();
+        check(await settle(() => hasClass(container(), scope) && isDark(ink(showApps()))), 'gone: dark again');
+        dockSettings.reset('transparency-mode');
+        await Scripting.sleep(400);
+
+        // Light at the left, dark at the right: each side, each widget, on
+        // what is behind it.
+        showWallpaper(halves);
+        await wallpapersSettled();
+        check(await settle(() => polarity('bar-left') === 'dark' && polarity('bar-right') === 'light' &&
+            polarity('widget-clock') === 'dark' && polarity('widget-date') === 'light'),
+        `half light, half dark: ${['bar-left', 'bar-right', 'widget-clock', 'widget-date'].map(polarity)}`);
+        const split = shown();
+        check(isDark(split.left) && split.right === '#ffffff' && isDark(split.clock) && split.date === '#ffffff',
+            `the left side and the clock dark, the right side and the date as set (${JSON.stringify(split)})`);
+        await screenshot('96e-vibrancy-halves');
+
+        // Solid surfaces: as set.
+        settings.set_string('glass-variant', 'off');
+        check(await settle(() => vibrancy.stylesheet === null && ink(time()) === '#ffffff'),
+            `glass off: type as set (${JSON.stringify(shown())})`);
+        settings.reset('glass-variant');
+        check(await settle(() => isDark(ink(widget('clock')))), 'and back');
+    } finally {
+        theme.unload_stylesheet(clearGlass);
+        await closeTestWindows();
+        ['show-show-apps-button', 'transparency-mode'].forEach(key => dockSettings.reset(key));
+        ['sides', 'surface'].forEach(key => bar.reset(key));
+        ['style', 'glass', 'card-opacity', 'widgets'].forEach(key => desktopSettings.reset(key));
+        ['source', 'preset'].forEach(key => paletteSettings.reset(key));
+        settings.reset('glass-variant');
+        uris.forEach(([key, uri]) => background.set_string(key, uri));
+        await wallpapersSettled();
+        await Scripting.sleep(800);
+    }
 }
 
 // A made-up GitHub page: a year with something every few days.
@@ -6043,6 +6259,12 @@ async function testDisableCleansUp(atelier) {
     check(Main.panel.statusArea['atelier-claude'] === undefined, 'no modules left in the bar');
     check(qsMenu._grid.get_parent() === qsMenu.box && !Main.panel.has_style_class_name('atelier-bar-clean') &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea', 'quick settings, the bar and the calendar restored');
+    const sheets = St.ThemeContext.get_for_stage(global.stage).get_theme().get_custom_stylesheets()
+        .map(file => file.get_basename());
+    const boxes = [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox];
+    check(!sheets.some(name => name.startsWith('vibrancy-')) &&
+        !boxes.some(box => (box.get_style_class_name() ?? '').includes('atelier-vibrant')),
+    `no colours of the type on glass left (${sheets})`);
     const trayProto = Object.getPrototypeOf(Main.messageTray);
     check(['_showNotification', '_hideNotification', '_updateShowingNotification']
         .every(name => Main.messageTray[name] === trayProto[name]), 'message tray restored');
@@ -6636,6 +6858,7 @@ export async function run() {
         await part(testTrayApp, ext);
         await part(testOverviewBar);
         await part(testBarStyles, ext);
+        await part(testVibrancy, ext);
         await part(testFullscreen, ext);
         await part(testClaude, ext);
         await part(testDesktop, ext);
