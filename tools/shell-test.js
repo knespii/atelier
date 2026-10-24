@@ -1675,6 +1675,7 @@ async function testLiquidGlass(ext) {
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
     const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = iface.get_string('color-scheme');
     const a11y = new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'});
     const monitor = Main.layoutManager.primaryMonitor;
     const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -1908,6 +1909,8 @@ async function testLiquidGlass(ext) {
         // Its tint: smoky in GNOME's dark style, deep under the control
         // centre's GNOME controls (styled for a dark surface only), light
         // in the light style – the wallpaper not dimmed by its blur then.
+        iface.set_string('color-scheme', 'prefer-dark');
+        await Scripting.sleep(300);
         const islandGlass = islandModule._glass;
         const blurOf = surface => surface._bgManager?.backgroundActor?.get_effect('atelier-glass-blur')?.brightness;
         check(hasClass(islandGlass, 'atelier-glass-smoky') && blurOf(islandGlass) < 1,
@@ -1920,7 +1923,6 @@ async function testLiquidGlass(ext) {
         await waitFor(() => island.page === null, 2000);
         check(hasClass(islandGlass, 'atelier-glass-smoky') && !hasClass(islandGlass, 'atelier-glass-deep'),
             'closed, smoky again');
-        const scheme = iface.get_string('color-scheme');
         iface.set_string('color-scheme', 'prefer-light');
         await Scripting.sleep(300);
         check(hasClass(islandModule._glass, 'atelier-glass-light') && blurOf(islandModule._glass) === 1,
@@ -1988,6 +1990,7 @@ async function testLiquidGlass(ext) {
         glass?.destroy();
         changes.forEach((_, surface) => delete surface.setLights);
         iface.reset('enable-animations');
+        iface.set_string('color-scheme', scheme);
         a11y.reset('high-contrast');
         settings.reset('glass-variant');
         ['style', 'surface'].forEach(key => bar.reset(key));
