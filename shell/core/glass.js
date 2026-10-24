@@ -1,7 +1,8 @@
-// Atelier's glass: the wallpaper under a surface, blurred and tinted, like
-// GNOME's lock screen – a static blur, which costs nothing while it stays.
-// For a while, it may be live glass instead: of what is under it now, the
-// windows too, blurred again whenever that changes.
+// Atelier's glass: the wallpaper under a surface, blurred, like GNOME's lock
+// screen – a static blur, which costs nothing while it stays – and drawn as
+// Liquid Glass (shell/core/glassMaterial.js): bending at its edges, which
+// catch the light. For a while, it may be live glass instead: of what is
+// under it now, the windows too, blurred again whenever that changes.
 // A surface is the blurred wallpaper of the top of its monitor (or of
 // another edge, for a dock), masked to a rounded rectangle that can move and
 // change size every frame (the island growing) without blurring anything
@@ -11,11 +12,18 @@
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
+import Mtk from 'gi://Mtk';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {REST_LIGHT, bodyRect, boundsOf, sameLight} from '../../lib/glassLook.js';
+import {glassLight} from './glassLight.js';
+import {
+    MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+} from './glassMaterial.js';
 
 const BLUR_RADIUS = 36; // logical pixels
 const BLUR_BRIGHTNESS = 0.75;
@@ -32,16 +40,25 @@ const LIVE_STEP = 64;
 // neck a thin upright capsule (from the island to the drop, as it hangs),
 // joined with a smooth minimum: within blend pixels of each other, they flow
 // together like liquid.
-const MASK_DECLARATIONS = `
+// The glass's body is the same, but past the screen's edges the rectangle
+// lies on (body), and one with another surface's shape this one lies in
+// (partner: the one island the island's glass is in) – they are one glass.
+const SHAPE_DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
 uniform vec4 rect;
+uniform vec4 body;
 uniform vec2 radii;
 uniform float ear;
 uniform vec4 drop;
 uniform float dropRadius;
 uniform vec4 neck;
 uniform float blend;
+uniform vec4 partner;
+uniform vec4 partnerBody;
+uniform vec3 partnerLook;
+uniform vec2 glassLight;
+uniform vec4 glassFrame;
 
 float atelier_smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -53,37 +70,65 @@ float atelier_box(vec2 p, vec2 center, vec2 halfSize) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
 }
 
-float atelier_ear(vec2 p, float side, float inner) {
-    vec2 center = vec2(side + (inner - side) * 0.5, rect.y + ear * 0.5 - 0.5);
-    float square = atelier_box(p, center, vec2(ear * 0.5 + 0.5));
-    return max(square, ear - length(p - vec2(side, rect.y + ear)));
+float atelier_rounded(vec2 p, vec4 r, vec2 corners) {
+    vec2 halfSize = r.zw * 0.5;
+    vec2 center = r.xy + halfSize;
+    float radius = p.y < center.y ? corners.x : corners.y;
+    vec2 q = abs(p - center) - halfSize + vec2(radius);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
-`;
 
-const MASK_CODE = `
-vec2 p = origin + cogl_tex_coord_in[0].xy * size;
-vec2 halfSize = rect.zw * 0.5;
-vec2 center = rect.xy + halfSize;
-float radius = p.y < center.y ? radii.x : radii.y;
-vec2 q = abs(p - center) - halfSize + vec2(radius);
-float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-if (ear > 0.0) {
-    float left = atelier_ear(p, rect.x - ear, rect.x + 1.0);
-    float right = atelier_ear(p, rect.x + rect.z + ear, rect.x + rect.z - 1.0);
-    d = min(d, min(left, right));
+float atelier_ear(vec2 p, float top, float e, float side, float inner, float above) {
+    vec2 center = vec2((side + inner) * 0.5, top + (e - above) * 0.5);
+    float square = atelier_box(p, center, vec2(abs(inner - side) * 0.5, (e + above) * 0.5));
+    return max(square, e - length(p - vec2(side, top + e)));
 }
-float k = max(blend, 0.001);
-if (neck.w > 0.0) {
-    vec2 pa = p - neck.xy;
-    vec2 ba = vec2(0.0, neck.z - neck.y);
-    float s = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
-    d = atelier_smin(d, length(pa - ba * s) - neck.w, k);
+
+float atelier_notch(vec2 p, vec4 r, vec4 b, vec2 corners, float e) {
+    float d = atelier_rounded(p, b, corners);
+    if (e > 0.0) {
+        // (The body's ears reach well into it, so that where they meet it
+        // is no edge.)
+        float above = r.y - b.y + 1.0;
+        float into = b.y < r.y ? 2.0 * e : 1.0;
+        float left = atelier_ear(p, r.y, e, r.x - e, r.x + into, above);
+        float right = atelier_ear(p, r.y, e, r.x + r.z + e, r.x + r.z - into, above);
+        d = min(d, min(left, right));
+    }
+    return d;
 }
-if (drop.z > 0.0 && drop.w > 0.0) {
-    vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
-    d = atelier_smin(d, length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius, k);
+
+float atelier_drip(vec2 p, float d) {
+    float k = max(blend, 0.001);
+    if (neck.w > 0.0) {
+        vec2 pa = p - neck.xy;
+        vec2 ba = vec2(0.0, neck.z - neck.y);
+        float s = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
+        d = atelier_smin(d, length(pa - ba * s) - neck.w, k);
+    }
+    if (drop.z > 0.0 && drop.w > 0.0) {
+        vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
+        d = atelier_smin(d, length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius, k);
+    }
+    return d;
 }
-cogl_color_out *= clamp(0.5 - d, 0.0, 1.0);
+
+float atelier_shape(vec2 p) {
+    return atelier_drip(p, atelier_notch(p, rect, rect, radii, ear));
+}
+
+float atelier_body(vec2 p) {
+    float d = atelier_drip(p, atelier_notch(p, rect, body, radii, ear));
+    if (partner.z > 0.0 && partner.w > 0.0)
+        d = min(d, atelier_notch(p, partner, partnerBody, partnerLook.xy, partnerLook.z));
+    return d;
+}
+
+void atelier_part(vec2 p, out vec4 frame, out vec2 light) {
+    frame = glassFrame;
+    light = glassLight;
+}
+${MATERIAL_DECLARATIONS}
 `;
 
 /**
@@ -120,28 +165,27 @@ const RoundedMaskEffect = GObject.registerClass(
 class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
-        this._origin = this.get_uniform_location('origin');
-        this._size = this.get_uniform_location('size');
-        this._rect = this.get_uniform_location('rect');
-        this._radii = this.get_uniform_location('radii');
-        this._ear = this.get_uniform_location('ear');
-        this._drop = this.get_uniform_location('drop');
-        this._dropRadius = this.get_uniform_location('dropRadius');
-        this._neck = this.get_uniform_location('neck');
-        this._blend = this.get_uniform_location('blend');
+        const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
+            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassFrame'];
+        this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
+        this._material = materialUniforms(this);
         this.setDrop([0, 0, 0, 0], 0, 1);
         this.setNeck([0, 0, 0, 0]);
+        this.setPartner(null);
+        this.setLight(REST_LIGHT);
+        this.setFrame([0, 0, 0, 0]);
+        this.setMaterial(null, 1);
     }
 
     vfunc_paint_target(node, paintContext) {
-        syncTextureFrame(this, this._origin, this._size);
+        syncTextureFrame(this, this._at.origin, this._at.size);
         super.vfunc_paint_target(node, paintContext);
     }
 
     vfunc_build_pipeline() {
         // After the texture lookup; the color is premultiplied, so all four
         // channels get the mask.
-        this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, MASK_DECLARATIONS, MASK_CODE, false);
+        this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, SHAPE_DECLARATIONS, MATERIAL_CODE, false);
     }
 
     /**
@@ -149,13 +193,49 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      * @param {number[]} rect - [x, y, width, height] relative to the actor
      * @param {number[]} radii - [top, bottom] corner radius
      * @param {number} ear - radius of the ears, 0 for none
+     * @param {number[]} [body] - the rect past the screen's edges it lies on
      */
-    setShape(size, rect, radii, ear) {
-        this.set_uniform_float(this._origin, 2, [0, 0]);
-        this.set_uniform_float(this._size, 2, size);
-        this.set_uniform_float(this._rect, 4, rect);
-        this.set_uniform_float(this._radii, 2, radii);
-        this.set_uniform_float(this._ear, 1, [ear]);
+    setShape(size, rect, radii, ear, body = rect) {
+        this.set_uniform_float(this._at.origin, 2, [0, 0]);
+        this.set_uniform_float(this._at.size, 2, size);
+        setMaterialArea(this, this._material, size);
+        this.set_uniform_float(this._at.rect, 4, rect);
+        this.set_uniform_float(this._at.body, 4, body);
+        this.set_uniform_float(this._at.radii, 2, radii);
+        this.set_uniform_float(this._at.ear, 1, [ear]);
+        this.queue_repaint();
+    }
+
+    /**
+     * Another surface's shape this one's glass is one with.
+     *
+     * @param {object|null} partner - {rect, body, radii, ear} as setShape()
+     *   has them, null for none
+     */
+    setPartner(partner) {
+        const {rect = [0, 0, 0, 0], body = rect, radii = [0, 0], ear = 0} = partner ?? {};
+        this.set_uniform_float(this._at.partner, 4, rect);
+        this.set_uniform_float(this._at.partnerBody, 4, body);
+        this.set_uniform_float(this._at.partnerLook, 3, [...radii, ear]);
+        this.queue_repaint();
+    }
+
+    /** @param {number[]} light - where it comes from, [x, y] (y down) */
+    setLight(light) {
+        this.set_uniform_float(this._at.glassLight, 2, light);
+    }
+
+    /** @param {number[]} frame - [x, y, width, height] the sheen runs across */
+    setFrame(frame) {
+        this.set_uniform_float(this._at.glassFrame, 4, frame);
+    }
+
+    /**
+     * @param {object|null} look - LOOK's, null for only the shape
+     * @param {number} scale - pixels in a logical pixel
+     */
+    setMaterial(look, scale) {
+        setMaterial(this, this._material, look, scale);
         this.queue_repaint();
     }
 
@@ -166,9 +246,9 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      * @param {number} blend - how near it melts into the rectangle
      */
     setDrop(drop, radius, blend) {
-        this.set_uniform_float(this._drop, 4, drop);
-        this.set_uniform_float(this._dropRadius, 1, [radius]);
-        this.set_uniform_float(this._blend, 1, [blend]);
+        this.set_uniform_float(this._at.drop, 4, drop);
+        this.set_uniform_float(this._at.dropRadius, 1, [radius]);
+        this.set_uniform_float(this._at.blend, 1, [blend]);
         this.queue_repaint();
     }
 
@@ -177,7 +257,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      *   the actor; no width for none
      */
     setNeck(neck) {
-        this.set_uniform_float(this._neck, 4, neck);
+        this.set_uniform_float(this._at.neck, 4, neck);
         this.queue_repaint();
     }
 });
@@ -209,11 +289,11 @@ class AtelierGlassSurface extends St.Widget {
      * @param {boolean} [params.fromBottom] - the same as side 'BOTTOM'
      * @param {boolean} [params.solid] - black instead of glass: the same
      *   shapes, changing every frame without anything being laid out anew
-     * @param {boolean} [params.neutral] - grey glass: none of the
-     *   wallpaper's colours (nor the palette's in its tint)
+     * @param {object|null} [params.look] - the material (lib/glassLook.js
+     *   LOOK's), none for plain blurred glass; never for solid surfaces
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
-        solid = false, neutral = false} = {}) {
+        solid = false, look = null} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -223,10 +303,13 @@ class AtelierGlassSurface extends St.Widget {
         this._reach = reach;
         this._side = side ?? (fromBottom ? 'BOTTOM' : 'TOP');
         this._solid = solid;
+        this._look = solid ? null : look;
         this._shape = null;
         this._drop = null;
         this._neck = null;
+        this._partner = null;
         this._live = null;
+        this._light = REST_LIGHT;
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -235,19 +318,69 @@ class AtelierGlassSurface extends St.Widget {
 
         this._mask = new RoundedMaskEffect();
         this.add_effect_with_name('atelier-glass-mask', this._mask);
-        if (neutral)
-            this.add_effect_with_name('atelier-glass-grey', new Clutter.DesaturateEffect({factor: 1}));
 
         Main.layoutManager.connectObject('monitors-changed', () => this._build(), this);
-        St.ThemeContext.get_for_stage(global.stage).connectObject(
-            'notify::scale-factor', () => this._blurBackground(), this);
+        St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => {
+            this._blurBackground();
+            this._mask.setMaterial(this._look, glassScale());
+        }, this);
+        // (Its light is looked after while it shows.)
+        if (!solid) {
+            glassLight.add(this);
+            this.connect('notify::mapped', () => glassLight.sync());
+        }
         this.connect('destroy', () => {
+            glassLight.remove(this);
             Main.layoutManager.disconnectObject(this);
             St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
             this._bgManager?.destroy();
             this._bgManager = null;
         });
+        this._mask.setMaterial(this._look, glassScale());
+        if (!solid)
+            this._tint.opacity = Math.round(255 * Math.min(1, this._frost));
         this._build();
+    }
+
+    /**
+     * Another material: another variant of glass. (A solid surface has
+     * none.)
+     *
+     * @param {object|null} look - LOOK's, null for plain blurred glass
+     */
+    setLook(look) {
+        if (this._solid || look === this._look)
+            return;
+        const frosted = this._frost;
+        this._look = look;
+        this._mask.setMaterial(look, glassScale());
+        // (Less frosted, it is blurred anew.)
+        if (this._frost !== frosted)
+            this._syncFrost();
+        glassLight.sync();
+    }
+
+    // How frosted it is (LOOK's): its blur and its tint, a share of its own.
+    get _frost() {
+        return this._look?.frost ?? 1;
+    }
+
+    _syncFrost() {
+        this._tint.opacity = Math.round(255 * Math.min(1, this._frost));
+        this._blurBackground();
+        const live = this._live?.get_effect('atelier-glass-blur');
+        if (live)
+            live.radius = BLUR_RADIUS * glassScale() * this._frost;
+    }
+
+    /** @returns {object|null} the material it is drawn with */
+    get look() {
+        return this._look;
+    }
+
+    /** @returns {number[]|null} its shape, as setShape() took it last */
+    get shape() {
+        return this._shape;
     }
 
     _build() {
@@ -270,28 +403,22 @@ class AtelierGlassSurface extends St.Widget {
         this.set_size(width, height);
         this._tint.set_size(width, height);
         this._wallpaper.set_position(-offsetX, -offsetY);
-        if (this._solid) {
-            if (this._shape)
-                this.setShape(...this._shape);
-            if (this._drop)
-                this.setDrop(...this._drop);
-            if (this._neck)
-                this.setNeck(...this._neck);
-            return;
+        if (!this._solid) {
+            this._bgManager = new Background.BackgroundManager({
+                container: this._wallpaper,
+                monitorIndex: this._monitorIndex,
+                controlPosition: false,
+            });
+            this._bgManager.connect('changed', () => this._blurBackground());
+            this._blurBackground();
         }
-        this._bgManager = new Background.BackgroundManager({
-            container: this._wallpaper,
-            monitorIndex: this._monitorIndex,
-            controlPosition: false,
-        });
-        this._bgManager.connect('changed', () => this._blurBackground());
-        this._blurBackground();
         if (this._shape)
             this.setShape(...this._shape);
         if (this._drop)
             this.setDrop(...this._drop);
         if (this._neck)
             this.setNeck(...this._neck);
+        this._applyPartner();
     }
 
     /**
@@ -312,7 +439,7 @@ class AtelierGlassSurface extends St.Widget {
             this._live.add_child(windows);
             this._live.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
                 mode: Shell.BlurMode.ACTOR,
-                radius: BLUR_RADIUS * scale,
+                radius: BLUR_RADIUS * scale * this._frost,
                 brightness: BLUR_BRIGHTNESS,
             }));
             this.insert_child_above(this._live, this._wallpaper);
@@ -371,7 +498,7 @@ class AtelierGlassSurface extends St.Widget {
         actor.remove_effect_by_name('atelier-glass-blur');
         actor.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
             mode: Shell.BlurMode.ACTOR,
-            radius: BLUR_RADIUS * scale,
+            radius: BLUR_RADIUS * scale * this._frost,
             brightness: BLUR_BRIGHTNESS,
         }));
     }
@@ -389,10 +516,126 @@ class AtelierGlassSurface extends St.Widget {
      */
     setShape(x, y, width, height, radius, bottomRadius = radius, ear = 0) {
         this._shape = [x, y, width, height, radius, bottomRadius, ear];
-        const limit = Math.min(width / 2, height / 2);
-        this._mask.setShape([this.width, this.height], [x - this.x, y - this.y, width, height],
-            [Math.min(radius, limit), Math.min(bottomRadius, limit)], ear);
+        const {rect, body, radii} = this._shapeIn([x, y, width, height], radius, bottomRadius);
+        this._mask.setShape([this.width, this.height], rect, radii, ear, body);
         this._syncLive();
+        this._syncFrame();
+    }
+
+    // A rectangle on the stage, in the actor: as it is, past the edges of
+    // the screen it lies on, and its corners (no rounder than it can be).
+    _shapeIn([x, y, width, height], radius, bottomRadius) {
+        const monitor = Main.layoutManager.monitors[this._monitorIndex];
+        const [bx, by, bw, bh] = monitor ? bodyRect([x, y, width, height], monitor) : [x, y, width, height];
+        const limit = Math.min(width / 2, height / 2);
+        return {
+            rect: [x - this.x, y - this.y, width, height],
+            body: [bx - this.x, by - this.y, bw, bh],
+            radii: [Math.min(radius, limit), Math.min(bottomRadius, limit)],
+        };
+    }
+
+    /**
+     * Another surface's shape, in stage coordinates, which this one's glass
+     * is one with: the one island the island lies in, say. It bends and
+     * catches the light as one with it (never where this one is only
+     * inside it), the light leaning the same way for both.
+     *
+     * @param {number[]|null} shape - [x, y, width, height, radius,
+     *   bottomRadius, ear] as setShape() takes them, null for none
+     */
+    setPartner(shape) {
+        if (JSON.stringify(shape) === JSON.stringify(this._partner))
+            return;
+        this._partner = shape;
+        this._applyPartner();
+    }
+
+    _applyPartner() {
+        const shape = this._partner;
+        if (!shape) {
+            this._mask.setPartner(null);
+        } else {
+            const [x, y, width, height, radius, bottomRadius = radius, ear = 0] = shape;
+            this._mask.setPartner({...this._shapeIn([x, y, width, height], radius, bottomRadius), ear});
+        }
+        this._syncFrame();
+    }
+
+    // [x, y, width, height] on the stage of its shapes, a drop's and its
+    // neck's too, null for none.
+    _bounds() {
+        const rects = [];
+        if (this._shape) {
+            const [x, y, width, height, , , ear] = this._shape;
+            rects.push([x - ear, y, width + 2 * ear, height]);
+        }
+        if (this._drop && this._drop[2] > 0 && this._drop[3] > 0) {
+            const [cx, cy, hw, hh] = this._drop;
+            rects.push([cx - hw, cy - hh, 2 * hw, 2 * hh]);
+        }
+        if (this._neck && this._neck[3] > 0) {
+            const [cx, top, bottom, hw] = this._neck;
+            rects.push([cx - hw, top, 2 * hw, bottom - top]);
+        }
+        return boundsOf(rects);
+    }
+
+    // What the sheen runs across and the light leans by: all of the glass
+    // it is part of.
+    _glassBounds() {
+        const partner = this._partner;
+        return boundsOf([this._bounds() ?? [0, 0, 0, 0], partner?.slice(0, 4) ?? [0, 0, 0, 0]]);
+    }
+
+    _syncFrame() {
+        const bounds = this._glassBounds();
+        this._mask.setFrame(bounds ? [bounds[0] - this.x, bounds[1] - this.y, bounds[2], bounds[3]] : [0, 0, 0, 0]);
+        glassLight.refresh(this);
+    }
+
+    /**
+     * For the light (shell/core/glassLight.js): all of the glass it is
+     * part of, on the stage, while it is shown.
+     *
+     * @returns {number[][]}
+     */
+    lightAreas() {
+        if (!this._look || !this.mapped || this.opacity === 0)
+            return [];
+        const bounds = this._glassBounds();
+        return bounds ? [bounds] : [];
+    }
+
+    /** @returns {object|null} how its light leans (LOOK's) */
+    lightLook() {
+        return this._look?.light ?? null;
+    }
+
+    /**
+     * @param {number[][]} lights - where the light comes from, one
+     * @returns {boolean} whether it changed (and is drawn again, only where
+     *   the surface's shapes are)
+     */
+    setLights([light]) {
+        if (!light || sameLight(light, this._light))
+            return false;
+        this._light = light;
+        this._mask.setLight(light);
+        const bounds = this._bounds();
+        if (bounds) {
+            const [x, y, width, height] = bounds;
+            const [x1, y1] = [Math.floor(x - this.x) - 2, Math.floor(y - this.y) - 2];
+            this.queue_redraw_with_clip(new Mtk.Rectangle({
+                x: x1, y: y1, width: Math.ceil(x + width - this.x) + 2 - x1, height: Math.ceil(y + height - this.y) + 2 - y1,
+            }));
+        }
+        return true;
+    }
+
+    /** @returns {number[]} where its light comes from now, [x, y] (y down) */
+    get light() {
+        return this._light;
     }
 
     /**
@@ -411,6 +654,7 @@ class AtelierGlassSurface extends St.Widget {
         this._mask.setDrop([centerX - this.x, centerY - this.y, halfWidth, halfHeight],
             Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
         this._syncLive();
+        this._syncFrame();
     }
 
     /**
@@ -426,6 +670,7 @@ class AtelierGlassSurface extends St.Widget {
         this._neck = [centerX, top, bottom, halfWidth];
         this._mask.setNeck([centerX - this.x, top - this.y, bottom - this.y, Math.max(0, halfWidth)]);
         this._syncLive();
+        this._syncFrame();
     }
 
     /** No drop, nor its neck. */
@@ -435,5 +680,6 @@ class AtelierGlassSurface extends St.Widget {
         this._mask.setDrop([0, 0, 0, 0], 0, 1);
         this._mask.setNeck([0, 0, 0, 0]);
         this._syncLive();
+        this._syncFrame();
     }
 });
