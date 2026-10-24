@@ -1,8 +1,9 @@
 import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
 import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
-    DEFAULT_LAYOUT, LOCK_KINDS, PITCH, UNIT, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits, gridOrigin, gridSize, nearestSize,
-    nearestSpot, newId, nextSize, normalizeWidgets, parseLayout, pixelSize, placeAt, serializeLayout, splitClock,
+    DEFAULT_LAYOUT, LOCK_KINDS, PITCH, UNIT, allowsSize, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits,
+    freeLimits, freeSize, gridOrigin, gridSize, namedSize, nearestSize, nearestSpot, newId, nextSize, normalizeWidgets, parseLayout,
+    pixelSize, placeAt, serializeLayout, sizeName, sizeOf, splitClock,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
@@ -222,6 +223,84 @@ export function testLockScreenKinds() {
     assertEqual(parseLayout(JSON.stringify([{kind: 'battery'}])), [], 'the battery not on the desktop');
     assertEqual(pixelSize('small'), [180, 84]);
     assert(fits([], {id: 'b', size: 'line', x: 30, y: 18}, [38, 20]), 'a line fits two rows');
+}
+
+export function testSizesOfTheirOwn() {
+    assertEqual(sizeOf('large'), [8, 8]);
+    assertEqual(sizeOf('9x11'), [9, 11], 'a size of its own: columns by rows');
+    assertEqual([sizeOf('0x4'), sizeOf('9 x 11'), sizeOf('nonsense'), sizeOf('constructor'), sizeOf(null)],
+        [[4, 4], [4, 4], [4, 4], [4, 4], [4, 4]], 'one that makes no sense: a square');
+    assertEqual(pixelSize('9x11'), [9 * PITCH - 12, 11 * PITCH - 12]);
+    const clockSizes = LOCK_KINDS.clock.sizes;
+    assertEqual(freeSize(9, 11, clockSizes), '9x11');
+    assertEqual(freeSize(8, 12, clockSizes), 'tall', 'by its name, where the kind has a size of just those cells');
+    assertEqual(freeSize(12, 4, clockSizes), '12x4', 'not by another kind\'s name (wide is the desktop\'s)');
+    assertEqual([sizeName('large'), sizeName('9x11')], ['Large square', '9 × 11']);
+
+    // The named size one of its own goes by: the nearest in width, then
+    // in height (the first listed of those as near).
+    assertEqual(namedSize('4x9', clockSizes), 'square', 'as wide as a square clock: styled as one');
+    assertEqual(namedSize('9x11', clockSizes), 'tall');
+    assertEqual(namedSize('9x6', clockSizes), 'large', 'as near to a card: the first listed');
+    assertEqual(namedSize('card', clockSizes), 'card', 'a named one: itself');
+    assertEqual(namedSize('12x4'), 'wide', 'of all of them, without a kind\'s');
+
+    // Only the lock screen's glass clock may have one, within its limits.
+    const glass = {kind: 'clock', face: 'glass'};
+    assert(freeLimits(glass, LOCK_KINDS) && !freeLimits({kind: 'clock', face: 'stacked'}, LOCK_KINDS) &&
+        !freeLimits({kind: 'clock'}, LOCK_KINDS) && !freeLimits(glass) && !freeLimits({kind: 'battery'}, LOCK_KINDS),
+    'the lock screen\'s glass clock only');
+    assert(allowsSize(glass, '9x11', LOCK_KINDS) && allowsSize(glass, 'card', LOCK_KINDS) && allowsSize(glass, '4x3', LOCK_KINDS));
+    assert(!allowsSize(glass, '3x3', LOCK_KINDS) && !allowsSize(glass, '4x2', LOCK_KINDS) && !allowsSize(glass, '200x4', LOCK_KINDS),
+        'no smaller than the least, no bigger than the most');
+    assert(!allowsSize({kind: 'clock', face: 'digital'}, '9x11', LOCK_KINDS) && !allowsSize(glass, 'wide', LOCK_KINDS) &&
+        !allowsSize(glass, '9x11'), 'nor another face, another kind\'s name, or the desktop\'s clock');
+}
+
+export function testSizesOfTheirOwnKept() {
+    const json = JSON.stringify([
+        {id: 'glass', kind: 'clock', size: '9x11', x: 2, y: 2, fine: true, face: 'glass'},
+        {id: 'stacked', kind: 'clock', size: '9x11', x: 12, y: 2, fine: true, face: 'stacked'},
+        {id: 'eight', kind: 'clock', size: '8x8', x: 0, y: 14, fine: true, face: 'glass'},
+        {id: 'tiny', kind: 'clock', size: '2x2', x: 8, y: 14, fine: true, face: 'glass'},
+        {id: 'odd', kind: 'clock', size: '9 x 11', x: 20, y: 2, fine: true, face: 'glass'},
+        {id: 'battery', kind: 'battery', size: '6x2', x: 20, y: 14, fine: true},
+    ]);
+    const lock = parseLayout(json, LOCK_KINDS);
+    assertEqual(lock.map(e => `${e.id} ${e.size}`),
+        ['glass 9x11', 'stacked tall', 'eight large', 'tiny square', 'odd large', 'battery small'],
+        'a glass clock keeps its own (by its name where it has one); another face, too small a size, another kind: ' +
+        'the named size nearest to it; one that makes no sense, the first');
+    assertEqual(parseLayout(serializeLayout(lock), LOCK_KINDS), lock, 'kept as they are');
+    assertEqual(parseLayout(json).find(e => e.id === 'glass').size, 'card', 'the desktop\'s clock: the nearest of its sizes');
+}
+
+export function testPlacingSizesOfTheirOwn() {
+    const grid = [20, 14];
+    const clock = {id: 'g', kind: 'clock', face: 'glass', size: '9x11', x: 0, y: 0};
+    assert(fits([clock], {id: 'b', size: 'small', x: 9, y: 0}, grid), 'beside it');
+    assert(!fits([clock], {id: 'b', size: 'small', x: 8, y: 10}, grid), 'not over its last column and row');
+    assert(fits([clock], {id: 'b', size: 'small', x: 0, y: 11}, grid), 'under it');
+    assert(!fits([], {...clock, x: 12}, grid) && !fits([], {...clock, y: 4}, grid), 'not past the edges');
+    assertEqual(findSpot([clock], {id: 'n', size: 'card'}, grid), {x: 9, y: 0});
+
+    // Stretched: the whole cells nearest to how big it is that fit where it
+    // is, within its limits and the grid.
+    const battery = {id: 'b', kind: 'battery', size: 'small', x: 14, y: 6};
+    const glass = {id: 'g', kind: 'clock', face: 'glass', size: 'large', x: 2, y: 2};
+    const big = [24, 16];
+    assertEqual(nearestSize([battery], glass, big, 9.3, 10.6, LOCK_KINDS), '9x11', 'the nearest whole cells');
+    assertEqual(nearestSize([battery], glass, big, 8.2, 11.8, LOCK_KINDS), 'tall', 'by its name where it has one');
+    assertEqual(nearestSize([battery], glass, big, 1, 1, LOCK_KINDS), '4x3', 'no smaller than the least');
+    assertEqual(nearestSize([], glass, big, 40, 40, LOCK_KINDS), '22x14', 'to the grid\'s edges at most');
+    assertEqual(nearestSize([battery], glass, big, 14.4, 7, LOCK_KINDS), '12x7', 'never over another widget');
+    assertEqual(nearestSize([battery], {...glass, face: 'stacked'}, big, 9.3, 10.6, LOCK_KINDS), 'tall',
+        'another face: the nearest of its sizes');
+    assertEqual(nextSize('clock', '9x11', LOCK_KINDS), 'large', 'clicked, from one of its own to the first of its sizes');
+
+    // On a smaller screen, near the same edges.
+    const [moved] = fitLayout([{...clock, x: 20, y: 2, grid: [38, 20]}], [26, 14]);
+    assertEqual([moved.x, moved.y, moved.size], [12, 1, '9x11']);
 }
 
 export function testSplitClock() {

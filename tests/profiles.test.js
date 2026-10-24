@@ -258,6 +258,29 @@ export function testLockscreenKeptValid() {
     assertEqual(normalizeProfile({id: 'p'}).lockscreen, null, 'none: the lock screen is left as it is');
 }
 
+export function testLockscreenClockOfItsOwnSize() {
+    // A glass clock stretched to a size of its own keeps it, in the profile
+    // and on the lock screen it is written to; the biggest clock is the one
+    // that covers most cells.
+    const poster = normalizeLockscreen({widgets: [
+        {id: 'stacked', kind: 'clock', size: 'tall', x: 0, y: 2, fine: true, face: 'stacked'},
+        {...GLASS_CLOCK, id: 'glass', size: '9x11', x: 13},
+    ]});
+    assertEqual(poster.widgets.map(e => e.size), ['tall', '9x11'], 'kept as it is');
+    assertEqual(normalizeLockscreen(poster), poster, 'and again');
+    const profile = normalizeProfile({id: 'p', lockscreen: poster});
+    assertEqual(profile.lockscreen, poster, 'in a profile');
+    assertEqual(describeProfile(profile).find(p => p.label === 'Lock screen')?.value, 'Glass clock, Inter',
+        'nine by eleven cells: bigger than a tall clock');
+    const lock = lockSettingsOf(makeStore());
+    try {
+        writeLockscreen(lock, poster);
+        assertEqual(readLockscreen(lock), poster, 'written and read back');
+    } finally {
+        lockSettingsOf(makeStore());
+    }
+}
+
 export function testLockscreenAsTheSchemaHasIt() {
     const lock = lockSettingsOf(makeStore());
     const schema = lock.settings_schema;
