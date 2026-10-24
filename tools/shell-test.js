@@ -4717,11 +4717,31 @@ async function testLockFreeStretch() {
     const fills = d => Boolean(d) && Math.abs(d.feet - d.bottom) < 1;
 
     // Dragged by its corner a cell and a bit right, three and a bit down.
+    // (How long after each move of the pointer a frame shows it.)
+    const lockEditor = editor.preview._editor;
+    const stretch = lockEditor._stretch;
+    const delays = [];
+    let moved = null;
+    lockEditor._stretch = function (...args) {
+        moved ??= GLib.get_monotonic_time();
+        stretch.apply(this, args);
+    };
+    const paintId = global.stage.connect('after-paint', () => {
+        if (moved !== null)
+            delays.push((GLib.get_monotonic_time() - moved) / 1000);
+        moved = null;
+    });
     let [hx, hy] = centerOf(clock._editHandle);
     const [dx, dy] = [(PITCH + 10) * scale, (3 * PITCH + 10) * scale];
     await pointerDown(hx, hy);
     await pointerAlong(hx, hy, hx + dx, hy + dy);
     await Scripting.sleep(300);
+    global.stage.disconnect(paintId);
+    delete lockEditor._stretch;
+    delays.sort((a, b) => a - b);
+    results.push(`INFO  stretching the glass clock, each move of the pointer shown ` +
+        `${delays[Math.floor(delays.length / 2)]?.toFixed(1)} ms after it (at most ${delays.at(-1)?.toFixed(1)}, ` +
+        `${delays.length} moves)`);
     const live = [clock.width, clock.height];
     check(Math.abs(live[0] - (px(8) + dx)) <= 1 && Math.abs(live[1] - (px(8) + dy)) <= 1 && ghost.visible &&
         Math.abs(ghost.width - px(9)) < 1 && Math.abs(ghost.height - px(11)) < 1,
@@ -4733,12 +4753,12 @@ async function testLockFreeStretch() {
     await pointerUp();
     check(await waitFor(() => clock.width === px(9) && clock.height === px(11), 1000) && saved()?.size === '9x11' &&
         clock.entry.size === '9x11', `let go, it takes them and keeps them (${saved()?.size})`);
-    await waitFor(() => clock.glass?.target, 1000);
+    await waitFor(() => clock.glass?.target && fills(digitsNow()), 1000);
     const filled = digitsNow();
-    const stretch = clock.glass.target.stretch;
+    const tall = clock.glass.target.stretch;
     // (×2.8: the most they stretched to before, whatever the box.)
-    check(fills(filled) && stretch > large && stretch > 2.8,
-        `its digits fill it, from under the date line to its bottom (×${stretch.toFixed(2)}; a large clock's ` +
+    check(fills(filled) && tall > large && tall > 2.8,
+        `its digits fill it, from under the date line to its bottom (×${tall.toFixed(2)}; a large clock's ` +
         `×${large.toFixed(2)}, at most ×2.8 before)`);
     results.push(`INFO  the glass clock of 9 × 11 cells: its face ${Math.round(clock.glass.width)}×` +
         `${Math.round(clock.glass.height)} of ${clock.width}×${clock.height}, its digits ${Math.round(filled.height)} tall`);
@@ -4775,7 +4795,7 @@ async function testLockFreeStretch() {
     await Scripting.sleep(300);
     await pointerUp();
     await restPointer();
-    check(await waitFor(() => saved()?.size === '9x14' && clock.height === px(14), 1000) && fills(digitsNow()),
+    check(await waitFor(() => saved()?.size === '9x14' && clock.height === px(14) && fills(digitsNow()), 1000),
         `stretched further, as far again (${saved()?.size}, ×${clock.glass?.target?.stretch.toFixed(2)})`);
     const far = digitsNow();
     check(await waitFor(() => depth().tooMuch && !depth().actor.visible, 2000) &&
@@ -4792,9 +4812,15 @@ async function testLockFreeStretch() {
         clock.height === px(12), `another face: the nearest of the clock's sizes (${saved()?.size})`);
     board.setWidgetOption('clock', 'face', 'glass');
     check(saved()?.face === 'glass' && saved().size === 'tall' && Boolean(clock.glass), 'the glass face again: as it is');
-    // A click on its corner, from a size of its own: the first of the clock's.
-    check(board.setWidgetSize('clock', '9x11') && saved()?.size === '9x11', 'a size of its own again');
+    // A box too flat for the digits: as tall as it is, and narrower.
+    check(board.setWidgetSize('clock', '16x3') && saved()?.size === '16x3' &&
+        await waitFor(() => fills(digitsNow()) && clock.glass.target.stretch < 1.05, 1000) &&
+        clock.glass.digitsRect.width < 0.9 * clock.glass.width,
+    `16 × 3 cells, too flat for them: as tall as it is (×${clock.glass?.target?.stretch.toFixed(2)}), ` +
+    `${Math.round(clock.glass?.digitsRect?.width)} of its ${clock.glass?.width} px wide`);
     await Scripting.sleep(300);
+    await screenshot('95f-lock-free-flat');
+    // A click on its corner, from a size of its own: the first of the clock's.
     await clickAt(...centerOf(clock._editHandle));
     await Scripting.sleep(300);
     check(saved()?.size === 'large' && clock.entry.size === 'large',
@@ -4813,12 +4839,16 @@ async function testLockFreeStretch() {
             check(await waitFor(() => lock()?.board?.widgets[0]?.glass?.target && lock().board.depth?.loaded, 5000),
                 'locked: the clock of its own size there');
             const there = lock().board.widgets[0];
-            const glass = there.glass;
-            const [, fy] = glass.get_transformed_position();
-            const feet = fy + glass.digitsRect.y + glass.digitsRect.height;
-            check(there.entry.size === '9x11' && there.width === px(9) && there.height === px(11) &&
-                Math.abs(feet - fy - glass.height) < 1 && lock().board.depth.actor.visible,
-            `9 × 11 cells, its digits filling them, the hill in front of their feet (×${glass.target.stretch.toFixed(2)})`);
+            // (How far over the bottom of their face the digits' feet are.)
+            const short = () => {
+                const digits = there.glass?.digitsRect;
+                return digits ? there.glass.height - digits.y - digits.height : null;
+            };
+            check(await waitFor(() => there.entry.size === '9x11' && there.width === px(9) && there.height === px(11) &&
+                short() !== null && Math.abs(short()) < 1 && lock().board.depth.actor.visible, 3000),
+            `9 × 11 cells, its digits filling them (${short()?.toFixed(1)} px short of its bottom, ` +
+            `×${there.glass?.target?.stretch.toFixed(2)}), the hill in front of their feet ` +
+            `(${JSON.stringify(lock().board.depth.legibility[0])})`);
             await restPointer();
             await Scripting.sleep(800);
             await screenshot('95e-lock-free-locked');

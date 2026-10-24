@@ -260,7 +260,7 @@ const GlassFace = GObject.registerClass({
         return {size: this._metrics.fontSize / scaleFactor(), weight: this._type.style.weight, tintAlpha: tintShown()};
     }
 
-    /** @returns {object|null} {stretch, y} the digits are going to */
+    /** @returns {object|null} {stretch, y}: how tall the digits stand in the box, and where their top is */
     get target() {
         return this._target;
     }
@@ -542,8 +542,8 @@ const GlassFace = GObject.registerClass({
 
     /**
      * @returns {object[]|null} each digit's ink, {x, y, width, height} in
-     *   the face, where it stands (as tall as it is going: target), the
-     *   colon left out; null until measured
+     *   the face, where it stands (target), the colon left out; null until
+     *   measured
      */
     get glyphBoxes() {
         if (!this._metrics || !this._target || !this._text)
