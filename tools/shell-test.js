@@ -1549,14 +1549,19 @@ async function testVibrancy(ext) {
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
     const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
     const showWallpaper = path => ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(path)));
+    // (In the dark style: apps' windows are taken to be dark.)
+    const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = desktopInterface.get_string('color-scheme');
     const LIGHT = '#efe6d2';
     const DARK = '#141a24';
     const light = makePicture('vibrancy-light', LIGHT);
     const dark = makePicture('vibrancy-dark', DARK);
     const halves = makePicture('vibrancy-halves', LIGHT, DARK);
-    const clearGlass = Gio.File.new_for_path(`${OUTPUT}/vibrancy-clear-glass.css`);
+    const clearGlass = Gio.File.new_for_path(`${OUTPUT}/clear-glass.css`);
     GLib.file_set_contents(clearGlass.get_path(), '.atelier-glass StWidget.atelier-glass-tint { background-color: transparent; }\n');
-    const theme = St.ThemeContext.get_for_stage(global.stage).get_theme();
+    // (The theme as it is now: GNOME makes it anew for another style,
+    // taking the stylesheets loaded over to the new one.)
+    const theme = () => St.ThemeContext.get_for_stage(global.stage).get_theme();
 
     const ink = actor => (actor?.get_stage() ? hexOf(actor.get_theme_node().get_foreground_color()) : null);
     const fill = actor => hexOf(actor.get_theme_node().get_background_color());
@@ -1591,7 +1596,8 @@ async function testVibrancy(ext) {
         // the island, the dock, the widgets' cards (as see-through as the
         // glass alone), a clock at the left and the date at the right; a
         // palette of the sea.
-        theme.load_stylesheet(clearGlass);
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        theme().load_stylesheet(clearGlass);
         dockSettings.set_boolean('show-show-apps-button', true);
         bar.set_string('sides', 'capsules');
         bar.set_string('surface', 'glass');
@@ -1663,7 +1669,6 @@ async function testVibrancy(ext) {
             `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
         await screenshotIsland('96d-vibrancy-glance-window', 420);
         // In the light style, its windows are taken to be light.
-        const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         desktopInterface.set_string('color-scheme', 'prefer-light');
         check(await settle(() => polarity('island-windows') === 'dark' && isDark(ink(glanceTime()))),
             `over a window, in the light style, dark (${glanceTime() && ink(glanceTime())})`);
@@ -1716,7 +1721,8 @@ async function testVibrancy(ext) {
         settings.reset('glass-variant');
         check(await settle(() => isDark(ink(widget('clock')))), 'and back');
     } finally {
-        theme.unload_stylesheet(clearGlass);
+        theme().unload_stylesheet(clearGlass);
+        desktopInterface.set_string('color-scheme', scheme);
         await closeTestWindows();
         ['show-show-apps-button', 'transparency-mode'].forEach(key => dockSettings.reset(key));
         ['sides', 'surface'].forEach(key => bar.reset(key));
@@ -6262,7 +6268,7 @@ async function testDisableCleansUp(atelier) {
     const sheets = St.ThemeContext.get_for_stage(global.stage).get_theme().get_custom_stylesheets()
         .map(file => file.get_basename());
     const boxes = [Main.panel._leftBox, Main.panel._centerBox, Main.panel._rightBox];
-    check(!sheets.some(name => name.startsWith('vibrancy-')) &&
+    check(!sheets.some(name => /^vibrancy-[0-9a-f]{12}\.css$/.test(name)) &&
         !boxes.some(box => (box.get_style_class_name() ?? '').includes('atelier-vibrant')),
     `no colours of the type on glass left (${sheets})`);
     const trayProto = Object.getPrototypeOf(Main.messageTray);
