@@ -188,7 +188,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     dbus-run-session -- timeout --kill-after=5 "${ATELIER_TEST_TIMEOUT:-1500}" \
     gnome-shell --headless $MONITORS $NO_X11 $MODE \
         --wayland-display=atelier-test-0 --force-animations \
-        --automation-script="$REPO/tools/shell-test.js" \
+        --automation-script="$REPO/tools/shell-test-entry.js" \
     > "$ROOT/shell.log" 2>&1 || status=$?
 
 echo "gnome-shell exited with status $status (log: $ROOT/shell.log)"
