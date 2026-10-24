@@ -447,7 +447,8 @@ export class GlassBackdrop {
 // as large (the area they cover goes in steps of this many pixels): the
 // digits drawn again and again as they change make no new ones, and leave
 // nothing behind for the garbage collector, which can't tell how large
-// they are.
+// they are. (One of another size – the digits stretched – lets go of the
+// one before at once.)
 const MASK_STEP = 32;
 // A sketch's frost and tint are made with this much room (logical pixels)
 // at least to grow right and down, or half as much again as they cover.
@@ -481,6 +482,7 @@ class Masks {
             }
             return surface;
         }
+        surface?.finish();
         surface = new Cairo.ImageSurface(format, width, height);
         surface.setDeviceScale(density, density);
         this._kept.set(name, surface);
@@ -605,6 +607,13 @@ export class LiquidGlass {
             return;
         this._backdrop = backdrop;
         this._behind.clear();
+        this._forgetSketch();
+    }
+
+    // What a sketch was drawn with, let go of at once (the garbage
+    // collector can't tell how large it is).
+    _forgetSketch() {
+        this._sketch?.surface.finish();
         this._sketch = null;
     }
 
@@ -670,7 +679,7 @@ export class LiquidGlass {
         if (!placed)
             return;
         // (Drawn in full: what a sketch was drawn with is let go of.)
-        this._sketch = null;
+        this._forgetSketch();
         const {area, density} = placed;
         const shape = this._shapeOf(path, area, density);
         const {step, away, toward} = this._moves(shape, density, scale);
@@ -829,6 +838,7 @@ export class LiquidGlass {
             area.x >= x1 && area.y >= y1 && area.x + area.width <= x2 && area.y + area.height <= y2;
         if (kept?.key === key && covers(kept))
             return kept;
+        this._forgetSketch();
         const [mw, mh] = backdrop?.monitor ?? [Infinity, Infinity];
         const room = (end, size, edge) => Math.max(end, Math.min(end + Math.max(MATERIAL_ROOM, size / 2), edge));
         // (On whole pixels of the stage's.)
