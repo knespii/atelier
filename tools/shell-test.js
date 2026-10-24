@@ -1620,7 +1620,7 @@ async function testVibrancy(ext) {
         check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => asSet[part] === '#ffffff'),
             `all of it as it is set, white (${JSON.stringify(asSet)})`);
         check(vibrancy.stylesheet === null, `no colours of its own (${vibrancy.stylesheet})`);
-        await screenshot('96a-vibrancy-dark');
+        await screenshot('32a-vibrancy-dark');
 
         // A light wallpaper: dark type, as emphatic as it is set – readable
         // on the glass as it is predicted.
@@ -1646,7 +1646,7 @@ async function testVibrancy(ext) {
         check(!date?.visible || Math.abs(contrastLc(ink(date), vibrancy.surfaceOf('island').backdrop.dark)) <
             Math.abs(contrastLc(ink(time()), vibrancy.surfaceOf('island').backdrop.dark)),
         'the island\'s date quieter than its time');
-        await screenshot('96b-vibrancy-light');
+        await screenshot('32b-vibrancy-light');
 
         // Open over the wallpaper, the glance is dark too; over a window
         // (live glass, what it shows not known), as set.
@@ -1655,7 +1655,7 @@ async function testVibrancy(ext) {
         await Scripting.sleep(700);
         const glanceTime = () => actorWith(island.page, 'atelier-glance-time');
         check(glanceTime() && isDark(ink(glanceTime())), `the glance over the wallpaper, dark (${glanceTime() && ink(glanceTime())})`);
-        await screenshotIsland('96c-vibrancy-glance-light', 420);
+        await screenshotIsland('32c-vibrancy-glance-light', 420);
         await restPointer();
         await waitFor(() => island.page === null, 3000);
         await Scripting.sleep(400);
@@ -1667,12 +1667,12 @@ async function testVibrancy(ext) {
         await Scripting.sleep(700);
         check(polarity('island-windows') === 'light' && glanceTime() && ink(glanceTime()) === '#ffffff',
             `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
-        await screenshotIsland('96d-vibrancy-glance-window', 420);
+        await screenshotIsland('32d-vibrancy-glance-window', 420);
         // In the light style, its windows are taken to be light.
         desktopInterface.set_string('color-scheme', 'prefer-light');
         check(await settle(() => polarity('island-windows') === 'dark' && isDark(ink(glanceTime()))),
             `over a window, in the light style, dark (${glanceTime() && ink(glanceTime())})`);
-        await screenshotIsland('96d2-vibrancy-glance-window-light-style', 420);
+        await screenshotIsland('32d2-vibrancy-glance-window-light-style', 420);
         desktopInterface.set_string('color-scheme', 'prefer-dark');
         await wallpapersSettled();
         await restPointer();
@@ -1696,7 +1696,7 @@ async function testVibrancy(ext) {
             ink(showApps()) === '#ffffff' && vibrancy.stylesheet === sheet,
         `a window near: light, the same stylesheet (${ink(showApps())}, ${vibrancy.stylesheet === sheet})`);
         const shotY = rect.y - 120;
-        await screenshotArea('96f-vibrancy-dock-near-window', rect.x - 40, shotY, rect.width + 80, global.stage.height - shotY);
+        await screenshotArea('32e-vibrancy-dock-near-window', rect.x - 40, shotY, rect.width + 80, global.stage.height - shotY);
         await closeTestWindows();
         check(await settle(() => hasClass(container(), scope) && isDark(ink(showApps()))), 'gone: dark again');
         dockSettings.reset('transparency-mode');
@@ -1712,7 +1712,7 @@ async function testVibrancy(ext) {
         const split = shown();
         check(isDark(split.left) && split.right === '#ffffff' && isDark(split.clock) && split.date === '#ffffff',
             `the left side and the clock dark, the right side and the date as set (${JSON.stringify(split)})`);
-        await screenshot('96e-vibrancy-halves');
+        await screenshot('32f-vibrancy-halves');
 
         // Solid surfaces: as set.
         settings.set_string('glass-variant', 'off');
