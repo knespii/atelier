@@ -498,12 +498,17 @@ async function inOverview(t, monitor) {
 // glass goes along, under its icons.
 async function glassFollows(t) {
     const {check} = t;
-    // (Glass under the dock: as the bar's.)
+    // (Glass under the dock: as the bar's – over GNOME's amber, a wallpaper
+    // with colour in it, whichever the parts before left.)
     const bar = t.ext.stateObj._settings.get_child('bar');
+    const background = new t.Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
+    const amber = t.Gio.File.new_for_path('/usr/share/backgrounds/gnome/amber-d.jxl').get_uri();
+    uris.forEach(([key]) => background.set_string(key, amber));
     const before = t.module.dock;
     bar.set_string('surface', 'glass');
     await t.waitFor(() => t.module.dock && t.module.dock !== before && t.module.dock._glass, 2000);
-    await t.sleep(900);
+    await t.sleep(1500);
     const dock = t.module.dock;
     // (Liquid Glass of the wallpaper's colours, as the island's: no longer
     // grey.)
@@ -515,6 +520,7 @@ async function glassFollows(t) {
     check(!dock._glass.get_effect('atelier-glass-grey') && Boolean(dock._glass.look) &&
         Math.max(r, g, b) - Math.min(r, g, b) > 6,
     `its glass is Liquid Glass of the wallpaper's colours, no longer grey (${[r, g, b].map(Math.round)})`);
+    uris.forEach(([key, uri]) => background.set_string(key, uri));
     const shapeOf = () => dock._glass._shape?.slice(0, 4).map(Math.round) ?? [];
     const containerRect = () => [...dock.container.get_transformed_position(),
         ...dock.container.get_transformed_size()].map(Math.round);
