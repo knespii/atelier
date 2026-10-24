@@ -2800,8 +2800,11 @@
 /* ── Dock: indicators and badges (B3) ── */
 
 /* The running marks of the other styles, drawn where the dot is: a
-   little off the icon's edge towards the dock's edge. */
+   little off the icon's edge towards the dock's edge, white unless the
+   app's or the settings' colour is asked for (on glass, as vibrancy has it:
+   shell/core/vibrancy.js). */
 .atelier-dock .atelier-dock-indicator {
+  color: #ffffff;
   offset-y: 2px;
 }
 

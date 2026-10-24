@@ -109,11 +109,13 @@ export class IconDecorations {
             visible: false,
         });
         this._area.connect('repaint', area => this._drawMarks(area));
-        // A little off the icon, towards the edge, as the stylesheet says.
+        // A little off the icon, towards the edge, as the stylesheet says
+        // – and in its colour (light or dark on glass: shell/core/vibrancy.js).
         this._area.connect('style-changed', area => {
             const node = area.get_theme_node();
             area.translationX = node.get_length('offset-x');
             area.translationY = node.get_length('offset-y');
+            this._syncMarks();
         });
         container.add_child(this._area);
 
@@ -196,13 +198,18 @@ export class IconDecorations {
     }
 
     // The app's own colour, if asked for (and it has one), else the
-    // settings', else white.
+    // settings', else the stylesheet's (white; once styled).
     _bodyColor(custom) {
         const settings = this._ctx.settings;
         const own = settings.get_boolean('running-indicator-dominant-color') ? appColor(this._icon.app) : null;
         if (own)
             return own;
-        return custom ? parseColor(settings.get_string('custom-theme-running-dots-color')) : WHITE;
+        if (custom)
+            return parseColor(settings.get_string('custom-theme-running-dots-color'));
+        if (!this._area.get_stage())
+            return WHITE;
+        const {red, green, blue} = this._area.get_theme_node().get_foreground_color();
+        return [red, green, blue];
     }
 
     _drawMarks(area) {
