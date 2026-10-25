@@ -12,13 +12,18 @@
 // over all of a large monitor that would take a frame of its own. While
 // the popup rests nothing but what is behind it changing draws it anew.
 
+import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
 import {REST_LIGHT, edgeReach} from '../../lib/glassLook.js';
-import {WindowsClone, syncTextureFrame} from '../core/glass.js';
+import {GlassSurface, WindowsClone, syncTextureFrame} from '../core/glass.js';
 import {
     MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
     setMaterialReach, textureDensity,
@@ -172,3 +177,72 @@ class AtelierLockPopupGlass extends St.Widget {
         return this._behind.source;
     }
 });
+
+// Whether the lock screen's glass has been drawn once in this shell.
+let warm = false;
+/** @returns {boolean} whether the lock screen's glass was drawn ahead of it in this shell */
+export function lockGlassWarm() {
+    return warm;
+}
+
+// How long the warm-up waits for its frame at most, ms.
+const WARM_UP_WAIT = 2000;
+
+/**
+ * Draw the lock screen's glass once in the session, ahead of the lock
+ * screen, out of sight: the popup's, and a surface's over a picture of
+ * what is behind it, as the island's is there. The GPU makes the programs
+ * they are drawn with the first time they are drawn – here, with the
+ * session's first frames, not as the password is first asked (a third of
+ * a second there at 150 %, the popup's liquid frozen, the first time after
+ * each start of the shell). Once in the shell.
+ *
+ * @param {object} look - the glass's (lib/glassLook.js LOOK's)
+ * @param {boolean} light - GNOME's style is light
+ */
+export function warmUpLockGlass(look, light) {
+    const group = Main.layoutManager.uiGroup;
+    const behind = Main.layoutManager._backgroundGroup;
+    if (warm || !look || !group || !(behind instanceof Clutter.Actor))
+        return;
+    warm = true;
+    // (Under the windows and the wallpaper: drawn, never seen.)
+    const holder = new Clutter.Actor({x: 0, y: 0, width: 16, height: 16, reactive: false});
+    Shell.util_set_hidden_from_pick(holder, true);
+    group.insert_child_at_index(holder, 0);
+    const popup = new PopupGlass({source: behind, look, light});
+    holder.add_child(popup);
+    popup.place([0, 0], [0, 0], [16, 16]);
+    popup.setShapes({boxes: [[8, 8, 6, 6, 3]], capsules: []});
+    const surface = new GlassSurface({reach: 0.02, look, light, source: behind});
+    holder.add_child(surface);
+    surface.setShape(0, 0, 12, 12, 4);
+    let timeoutId = 0;
+    const done = () => {
+        global.stage.disconnectObject(holder);
+        if (timeoutId)
+            GLib.source_remove(timeoutId);
+        timeoutId = 0;
+        holder.destroy();
+    };
+    // (Gone a frame after it was drawn – or with the UI, as the shell quits.)
+    global.stage.connectObject('after-paint', () => {
+        global.stage.disconnectObject(holder);
+        global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            if (holder.get_parent())
+                done();
+            return GLib.SOURCE_REMOVE;
+        });
+    }, holder);
+    holder.connect('destroy', () => {
+        global.stage.disconnectObject(holder);
+        if (timeoutId)
+            GLib.source_remove(timeoutId);
+        timeoutId = 0;
+    });
+    timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, WARM_UP_WAIT, () => {
+        timeoutId = 0;
+        done();
+        return GLib.SOURCE_REMOVE;
+    });
+}

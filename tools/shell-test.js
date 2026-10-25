@@ -9,6 +9,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
+import Mtk from 'gi://Mtk';
 import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -7346,7 +7347,7 @@ async function testLockPromptPace() {
     const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
     const [columns, rows] = (GLib.getenv('ATELIER_TEST_PROMPT_CLOCK') ?? '17x14').split('x').map(Number);
     const wantedScale = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
-    const scaled = wantedScale > 0 && wantedScale !== global.stage.get_resource_scale();
+    const scaled = wantedScale > 0 && Math.abs(wantedScale - global.display.get_monitor_scale(Main.layoutManager.primaryIndex)) >= 0.01;
     if (scaled) {
         const width = global.stage.width;
         await setMonitorScale(wantedScale);
@@ -7395,6 +7396,19 @@ async function testLockPromptPace() {
             const module = lock();
             const board = module.board;
             const depth = board.depth;
+            // (Drawn once in the session ahead of it; the island's glass only
+            // as large as the island and its shadow, not the top of the
+            // monitor: what is behind it is painted into it anew every frame
+            // the wallpaper turns to glass.)
+            const base = Main.extensionManager.lookup(UUID).dir.get_uri();
+            const {lockGlassWarm} = await import(`${base}/shell/lockscreen/popupGlass.js`);
+            check(lockGlassWarm(), 'the lock screen\'s glass drawn ahead of it in the session');
+            // (How large it gets meanwhile.)
+            let islandGlassArea = 0;
+            const islandGlass = module.island?.glass;
+            const sizes = {};
+            islandGlass?.connectObject('notify::allocation', () => (islandGlassArea =
+                Math.max(islandGlassArea, islandGlass.width * islandGlass.height)), sizes);
             clock = clockThere();
             const glass = clock.glass;
             // (The time as the test sets it; the frosted wallpaper as the
@@ -7507,6 +7521,10 @@ async function testLockPromptPace() {
                 `nor the wallpaper's glass made anew: it only fades in and out (${made} → ${wallpaperGlass(module).made})`);
             const share = liquidSize ? liquidSize[0] * liquidSize[1] / (monitor.width * monitor.height) : 1;
             check(share < 0.25, `the popup's liquid only round it, not over the monitor (${liquidSize?.map(Math.round).join('×')})`);
+            islandGlass?.disconnectObject(sizes);
+            const islandShare = islandGlassArea / (monitor.width * monitor.height);
+            check(islandGlass && islandShare > 0 && islandShare < 0.1, 'the island\'s glass only round the island, ' +
+                `not over the top of the monitor (${Math.round(100 * islandShare)} % of it at most)`);
 
             // Frame by frame, what each while cost where.
             const names = Object.keys(timed.spent);
@@ -7541,6 +7559,10 @@ async function testLockPromptPace() {
                         return 'the popup made';
                     if (before && !before.form && f.form)
                         return 'the popup\'s form first drawn';
+                    // (The wallpapers' glass raised over them: all of the
+                    // lock screen drawn anew once.)
+                    if (before && before.glass === 0 && f.glass > 0)
+                        return 'the wallpaper\'s glass raised';
                     // (Its form drawn alone, without it, the frame after.)
                     if ([i - 1, i].some(j => frames[j - 1]?.popup && frames[j] && !frames[j].popup))
                         return 'the popup\'s liquid gone';
@@ -7548,7 +7570,15 @@ async function testLockPromptPace() {
                     return f.layout + f.painting + spent < 4 ? 'nothing measured' : null;
                 };
                 const late = moving.filter(f => f.gap > 20);
-                if (!slow && (name.startsWith('down') || name === 'up 2')) {
+                // The first time up too, the island's glass and the popup's
+                // drawn once in the session already (popupGlass.js
+                // warmUpLockGlass()): no frame the GPU makes their programs
+                // in – a third of a second at 150 %, the popup frozen.
+                if (!slow && name === 'up 1') {
+                    check(spread.max <= 100, `the prompt up 1, ${tag}: no frame over 100 ms, the lock screen's glass ` +
+                        `drawn once ahead of it (${ms(spread.max)} ms at most)`);
+                }
+                if (!slow && (name.startsWith('down') || name.startsWith('up'))) {
                     const said = late.map(f => `${ms(f.gap)} ms: ${causeOf(f) ?? `room ${f.room.toFixed(2)}`}`);
                     // (Late by more than half a display frame: one missed, as
                     // one sees it. A few milliseconds late – as a shell
@@ -7836,14 +7866,198 @@ async function testLockFreeStretch() {
 
 // The main monitor at a scale (its mode as it is): a 3840 × 2160 one at 2
 // is a 1920 × 1080 stage, drawn in twice the detail.
+// The whole stage as it is now, painted offscreen at a small scale, as a
+// GdkPixbuf. (Not Shell.Screenshot's screenshot_area(): a wallpaper GNOME
+// draws as it is, its blur off – as the lock screen's is while Atelier's
+// glass is over it – comes out black in it, never on the screen.)
+async function stageSample(scale = 0.08) {
+    const {paintStage} = await import(`${Main.extensionManager.lookup(UUID).dir.get_uri()}/shell/core/compat.js`);
+    const content = paintStage(new Mtk.Rectangle({x: 0, y: 0, width: global.stage.width, height: global.stage.height}),
+        scale, Clutter.PaintFlag.NO_CURSORS);
+    const stream = Gio.MemoryOutputStream.new_resizable();
+    await Shell.Screenshot.composite_to_stream(content.get_texture(), 0, 0, -1, -1, 1, null, 0, 0, 1, stream);
+    stream.close(null);
+    const loader = new GdkPixbuf.PixbufLoader();
+    loader.write_bytes(stream.steal_as_bytes());
+    loader.close();
+    return loader.get_pixbuf();
+}
+
+// Unlocked with the popup up, of glass, as the user does it, the shell
+// stopped a while as GNOME turns the other extensions on (and the lock
+// screen held meanwhile): every picture of the screen until the desktop
+// shows, a few milliseconds apart, shows the wallpaper – its glass coming
+// sharp, then the desktop – never black. (ATELIER_TEST_SCALE: at that
+// scale.)
+async function testLockUnlockShows() {
+    const shield = Main.screenShield;
+    if (!shield) {
+        results.push('INFO  no lock screen here (no GDM): the screen as it unlocks untested');
+        return;
+    }
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const back = await useTestScale('The screen as it unlocks');
+    try {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const dir = `${OUTPUT}/unlock`;
+        GLib.mkdir_with_parents(dir, 0o755);
+        // (A sky over a hill: nothing of it near black.)
+        const wallpaper = `${dir}/hill.png`;
+        hillPicture(wallpaper, [monitor.width, monitor.height], Math.round(monitor.height * 0.6), 0x4a7fd4ff, 0x3f8a2aff);
+        background.set_string('picture-uri', uriOf(wallpaper));
+        background.set_string('picture-uri-dark', uriOf(wallpaper));
+        background.set_string('picture-options', 'zoom');
+        lockSettings.set_boolean('password-field', true);
+        await wallpapersSettled();
+        const locked = await lockForTest();
+        const samples = [];
+        try {
+            check(await waitFor(() => lock()?.island?.glass && lock()?._field, 8000), 'locked, the island of glass');
+            await Scripting.sleep(1500);
+            await pressKey(Clutter.KEY_a);
+            check(await waitFor(() => lock().room === 1 && lock()._field?.form?.opacity === 255, 8000),
+                'the popup up, of glass');
+            await Scripting.sleep(300);
+            await typeText('right');
+            await pressKey(Clutter.KEY_Return);
+            locked.verifiers.at(-1).emit('verification-complete');
+            // (GNOME turns the other extensions on: the shell stopped.)
+            const stopper = Main.sessionMode.connect('updated', () => {
+                Main.sessionMode.disconnect(stopper);
+                const until = GLib.get_monotonic_time() + 600000;
+                while (GLib.get_monotonic_time() < until) {
+                    // the shell stopped
+                }
+            });
+            const start = GLib.get_monotonic_time() / 1000;
+            shield.deactivate(false);
+            let goneAt = 0;
+            for (;;) {
+                const pixbuf = await stageSample();
+                const [width, height, stride, channels, pixels] = [pixbuf.get_width(), pixbuf.get_height(),
+                    pixbuf.get_rowstride(), pixbuf.get_n_channels(), pixbuf.get_pixels()];
+                // (Under the island: the wallpaper, or its glass.)
+                let dark = 0;
+                let all = 0;
+                for (let y = Math.floor(height * 0.15); y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = y * stride + x * channels;
+                        if (Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) < 16)
+                            dark++;
+                        all++;
+                    }
+                }
+                const t = GLib.get_monotonic_time() / 1000 - start;
+                samples.push({t, dark: dark / all, dialog: Boolean(shield._dialog)});
+                if (!shield._dialog)
+                    goneAt ||= t;
+                if ((goneAt && t - goneAt > 300) || t > 5000)
+                    break;
+            }
+        } finally {
+            await locked.unlock();
+            // (The padlock back up and the island out, as the next part
+            // would find the session.)
+            await waitFor(() => atelier()._afterglow === null, 3000);
+            await Scripting.sleep(1500);
+        }
+        const held = samples.filter(sample => sample.dialog);
+        const darkest = samples.reduce((most, sample) => (sample.dark > most.dark ? sample : most), {dark: 0, t: 0});
+        check(held.length >= 5 && samples.every(sample => sample.dark < 0.1),
+            `unlocking, the screen never black: ${samples.length} pictures of it over ` +
+            `${Math.round(samples.at(-1)?.t ?? 0)} ms, ${held.length} of the lock screen held, at most ` +
+            `${Math.round(100 * darkest.dark)} % of it near black (at ${Math.round(darkest.t)} ms)`);
+    } finally {
+        lockSettings.reset('password-field');
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        await back?.();
+    }
+}
+
+// The control centre opening out of a notch of glass, as the user has it
+// (the bar one island of glass with it), over a maximised window: its glass
+// only as large as the island and its shadow – not most of the monitor,
+// all of which was drawn again every frame it grew – and the frames it
+// opens in each drawn, by the GPU too, in a few milliseconds. Three times
+// (ATELIER_TEST_SCALE: at that scale).
+async function testControlCentrePace(ext) {
+    const back = await useTestScale('The control centre\'s pace');
+    const bar = ext.stateObj._settings.get_child('bar');
+    const slow = Boolean(GLib.getenv('ATELIER_TEST_SLOW'));
+    try {
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        await Scripting.sleep(1500);
+        const islandModule = ext.stateObj.modules.get('island');
+        const island = islandModule.island;
+        const window = await openTestWindow('control centre pace');
+        window.maximize(Meta.MaximizeFlags.BOTH);
+        await Scripting.sleep(1000);
+        await restPointer();
+        await Scripting.sleep(1000);
+        const monitor = Main.layoutManager.primaryMonitor;
+        const painted = [];
+        let largest = 0;
+        for (let round = 0; round < 3; round++) {
+            // (Each frame waited for until the GPU has drawn it.)
+            const timings = [];
+            let start = 0;
+            const ids = [
+                global.stage.connect('before-paint', () => (start = GLib.get_monotonic_time())),
+                global.stage.connect('after-paint', (_, view) => {
+                    view?.get_framebuffer?.()?.finish();
+                    if (start)
+                        timings.push((GLib.get_monotonic_time() - start) / 1000);
+                    start = 0;
+                    const glass = islandModule._glass;
+                    if (glass)
+                        largest = Math.max(largest, glass.width * glass.height / (monitor.width * monitor.height));
+                }),
+            ];
+            await clickAt(...centerOf(island));
+            await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+            await Scripting.sleep(200);
+            ids.forEach(id => global.stage.disconnect(id));
+            painted.push(...timings);
+            await pressKey(Clutter.KEY_Escape);
+            await waitFor(() => !island.page && !island.busy, 3000);
+            await restPointer();
+            await Scripting.sleep(600);
+        }
+        const spread = spreadOf(painted);
+        const pace = `the control centre opening, ${global.stage.width} × ${global.stage.height} at ` +
+            `${global.stage.get_resource_scale()}×: ${spread.n} frames, drawn in ${ms(spread.mean)} ms on average, ` +
+            `${ms(spread.p95)} for 95 % of them, ${ms(spread.max)} at most; its glass ${Math.round(100 * largest)} % ` +
+            'of the monitor at most';
+        check(largest < 0.35, `${pace}: its glass only round it`);
+        if (slow)
+            results.push(`INFO  drawn without a GPU: ${pace}`);
+        else
+            check(spread.mean <= 7, pace);
+    } finally {
+        await closeTestWindows();
+        ['style', 'island-shape', 'surface', 'compact'].forEach(key => bar.reset(key));
+        await back?.();
+    }
+}
+
 async function setMonitorScale(scale) {
     const state = await displayConfig('GetCurrentState', null,
         '(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})');
     const [serial, monitors] = state.recursiveUnpack();
     const [[connector], modes] = monitors[0];
     const mode = modes.find(m => m[6]['is-current']);
+    // (The nearest the mode has: 2560 × 1600 has no 1.5, but 1.5023…, as
+    // a laptop's panel has it at 150 %.)
+    const near = mode[5].reduce((best, s) => (Math.abs(s - scale) < Math.abs(best - scale) ? s : best));
     await displayConfig('ApplyMonitorsConfig', new GLib.Variant('(uua(iiduba(ssa{sv}))a{sv})',
-        [serial, 1, [[0, 0, scale, 0, true, [[connector, mode[0], {}]]]], {}]));
+        [serial, 1, [[0, 0, near, 0, true, [[connector, mode[0], {}]]]], {}]));
 }
 
 // For a part: the main monitor at the scale ATELIER_TEST_SCALE asks for,
@@ -7851,7 +8065,7 @@ async function setMonitorScale(scale) {
 // Resolves to what sets it back to 1, null if nothing was changed.
 async function useTestScale(label) {
     const wanted = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
-    if (!(wanted > 0) || wanted === global.display.get_monitor_scale(Main.layoutManager.primaryIndex))
+    if (!(wanted > 0) || Math.abs(wanted - global.display.get_monitor_scale(Main.layoutManager.primaryIndex)) < 0.01)
         return null;
     const width = global.stage.width;
     await setMonitorScale(wanted);
@@ -7967,7 +8181,7 @@ async function testLockStretchSpeed() {
     const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
     const [columns, rows] = (GLib.getenv('ATELIER_TEST_STRETCH') ?? '30x16').split('x').map(Number);
     const wantedScale = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
-    const scaled = wantedScale > 0 && wantedScale !== global.stage.get_resource_scale();
+    const scaled = wantedScale > 0 && Math.abs(wantedScale - global.display.get_monitor_scale(Main.layoutManager.primaryIndex)) >= 0.01;
     if (scaled) {
         const width = global.stage.width;
         await setMonitorScale(wantedScale);
@@ -9138,6 +9352,7 @@ export async function run() {
             await part(testLockGlassPictures);
             await part(testLockClockFades);
             await part(testLockPromptPace);
+            await part(testLockUnlockShows);
             await part(testLockFreeStretch);
             await part(testLockStretchSpeed);
             await part(testLockOnOwnWallpaper);
@@ -9158,6 +9373,7 @@ export async function run() {
         await part(testIsland, ext, atelier);
         await part(testNotifications, ext, atelier);
         await part(testControlCentre, ext);
+        await part(testControlCentrePace, ext);
         await part(testStackStaysOpaque, ext);
         await part(testOtherExtensions, ext);
         await part(testOtherExtensionSettings, ext);
@@ -9204,6 +9420,7 @@ export async function run() {
         await part(testLockGlassLooks);
         await part(testLockClockFades);
         await part(testLockPromptPace);
+        await part(testLockUnlockShows);
         await part(testLockFreeStretch);
         await part(testLockStretchSpeed);
         await part(testLockOnOwnWallpaper);
