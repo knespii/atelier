@@ -25,7 +25,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
-import {contrastLc, minimumLc} from '../lib/apca.js';
+import {apcaY, contrastLc, minimumLc} from '../lib/apca.js';
 import {hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
@@ -1520,11 +1520,15 @@ async function testBarStyles(ext) {
 // notch at rest, with the glance and with the control centre, capsules
 // beside a floating island, the dock and the widgets – in each variant, in
 // GNOME's dark style (smoky glass) and its light one (light glass). Only
-// pictures, to look at.
+// pictures, to look at, and how the type on them reads (Lc, read off the
+// screen: drawnContrast()), said.
 async function testGlassPictures(ext) {
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const desktopSettings = settings.get_child('desktop');
+    // (The dock with its Show Applications icon: type on its glass.)
+    const dockSettings = settings.get_child('dock');
+    dockSettings.set_boolean('show-show-apps-button', true);
     const islandModule = ext.stateObj.modules.get('island');
     const island = islandModule.island;
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
@@ -1543,6 +1547,23 @@ async function testGlassPictures(ext) {
         const [x2, y2] = [Math.min(global.stage.width, Math.round(x + width)), Math.min(global.stage.height, Math.round(y + height))];
         return screenshotArea(`glass-pictures/${name}`, x1, y1, x2 - x1, y2 - y1);
     };
+    // How the type in a picture reads: [name, actor] of each part shown;
+    // and the shade of each surface's glass (shell/core/vibrancy.js).
+    const statusArea = Main.panel.statusArea;
+    const vibrancy = ext.stateObj.modules.get('vibrancy');
+    const measure = async (name, parts) => {
+        const said = [];
+        for (const [part, actor] of parts) {
+            const drawn = actor?.mapped ? await drawnContrast(`glass-pictures/type/${name}-${part}`, actor) : null;
+            if (drawn)
+                said.push(`${part} ${drawn.lc.toFixed(0)} ${drawn.light ? 'light' : 'dark'} on ${drawn.glass}`);
+        }
+        results.push(`INFO  glass pictures ${name}: ${said.join(', ') || 'none'}`);
+        const shades = [...vibrancy?._surfaces?.values() ?? []].filter(surface => surface.polarity)
+            .map(surface => `${surface.id} ${surface.polarity} ${surface.shade?.dim ?? '-'}/${surface.shade?.veil ?? '-'}`);
+        results.push(`INFO  glass pictures ${name} shades: ${shades.join(', ') || 'none'}`);
+    };
+    GLib.mkdir_with_parents(`${dir}/type`, 0o755);
     try {
         for (const [n, source] of wallpapers.entries()) {
             const wallpaper = `${copies}/glass-${GLib.path_get_basename(source)}`;
@@ -1563,6 +1584,7 @@ async function testGlassPictures(ext) {
     } finally {
         ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
         ['style', 'glass'].forEach(key => desktopSettings.reset(key));
+        dockSettings.reset('show-show-apps-button');
         settings.reset('glass-variant');
         iface.set_string('color-scheme', scheme);
         kept.forEach(([key, value]) => background.set_string(key, value));
@@ -1582,10 +1604,14 @@ async function testGlassPictures(ext) {
         await restPointer();
         await Scripting.sleep(900);
         await shot(`${name}-top`, global.stage.width / 2 - 450, 0, 900, 60);
+        await measure(`${name}-top`, [['time', islandModule._idle._time], ['workspaces', statusArea.activities],
+            ['battery', statusArea['atelier-battery']]]);
         await pointerTo(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
         await Scripting.sleep(700);
         await shot(`${name}-glance`, island.x - 40, 0, island.width + 80, island.y + island.height + 30);
+        await measure(`${name}-glance`, [['time', actorWith(island.page, 'atelier-glance-time')],
+            ['events', actorWith(island.page, 'atelier-glance-placeholder') ?? actorWith(island.page, 'atelier-glance-event-summary')]]);
         await restPointer();
         await waitFor(() => island.page === null, 2000);
         if (controlCentre) {
@@ -1604,6 +1630,8 @@ async function testGlassPictures(ext) {
         bar.set_boolean('compact', false);
         await Scripting.sleep(900);
         await shot(`${name}-capsules`, global.stage.width / 2 - 450, 0, 900, 60);
+        await measure(`${name}-capsules`, [['time', islandModule._idle._time], ['workspaces', statusArea.activities],
+            ['system', statusArea.quickSettings]]);
         // The dock, and the widgets.
         const dock = ext.stateObj.modules.get('dock')?.dock;
         if (dock) {
@@ -1611,6 +1639,7 @@ async function testGlassPictures(ext) {
             const [x, y] = dock.container.get_transformed_position();
             const [width, height] = dock.container.get_transformed_size();
             await shot(`${name}-dock`, x - 24, y - 24, width + 48, height + 48);
+            await measure(`${name}-dock`, [['show apps', actorWith(dock.container, 'show-apps-icon')]]);
         }
         const desktop = ext.stateObj.modules.get('desktop');
         if (desktop) {
@@ -1667,7 +1696,7 @@ function rowOf(pixels, x1, x2, y) {
 // GNOME's high contrast make the surfaces solid; the overview's blurred
 // wallpaper has the grain.
 async function testLiquidGlass(ext) {
-    const {LOOK, REST_LIGHT} = await import('../lib/glassLook.js');
+    const {LOOK, REST_LIGHT, sameLight} = await import('../lib/glassLook.js');
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const islandModule = ext.stateObj.modules.get('island');
@@ -1823,6 +1852,36 @@ async function testLiquidGlass(ext) {
         await Scripting.sleep(1500);
         global.stage.disconnect(paintId);
         check(frames <= 1, `at rest, nothing is drawn (${frames} frames in 1.5 s)`);
+
+        // An extra shade, as the type on glass asks for one where it would
+        // not read otherwise (shell/core/vibrancy.js), is drawn: a dark veil
+        // over the light band, a white one over the dark – none while the
+        // glass is deep (under GNOME's controls) or plain.
+        const middleOf = async (name, y) => {
+            await Scripting.sleep(500);
+            await screenshotArea(`liquid-glass/${name}`, mid - px(20), y, px(40), px(20));
+            return grey(averageColor(`liquid-glass/${name}`, 0, 0, px(40), px(20)));
+        };
+        const lightBand = top + px(60);
+        const unshaded = await middleOf('shade-none-light', lightBand);
+        glass.setShade({dim: 0.3, veil: 0});
+        const dimmed = await middleOf('shade-dim', lightBand);
+        check(dimmed < unshaded * 0.8 && dimmed > unshaded * 0.6,
+            `a dark veil of 0.3 drawn: ${unshaded.toFixed(0)} → ${dimmed.toFixed(0)}`);
+        glass.setDeep(true);
+        const deep = glass.shade;
+        glass.setDeep(false);
+        check(deep.dim === 0 && deep.veil === 0 && glass.shade.dim === 0.3, 'none while it is deep, again after');
+        glass.setLook(null);
+        check(glass.shade.dim === 0, 'none on plain glass');
+        glass.setLook(LOOK.regular);
+        glass.setShape(x0, monitor.y + px(660), w, px(140), px(24));
+        glass.setShade({dim: 0, veil: 0});
+        const darkBand = monitor.y + px(720);
+        const dark = await middleOf('shade-none-dark', darkBand);
+        glass.setShade({dim: 0, veil: 0.3});
+        const veiled = await middleOf('shade-veil', darkBand);
+        check(veiled > dark + 40, `a white veil of 0.3 drawn: ${dark.toFixed(0)} → ${veiled.toFixed(0)}`);
         glass.destroy();
         glass = null;
 
@@ -1936,7 +1995,9 @@ async function testLiquidGlass(ext) {
         await pointerTo(island.x - px(30), iy);
         await Scripting.sleep(200);
         const fixed = islandModule._glass.light;
-        check(fixed[0] === REST_LIGHT[0] && fixed[1] === REST_LIGHT[1], 'animations off: the light stays above');
+        // (As far as anyone could see: a lean too slight to draw anew for
+        // stays as it is.)
+        check(sameLight(fixed, REST_LIGHT), `animations off: the light stays above (${fixed.map(v => v.toFixed(4))})`);
         iface.reset('enable-animations');
         await restPointer();
 
@@ -2016,18 +2077,26 @@ function actorWith(root, name) {
 // over a light wallpaper dark, over a dark one as they are set; each side
 // of the bar, the island, the dock and each widget on what is behind it;
 // the palette's colours in their hue; an open page over windows as set;
-// all of it as set again with the glass off. (The glass drawn here is
-// Liquid Glass, smoky in the dark style: what is predicted – its blur, its
-// tint, its material – is what is drawn, but for the light its edges
-// catch and its sheen.)
+// all of it as set again with the glass off. Where the type would not read
+// on the glass as it is, the glass takes a shade – darker under light type
+// in the dark style – eased there: read off the screen, the type reads;
+// over a dark wallpaper, no shade. (The glass drawn here is Liquid Glass,
+// smoky in the dark style: what is predicted – its blur, its tint, its
+// material – is what is drawn, but for the light its edges catch and its
+// sheen.)
 async function testVibrancy(ext) {
+    const {sameShade} = await import('../lib/glassLook.js');
+    const {readingNeed} = await import('../lib/vibrancy.js');
     const modules = ext.stateObj.modules;
     const vibrancy = modules.get('vibrancy');
     const desktop = modules.get('desktop');
     const islandModule = modules.get('island');
+    const barModule = modules.get('bar');
     const dock = () => modules.get('dock')?.dock ?? null;
-    if (!check(vibrancy && desktop && islandModule && dock(), 'vibrancy, the island, the desktop and the dock running'))
+    if (!check(vibrancy && desktop && islandModule && barModule && dock(),
+        'vibrancy, the island, the bar, the desktop and the dock running'))
         return;
+    GLib.mkdir_with_parents(`${OUTPUT}/vibrancy`, 0o755);
     const island = islandModule.island;
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
@@ -2042,8 +2111,11 @@ async function testVibrancy(ext) {
     const scheme = desktopInterface.get_string('color-scheme');
     const LIGHT = '#efe6d2';
     const DARK = '#141a24';
+    // (A sky: light type reads on it only on glass shaded darker.)
+    const SKY = '#8fb0d8';
     const light = makePicture('vibrancy-light', LIGHT);
     const dark = makePicture('vibrancy-dark', DARK);
+    const sky = makePicture('vibrancy-sky', SKY);
     const halves = makePicture('vibrancy-halves', LIGHT, DARK);
 
     const ink = actor => (actor?.get_stage() ? hexOf(actor.get_theme_node().get_foreground_color()) : null);
@@ -2072,6 +2144,46 @@ async function testVibrancy(ext) {
         const ok = await waitFor(predicate, 8000);
         await Scripting.sleep(500);
         return ok;
+    };
+    const glanceTime = () => actorWith(island.page, 'atelier-glance-time');
+    // The extra shade each glass is to have (none: null).
+    const shades = () => ({
+        island: islandModule._glass?.shade ?? null,
+        'bar-left': barModule._surfaces[0]?.actor.shade ?? null,
+        'bar-right': barModule._surfaces[1]?.actor.shade ?? null,
+        dock: dock()?._glass?.shade ?? null,
+        clock: desktop._glass?.shadeOf('clock') ?? null,
+        date: desktop._glass?.shadeOf('date') ?? null,
+    });
+    const unshaded = shade => Boolean(shade) && shade.dim === 0 && shade.veil === 0;
+    const shadesText = () => Object.entries(shades()).map(([id, shade]) => `${id} ${shade?.dim}/${shade?.veil}`).join(', ');
+    // The type as drawn, read off the screen, against what its surface's
+    // type needs to read (lib/vibrancy.js readingNeed()) – SHORT less at
+    // most, APCA's steps: the island's time, each side's buttons (the
+    // workspaces, the system menu), the dock's Show Applications icon,
+    // the widgets. Says those that fall short.
+    const SHORT = 5;
+    const DRAWN = [
+        ['island', 'the island\'s time', time, 'island', 'island'],
+        ['bar-left', 'the workspaces', leftButton, 'bar', 'bar-left'],
+        ['bar-right', 'the system menu', rightButton, 'bar', 'bar-right'],
+        ['dock', 'Show Applications', showApps, 'dock', 'dock-0'],
+        ['clock', 'the clock', () => widget('clock'), 'widget', 'widget-clock'],
+        ['date', 'the date', () => widget('date'), 'widget', 'widget-date'],
+    ];
+    const short = async (label, ids = DRAWN.map(([id]) => id)) => {
+        const falling = [];
+        for (const [id, name, actor, inks, surface] of DRAWN.filter(([part]) => ids.includes(part))) {
+            const drawn = actor() ? await drawnContrast(`vibrancy/${label}-${id}`, actor()) : null;
+            const need = readingNeed(inks);
+            const predicted = vibrancy.surfaceOf(surface)?.backdrop;
+            results.push(`INFO  ${label}: ${name} Lc ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)} ` +
+                `(${drawn?.light ? 'light' : 'dark'} ${drawn?.type} on ${drawn?.glass}, predicted ` +
+                `${drawn?.light ? predicted?.light : predicted?.dark}; shade ${shades()[id]?.dim}/${shades()[id]?.veil})`);
+            if (!drawn || drawn.lc < need - SHORT)
+                falling.push(`${name} ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)}`);
+        }
+        return falling;
     };
 
     try {
@@ -2102,6 +2214,9 @@ async function testVibrancy(ext) {
         check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => asSet[part] === '#ffffff'),
             `all of it as it is set, white (${JSON.stringify(asSet)})`);
         check(vibrancy.stylesheet === null, `no colours of its own (${vibrancy.stylesheet})`);
+        check(Object.values(shades()).every(unshaded), `no glass shaded: as see-through as it is (${shadesText()})`);
+        const onDark = await short('dark');
+        check(onDark.length === 0, `read off the screen, it reads (${onDark.join(', ') || 'all of it'})`);
         await screenshot('32a-vibrancy-dark');
 
         // A light wallpaper: dark type, as emphatic as it is set – readable
@@ -2128,14 +2243,22 @@ async function testVibrancy(ext) {
         check(!date?.visible || Math.abs(contrastLc(ink(date), vibrancy.surfaceOf('island').backdrop.dark)) <
             Math.abs(contrastLc(ink(time()), vibrancy.surfaceOf('island').backdrop.dark)),
         'the island\'s date quieter than its time');
+        check(Object.values(shades()).every(shade => shade?.dim === 0),
+            `no glass darker for it (${shadesText()})`);
+        const lightShort = await short('light');
+        check(lightShort.length === 0, `read off the screen, it reads (${lightShort.join(', ') || 'all of it'})`);
         await screenshot('32b-vibrancy-light');
+
+        await testShadedGlass();
+        showWallpaper(light);
+        await wallpapersSettled();
+        check(await settle(() => isDark(ink(time())) && isDark(ink(widget('clock')))), 'a light wallpaper again');
 
         // Open over the wallpaper, the glance is dark too; over a window
         // (live glass, what it shows not known), as set.
         await pointerTo(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
         await Scripting.sleep(700);
-        const glanceTime = () => actorWith(island.page, 'atelier-glance-time');
         check(glanceTime() && isDark(ink(glanceTime())), `the glance over the wallpaper, dark (${glanceTime() && ink(glanceTime())})`);
         await screenshotIsland('32c-vibrancy-glance-light', 420);
         await restPointer();
@@ -2194,6 +2317,8 @@ async function testVibrancy(ext) {
         const split = shown();
         check(isDark(split.left) && split.right === '#ffffff' && isDark(split.clock) && split.date === '#ffffff',
             `the left side and the clock dark, the right side and the date as set (${JSON.stringify(split)})`);
+        const onHalves = await short('halves', ['bar-left', 'bar-right', 'clock', 'date']);
+        check(onHalves.length === 0, `read off the screen, each side reads (${onHalves.join(', ') || 'all of it'})`);
         await screenshot('32f-vibrancy-halves');
 
         // Solid surfaces: as set.
@@ -2204,15 +2329,134 @@ async function testVibrancy(ext) {
         check(await settle(() => isDark(ink(widget('clock')))), 'and back');
     } finally {
         desktopInterface.set_string('color-scheme', scheme);
+        desktopInterface.reset('enable-animations');
         await closeTestWindows();
         ['show-show-apps-button', 'transparency-mode'].forEach(key => dockSettings.reset(key));
-        ['sides', 'surface'].forEach(key => bar.reset(key));
+        ['sides', 'surface', 'style'].forEach(key => bar.reset(key));
         ['style', 'glass', 'card-opacity', 'widgets'].forEach(key => desktopSettings.reset(key));
         ['source', 'preset'].forEach(key => paletteSettings.reset(key));
         settings.reset('glass-variant');
         uris.forEach(([key, uri]) => background.set_string(key, uri));
         await wallpapersSettled();
         await Scripting.sleep(800);
+    }
+
+    // A sky, between light and dark: in the dark style light type, which
+    // reads there only on glass shaded darker – the island's, the bar's,
+    // the widgets' – eased to it; read off the screen, it reads, the
+    // glance's too, and at rest nothing is worked out anew or drawn. In
+    // the one island, the bar's glass and the island's shaded alike: no
+    // seam where they meet. In the light style the type reads too.
+    async function testShadedGlass() {
+        showWallpaper(sky);
+        await wallpapersSettled();
+        const sides = ['island', 'bar-left', 'bar-right'];
+        check(await settle(() => sides.every(id => polarity(id) === 'light' && shades()[id]?.dim > 0)),
+            `over a sky, light type on glass shaded darker (${sides.map(polarity)}; ${shadesText()})`);
+        check(Object.values(shades()).every(shade => shade?.veil === 0 && shade.dim <= 0.6),
+            `darker only, and no more than 0.6 (${shadesText()})`);
+        await Scripting.sleep(400);
+        const skyShort = await short('sky');
+        check(skyShort.length === 0, `read off the screen, it reads (${skyShort.join(', ') || 'all of it'})`);
+        await screenshot('32b2-vibrancy-sky');
+        // At rest: nothing worked out anew, nothing drawn.
+        const sync = vibrancy._sync;
+        let syncs = 0;
+        vibrancy._sync = function () {
+            syncs++;
+            return sync.call(this);
+        };
+        let frames = 0;
+        const paintId = global.stage.connect('after-paint', () => frames++);
+        await Scripting.sleep(1500);
+        global.stage.disconnect(paintId);
+        delete vibrancy._sync;
+        check(syncs === 0 && frames <= 1, `at rest, nothing worked out anew or drawn (${syncs} times, ${frames} frames in 1.5 s)`);
+
+        // Open, the glance's time reads on its glass, shaded too.
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        const glance = glanceTime() ? await drawnContrast('vibrancy/sky-glance', glanceTime()) : null;
+        const page = islandModule._glass?.shade;
+        results.push(`INFO  sky: the glance's time Lc ${glance?.lc.toFixed(0)} of ${readingNeed('pages').toFixed(0)} ` +
+            `(${glance?.type} on ${glance?.glass}, shade ${page?.dim}/${page?.veil})`);
+        check(glance && glance.lc >= readingNeed('pages') - SHORT && page?.dim > 0,
+            `the glance's time reads on its glass shaded darker (Lc ${glance?.lc.toFixed(0)}, shade ${page?.dim})`);
+        await screenshotIsland('32b3-vibrancy-sky-glance', 420);
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+        await Scripting.sleep(400);
+
+        // One island: the bar's glass and the island's are one glass, one
+        // polarity and one shade – at rest and open.
+        bar.set_string('style', 'island');
+        const one = () => barModule._surfaces[0]?.actor ?? null;
+        const alike = () => one()?.shade && islandModule._glass?.shade && sameShade(one().shade, islandModule._glass.shade);
+        check(await settle(() => polarity('bar') && polarity('bar') === polarity('island') && alike() &&
+            islandModule._glass.shade.dim > 0),
+        `one island: one polarity, one shade (${polarity('bar')} ${one()?.shade.dim}, ${polarity('island')} ` +
+            `${islandModule._glass?.shade.dim})`);
+        await Scripting.sleep(400);
+        // Either side of where the island begins in it: the bar's glass and
+        // the island's, alike (above the type).
+        const [seamX, seamY] = [Math.round(island.x), Math.round(island.y + 4)];
+        await screenshotArea('vibrancy/one-island-seam', seamX - 12, seamY, 24, 2);
+        const seam = pixelsOf('vibrancy/one-island-seam', [seamX - 12, seamY]);
+        const patch = x0 => [0, 1, 2].map(c => {
+            let sum = 0;
+            for (let x = x0; x < x0 + 4; x++)
+                sum += seam.at(x, seamY)[c] + seam.at(x, seamY + 1)[c];
+            return Math.round(sum / 8);
+        });
+        const [outside, inside] = [patch(seamX - 10), patch(seamX + 6)];
+        check(colorDistance(outside, inside) <= 8, `no seam where they meet (the bar's ${outside} | the island's ${inside})`);
+        await screenshotArea('32b5-vibrancy-sky-one-island', 0, 0, global.stage.width, 60);
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        await Scripting.sleep(700);
+        check(alike(), `open, the one island shaded as the island (${one()?.shade.dim}, ${islandModule._glass?.shade.dim})`);
+        await screenshotIsland('32b6-vibrancy-sky-one-island-open', 420);
+        await restPointer();
+        await waitFor(() => island.page === null, 3000);
+        bar.reset('style');
+        await Scripting.sleep(600);
+
+        // Another shade is eased to – a while, halfway between – and with
+        // GNOME's animations off taken at once.
+        const glass = islandModule._glass;
+        const before = glass.shade;
+        const target = {dim: before.dim + 0.2, veil: 0};
+        glass.setShade(target);
+        await Scripting.sleep(100);
+        const halfway = glass._shades.shown('glass').dim;
+        await Scripting.sleep(400);
+        const there = glass._shades.shown('glass').dim;
+        check(halfway > before.dim + 0.01 && halfway < target.dim - 0.01 && Math.abs(there - target.dim) < 1e-6,
+            `eased to another shade: ${halfway.toFixed(2)} on the way from ${before.dim} to ${target.dim}, then there`);
+        desktopInterface.set_boolean('enable-animations', false);
+        glass.setShade(before);
+        check(Math.abs(glass._shades.shown('glass').dim - before.dim) < 1e-6, 'with GNOME\'s animations off, at once');
+        desktopInterface.reset('enable-animations');
+
+        // The light style: the type reads over the sky (dark, as the style
+        // has it) and over a dark wallpaper (light).
+        desktopInterface.set_string('color-scheme', 'prefer-light');
+        check(await settle(() => polarity('island') === 'dark' && isDark(ink(time()))),
+            `the light style over the sky: dark type (${sides.map(polarity)}; ${shadesText()})`);
+        await Scripting.sleep(400);
+        const lightStyle = await short('sky-light-style');
+        check(lightStyle.length === 0, `read off the screen, it reads (${lightStyle.join(', ') || 'all of it'})`);
+        await screenshot('32b7-vibrancy-sky-light-style');
+        showWallpaper(dark);
+        await wallpapersSettled();
+        check(await settle(() => polarity('island') === 'light' && ink(time()) === '#ffffff'),
+            `and over a dark wallpaper, light type (${sides.map(polarity)}; ${shadesText()})`);
+        await Scripting.sleep(400);
+        const darkLightStyle = await short('dark-light-style');
+        check(darkLightStyle.length === 0, `read off the screen, it reads (${darkLightStyle.join(', ') || 'all of it'})`);
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        await Scripting.sleep(300);
     }
 }
 
@@ -5116,6 +5360,40 @@ function pixelsOf(name, [left, top] = [0, 0]) {
             return [pixels[i], pixels[i + 1], pixels[i + 2]];
         },
     };
+}
+
+// How type (or an icon, a mark) on glass reads as it is drawn: APCA's Lc
+// of its type – the 3 % of its box's pixels most unlike the glass, lighter
+// or darker as it is set – against the glass there (the middle of the
+// pixels nearer the glass than the type). The box's screenshot is kept,
+// under that name.
+async function drawnContrast(name, actor) {
+    const [x, y] = actor.get_transformed_position();
+    const [width, height] = actor.get_transformed_size();
+    const [x1, y1] = [Math.max(0, Math.floor(x)), Math.max(0, Math.floor(y))];
+    const [x2, y2] = [Math.min(global.stage.width, Math.ceil(x + width)), Math.min(global.stage.height, Math.ceil(y + height))];
+    if (x2 - x1 < 2 || y2 - y1 < 2)
+        return null;
+    await screenshotArea(name, x1, y1, x2 - x1, y2 - y1);
+    const pixels = pixelsOf(name, [x1, y1]);
+    const all = [];
+    for (let row = y1; row < y2; row++) {
+        for (let col = x1; col < x2; col++)
+            all.push(pixels.at(col, row));
+    }
+    const ys = all.map(rgb => apcaY(rgb));
+    const order = [...ys.keys()].sort((a, b) => ys[a] - ys[b]);
+    const {red, green, blue} = actor.get_theme_node().get_foreground_color();
+    const light = apcaY([red, green, blue]) > 0.2;
+    const share = Math.max(1, Math.round(order.length * 0.03));
+    const typeOf = light ? order.slice(-share) : order.slice(0, share);
+    const type = [0, 1, 2].map(c => typeOf.reduce((sum, i) => sum + all[i][c], 0) / typeOf.length);
+    const other = ys[order[Math.floor(order.length * (light ? 0.05 : 0.95))]];
+    const middle = (apcaY(type) + other) / 2;
+    const glassOf = order.filter(i => (light ? ys[i] < middle : ys[i] > middle));
+    const glass = all[glassOf[Math.floor(glassOf.length / 2)] ?? order[0]];
+    const hex = rgb => `#${rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+    return {lc: Math.abs(contrastLc(type, glass)), light, type: hex(type), glass: hex(glass)};
 }
 
 // How much two screenshots differ over a rectangle: the mean of each
