@@ -21,6 +21,17 @@
 //     there [dim, veil, deep] and the short side of the part of it p is in
 //     (its own rectangle, a drop, the one island…), in pixels.
 //
+// And, where it defines them (#define before the material's declarations):
+//
+//   ATELIER_OWN_NORMAL: vec2 atelier_normal(vec2 p) – the body's outward
+//     normal at p, a unit vector (none, shorter than a half: no edge there),
+//     for a body whose distances are not smooth enough to take it from
+//     (the lock screen's clock: its figures' distances read from a texture,
+//     the normal stored with them);
+//   ATELIER_WASH: vec4 atelier_wash – a colour [r, g, b] the glass is
+//     washed towards after its shade, as much as a (the clock's tone, as
+//     its legibility plan has it).
+//
 // Then, only within the bounds it may draw in (glassReach):
 // - the lens: within a bevel of the body's edge, what is behind is looked
 //   up farther in, along the body's normal (its gradient: shapes merged by
@@ -168,12 +179,17 @@ if (glassLens.w < 0.5) {
     vec2 normal = vec2(0.0);
     bool edged = false;
     if (d < max(max(bevel, glassEdge.y), glassGlint.w) + 1.0 && body < glassEdge.z + 1.5) {
+#ifdef ATELIER_OWN_NORMAL
+        normal = atelier_normal(p);
+        edged = dot(normal, normal) > 0.25;
+#else
         vec2 slope = vec2(atelier_body(p + vec2(1.0, 0.0)) - body, atelier_body(p + vec2(0.0, 1.0)) - body);
         float steep = length(slope);
         if (steep > 0.0001) {
             normal = slope / steep;
             edged = true;
         }
+#endif
     }
     float side = abs(dot(normal, across));
     vec4 outside = vec4(0.0);
@@ -218,6 +234,9 @@ if (glassLens.w < 0.5) {
         f = clamp(f, 0.0, 1.0);
         f *= 1.0 - shade.x;
         f = mix(f, vec3(1.0), shade.y);
+#ifdef ATELIER_WASH
+        f = mix(f, atelier_wash.rgb, atelier_wash.a);
+#endif
         float rim = 1.0 - clamp(d / max(glassEdge.y, 0.0001), 0.0, 1.0);
         f *= 1.0 - glassEdge.x * rim * rim;
         if (edged) {

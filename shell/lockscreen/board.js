@@ -4,8 +4,9 @@
 // type is in a tone legible on the wallpaper behind them (typography.js),
 // in the typeface chosen for them; each part of it as it takes to read
 // where it is – nothing where it reads as it is, else heavier, or a soft
-// shadow round its letters – and a glass clock's digits frost the
-// wallpaper behind them (liquidGlass.js). On the lock screen they only
+// shadow round its letters – and a glass clock's digits are Liquid Glass
+// over the wallpaper (glassText.js), washed towards the tone as far as
+// they need. On the lock screen they only
 // show – a click goes through to GNOME's lock screen, which brings up the
 // prompt; in the editor (a mock lock screen in the session, see
 // preview.js) they are moved and stretched as on the desktop. When the
@@ -103,9 +104,10 @@ export class LockBoard {
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
         // The glass clocks' glass, as Atelier's glass looks (none, solid
-        // digits, with GNOME's high contrast on), and their frosted
-        // wallpaper for it: made in the session ahead of time (clock.js
-        // GlassWarmUp), or here, in the background, when it isn't there yet.
+        // digits, with GNOME's high contrast on), and the wallpaper as it
+        // blurs it, small, to weigh what their digits take to read: made in
+        // the session ahead of time (clock.js GlassWarmUp), or here, in the
+        // background, when it isn't there yet.
         this._glassVariant = new GlassVariant(atelier, variant => {
             this._backdrop.setVariant(variant);
             this._queueGlass();
@@ -694,11 +696,12 @@ export class LockBoard {
     }
 
     // A glass clock: its digits in the typeface chosen, at the weight and
-    // width set; the frosted wallpaper behind it; and what its digits and
-    // its date line take to read where they are – its digits measured as
-    // their material comes out over the wallpaper (lib/lockLook.js
-    // glassInk()), their glass at rest to start with. The face applies it
-    // (shell/lockscreen/clock.js), nothing when it is told what it has.
+    // width set; the wallpaper behind it, as its glass blurs it; and what
+    // its digits and its date line take to read where they are – its
+    // digits measured as their glass comes out over the wallpaper
+    // (lib/lockLook.js glassInk()), their glass at rest to start with. The
+    // face applies it (shell/lockscreen/clock.js), nothing when it is told
+    // what it has.
     _planGlass(widget) {
         const glass = widget.glass;
         // (Being stretched: once it rests.)
