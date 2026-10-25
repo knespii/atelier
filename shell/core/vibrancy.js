@@ -10,8 +10,9 @@
 // What is behind a surface is the wallpaper as GNOME draws it on its
 // monitor: sampled small once for each wallpaper (in GdkPixbuf's worker
 // threads) and blurred as the glass blurs it, then made into the glass of
-// the variant chosen (lib/glassLook.js; none for 'off': solid surfaces keep
-// their colours). All of it is worked out anew a moment after the
+// the variant chosen, in GNOME's style, as a part as large as the surface
+// (lib/glassLook.js; none for 'off': solid surfaces keep their colours).
+// All of it is worked out anew a moment after the
 // wallpaper, the palette, the variant, the monitors, the theme or a
 // surface's place change – never while something moves: a surface says
 // where it rests, not where it is on its way. Nothing is read back from
@@ -28,7 +29,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {placement} from '../../lib/depth.js';
 import {frost, parseColor} from '../../lib/glassBackdrop.js';
-import {NO_SHADE, lookOf, resolveVariant, shadedLook} from '../../lib/glassLook.js';
+import {NO_SHADE, lookOf, resolveVariant, smallness} from '../../lib/glassLook.js';
 import {regionStats} from '../../lib/lockLook.js';
 import {rgbToHex} from '../../lib/palette.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
@@ -44,11 +45,12 @@ Gio._promisify(Gio.File.prototype, 'delete_async');
 Gio._promisify(Gio.InputStream.prototype, 'close_async');
 
 // The wallpaper's sample: so many pixels along its longer side (a 1080p
-// monitor's 12 to one), enough for surfaces some 30 pixels high.
-const SAMPLE_SIDE = 160;
-// The glass's blur, as its sigma in logical pixels (GNOME's blur radius,
-// 36 under the island, is twice it).
-const BLUR_SIGMA = 18;
+// monitor's 3 to one): glass blurs it little now, and what is behind type
+// is about as detailed as its own lines.
+const SAMPLE_SIDE = 640;
+// The samples blurred for the glass kept at most (one for each blur and
+// monitor's size in use: a few).
+const BLURRED_KEPT = 4;
 // A moment after a change, so that a burst of them is one.
 const DELAY = 200;
 
@@ -299,7 +301,8 @@ export class VibrancyModule {
         this._modules = modules;
         this._surfaces = new Map();
         this._sample = null;
-        this._blurred = null;
+        // The sample blurred, by its sigma and size.
+        this._blurred = new Map();
         this._serial = 0;
         this._timeoutId = 0;
     }
@@ -359,7 +362,7 @@ export class VibrancyModule {
         this._stylesheet.destroy(Main.sessionMode.isLocked);
         this._stylesheet = null;
         this._sample = null;
-        this._blurred = null;
+        this._blurred.clear();
     }
 
     /**
@@ -456,28 +459,35 @@ export class VibrancyModule {
         if (serial !== this._serial || !this._stylesheet)
             return;
         this._sample = sample;
-        this._blurred = null;
+        this._blurred.clear();
         this.queue();
     }
 
-    // The sample blurred as the glass blurs the wallpaper on a monitor
-    // (kept for the blur it was made for).
-    _blurredFor(shown) {
+    // The sample blurred as the glass blurs the wallpaper on a monitor –
+    // the look's blur, as the GPU's shader has it (none for clear glass) –
+    // kept for its sigma and size.
+    _blurredFor(shown, look) {
         const sample = this._sample;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const sigma = Math.round(BLUR_SIGMA * scale * sample.width / shown.width * 4) / 4;
-        if (this._blurred?.sigma !== sigma) {
-            const pixels = frost(sample.pixels, sample, {sigma, saturation: 1, lift: 0});
-            this._blurred = {sigma, image: {pixels, channels: 3, rowstride: sample.width * 3,
-                width: sample.width, height: sample.height}};
+        const sigma = Math.round((look?.blur ?? 0) * scale * sample.width / shown.width * 4) / 4;
+        const key = `${sigma} ${sample.width}x${sample.height}`;
+        let image = this._blurred.get(key);
+        if (!image) {
+            const pixels = sigma > 0 ? frost(sample.pixels, sample, {sigma, saturation: 1, lift: 0}) : null;
+            image = pixels
+                ? {pixels, channels: 3, rowstride: sample.width * 3, width: sample.width, height: sample.height}
+                : sample;
+            if (this._blurred.size >= BLURRED_KEPT)
+                this._blurred.delete(this._blurred.keys().next().value);
+            this._blurred.set(key, image);
         }
-        return this._blurred.image;
+        return image;
     }
 
     // What is behind a rectangle of a monitor: the wallpaper there, as
     // blurred as the glass has it, and the background's colour where the
     // picture doesn't reach.
-    _statsOf(rect, monitor) {
+    _statsOf(rect, monitor, look) {
         const background = rgbToHex(parseColor(this._background.get_string('primary-color')));
         const sample = this._sample;
         if (!sample)
@@ -487,13 +497,13 @@ export class VibrancyModule {
         const style = this._background.get_string('picture-options');
         const shown = placement(style, size, sample.picture) ?? placement('zoom', size, sample.picture);
         const on = pictureRegion(rect, shown);
-        const stats = on ? regionStats(this._blurredFor(shown), on.region) : null;
+        const stats = on ? regionStats(this._blurredFor(shown, look), on.region) : null;
         return withBackground(stats, on?.cover ?? 0, background);
     }
 
     // What is behind a surface: a colour it is given, or the wallpaper
     // where it rests; null: nowhere now.
-    _behind(surface) {
+    _behind(surface, look) {
         if (surface.behind) {
             const color = surface.behind();
             return color ? withBackground(null, 0, color) : null;
@@ -502,7 +512,7 @@ export class VibrancyModule {
         const monitor = rect?.width > 0 && rect.height > 0 ? this._monitorAt(rect) : null;
         if (!monitor)
             return null;
-        return this._statsOf([rect.x - monitor.x, rect.y - monitor.y, rect.width, rect.height], monitor);
+        return this._statsOf([rect.x - monitor.x, rect.y - monitor.y, rect.width, rect.height], monitor, look);
     }
 
     /**
@@ -541,7 +551,9 @@ export class VibrancyModule {
         const look = lookOf(variant);
         const palette = this._currentPalette();
         // (The polarity GNOME's style implies: light type in its dark style.)
-        const prefer = this._interface.get_string('color-scheme') === 'prefer-dark' ? 'light' : 'dark';
+        const light = this._interface.get_string('color-scheme') !== 'prefer-dark';
+        const prefer = light ? 'dark' : 'light';
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         // What each surface's type needs of its glass, by the glass as it
         // is (never as shaded: its shade isn't read back), those that are
         // one glass together.
@@ -556,14 +568,18 @@ export class VibrancyModule {
                 continue;
             let stats = null;
             try {
-                stats = this._behind(surface);
+                stats = this._behind(surface, look);
             } catch (e) {
                 console.warn(`Atelier: what is behind the ${surface.id} can't be told: ${e.message}`);
             }
             if (!stats)
                 continue;
+            // (Its glass's face: a small control's, as large as it rests.)
+            const rect = surface.rect();
+            const small = rect?.width > 0 && rect.height > 0 ? smallness(Math.min(rect.width, rect.height) / scale) : 0;
             const options = {
-                blur: surface.blur(), tint: surface.tint(), strength: surface.strength(), layers: surface.layers(),
+                light, small, blur: surface.blur(), tint: surface.tint(), strength: surface.strength(),
+                layers: surface.layers(),
             };
             const need = readingNeed(surface.inks, palette);
             const needed = Object.fromEntries(['light', 'dark'].map(polarity =>
@@ -581,7 +597,7 @@ export class VibrancyModule {
             const polarity = polarityOf(needed, {prefer, was: parts.find(part => part.was)?.was ?? null});
             const shade = shadeOf(polarity, needed);
             for (const {surface, stats, options} of parts) {
-                const backdrop = steadied(backdropOf(stats, shadedLook(look, shade), options));
+                const backdrop = steadied(backdropOf(stats, look, {...options, shade}));
                 rules.push(...surfaceRules({
                     roots: surface.roots, scope: surface.scope, inks: surface.inks, backdrop, polarity,
                 }, palette));
