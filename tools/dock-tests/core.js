@@ -510,6 +510,9 @@ async function glassFollows(t) {
     await t.waitFor(() => t.module.dock && t.module.dock !== before && t.module.dock._glass, 2000);
     await t.sleep(1500);
     const dock = t.module.dock;
+    // (Shown whole first: a slower shell – the GNOME 50 container's, drawn
+    // without a GPU – still slides it in.)
+    await t.waitFor(() => dock.container.translation_x === 0 && dock.container.translation_y === 0, 5000);
     // (Liquid Glass of the wallpaper's colours, as the island's: no longer
     // grey.)
     const [gx, gy] = dock.container.get_transformed_position();

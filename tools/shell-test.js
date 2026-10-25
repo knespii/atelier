@@ -7962,7 +7962,10 @@ async function testLockStretchSpeed() {
             results.push(`INFO  drawn without a GPU: ${pace}`);
         else
             check(gaps.mean <= 20 && gaps.p95 <= 25 && long <= 2, pace);
-        check(moves > 30 && placed >= moves - 2 && placed <= 2 * moves + 2 && glass.sdfBuilds === builds &&
+        // (As many moves as frames: fewer where the shell draws without a
+        // GPU, a frame there taking up to seconds.)
+        const fewest = GLib.getenv('ATELIER_TEST_SLOW') ? 10 : 30;
+        check(moves > fewest && placed >= moves - 2 && placed <= 2 * moves + 2 && glass.sdfBuilds === builds &&
             glass.glassText.atlas === atlas,
         `each of its ${moves} moves its figures placed anew (${placed} times; what is behind them painted ` +
             `${behind} times, as its glass grows), none made (${glass.sdfBuilds - builds})`);
