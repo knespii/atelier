@@ -137,6 +137,8 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._count, 1, [Math.min(rects.length, MAX_RECTS)]);
         this.set_uniform_float(this._rects, 4, values);
         setLiquid(this, this._liquid, liquid);
+        // (Drawn anew as they are now: what it drew before was cached.)
+        this.queue_repaint();
     }
 
     /** @param {number[][]} lights - where each rect's light comes from, [x, y] */
@@ -319,6 +321,7 @@ class AtelierDesktopGlass extends St.Widget {
         if (!shade) {
             this._shades.delete(key);
             this._apply();
+            this.queue_redraw();
             return;
         }
         this._shades.set(key, shade);
@@ -334,14 +337,12 @@ class AtelierDesktopGlass extends St.Widget {
 
     // The shades as they are now, drawn again only where those widgets are.
     _showShades(keys) {
-        if (keys.includes(STYLE)) {
+        const style = keys.includes(STYLE);
+        if (style)
             this._syncMaterial();
-            this._rects.forEach(rect => this._redrawWithin(rect));
-            return;
-        }
         this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
         this._rects.forEach((rect, i) => {
-            if (keys.includes(this._keys[i]))
+            if (style || keys.includes(this._keys[i]))
                 this._redrawWithin(rect);
         });
     }
