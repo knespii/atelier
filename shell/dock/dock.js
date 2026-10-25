@@ -22,7 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {
     dockRect, dropIndex, fitIconSize, isHorizontal, maxLength, strutRect,
 } from '../../lib/dockGeometry.js';
-import {NO_SHADE} from '../../lib/glassLook.js';
+import {NO_SHADE, edgeReach} from '../../lib/glassLook.js';
 import {GlassSurface} from '../core/glass.js';
 import {scrollDock} from './actions.js';
 import {DockHider} from './hider.js';
@@ -37,7 +37,7 @@ import {appWindows, windowOptions} from './windows.js';
 
 const MARGIN = 8; // between the dock and its edge, logical pixels
 // How much of a monitor's width the glass of a dock at its side may take,
-// logical pixels.
+// logical pixels (and as much again as its shadow reaches past it).
 const SIDE_GLASS = 160;
 
 // Settings the dock lays its apps out again for.
@@ -130,7 +130,8 @@ export class Dock extends EventEmitter {
         if (glass) {
             const monitor = this.monitor;
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-            const reach = horizontal || !monitor ? 0.25 : Math.min(1, SIDE_GLASS * scale / monitor.width);
+            const reach = horizontal || !monitor ? 0.25
+                : Math.min(1, (SIDE_GLASS + edgeReach(true)) * scale / monitor.width);
             // (Of the wallpaper's colours, as the island's glass.)
             this._glass = new GlassSurface({monitorIndex, side: this._side, reach, look, light});
             this._glass.add_style_class_name('atelier-dock-glass');
