@@ -31,6 +31,14 @@ import {
 // change).
 const LIVE_STEP = 64;
 
+// A surface is only as large as its shapes need (and as far round as their
+// contour, shadow and blur go), in steps of this many logical pixels, within
+// its part of the monitor: what it is painted into offscreen, and drawn
+// again whenever what is behind changes, is no larger. (Monitor-wide, the
+// island's glass was 1704 × 959 logical pixels at 150 %, drawn whole every
+// frame it grew into the control centre.)
+const FIT_STEP = 64;
+
 // Pixels outside the rounded rectangle are dropped; its edge gets one pixel
 // of antialiasing. Everything is in pixels of the actor. The top and the
 // bottom corners may differ (a notch has square top corners), and a notch
@@ -226,7 +234,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.body, 4, body);
         this.set_uniform_float(this._at.radii, 2, radii);
         this.set_uniform_float(this._at.ear, 1, [ear]);
-        this.queue_repaint();
     }
 
     /**
@@ -240,7 +247,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.partner, 4, rect);
         this.set_uniform_float(this._at.partnerBody, 4, body);
         this.set_uniform_float(this._at.partnerLook, 3, [...radii, ear]);
-        this.queue_repaint();
     }
 
     /** @param {number[]} light - where it comes from, [x, y] (y down) */
@@ -274,7 +280,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.drop, 4, drop);
         this.set_uniform_float(this._at.dropRadius, 1, [radius]);
         this.set_uniform_float(this._at.blend, 1, [blend]);
-        this.queue_repaint();
     }
 
     /**
@@ -283,7 +288,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      */
     setNeck(neck) {
         this.set_uniform_float(this._at.neck, 4, neck);
-        this.queue_repaint();
     }
 });
 
@@ -339,6 +343,12 @@ class AtelierGlassSurface extends St.Widget {
         this._lightStyle = light;
         this._source = null;
         this._shape = null;
+        // (Where its shapes were drawn last, on the stage; the part of the
+        // monitor it may cover, and how much of it it covers now.)
+        this._drawn = null;
+        this._band = null;
+        this._frame = null;
+        this._monitorAt = [0, 0];
         this._drop = null;
         this._neck = null;
         this._partner = null;
@@ -441,7 +451,7 @@ class AtelierGlassSurface extends St.Widget {
         this._eased.set('style', {light: light ? 1 : 0}, STYLE_TIME);
         this._eased.set('dim', {dim: look?.dim ?? 0});
         this._syncMaterial();
-        this._syncLive();
+        this._shapesChanged();
         glassLight.sync();
     }
 
@@ -508,12 +518,10 @@ class AtelierGlassSurface extends St.Widget {
             height = Math.ceil(monitor.height * this._reach);
             offsetY = this._side === 'BOTTOM' ? monitor.height - height : 0;
         }
-        this.set_position(monitor.x + offsetX, monitor.y + offsetY);
-        this.set_size(width, height);
-        this._fill?.set_size(width, height);
-        this._wallpaper.set_position(-offsetX, -offsetY);
+        /** The part of the monitor it may cover, on the stage: [x, y, width, height]. */
+        this._band = [monitor.x + offsetX, monitor.y + offsetY, width, height];
+        this._monitorAt = [monitor.x, monitor.y];
         this._source?.set_size(global.stage.width, global.stage.height);
-        this._syncSource();
         if (!this._solid) {
             this._bgManager = new Background.BackgroundManager({
                 container: this._wallpaper,
@@ -521,13 +529,76 @@ class AtelierGlassSurface extends St.Widget {
                 controlPosition: false,
             });
         }
-        if (this._shape)
-            this.setShape(...this._shape);
-        if (this._drop)
-            this.setDrop(...this._drop);
-        if (this._neck)
-            this.setNeck(...this._neck);
+        this._frame = null;
+        this._shapesChanged();
+    }
+
+    // Where it is on the stage and how large: round its shapes as far as
+    // they draw, in steps, within its part of the monitor – grown at once,
+    // shrunk only once they need much less (a texture of another size is
+    // made anew as it changes). Without shapes, as it was (a pixel to
+    // start with).
+    _fit() {
+        const band = this._band;
+        if (!band)
+            return;
+        const bounds = this._bounds();
+        let need;
+        if (bounds) {
+            const scale = glassScale();
+            const margin = Math.ceil((edgeReach(true) + 3 * (this._look?.blur ?? 0) + 2) * scale) + 2;
+            const step = FIT_STEP * scale;
+            const [bx, by, bw, bh] = band;
+            const down = (v, from) => from + Math.floor((v - from) / step) * step;
+            const up = (v, from) => from + Math.ceil((v - from) / step) * step;
+            const x1 = Math.max(bx, down(bounds[0] - margin, bx));
+            const y1 = Math.max(by, down(bounds[1] - margin, by));
+            const x2 = Math.min(bx + bw, up(bounds[0] + bounds[2] + margin, bx));
+            const y2 = Math.min(by + bh, up(bounds[1] + bounds[3] + margin, by));
+            need = [x1, y1, Math.max(1, x2 - x1), Math.max(1, y2 - y1)];
+        } else {
+            need = this._frame ?? [band[0], band[1], 1, 1];
+        }
+        const frame = this._frame;
+        if (frame) {
+            const inside = need[0] >= frame[0] && need[1] >= frame[1] &&
+                need[0] + need[2] <= frame[0] + frame[2] && need[1] + need[3] <= frame[1] + frame[3];
+            if (inside && need[2] * need[3] * 4 > frame[2] * frame[3])
+                return;
+        }
+        this._frame = need;
+        const [x, y, width, height] = need.map(Math.round);
+        this.set_position(x, y);
+        this.set_size(width, height);
+        this._fill?.set_size(width, height);
+        this._wallpaper.set_position(this._monitorAt[0] - x, this._monitorAt[1] - y);
+        this._syncSource();
+    }
+
+    // Its shapes as they are: where it is, what its shader is told (in its
+    // own pixels), its live glass and what it draws within.
+    _shapesChanged() {
+        this._fit();
+        if (this._shape) {
+            const [x, y, width, height, radius, bottomRadius, ear] = this._shape;
+            const {rect, body, radii} = this._shapeIn([x, y, width, height], radius, bottomRadius);
+            this._mask.setShape([this.width, this.height], rect, radii, ear, body);
+        }
+        if (this._drop) {
+            const [centerX, centerY, halfWidth, halfHeight, radius, blend] = this._drop;
+            this._mask.setDrop([centerX - this.x, centerY - this.y, halfWidth, halfHeight],
+                Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
+        } else {
+            this._mask.setDrop([0, 0, 0, 0], 0, 1);
+        }
+        if (this._neck) {
+            const [centerX, top, bottom, halfWidth] = this._neck;
+            this._mask.setNeck([centerX - this.x, top - this.y, bottom - this.y, Math.max(0, halfWidth)]);
+        } else {
+            this._mask.setNeck([0, 0, 0, 0]);
+        }
         this._applyPartner();
+        this._syncLive();
     }
 
     /**
@@ -609,10 +680,7 @@ class AtelierGlassSurface extends St.Widget {
      */
     setShape(x, y, width, height, radius, bottomRadius = radius, ear = 0) {
         this._shape = [x, y, width, height, radius, bottomRadius, ear];
-        const {rect, body, radii} = this._shapeIn([x, y, width, height], radius, bottomRadius);
-        this._mask.setShape([this.width, this.height], rect, radii, ear, body);
-        this._syncLive();
-        this._syncFrame();
+        this._shapesChanged();
     }
 
     // A rectangle on the stage, in the actor: as it is, past the edges of
@@ -680,8 +748,18 @@ class AtelierGlassSurface extends St.Widget {
         return boundsOf([this._bounds() ?? [0, 0, 0, 0], partner?.slice(0, 4) ?? [0, 0, 0, 0]]);
     }
 
+    // (Its shapes changed: drawn again where they were and where they are,
+    // the effect's uniforms only. Not all of the surface – it draws nothing
+    // past its shapes, and what lies under all of it, monitor-wide, would
+    // be drawn again with it every frame they move: the island growing into
+    // the control centre, 9 ms a frame at 150 % here.)
     _syncFrame() {
         this._syncReach();
+        const bounds = this._bounds();
+        const drawn = [bounds, this._drawn].filter(Boolean);
+        this._drawn = bounds;
+        if (drawn.length > 0)
+            this._redrawWithin(boundsOf(drawn));
         glassLight.refresh(this);
     }
 
@@ -737,10 +815,7 @@ class AtelierGlassSurface extends St.Widget {
      */
     setDrop(centerX, centerY, halfWidth, halfHeight, radius, blend) {
         this._drop = [centerX, centerY, halfWidth, halfHeight, radius, blend];
-        this._mask.setDrop([centerX - this.x, centerY - this.y, halfWidth, halfHeight],
-            Math.max(0, Math.min(radius, halfWidth, halfHeight)), blend);
-        this._syncLive();
-        this._syncFrame();
+        this._shapesChanged();
     }
 
     /**
@@ -754,18 +829,13 @@ class AtelierGlassSurface extends St.Widget {
      */
     setNeck(centerX, top, bottom, halfWidth) {
         this._neck = [centerX, top, bottom, halfWidth];
-        this._mask.setNeck([centerX - this.x, top - this.y, bottom - this.y, Math.max(0, halfWidth)]);
-        this._syncLive();
-        this._syncFrame();
+        this._shapesChanged();
     }
 
     /** No drop, nor its neck. */
     clearDrop() {
         this._drop = null;
         this._neck = null;
-        this._mask.setDrop([0, 0, 0, 0], 0, 1);
-        this._mask.setNeck([0, 0, 0, 0]);
-        this._syncLive();
-        this._syncFrame();
+        this._shapesChanged();
     }
 });

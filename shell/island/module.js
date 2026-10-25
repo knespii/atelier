@@ -459,10 +459,15 @@ export class IslandModule {
         if (top?.get_parent() !== group)
             return;
         const children = group.get_children();
-        [this._glass, this._liquid, this._sheet, ...this._ears?.actors ?? [], this._island]
+        const ours = [this._glass, this._liquid, this._sheet, ...this._ears?.actors ?? [], this._island]
             .filter(actor => actor?.get_parent() === group)
-            .sort((a, b) => children.indexOf(a) - children.indexOf(b))
-            .forEach(actor => group.set_child_below_sibling(actor, top));
+            .sort((a, b) => children.indexOf(a) - children.indexOf(b));
+        // (Already there, right under the top windows: left as it is –
+        // restacked, all of it is drawn again, a frame of its own.)
+        const at = children.indexOf(top);
+        if (ours.every((actor, i) => children[at - ours.length + i] === actor))
+            return;
+        ours.forEach(actor => group.set_child_below_sibling(actor, top));
     }
 
     /**
