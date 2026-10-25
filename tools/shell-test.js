@@ -7567,7 +7567,11 @@ async function testLockPromptPace() {
                     if ([i - 1, i].some(j => frames[j - 1]?.popup && frames[j] && !frames[j].popup))
                         return 'the popup\'s liquid gone';
                     const spent = Object.values(f.spent).reduce((sum, took) => sum + took, 0);
-                    return f.layout + f.painting + spent < 4 ? 'nothing measured' : null;
+                    if (f.layout + f.painting + spent < 4)
+                        return 'nothing measured';
+                    // (Laid out and painted in no time: held up outside
+                    // the frame.)
+                    return f.layout + f.painting < 2 ? 'held up outside the frame' : null;
                 };
                 const late = moving.filter(f => f.gap > 20);
                 // The first time up too, the island's glass and the popup's
