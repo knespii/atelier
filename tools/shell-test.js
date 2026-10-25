@@ -9359,12 +9359,13 @@ export async function run() {
             await part(testLockGlassPictures);
             await part(testLockClockFades);
             await part(testLockPromptPace);
-            await part(testLockUnlockShows);
             await part(testLockFreeStretch);
             await part(testLockStretchSpeed);
             await part(testLockOnOwnWallpaper);
             await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
             await part(testLockFonts);
+            // (Last: it unlocks the way the user does, the shell stopped a while.)
+            await part(testLockUnlockShows);
             // (GNOME's wallpapers made anew as it quits would touch what is gone.)
             await wallpapersSettled();
             testQuitWithWorkQueued(ext);
@@ -9427,12 +9428,12 @@ export async function run() {
         await part(testLockGlassLooks);
         await part(testLockClockFades);
         await part(testLockPromptPace);
-        await part(testLockUnlockShows);
         await part(testLockFreeStretch);
         await part(testLockStretchSpeed);
         await part(testLockOnOwnWallpaper);
         await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
         await part(testLockFonts);
+        await part(testLockUnlockShows);
         // (Last: they set up how the shell quits.)
         await testQuitWithControlCentreOpen(ext);
         testQuitWithWorkQueued(ext);
