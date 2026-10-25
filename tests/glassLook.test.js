@@ -1,6 +1,6 @@
 import {
     LOOK, NO_SHADE, REST_LIGHT, TINTS, VARIANTS, bodyRect, boundsOf, lightToward, lookOf, materialValues, resolveVariant,
-    sameLight, sameShade, shadedLook, tintOf,
+    sameLight, sameShade, shadedLook, textureFrame, tintOf,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -120,4 +120,20 @@ export function testBounds() {
     assertEqual(boundsOf([]), null, 'none');
     assertEqual(boundsOf([[10, 20, 30, 40], [0, 50, 10, 0]]), [10, 20, 30, 40], 'empty ones left out');
     assertEqual(boundsOf([[10, 20, 30, 40], [0, 50, 10, 30]]), [0, 20, 40, 60], 'around them all');
+}
+
+export function testTextureFrame() {
+    // (As measured in the headless shell: a 1920 × 108 surface's texture
+    // has 1923 × 111 texels at scale 1 and 3846 × 222 at 2, a 2560 × 144
+    // one 5126 × 294 at 150 % – twice its frame's size each way.)
+    assertEqual(textureFrame(1920), [-2, 1923], 'two pixels before the actor, one after it');
+    assertEqual(textureFrame(108), [-2, 111], 'the same at any length');
+    assertEqual(textureFrame(144), [-2, 147], 'whatever the scale it is drawn at');
+    assertEqual(textureFrame(100.4), [-1, 103], 'a size rounded down: its end padded the more');
+    assertEqual(textureFrame(100.6), [-2, 104], 'rounded up');
+    for (const length of [1, 32, 108, 972, 1080, 1920, 2560, 3840]) {
+        const [start, size] = textureFrame(length);
+        assert(start <= -0.75 && start + size >= length + 0.75,
+            `${length}: at least 0.75 px of padding either side`);
+    }
 }

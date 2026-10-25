@@ -19,7 +19,7 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, tintOf} from '../../lib/glassLook.js';
+import {NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, textureFrame, tintOf} from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
@@ -149,17 +149,9 @@ export function syncTextureFrame(effect, origin, size) {
     const actor = effect.get_actor();
     if (!actor)
         return;
-    // As Clutter enlarges the box of an offscreen effect (in its pixels):
-    // the end rounded up past 0.75 px more, the size rounded and 3 px more.
-    const scale = Math.ceil(actor.get_resource_scale());
-    const frame = length => {
-        const scaled = length * scale;
-        const rounded = Math.round(scaled);
-        const end = Math.ceil(scaled + 0.75);
-        return [(end - rounded - 3) / scale, (rounded + 3) / scale];
-    };
-    const [x, width] = frame(actor.width);
-    const [y, height] = frame(actor.height);
+    // (Whatever its resource scale: lib/glassLook.js textureFrame().)
+    const [x, width] = textureFrame(actor.width);
+    const [y, height] = textureFrame(actor.height);
     effect.set_uniform_float(origin, 2, [x, y]);
     effect.set_uniform_float(size, 2, [width, height]);
 }
