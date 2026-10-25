@@ -202,14 +202,16 @@ const WARM_UP_WAIT = 2000;
  */
 export function warmUpLockGlass(look, light) {
     const group = Main.layoutManager.uiGroup;
-    const behind = Main.layoutManager._backgroundGroup;
-    if (warm || !look || !group || !(behind instanceof Clutter.Actor))
+    if (warm || !look || !group)
         return;
     warm = true;
-    // (Under the windows and the wallpaper: drawn, never seen.)
+    // (Under the windows and the wallpaper: drawn, never seen. What is
+    // behind them here is any picture: the programs are the same.)
     const holder = new Clutter.Actor({x: 0, y: 0, width: 16, height: 16, reactive: false});
     Shell.util_set_hidden_from_pick(holder, true);
     group.insert_child_at_index(holder, 0);
+    const behind = new Clutter.Actor({width: 16, height: 16, background_color: Cogl.Color.from_string('grey')[1]});
+    holder.add_child(behind);
     const popup = new PopupGlass({source: behind, look, light});
     holder.add_child(popup);
     popup.place([0, 0], [0, 0], [16, 16]);
@@ -218,23 +220,21 @@ export function warmUpLockGlass(look, light) {
     holder.add_child(surface);
     surface.setShape(0, 0, 12, 12, 4);
     let timeoutId = 0;
+    let gone = false;
     const done = () => {
-        global.stage.disconnectObject(holder);
-        if (timeoutId)
-            GLib.source_remove(timeoutId);
-        timeoutId = 0;
-        holder.destroy();
+        if (!gone)
+            holder.destroy();
     };
     // (Gone a frame after it was drawn – or with the UI, as the shell quits.)
     global.stage.connectObject('after-paint', () => {
         global.stage.disconnectObject(holder);
         global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
-            if (holder.get_parent())
-                done();
+            done();
             return GLib.SOURCE_REMOVE;
         });
     }, holder);
     holder.connect('destroy', () => {
+        gone = true;
         global.stage.disconnectObject(holder);
         if (timeoutId)
             GLib.source_remove(timeoutId);

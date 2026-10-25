@@ -1511,8 +1511,11 @@ async function testBarStyles(ext) {
     // GNOME's bar, of glass, giving way to the overview as GNOME's does.
     bar.set_string('style', 'gnome');
     bar.set_string('surface', 'glass');
+    // (Laid out anew a frame or two later: without a GPU, up to seconds.)
+    const glassBarThere = () => shown('atelier-glass').find(g => g._shape?.[2] >= Main.panel.width - 1);
+    await waitFor(() => glassBarThere() && left.translation_x === 0, 4000);
     await Scripting.sleep(600);
-    const glassBar = shown('atelier-glass').find(g => g._shape?.[2] >= Main.panel.width - 1);
+    const glassBar = glassBarThere();
     check(glassBar && Main.panel.has_style_class_name('atelier-bar-clean') && left.translation_x === 0 &&
         statusArea.quickSettings.container.visible, 'GNOME\'s bar of glass, with all its icons');
     await top('28f-bar-gnome-glass');

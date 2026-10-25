@@ -472,11 +472,15 @@ class AtelierGlassSurface extends St.Widget {
     // them as its contour and shadow go).
     _redrawWithin([x, y, width, height]) {
         const margin = Math.ceil(edgeReach(true) * glassScale()) + 2;
-        const [x1, y1] = [Math.floor(x - this.x) - margin, Math.floor(y - this.y) - margin];
-        this.queue_redraw_with_clip(new Mtk.Rectangle({
-            x: x1, y: y1,
-            width: Math.ceil(x + width - this.x) + margin - x1, height: Math.ceil(y + height - this.y) + margin - y1,
-        }));
+        // (Within the surface: past it there is nothing of it to draw – an
+        // empty or upside-down rectangle is no clip to give Clutter.)
+        const x1 = Math.max(0, Math.floor(x - this.x) - margin);
+        const y1 = Math.max(0, Math.floor(y - this.y) - margin);
+        const x2 = Math.min(Math.ceil(this.width), Math.ceil(x + width - this.x) + margin);
+        const y2 = Math.min(Math.ceil(this.height), Math.ceil(y + height - this.y) + margin);
+        if (!(x2 > x1 && y2 > y1))
+            return;
+        this.queue_redraw_with_clip(new Mtk.Rectangle({x: x1, y: y1, width: x2 - x1, height: y2 - y1}));
     }
 
     // What the shader draws within: its shapes, their contour and shadow.
