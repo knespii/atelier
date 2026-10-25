@@ -1,6 +1,7 @@
 import {
-    LOOK, NO_SHADE, REST_LIGHT, TINTS, VARIANTS, bodyRect, boundsOf, lightToward, lookOf, materialValues, resolveVariant,
-    sameLight, sameShade, shadedLook, textureFrame, tintOf,
+    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, TINTS, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
+    faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameShade,
+    shadedLook, smallness, textureFrame, tintOf,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -20,30 +21,115 @@ export function testLooks() {
     for (const variant of ['regular', 'clear']) {
         const look = lookOf(variant);
         assert(look === LOOK[variant], `${variant} has its material`);
-        assert(look.rim.top > look.rim.side && look.rim.side > look.rim.bottom,
-            `${variant}: the light strongest at the top, faintest at the bottom`);
-        assert(look.saturation >= 1 && look.brightness >= 1, `${variant}: richer and lighter`);
+        assert(look.lens.bevel === 20 && look.lens.depth === 60 && look.lens.dispersion === 0,
+            `${variant}: Apple's bevel, no colour fringe`);
+        assert(look.glint > 0 && look.glint < 1, `${variant}: a glint`);
+        // (The lock screen's Cairo clock's, as they were.)
+        assert(look.rim.top > look.rim.side && look.rim.side > look.rim.bottom && look.saturation >= 1 &&
+            look.lens.width > 0 && look.sheen.alpha > 0, `${variant}: the Cairo clock's look kept`);
     }
-    assert(LOOK.clear.veil < LOOK.regular.veil && LOOK.clear.dim > LOOK.regular.dim,
-        'clear: less veil, a dimming under it');
-    assert(LOOK.clear.frost < LOOK.regular.frost && LOOK.regular.frost === 1,
-        'clear: less frosted than the surfaces are');
+    assert(LOOK.regular.blur === 2 && LOOK.clear.blur === 0, 'regular lightly blurred, clear not at all');
+    assert(LOOK.clear.glint > LOOK.regular.glint, 'clear glass glints more');
+    assert(LOOK.regular.contour.dark > LOOK.regular.contour.light && LOOK.clear.contour.dark === LOOK.clear.contour.light,
+        'a darker contour in the dark style; clear glass\'s its own');
+    assertEqual(faceOf(LOOK.regular, {light: true}), 'light', 'regular: GNOME\'s style\'s face');
+    assertEqual(faceOf(LOOK.regular, {light: false}), 'dark', 'dark in its dark style');
+    assertEqual(faceOf(LOOK.clear, {light: true}), 'clear', 'clear: its own');
+    assertEqual(faceOf(null, {light: true}), null, 'none: none');
+}
+
+export function testFaces() {
+    const grey = v => [v, v, v];
+    const close = (a, b, message) => assert(a.every((v, i) => Math.abs(v - b[i]) < 1e-6), `${message} (${a})`);
+    // Light glass lifts black (to its lift) and keeps white white.
+    close(faceColor(grey(0), 'light'), grey(FACES.light.lift), 'light glass over black: its lift');
+    assert(faceColor(grey(1), 'light')[0] > 0.98, 'light glass over white: white');
+    // Dark glass: black a dark grey, white well below white – the middle
+    // greys lifted (λ) more than a straight line would.
+    close(faceColor(grey(0), 'dark'), grey(32 / 255), 'dark glass over black');
+    const white = faceColor(grey(1), 'dark')[0];
+    assert(near(white, 32 / 255 + 0.4525), `dark glass over white: ${white}`);
+    assert(faceColor(grey(0.5), 'dark')[0] > (32 / 255 + white) / 2, 'its middle greys lifted');
+    // Small controls of dark glass: lighter over light backdrops.
+    assert(faceColor(grey(0.9), 'dark', {small: 1})[0] > faceColor(grey(0.9), 'dark')[0],
+        'a small control lighter');
+    close(faceColor(grey(0.4), 'light', {small: 1}), faceColor(grey(0.4), 'light'), 'light glass the same small');
+    // Clear: nearly what is behind, a little lifted.
+    const clear = faceColor(grey(0.5), 'clear')[0];
+    assert(clear > 0.5 && clear < 0.65, `clear glass over grey: ${clear}`);
+    // Neutral: a grey stays grey; colour stays its hue, a little richer.
+    const red = faceColor([0.8, 0.2, 0.2], 'light');
+    assert(red[0] > red[1] && near(red[1], red[2]), `a red stays red (${red})`);
+    // Deep: darker than dark, eased towards.
+    const deep = faceColor(grey(0.8), 'dark', {deep: 1})[0];
+    const half = faceColor(grey(0.8), 'dark', {deep: 0.5})[0];
+    assert(deep < faceColor(grey(0.8), 'dark')[0] && near(half, (deep + faceColor(grey(0.8), 'dark')[0]) / 2),
+        `deep glass darker, eased (${deep}, ${half})`);
+    assert(faceColor([1, 0, 0], 'light').every(v => v >= 0 && v <= 1), 'within 0 … 1');
+}
+
+export function testSmallness() {
+    assertEqual(SMALL, [40, 80]);
+    assertEqual(smallness(32), 1, 'the island at rest: a small control');
+    assertEqual(smallness(100), 0, 'a panel: not');
+    assert(near(smallness(60), 0.5), 'half way between');
+}
+
+export function testLens() {
+    assertEqual(lensDepth(0, 20, 60), 60, 'the whole depth at the very edge');
+    assertEqual(lensDepth(20, 20, 60), 0, 'nothing from the bevel\'s end in');
+    assertEqual(lensDepth(50, 20, 60), 0, 'the middle flat');
+    assertEqual(lensDepth(5, 0, 60), 0, 'no bevel: no lens');
+    // Where it looks up (d + depth) falls, then rises again: the outer part
+    // of the bevel is a mirrored copy, some 0.55 (depth twice the bevel: a
+    // small part) to 0.68 of it (three times).
+    for (const [bevel, depth] of [[20, 60], [12, 24]]) {
+        const at = d => d + lensDepth(d, bevel, depth);
+        let turn = 0;
+        for (let d = 0.01; d < bevel; d += 0.01) {
+            if (at(d) < at(turn) - 1e-9)
+                turn = d;
+        }
+        assert(turn > 0.55 * bevel && turn < 0.69 * bevel,
+            `${bevel}, ${depth}: mirrored over the outer ${(turn / bevel).toFixed(3)} of the bevel`);
+    }
+    assertEqual(lensOf(LOOK.regular.lens, 200), {bevel: 20, depth: 60}, 'a panel: the whole bevel');
+    assertEqual(lensOf(LOOK.regular.lens, 48), {bevel: 12, depth: 24}, 'a 48 px circle: never deeper than half of it');
+    assertEqual(lensOf(LOOK.regular.lens, 200, 2), {bevel: 40, depth: 100}, 'in pixels at scale 2');
+}
+
+export function testBlurTaps() {
+    assertEqual(blurTaps(0), {taps: 1, offset: 0, weight: 0}, 'clear glass: one tap');
+    const five = blurTaps(0.8);
+    assert(five.taps === 5 && near(4 * five.weight * five.offset ** 2, 0.64), `a light blur: five, its spread (${five.weight})`);
+    const nine = blurTaps(4);
+    assert(nine.taps === 9 && near(2 * nine.weight * nine.offset ** 2, 16), 'more: nine, the Gaussian\'s spread');
 }
 
 export function testMaterialValues() {
     const look = LOOK.regular;
-    const values = materialValues(look, 2);
-    assertEqual(values.tone, [look.saturation, look.brightness, look.veil, look.dim], 'the tone as it is');
-    assertEqual(values.lens, [look.lens.width * 2, look.lens.shift * 2, look.aberration, 1],
-        'lengths in the surface\'s pixels, the material on');
-    assertEqual(values.rim, [look.rim.top, look.rim.bottom, look.rim.side, look.rim.width * 2], 'the rim');
-    assert(near(values.sheen[2], look.sheen.angle * Math.PI / 180) && values.sheen[3] === look.grain,
-        'the sheen\'s angle in radians, the grain');
-    assert(near(values.sheen[0], look.sheen.alpha * look.sheen.surface) && values.sheen[0] < look.sheen.alpha,
-        'a surface shows a share of the sheen (type is read on it)');
+    const values = materialValues(look, 2, {light: false, shadow: true, density: 2});
+    assertEqual(values.lens, [40, 120, 0, 1], 'lengths in the surface\'s pixels, the material on');
+    const taps = blurTaps(look.blur * 2 * 2);
+    assertEqual(values.blur, [taps.taps, taps.offset / 2, taps.weight, look.grain],
+        'the blur\'s taps for its texels, apart in pixels; the grain');
+    const dark = FACES.dark;
+    assertEqual(values.face, [dark.lift, dark.T, dark.lambda, dark.g], 'the dark style\'s face');
+    assertEqual(values.small, [dark.small.T, dark.small.lambda, 2, 0], 'and its small controls\'');
+    assertEqual(values.deep, [FACES.deep.lift, FACES.deep.T, FACES.deep.lambda, FACES.deep.g], 'deep glass\'s');
+    assertEqual(values.glint, [look.glint, EDGE.glint.side, EDGE.glint.near * 2, EDGE.glint.far * 2], 'the glint');
+    assertEqual(values.edge, [EDGE.bevel.amount, EDGE.bevel.reach * 2, EDGE.contour.width * 2, look.contour.dark],
+        'the bevel and the contour');
+    assertEqual(values.shadow, [EDGE.shadow.y * 2, EDGE.shadow.sigma * 2, EDGE.shadow.alpha, 0], 'the shadow');
+    const light = materialValues(look, 1, {light: true});
+    assertEqual(light.face[1], FACES.light.T, 'the light style\'s face');
+    assertEqual(light.small.slice(0, 2), [FACES.light.T, FACES.light.lambda], 'the same for small controls');
+    assertEqual(light.shadow[2], 0, 'no shadow unless asked');
+    assertEqual(materialValues(LOOK.clear, 1, {light: true}).face[1], FACES.clear.T, 'clear glass\'s own');
     const none = materialValues(null);
     assertEqual(none.lens[3], 0, 'none: only the shape');
-    assertEqual(none.tone, [1, 1, 0, 0], 'and what is behind as it is');
+    assert(edgeReach(true) > EDGE.shadow.y + 2 * EDGE.shadow.sigma && edgeReach(false) < 2,
+        'drawn as far out as the shadow goes, or the contour');
 }
 
 export function testShadedLook() {
@@ -62,33 +148,36 @@ export function testShadedLook() {
     assert(regular.dim === 0 && LOOK.regular === regular, 'the look itself untouched');
     assert(sameShade({dim: 0.2, veil: 0}, {dim: 0.20001, veil: 0}) && !sameShade({dim: 0.2, veil: 0}, NO_SHADE),
         'shades the same as far as anyone could see');
+    assert(sameShade({deep: 0}, NO_SHADE) && !sameShade({deep: 1}, {deep: 0.5}), 'and what is eased with them');
 }
 
 export function testLightTowardThePointer() {
     const area = [100, 100, 200, 40];
     const light = LOOK.regular.light;
-    assertEqual(lightToward(area, [1000, 1000], light), REST_LIGHT, 'far: from above');
-    assertEqual(lightToward(area, [200, 100 - light.near - 1], light), REST_LIGHT, 'just past near: from above');
-    // Beside it on the left, a little away: leaning left, still mostly from above.
+    assert(near(REST_LIGHT[0], REST_LIGHT[1]) && REST_LIGHT[0] < 0 && near(Math.hypot(...REST_LIGHT), 1),
+        'at rest: from the top left');
+    assertEqual(lightToward(area, [1000, 1000], light), REST_LIGHT, 'far: from the top left');
+    assertEqual(lightToward(area, [200, 100 - light.near - 1], light), REST_LIGHT, 'just past near: the same');
+    // Beside it on the left, a little away: leaning left.
     const left = lightToward(area, [60, 120], light);
-    assert(left[0] < 0 && left[1] < 0 && Math.abs(left[0]) < Math.abs(left[1]),
-        `beside it on the left: leaning left (${left})`);
+    assert(left[0] < REST_LIGHT[0] && left[1] < 0, `beside it on the left: leaning left (${left})`);
     assert(near(Math.hypot(...left), 1), 'a direction');
     // Right at it: as far as it leans; nearer leans more.
     const touching = lightToward(area, [100, 120], light);
     const farther = lightToward(area, [20, 120], light);
-    assert(touching[0] < farther[0] && farther[0] < 0, `nearer leans more (${touching} vs ${farther})`);
-    const most = Math.atan2(light.lean, 1 - light.lean);
-    assert(Math.abs(Math.atan2(-touching[0], -touching[1]) - most) < 1e-6,
+    assert(touching[0] < farther[0] && farther[0] < REST_LIGHT[0], `nearer leans more (${touching} vs ${farther})`);
+    const [lx, ly] = [REST_LIGHT[0] * (1 - light.lean) - light.lean, REST_LIGHT[1] * (1 - light.lean)];
+    assert(near(touching[0], lx / Math.hypot(lx, ly)) && near(touching[1], ly / Math.hypot(lx, ly)),
         `at most lean of the way (${touching})`);
-    // Over its middle: from above; over its right end: leaning right.
-    assert(sameLight(lightToward(area, [200, 120], light), REST_LIGHT), 'over its middle: from above');
-    assert(lightToward(area, [295, 120], light)[0] > 0, 'over its right end: leaning right');
+    // Over its middle: at rest; over its right end: leaning right.
+    assert(sameLight(lightToward(area, [200, 120], light), REST_LIGHT), 'over its middle: at rest');
+    assert(lightToward(area, [295, 120], light)[0] > REST_LIGHT[0], 'over its right end: leaning right');
     // Eased: hardly any lean as the pointer comes within reach.
     const edge = lightToward(area, [100 - light.near + 2, 120], light);
-    assert(edge[0] < 0 && Math.abs(edge[0]) < 5e-3, `hardly any lean at the edge of reach (${edge})`);
+    assert(edge[0] < REST_LIGHT[0] && Math.abs(edge[0] - REST_LIGHT[0]) < 5e-3,
+        `hardly any lean at the edge of reach (${edge})`);
     // In pixels: twice as far at scale 2.
-    assert(lightToward([200, 200, 400, 80], [200 - light.near * 1.5, 240], light, 2)[0] < 0,
+    assert(lightToward([200, 200, 400, 80], [200 - light.near * 1.5, 240], light, 2)[0] < REST_LIGHT[0],
         'at scale 2, near is twice as far in pixels');
     assert(sameLight(lightToward([200, 200, 400, 80], [200 - light.near * 1.5, 240], light, 1), REST_LIGHT),
         'and at scale 1, not');
