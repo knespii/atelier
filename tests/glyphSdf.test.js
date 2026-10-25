@@ -26,6 +26,12 @@ function square(x, y, side, clockwise = false) {
     return [['M', ...corners[0]], ...corners.slice(1).map(c => ['L', ...c]), ['Z']];
 }
 
+// A rectangle, wound as square() winds it.
+function rectangle(x, y, width, height) {
+    const corners = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]];
+    return [['M', ...corners[0]], ...corners.slice(1).map(c => ['L', ...c]), ['Z']];
+}
+
 // Each texel's middle, in px of the tile (y down).
 const middle = (sdf, i, j) => [(i + 0.5) * sdf.texel, (j + 0.5) * sdf.texel];
 
@@ -85,6 +91,10 @@ export function testWinding() {
     // from any edge there as the band tells.)
     assert(at(both, 101, 50) <= -FAR + 1 && at(both, 49, 50) <= -FAR + 1,
         `no edge inside, where they overlap (${at(both, 49, 50)}, ${at(both, 101, 50)})`);
+    // A stem through a foot: its sides run on inside the foot, no edge there.
+    const one = glyphSdf([...rectangle(40, 0, 20, 200), ...rectangle(0, 0, 100, 20)], {scale: 1});
+    assert(at(one, 41, 10) < -8, `a stem's side inside its foot: no edge (${at(one, 41, 10)})`);
+    assert(Math.abs(at(one, 39, 100)) < 2, `but along the stem, above it (${at(one, 39, 100)})`);
     // One inside the other the other way round: a hole.
     const ring = glyphSdf([...square(0, 0, 200), ...square(50, 50, 100, true)], {scale: 1});
     assert(at(ring, 100, 100) > 20 && at(ring, 25, 100) < -10, `the other way round: a hole (${at(ring, 100, 100)})`);
