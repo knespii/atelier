@@ -1528,16 +1528,96 @@ async function testBarStyles(ext) {
     powerToggle.visible = batteryShown;
 }
 
+// The shapes of glass iOS 26's Control Center has, logical pixels: circles,
+// a capsule, a squircle (a rounded square, as near as a radius comes) and a
+// panel – a row of specimens, the gap between them.
+const SPECIMENS = [
+    {name: 'circle-48', width: 48, height: 48, radius: 24},
+    {name: 'circle-64', width: 64, height: 64, radius: 32},
+    {name: 'circle-96', width: 96, height: 96, radius: 48},
+    {name: 'capsule', width: 220, height: 64, radius: 32},
+    {name: 'squircle', width: 140, height: 140, radius: 36},
+    {name: 'panel', width: 420, height: 280, radius: 34},
+];
+const SPECIMEN_GAP = 28;
+
+// The knobs of the glass tried apart over the specimens: the blur's sigma,
+// the lens's depth as so many times its bevel, the glint.
+const SWEEPS = [
+    ['blur-0', look => ({...look, blur: 0})],
+    ['blur-2', look => ({...look, blur: 2})],
+    ['blur-4', look => ({...look, blur: 4})],
+    ['depth-2', look => ({...look, lens: {...look.lens, depth: 2 * look.lens.bevel}})],
+    ['depth-3', look => ({...look, lens: {...look.lens, depth: 3 * look.lens.bevel}})],
+    ['glint-30', look => ({...look, glint: 0.3})],
+    ['glint-50', look => ({...look, glint: 0.5})],
+    ['glint-70', look => ({...look, glint: 0.7})],
+];
+
+// Where a row of so much (logical pixels) lies over the most detail of a
+// picture GNOME shows zoomed on a monitor of this size, between its bar and
+// its dock: the sum of its brightness's steps there, at a twelfth of the
+// size (its shapes, not their grain). Returns its top left corner.
+function mostDetailed(path, [width, height], [rowWidth, rowHeight]) {
+    const q = 12;
+    const [w, h] = [Math.round(width / q), Math.round(height / q)];
+    const original = GdkPixbuf.Pixbuf.new_from_file(path);
+    const s = Math.max(w / original.get_width(), h / original.get_height());
+    const [sw, sh] = [Math.ceil(original.get_width() * s), Math.ceil(original.get_height() * s)];
+    const pixbuf = original.scale_simple(sw, sh, GdkPixbuf.InterpType.BILINEAR);
+    const [ox, oy] = [Math.floor((sw - w) / 2), Math.floor((sh - h) / 2)];
+    const pixels = pixbuf.get_pixels();
+    const stride = pixbuf.get_rowstride();
+    const channels = pixbuf.get_n_channels();
+    const lum = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y + oy) * stride + (x + ox) * channels;
+            lum[y * w + x] = 0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2];
+        }
+    }
+    // (Summed from the corner: any rectangle's sum in four lookups.)
+    const sums = new Float64Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = y * w + x;
+            const step = (x + 1 < w ? Math.abs(lum[i + 1] - lum[i]) : 0) + (y + 1 < h ? Math.abs(lum[i + w] - lum[i]) : 0);
+            sums[(y + 1) * (w + 1) + x + 1] = step + sums[y * (w + 1) + x + 1] + sums[(y + 1) * (w + 1) + x] -
+                sums[y * (w + 1) + x];
+        }
+    }
+    const [rw, rh] = [Math.ceil(rowWidth / q), Math.ceil(rowHeight / q)];
+    const sumOf = (x, y) => sums[(y + rh) * (w + 1) + x + rw] - sums[y * (w + 1) + x + rw] -
+        sums[(y + rh) * (w + 1) + x] + sums[y * (w + 1) + x];
+    let best = [Math.round((w - rw) / 2), Math.round((h - rh) / 2)];
+    for (let y = Math.ceil(110 / q); y <= Math.floor((height - 170) / q) - rh; y++) {
+        for (let x = Math.ceil(16 / q); x <= w - rw - Math.ceil(16 / q); x++) {
+            if (sumOf(x, y) > sumOf(...best))
+                best = [x, y];
+        }
+    }
+    return best.map(v => v * q);
+}
+
 // Pictures of the glass on wallpapers (ATELIER_TEST_WALLPAPER, pictures
 // apart by colons, only read; GNOME's own otherwise): the one island as a
 // notch at rest, with the glance and with the control centre, capsules
 // beside a floating island, the dock and the widgets – in each variant, in
-// GNOME's dark style (smoky glass) and its light one (light glass). Only
-// pictures, to look at, and how the type on them reads (Lc, read off the
-// screen: drawnContrast()), said. (ATELIER_TEST_SCALE: with the monitor at
-// that scale.)
+// GNOME's dark style and its light one – and a row of specimens of the
+// shapes iOS's Control Center has over the most detailed part of each
+// (SPECIMENS: a picture, and where each specimen is in it, for
+// tools/glass-sheet.js). With ATELIER_TEST_GLASS_SHEET, over stripes too,
+// and on the first wallpaper and the stripes, the knobs of the glass tried
+// apart (SWEEPS), the light leaning towards the pointer, and the island
+// growing from rest to the glance, slowed down. Only pictures, to look at,
+// and how the type on them reads (Lc, read off the screen:
+// drawnContrast()), said. (ATELIER_TEST_SCALE: with the monitor at that
+// scale.)
 async function testGlassPictures(ext) {
     const back = await useTestScale('The glass pictures');
+    const {GlassSurface} = await import(`file://${ext.path}/shell/core/glass.js`);
+    const {LOOK} = await import(`file://${ext.path}/lib/glassLook.js`);
+    const sheet = Boolean(GLib.getenv('ATELIER_TEST_GLASS_SHEET'));
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const desktopSettings = settings.get_child('desktop');
@@ -1595,6 +1675,18 @@ async function testGlassPictures(ext) {
                     await shootGlass(`${n}-${prefix}${variant}`, variant === 'regular');
                 }
             }
+            if (sheet && n === 0)
+                await shootChanges(`${n}`);
+            await shootSpecimens(`${n}`, wallpaper, sheet && n === 0);
+        }
+        if (sheet) {
+            const stripes = `${copies}/glass-stripes.png`;
+            stripesPicture(stripes, [3840, 2160], 28);
+            background.set_string('picture-uri', uriOf(stripes));
+            background.set_string('picture-uri-dark', uriOf(stripes));
+            background.set_string('picture-options', 'zoom');
+            await wallpapersSettled();
+            await shootSpecimens('stripes', stripes, true);
         }
     } finally {
         ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
@@ -1605,6 +1697,107 @@ async function testGlassPictures(ext) {
         kept.forEach(([key, value]) => background.set_string(key, value));
         await wallpapersSettled();
         await back?.();
+    }
+
+    // A row of specimens (SPECIMENS) of glass of their own, in each variant
+    // and style (the light from the top left, as at rest), where the
+    // wallpaper is most detailed; and the knobs tried apart (SWEEPS), and
+    // the light leaning towards the pointer.
+    async function shootSpecimens(name, picture, sweeps) {
+        const rowWidth = SPECIMENS.reduce((sum, s) => sum + s.width, 0) + SPECIMEN_GAP * (SPECIMENS.length - 1);
+        const rowHeight = Math.max(...SPECIMENS.map(s => s.height));
+        const [x0, y0] = mostDetailed(picture, [global.stage.width, global.stage.height], [rowWidth + 80, rowHeight + 80]);
+        const [left, top] = [x0 + 40, y0 + 40];
+        const desktop = Main.layoutManager._backgroundGroup.get_children().find(a => a.name === 'atelier-desktop');
+        const desktopOpacity = desktop?.opacity ?? 255;
+        if (desktop)
+            desktop.opacity = 0;
+        const rects = [];
+        let x = left;
+        for (const specimen of SPECIMENS) {
+            rects.push({...specimen, x, y: top + (rowHeight - specimen.height) / 2});
+            x += specimen.width + SPECIMEN_GAP;
+        }
+        const surfaces = rects.map(() => {
+            const surface = new GlassSurface({reach: 1});
+            Main.layoutManager.uiGroup.add_child(surface);
+            return surface;
+        });
+        // (Still: the light from the top left, wherever the pointer is.)
+        const still = look => ({...look, light: {lean: 0, near: 0}});
+        const show = async (look, light) => {
+            surfaces.forEach((surface, i) => {
+                const {x: rx, y: ry, width, height, radius} = rects[i];
+                surface.setLook(look, light);
+                surface.setShape(rx, ry, width, height, radius);
+            });
+            await Scripting.sleep(500);
+        };
+        const area = [left - 40, top - 40, rowWidth + 80, rowHeight + 80];
+        GLib.file_set_contents(`${dir}/${name}-specimens.json`, JSON.stringify({
+            area, rects: rects.map(r => ({...r, x: r.x - area[0], y: r.y - area[1]})),
+        }));
+        try {
+            await restPointer();
+            for (const [style, prefix, light] of [['prefer-dark', '', false], ['prefer-light', 'light-', true]]) {
+                iface.set_string('color-scheme', style);
+                for (const variant of ['regular', 'clear']) {
+                    await show(still(LOOK[variant]), light);
+                    await shot(`${name}-${prefix}${variant}-specimens`, ...area);
+                }
+                if (!sweeps)
+                    continue;
+                for (const [knob, change] of SWEEPS) {
+                    await show(still(change(LOOK.regular)), light);
+                    await shot(`${name}-${prefix}sweep-${knob}`, ...area);
+                }
+                // The light leaning towards the pointer: beside the 96 px
+                // circle, above it, and over it.
+                await show(LOOK.regular, light);
+                const circle = rects[2];
+                const [cx, cy] = [circle.x + circle.width / 2, circle.y + circle.height / 2];
+                for (const [i, [px, py]] of [[cx - 90, cy], [cx, cy - 90], [cx + 20, cy + 20]].entries()) {
+                    await pointerTo(px, py);
+                    await Scripting.sleep(300);
+                    await shot(`${name}-${prefix}lean-${i}`, circle.x - 40, circle.y - 40, circle.width + 80, circle.height + 80);
+                }
+                await restPointer();
+            }
+        } finally {
+            surfaces.forEach(surface => surface.destroy());
+            if (desktop)
+                desktop.opacity = desktopOpacity;
+        }
+    }
+
+    // The island growing from rest into the glance, slowed down tenfold
+    // (each picture a moment after the one before), in each style.
+    async function shootChanges(name) {
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        settings.set_string('glass-variant', 'regular');
+        const slowDown = St.Settings.get().slow_down_factor;
+        try {
+            for (const [style, prefix] of [['prefer-dark', ''], ['prefer-light', 'light-']]) {
+                iface.set_string('color-scheme', style);
+                await restPointer();
+                await waitFor(() => island.page === null, 2000);
+                await Scripting.sleep(900);
+                St.Settings.get().slow_down_factor = 10;
+                await pointerTo(...centerOf(island));
+                for (let i = 0; i < 10; i++) {
+                    await shot(`${name}-${prefix}morph-${i}`, global.stage.width / 2 - 450, 0, 900, 240);
+                    await Scripting.sleep(220);
+                }
+                St.Settings.get().slow_down_factor = slowDown;
+                await restPointer();
+                await waitFor(() => island.page === null, 4000);
+            }
+        } finally {
+            St.Settings.get().slow_down_factor = slowDown;
+        }
     }
 
     // (Each look: the bar as the user has it, the glance and – deep glass –
@@ -1662,6 +1855,120 @@ async function testGlassPictures(ext) {
             const area = desktop.area;
             await shot(`${name}-widgets`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
         }
+    }
+}
+
+// How long the glass takes to draw, only when asked for by name
+// (ATELIER_TEST_ONLY=testGlassPaint; ATELIER_TEST_MONITOR=3840x2160 and
+// ATELIER_TEST_SCALE=2 for a 4K monitor at 200 %): each surface of glass
+// drawn anew every frame for a while – the one island at rest, the island
+// in the glance, the bar's capsules, the dock – and none, the milliseconds
+// each frame takes to paint, the GPU's drawing too (waited for: what it
+// costs, not what the display shows), and how often frames come, said;
+// and the textures the glass is painted into, their size (and that of the
+// wallpaper's copy each surface blurred with GNOME's blur before).
+async function testGlassPaint(ext) {
+    if (!ONLY?.includes('testGlassPaint'))
+        return;
+    const back = await useTestScale('The glass\'s paint');
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const island = ext.stateObj.modules.get('island').island;
+    const glasses = () => {
+        const found = [];
+        const walk = actor => {
+            if (hasClass(actor, 'atelier-glass') || hasClass(actor, 'atelier-desktop-glass'))
+                found.push(actor);
+            actor.get_children().forEach(walk);
+        };
+        walk(global.stage);
+        return found;
+    };
+    // Drawn anew every frame, these surfaces only (the others out of sight).
+    const measure = async (label, which) => {
+        const all = glasses();
+        const shown = all.filter(which);
+        const hidden = all.filter(glass => !shown.includes(glass) && glass.opacity > 0);
+        hidden.forEach(glass => (glass.opacity = 0));
+        const timeline = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+        timeline.connect('new-frame', () => {
+            shown.forEach(glass => glass.queue_redraw());
+            global.stage.queue_redraw();
+        });
+        const watch = watchFrames();
+        // (Each frame waited for until the GPU has drawn it.)
+        const drawn = [];
+        let start = 0;
+        const ids = [
+            global.stage.connect('before-paint', () => (start = GLib.get_monotonic_time())),
+            global.stage.connect('after-paint', (_, view) => {
+                view?.get_framebuffer?.()?.finish();
+                if (start)
+                    drawn.push((GLib.get_monotonic_time() - start) / 1000);
+                start = 0;
+            }),
+        ];
+        timeline.start();
+        await Scripting.sleep(3000);
+        timeline.stop();
+        watch.stop();
+        ids.forEach(id => global.stage.disconnect(id));
+        hidden.forEach(glass => (glass.opacity = 255));
+        const frames = watch.frames.slice(10);
+        const paint = spreadOf(drawn.slice(10));
+        const gaps = spreadOf(frames.slice(1).map((frame, i) => frame.done - frames[i].done));
+        const sizes = shown.map(glass => {
+            const density = Math.ceil(glass.get_resource_scale());
+            return `${Math.round(glass.width)} × ${Math.round(glass.height)} @${density}`;
+        });
+        results.push(`INFO  glass paint ${label} (${sizes.join(', ') || 'none'}): ${ms(paint.mean)} ms a frame ` +
+            `(95 % ${ms(paint.p95)}, most ${ms(paint.max)}), a frame every ${ms(gaps.mean)} ms ` +
+            `(95 % ${ms(gaps.p95)}) over ${paint.n} frames`);
+    };
+    // A surface's textures, MB: the one its glass is painted into, and the
+    // wallpaper's copy GNOME's blur painted the monitor's size before.
+    const texturesOf = glass => {
+        const density = Math.ceil(glass.get_resource_scale());
+        const own = (Math.round(glass.width) + 3) * (Math.round(glass.height) + 3) * density * density * 4 / 1e6;
+        const monitor = Main.layoutManager.primaryMonitor;
+        const blurred = monitor.width * monitor.height * density * density * 4 / 1e6;
+        return [own, blurred];
+    };
+    try {
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        await restPointer();
+        await Scripting.sleep(1000);
+        const islandGlass = () => ext.stateObj.modules.get('island')._glass;
+        await measure('none', () => false);
+        await measure('one island at rest', glass => glass === islandGlass() || glass._shape?.[1] === 0);
+        await pointerTo(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-glance'), 2000);
+        await Scripting.sleep(800);
+        await measure('glance', glass => glass === islandGlass() || glass._shape?.[1] === 0);
+        await restPointer();
+        await waitFor(() => island.page === null, 2000);
+        bar.set_string('style', 'grouped');
+        bar.set_string('sides', 'capsules');
+        bar.set_string('island-shape', 'floating');
+        bar.set_boolean('compact', false);
+        await Scripting.sleep(1000);
+        await measure('capsules and the island', glass => glass === islandGlass() || (glass._shape && glass._shape[1] < 60));
+        const dock = ext.stateObj.modules.get('dock')?.dock;
+        if (dock) {
+            await measure('dock', glass => glass === dock._glass);
+            await measure('all', () => true);
+        }
+        const said = glasses().filter(glass => glass.mapped).map(glass => {
+            const [own, blurred] = texturesOf(glass);
+            return `${glass.constructor.name.replace(/^Gjs_[a-z_]+_/i, '')} ${own.toFixed(1)} MB (before also ${blurred.toFixed(1)} MB)`;
+        });
+        results.push(`INFO  glass textures: ${said.join(', ')}`);
+    } finally {
+        ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
+        await back?.();
     }
 }
 
@@ -7986,6 +8293,7 @@ export async function run() {
         await part(testLiquidGlass, ext);
         await part(testGlassEars, ext);
         await part(testGlassPictures, ext);
+        await part(testGlassPaint, ext);
         await part(testVibrancy, ext);
         await part(testFullscreen, ext);
         await part(testClaude, ext);
