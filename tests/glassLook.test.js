@@ -44,12 +44,18 @@ export function testFaces() {
     // Light glass lifts black (to its lift) and keeps white white.
     close(faceColor(grey(0), 'light'), grey(FACES.light.lift), 'light glass over black: its lift');
     assert(faceColor(grey(1), 'light')[0] > 0.98, 'light glass over white: white');
-    // Dark glass: black a dark grey, white well below white – the middle
-    // greys lifted (λ) more than a straight line would.
-    close(faceColor(grey(0), 'dark'), grey(32 / 255), 'dark glass over black');
+    // Dark glass: nearly clear under a light dark wash – a straight line
+    // from black, white a light grey – what is behind a little richer.
+    close(faceColor(grey(0), 'dark'), grey(FACES.dark.lift), 'dark glass over black: as dark');
     const white = faceColor(grey(1), 'dark')[0];
-    assert(near(white, 32 / 255 + 0.4525), `dark glass over white: ${white}`);
-    assert(faceColor(grey(0.5), 'dark')[0] > (32 / 255 + white) / 2, 'its middle greys lifted');
+    assert(near(white, FACES.dark.lift + FACES.dark.T) && white > 0.6 && white < 0.75, `dark glass over white: ${white}`);
+    assert(near(faceColor(grey(0.5), 'dark')[0], FACES.dark.lift + FACES.dark.T / 2), 'its greys on a straight line');
+    const sky = faceColor([0.4, 0.6, 0.95], 'dark');
+    const chroma = rgb => Math.max(...rgb) - Math.min(...rgb);
+    assert(sky[2] > sky[1] && sky[1] > sky[0] && chroma(sky) / Math.max(...sky) > 0.55 / 0.95,
+        `a sky stays blue, a little richer (${sky})`);
+    for (const face of ['light', 'dark', 'clear', 'deep'])
+        assert(FACES[face].g >= FACES[face].T, `${face}: no less colourful than it lets light through`);
     // Small controls of dark glass: lighter over light backdrops.
     assert(faceColor(grey(0.9), 'dark', {small: 1})[0] > faceColor(grey(0.9), 'dark')[0],
         'a small control lighter');
@@ -94,8 +100,13 @@ export function testLens() {
             `${bevel}, ${depth}: mirrored over the outer ${(turn / bevel).toFixed(3)} of the bevel`);
     }
     assertEqual(lensOf(LOOK.regular.lens, 200), {bevel: 20, depth: 60}, 'a panel: the whole bevel');
-    assertEqual(lensOf(LOOK.regular.lens, 48), {bevel: 12, depth: 24}, 'a 48 px circle: never deeper than half of it');
-    assertEqual(lensOf(LOOK.regular.lens, 200, 2), {bevel: 40, depth: 100}, 'in pixels at scale 2');
+    const circle = lensOf(LOOK.regular.lens, 48);
+    assert(near(circle.bevel, 16) && near(circle.depth, 31.2), `a 48 px circle: a third, 0.65 of it (${JSON.stringify(circle)})`);
+    const capsule = lensOf(LOOK.regular.lens, 24);
+    assert(near(capsule.bevel, 8) && near(capsule.depth, 15.6), 'a 24 px capsule: its rim bends too');
+    const between = lensOf(LOOK.regular.lens, 96);
+    assert(between.bevel === 20 && between.depth > 48 && between.depth < 60, `96 px: between (${between.depth})`);
+    assertEqual(lensOf(LOOK.regular.lens, 400, 2), {bevel: 40, depth: 120}, 'in pixels at scale 2');
 }
 
 export function testBlurTaps() {

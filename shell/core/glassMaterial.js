@@ -52,7 +52,7 @@ import St from 'gi://St';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {EDGE, NO_SHADE, SMALL, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
+import {EDGE, LENS_SHARE, NO_SHADE, SMALL, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
 
 // How long glass takes to take another shade, ms.
 const SHADE_TIME = 250;
@@ -161,8 +161,10 @@ if (glassLens.w < 0.5) {
     atelier_part(p, light, shade, thick);
     vec2 across = vec2(-light.y, light.x);
     float d = -body;
-    float bevel = min(glassLens.x, thick * 0.25);
-    float depth = min(glassLens.y, thick * 0.5);
+    // (lib/glassLook.js lensOf().)
+    float large = smoothstep(${LENS_SHARE.between[0]}.0 * glassSmall.z, ${LENS_SHARE.between[1]}.0 * glassSmall.z, thick);
+    float bevel = min(glassLens.x, thick * mix(${LENS_SHARE.small[0]}, ${LENS_SHARE.large[0]}, large));
+    float depth = min(glassLens.y, thick * mix(${LENS_SHARE.small[1]}, ${LENS_SHARE.large[1]}, large));
     vec2 normal = vec2(0.0);
     bool edged = false;
     if (d < max(max(bevel, glassEdge.y), glassGlint.w) + 1.0 && body < glassEdge.z + 1.5) {
