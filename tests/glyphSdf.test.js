@@ -81,6 +81,10 @@ export function testWinding() {
     const at = (sdf, x, y) => sdf.distances[Math.floor((sdf.y - y) / sdf.texel) * sdf.width +
         Math.floor((sdf.x + x) / sdf.texel)];
     assert(at(both, 75, 50) < -20, `overlapping the same way: inside (${at(both, 75, 50)})`);
+    // (And no edge where one square's side lies inside the other: as far
+    // from any edge there as the band tells.)
+    assert(at(both, 101, 50) <= -FAR + 1 && at(both, 49, 50) <= -FAR + 1,
+        `no edge inside, where they overlap (${at(both, 49, 50)}, ${at(both, 101, 50)})`);
     // One inside the other the other way round: a hole.
     const ring = glyphSdf([...square(0, 0, 200), ...square(50, 50, 100, true)], {scale: 1});
     assert(at(ring, 100, 100) > 20 && at(ring, 25, 100) < -10, `the other way round: a hole (${at(ring, 100, 100)})`);
