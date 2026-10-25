@@ -3,6 +3,7 @@
 
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
+import Cogl from 'gi://Cogl';
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -2088,6 +2089,180 @@ async function testLiquidGlass(ext) {
 // the wallpaper, the glass beside it, white (its rim, its sheen) or a mix of
 // them: the lens looks up nothing but the glass's own pixels – past them
 // its texture is clear, and red looked up there would leave a blue speck.
+// Pixels of Atelier's own as a second texture of a Shell.GLSLEffect
+// (shell/core/glassShapeTexture.js): its texels read back in cogl_sampler1
+// as they were given, any R and G (each byte / 255, nothing premultiplied or
+// converted), between them as asked (nearest, linear), as the actor grows
+// and when they are given anew; what the actor draws itself still in
+// cogl_sampler0; drawn over and over without a word in the shell's log.
+async function testGlassLayerSpike() {
+    const {SHAPE_DECLARATIONS, ShapeTexture, setShapeRect} = await import('../shell/core/glassShapeTexture.js');
+    const {textureFrame} = await import('../lib/glassLook.js');
+    const back = await useTestScale('A second texture');
+    // Left of the texture's rect, what the actor draws; in it, the texel.
+    const LayerEffect = GObject.registerClass(class AtelierTestLayerEffect extends Shell.GLSLEffect {
+        _init(params) {
+            super._init(params);
+            this.paints = 0;
+            this._origin = this.get_uniform_location('origin');
+            this._size = this.get_uniform_location('size');
+            this.shapeRect = this.get_uniform_location('shapeRect');
+        }
+
+        vfunc_build_pipeline() {
+            this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, `uniform vec2 origin;\nuniform vec2 size;\n${SHAPE_DECLARATIONS}`, `
+                vec2 p = origin + cogl_tex_coord_in[0].xy * size;
+                if (p.x >= shapeRect.x)
+                    cogl_color_out = vec4(atelier_shape_texel(p).rgb, 1.0);`, false);
+        }
+
+        vfunc_paint_target(node, paintContext) {
+            const actor = this.get_actor();
+            const [x, width] = textureFrame(actor.width);
+            const [y, height] = textureFrame(actor.height);
+            this.set_uniform_float(this._origin, 2, [x, y]);
+            this.set_uniform_float(this._size, 2, [width, height]);
+            this.shape?.bind(this);
+            this.paints++;
+            super.vfunc_paint_target(node, paintContext);
+        }
+    });
+    // 12 × 8 texels, [r, g, b, a] each by column and row; the last one's
+    // alpha below its red.
+    const [columns, rows] = [12, 8];
+    const first = (i, j) => [5 + 20 * i, 9 + 30 * j, 77, i === columns - 1 && j === rows - 1 ? 100 : 255];
+    const second = (i, j) => [230 - 20 * i, 240 - 30 * j, 160, 255];
+    const bytesOf = texel => {
+        const bytes = new Uint8Array(columns * rows * 4);
+        for (let j = 0; j < rows; j++) {
+            for (let i = 0; i < columns; i++)
+                bytes.set(texel(i, j), (j * columns + i) * 4);
+        }
+        return bytes;
+    };
+    const [left, top, margin] = [200, 300, 64];
+    const actor = new St.Widget({x: left, y: top, width: 256, height: 128, style: 'background-color: #336699;'});
+    const effect = new LayerEffect();
+    const shape = new ShapeTexture({filter: 'nearest'});
+    const placeShape = () => setShapeRect(effect, effect.shapeRect, [margin, 0, actor.width - margin, actor.height]);
+    const drawn = async () => {
+        const paints = effect.paints;
+        await waitFor(() => effect.paints > paints, 2000);
+        await Scripting.sleep(150);
+    };
+    const shot = async name => {
+        await screenshotArea(`layer-spike-${name}`, left, top, actor.width, actor.height);
+        return pixelsOf(`layer-spike-${name}`, [left, top]);
+    };
+    // Each texel's middle against what it was given: the worst [channel's
+    // difference, where].
+    const worstOf = (pixels, texel) => {
+        let worst = [0, 'nowhere'];
+        const [cellW, cellH] = [(actor.width - margin) / columns, actor.height / rows];
+        for (let j = 0; j < rows; j++) {
+            for (let i = 0; i < columns; i++) {
+                const seen = pixels.at(left + margin + (i + 0.5) * cellW, top + (j + 0.5) * cellH);
+                const off = Math.max(...[0, 1].map(c => Math.abs(seen[c] - texel(i, j)[c])));
+                if (off > worst[0])
+                    worst = [off, `texel ${i}, ${j}: ${seen} for ${texel(i, j)}`];
+            }
+        }
+        return worst;
+    };
+    const logPath = `${OUTPUT}/shell.log`;
+    const logLength = () => {
+        try {
+            return GLib.file_get_contents(logPath)[1].length;
+        } catch {
+            return 0;
+        }
+    };
+    try {
+        actor.add_effect(effect);
+        Main.uiGroup.add_child(actor);
+        placeShape();
+        effect.shape = shape;
+        await drawn();
+        let pixels = await shot('none');
+        check(colorDistance(pixels.at(left + margin + 40, top + 40), [0, 0, 0]) <= 1,
+            `a second texture: clear until it has pixels (${pixels.at(left + margin + 40, top + 40)})`);
+
+        shape.setPixels(bytesOf(first), columns, rows);
+        await drawn();
+        pixels = await shot('nearest');
+        const own = averageColor('layer-spike-nearest', 8, 8, margin - 16, actor.height - 16);
+        check(colorDistance(own, [0x33, 0x66, 0x99]) <= 2,
+            `a second texture: what the actor draws still there, in cogl_sampler0 (${own})`);
+        let worst = worstOf(pixels, first);
+        check(worst[0] <= 1, `a second texture: its texels read back in cogl_sampler1 as they were given, R and G (worst ${worst[0]}, ${worst[1]})`);
+        const odd = pixels.at(left + margin + (columns - 0.5) * 16, top + (rows - 0.5) * 16);
+        results.push(`INFO  a second texture: a texel of r 225, g 219, b 77, a 100 reads back as ${odd}`);
+        // Across the step between texels 3 and 4 of row 2 (x 128 in the
+        // actor): either side of it in the screenshot's own pixels.
+        const d = pixels.density;
+        const row = Math.round(40 * d);
+        const step = Math.round((margin + 64) * d);
+        const across = () => [pixels.own(step - 1, row)[0], pixels.own(step, row)[0]];
+        check(across()[0] === first(3, 2)[0] && across()[1] === first(4, 2)[0],
+            `a second texture: nearest texels, a step between them (${across()})`);
+        shape.setFilter('linear');
+        await drawn();
+        pixels = await shot('linear');
+        worst = worstOf(pixels, first);
+        const middle = (first(3, 2)[0] + first(4, 2)[0]) / 2;
+        check(worst[0] <= 1 && across().every(v => Math.abs(v - middle) <= 2),
+            `a second texture: linear, each texel's middle as given (worst ${worst[0]}), between two halfway (${across()} for ${middle})`);
+
+        shape.setFilter('nearest');
+        actor.set_size(384, 192);
+        placeShape();
+        await drawn();
+        pixels = await shot('grown');
+        worst = worstOf(pixels, first);
+        check(worst[0] <= 1, `a second texture: still there as the actor grows (worst ${worst[0]}, ${worst[1]})`);
+
+        shape.setPixels(bytesOf(second), columns, rows);
+        await drawn();
+        pixels = await shot('anew');
+        worst = worstOf(pixels, second);
+        check(worst[0] <= 1, `a second texture: given anew, shown anew (worst ${worst[0]}, ${worst[1]})`);
+
+        // 600 frames: the effect drawn again over the actor's picture, or
+        // the actor drawn anew; the texels given anew now and then.
+        const logged = logLength();
+        const paints = effect.paints;
+        let frames = 0;
+        const timeline = new Clutter.Timeline({actor: global.stage, duration: 1000, repeat_count: -1});
+        timeline.connect('new-frame', () => {
+            frames++;
+            if (frames % 100 === 0)
+                shape.setPixels(bytesOf(frames % 200 ? first : second), columns, rows);
+            else if (frames % 2)
+                actor.queue_redraw();
+            else
+                effect.queue_repaint();
+        });
+        timeline.start();
+        await waitFor(() => effect.paints - paints >= 600, 30000);
+        timeline.stop();
+        await Scripting.sleep(300);
+        const said = GLib.file_test(logPath, GLib.FileTest.EXISTS)
+            ? new TextDecoder().decode(GLib.file_get_contents(logPath)[1].slice(logged)).split('\n')
+                .filter(line => /WARNING|CRITICAL|ERROR|GLSL|[Ss]hader/.test(line))
+            : null;
+        check(effect.paints - paints >= 600 && said?.length === 0,
+            `a second texture: drawn ${effect.paints - paints} times, nothing in the shell's log${
+                said === null ? ' (no log)' : said.length ? `: ${said.slice(0, 3).join(' | ')}` : ''}`);
+        pixels = await shot('after');
+        worst = worstOf(pixels, second);
+        check(worst[0] <= 1, `a second texture: as given after all that (worst ${worst[0]}, ${worst[1]})`);
+    } finally {
+        actor.destroy();
+        shape.destroy();
+        await back?.();
+    }
+}
+
 async function testGlassEars(ext) {
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
@@ -7987,6 +8162,7 @@ export async function run() {
         await part(testGlassEars, ext);
         await part(testGlassPictures, ext);
         await part(testVibrancy, ext);
+        await part(testGlassLayerSpike);
         await part(testFullscreen, ext);
         await part(testClaude, ext);
         await part(testDesktop, ext);
