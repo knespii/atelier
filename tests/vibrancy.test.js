@@ -45,7 +45,7 @@ export function testGlassOver() {
     assertEqual(glassOver('#808080', REGULAR, {light: true}), face('#808080', 'light'), 'and light glass');
     assertEqual(glassOver('#808080', REGULAR, {small: 1}), face('#808080', 'dark', {small: 1}), 'a small control');
     assertEqual(glassOver('#808080', CLEAR, {light: true}), face('#808080', 'clear'), 'clear glass, either style');
-    assertEqual(glassOver('#000000', REGULAR), '#202020', 'black, a dark grey through dark glass');
+    assertEqual(glassOver('#000000', REGULAR), '#050505', 'black, as dark through dark glass');
     assertEqual(glassOver('#ffffff', REGULAR, {light: true}), '#ffffff', 'white, white through light glass');
     for (const color of ['#141a24', '#3a6ea5', '#9aa8b8', '#e9b949']) {
         const dark = glassOver(color, REGULAR);
@@ -187,8 +187,8 @@ export function testShade() {
         shadeNeeded(flat('#ffffff'), REGULAR, 'light', island), 'a small control of dark glass: more over white');
     // What lies over the glass counts: a card's dark colour, less.
     const card = {layers: [{color: '#0e0e12', alpha: 0.38}]};
-    assert(shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island, card) <
-        shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island), 'a dark card over the glass: less');
+    assert(shadeNeeded(flat('#e0e0e0'), REGULAR, 'light', island, card) <
+        shadeNeeded(flat('#e0e0e0'), REGULAR, 'light', island), 'a dark card over the glass: less');
     // Where the backdrop spans both, the worst tenth for each.
     const mixed = {mean: '#808080', tenths: {dark: '#303030', middle: '#808080', light: '#d0d0d0'}};
     assert(shadeNeeded(mixed, REGULAR, 'light', island) === shadeNeeded(flat('#d0d0d0'), REGULAR, 'light', island) &&
@@ -304,8 +304,8 @@ export function testDarkOnLight() {
 export function testOnlyAsFarAsNeeded() {
     // A middling backdrop: light type, the quieter type a little more
     // opaque – just enough.
-    const backdrop = on('#6a7282');
-    assertEqual([polarityFor('#6a7282'), neededOn('#6a7282').light], ['light', 0], 'still light type, unshaded');
+    const backdrop = on('#8a92a2');
+    assertEqual([polarityFor('#8a92a2'), neededOn('#8a92a2').light], ['light', 0], 'still light type, unshaded');
     const date = inkOf('island', '& .atelier-island-date');
     const shown = inkOn(date, backdrop, 'light');
     const need = needOf(date);

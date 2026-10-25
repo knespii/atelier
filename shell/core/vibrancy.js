@@ -34,7 +34,7 @@ import {regionStats} from '../../lib/lockLook.js';
 import {rgbToHex} from '../../lib/palette.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
 import {
-    backdropOf, pictureRegion, polarityOf, readingNeed, scopeOf, shadeNeeded, shadeOf, steadied, surfaceRules,
+    SHARP, backdropOf, pictureRegion, polarityOf, readingNeed, scopeOf, shadeNeeded, shadeOf, steadied, surfaceRules,
     vibrancyStylesheet, withBackground,
 } from '../../lib/vibrancy.js';
 import {wallpaperShown} from '../../lib/wallpaperPalette.js';
@@ -581,7 +581,9 @@ export class VibrancyModule {
                 light, small, blur: surface.blur(), tint: surface.tint(), strength: surface.strength(),
                 layers: surface.layers(),
             };
-            const need = readingNeed(surface.inks, palette);
+            // (A little more where the glass hardly blurs: SHARP.)
+            const reading = readingNeed(surface.inks, palette);
+            const need = reading > 0 && look.blur < SHARP.sigma ? reading + SHARP.margin : reading;
             const needed = Object.fromEntries(['light', 'dark'].map(polarity =>
                 [polarity, shadeNeeded(stats, look, polarity, need, options)]));
             const glass = surface.oneWith() ?? surface.id;
