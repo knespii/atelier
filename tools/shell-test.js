@@ -94,11 +94,17 @@ async function framesDrawn(count, timeout = 2000) {
     return enough;
 }
 
+// How wide each screenshot is in logical pixels, by name. (The shell lays
+// out in logical pixels at 150 % or 200 %, say, and draws in 1.5 or 2
+// times the detail: so many pixels to a logical one in its screenshots.)
+const shotWidths = new Map();
+
 async function screenshot(name) {
     const file = Gio.File.new_for_path(`${OUTPUT}/${name}.png`);
     const stream = file.replace(null, false, Gio.FileCreateFlags.NONE, null);
     await new Shell.Screenshot().screenshot(false, stream);
     stream.close(null);
+    shotWidths.set(name, global.stage.width);
 }
 
 async function screenshotArea(name, x, y, width, height) {
@@ -106,7 +112,11 @@ async function screenshotArea(name, x, y, width, height) {
     const stream = file.replace(null, false, Gio.FileCreateFlags.NONE, null);
     await new Shell.Screenshot().screenshot_area(x, y, width, height, stream);
     stream.close(null);
+    shotWidths.set(name, width);
 }
+
+// A screenshot's pixels to a logical pixel (1 for a picture not taken as one).
+const densityOf = (name, pixbuf) => pixbuf.get_width() / (shotWidths.get(name) ?? pixbuf.get_width());
 
 /** The top middle of the screen, where the island lives. */
 function screenshotIsland(name, height = 420) {
@@ -117,23 +127,26 @@ function screenshotIsland(name, height = 420) {
 const uriOf = path => Gio.File.new_for_path(path).get_uri();
 
 /**
- * @returns {number[]} the average [r, g, b] of a rectangle of a screenshot
+ * @returns {number[]} the average [r, g, b] of a rectangle of a screenshot,
+ *   in logical pixels from its corner
  */
 function averageColor(name, x, y, width, height) {
     const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
     const pixels = pixbuf.get_pixels();
     const stride = pixbuf.get_rowstride();
     const channels = pixbuf.get_n_channels();
+    const density = densityOf(name, pixbuf);
+    const [x1, y1, x2, y2] = [x, y, x + width, y + height].map(v => Math.round(v * density));
     const sum = [0, 0, 0];
-    for (let row = y; row < y + height; row++) {
-        for (let col = x; col < x + width; col++) {
+    for (let row = y1; row < y2; row++) {
+        for (let col = x1; col < x2; col++) {
             const i = row * stride + col * channels;
             sum[0] += pixels[i];
             sum[1] += pixels[i + 1];
             sum[2] += pixels[i + 2];
         }
     }
-    return sum.map(v => Math.round(v / (width * height)));
+    return sum.map(v => Math.round(v / ((x2 - x1) * (y2 - y1))));
 }
 
 const colorDistance = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
@@ -1521,8 +1534,10 @@ async function testBarStyles(ext) {
 // beside a floating island, the dock and the widgets – in each variant, in
 // GNOME's dark style (smoky glass) and its light one (light glass). Only
 // pictures, to look at, and how the type on them reads (Lc, read off the
-// screen: drawnContrast()), said.
+// screen: drawnContrast()), said. (ATELIER_TEST_SCALE: with the monitor at
+// that scale.)
 async function testGlassPictures(ext) {
+    const back = await useTestScale('The glass pictures');
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const desktopSettings = settings.get_child('desktop');
@@ -1589,6 +1604,7 @@ async function testGlassPictures(ext) {
         iface.set_string('color-scheme', scheme);
         kept.forEach(([key, value]) => background.set_string(key, value));
         await wallpapersSettled();
+        await back?.();
     }
 
     // (Each look: the bar as the user has it, the glance and – deep glass –
@@ -1694,9 +1710,11 @@ function rowOf(pixels, x1, x2, y) {
 // least – which leans towards the pointer when it is near (only then, and
 // only for the glass it is near); at rest nothing is drawn; 'off' and
 // GNOME's high contrast make the surfaces solid; the overview's blurred
-// wallpaper has the grain.
+// wallpaper has the grain. (ATELIER_TEST_SCALE: all of it with the monitor
+// at that scale.)
 async function testLiquidGlass(ext) {
     const {LOOK, REST_LIGHT, sameLight} = await import('../lib/glassLook.js');
+    const back = await useTestScale('Liquid Glass');
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const islandModule = ext.stateObj.modules.get('island');
@@ -2058,7 +2076,131 @@ async function testLiquidGlass(ext) {
         kept.forEach(([key, value]) => background.set_string(key, value));
         await restPointer();
         await wallpapersSettled();
+        await back?.();
     }
+}
+
+// The notch's ears, where its glass curves into the top edge of the screen
+// and its lens looks up towards it – at the scale ATELIER_TEST_SCALE asks
+// for, if any: the one island's ears and the island's own, of regular and
+// clear glass, light and smoky, show no colour foreign to the wallpaper and
+// the glass there. Over a wallpaper of one colour, each pixel round them is
+// the wallpaper, the glass beside it, white (its rim, its sheen) or a mix of
+// them: the lens looks up nothing but the glass's own pixels – past them
+// its texture is clear, and red looked up there would leave a blue speck.
+async function testGlassEars(ext) {
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const barModule = ext.stateObj.modules.get('bar');
+    const islandModule = ext.stateObj.modules.get('island');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = iface.get_string('color-scheme');
+    const dir = `${OUTPUT}/glass-ears`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const back = await useTestScale('The notch\'s ears');
+    // Each channel's middle value over a rectangle of a picture, in logical
+    // pixels from its corner.
+    const middleOf = (pixels, x, y, width, height) => {
+        const values = [[], [], []];
+        const d = pixels.density;
+        for (let row = Math.round(y * d); row < Math.round((y + height) * d); row++) {
+            for (let column = Math.round(x * d); column < Math.round((x + width) * d); column++)
+                pixels.own(column, row).forEach((v, c) => values[c].push(v));
+        }
+        return values.map(v => v.sort((a, b) => a - b)[Math.floor(v.length / 2)]);
+    };
+    try {
+        const flat = `${dir}/flat.png`;
+        const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 64, 64);
+        pixbuf.fill(0xbe3ca0ff);
+        pixbuf.savev(flat, 'png', [], []);
+        background.set_string('picture-uri', uriOf(flat));
+        background.set_string('picture-uri-dark', uriOf(flat));
+        background.set_string('picture-options', 'zoom');
+        await wallpapersSettled();
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        await restPointer();
+        const notches = [
+            ['one', 'the one island\'s ears', 'island', () => barModule._surfaces[0]?.actor.shape],
+            ['island', 'the island\'s own ears', 'spread', () => islandModule._glass?.shape],
+        ];
+        for (const [name, label, style, shapeOf] of notches) {
+            bar.set_string('style', style);
+            // [how far off, where]
+            let worst = [0, 'nowhere'];
+            let shown = 0;
+            let density = 1;
+            for (const tone of ['prefer-dark', 'prefer-light']) {
+                iface.set_string('color-scheme', tone);
+                for (const variant of ['regular', 'clear']) {
+                    settings.set_string('glass-variant', variant);
+                    await Scripting.sleep(1000);
+                    const shape = shapeOf();
+                    if (!shape)
+                        continue;
+                    shown++;
+                    const [x, , width] = shape;
+                    // 12 px either side of the corner, the ear on the outer
+                    // side: the wallpaper beside it, below its reach, the
+                    // glass on the inner side, past its rim.
+                    for (const [side, corner, outer, inner] of [['left', x, 0, 15], ['right', x + width, 22, 1]]) {
+                        const shot = `glass-ears/${name}-${tone === 'prefer-dark' ? 'smoky' : 'light'}-${variant}-${side}`;
+                        await screenshotArea(shot, Math.round(corner) - 12, 0, 24, 16);
+                        const pixels = pixelsOf(shot);
+                        density = pixels.density;
+                        const wallpaper = middleOf(pixels, outer, 12, 2, 3);
+                        const glass = middleOf(pixels, inner, 10, 8, 6);
+                        for (let row = 0; row < pixels.height; row++) {
+                            for (let column = 0; column < pixels.width; column++) {
+                                const color = pixels.own(column, row);
+                                const off = offMixes(color, wallpaper, glass, [255, 255, 255]);
+                                if (off > worst[0]) {
+                                    worst = [off, `${shot.slice('glass-ears/'.length)} (${column}, ${row}): ${color}, ` +
+                                        `the glass ${glass}, the wallpaper ${wallpaper}`];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            check(shown === 4 && worst[0] <= 24,
+                `${label} at ${density}×: no colour foreign to the wallpaper and the glass there ` +
+                `(${shown} of 4 glasses shown; at most ${worst[0].toFixed(1)} off, ${worst[1]})`);
+        }
+    } finally {
+        ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
+        settings.reset('glass-variant');
+        iface.set_string('color-scheme', scheme);
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        await wallpapersSettled();
+        await back?.();
+    }
+}
+
+// How far a colour is from all those mixed of three others, in RGB.
+function offMixes(p, a, b, c) {
+    const minus = (u, v) => u.map((x, i) => x - v[i]);
+    const dot = (u, v) => u.reduce((sum, x, i) => sum + x * v[i], 0);
+    // (From a segment, its ends mixed.)
+    const fromSegment = (from, to) => {
+        const d = minus(to, from);
+        const t = Math.min(1, Math.max(0, dot(minus(p, from), d) / Math.max(dot(d, d), 1e-9)));
+        return Math.hypot(...p.map((x, i) => x - from[i] - d[i] * t));
+    };
+    const [ab, ac, ap] = [minus(b, a), minus(c, a), minus(p, a)];
+    const [abab, abac, acac, apab, apac] = [dot(ab, ab), dot(ab, ac), dot(ac, ac), dot(ap, ab), dot(ap, ac)];
+    const determinant = abab * acac - abac * abac;
+    if (determinant > 1e-9) {
+        // In the triangle: as far as from its plane.
+        const s = (acac * apab - abac * apac) / determinant;
+        const t = (abab * apac - abac * apab) / determinant;
+        if (s >= 0 && t >= 0 && s + t <= 1)
+            return Math.hypot(...ap.map((x, i) => x - ab[i] * s - ac[i] * t));
+    }
+    return Math.min(fromSegment(a, b), fromSegment(b, c), fromSegment(a, c));
 }
 
 // The first actor in a tree with a style class.
@@ -2083,7 +2225,7 @@ function actorWith(root, name) {
 // over a dark wallpaper, no shade. (The glass drawn here is Liquid Glass,
 // smoky in the dark style: what is predicted – its blur, its tint, its
 // material – is what is drawn, but for the light its edges catch and its
-// sheen.)
+// sheen. ATELIER_TEST_SCALE: with the monitor at that scale.)
 async function testVibrancy(ext) {
     const {sameShade} = await import('../lib/glassLook.js');
     const {readingNeed} = await import('../lib/vibrancy.js');
@@ -2186,6 +2328,7 @@ async function testVibrancy(ext) {
         return falling;
     };
 
+    const back = await useTestScale('Vibrancy');
     try {
         // Glass everywhere: the sides of the bar in capsules at the edges,
         // the island, the dock, the widgets' cards (as see-through as the
@@ -2339,6 +2482,7 @@ async function testVibrancy(ext) {
         uris.forEach(([key, uri]) => background.set_string(key, uri));
         await wallpapersSettled();
         await Scripting.sleep(800);
+        await back?.();
     }
 
     // A sky, between light and dark: in the dark style light type, which
@@ -5350,15 +5494,23 @@ function fakeBattery() {
 }
 
 // A screenshot's pixels, read once: at(x, y) gives [r, g, b] – of the point
-// of the screen, for a screenshot of an area with its corner there.
+// of the screen (in logical pixels), for a screenshot of an area with its
+// corner there; own(column, row) of the picture's own pixel, density of
+// them to a logical pixel.
 function pixelsOf(name, [left, top] = [0, 0]) {
     const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
     const [pixels, stride, channels] = [pixbuf.get_pixels(), pixbuf.get_rowstride(), pixbuf.get_n_channels()];
+    const density = densityOf(name, pixbuf);
+    const own = (column, row) => {
+        const i = row * stride + column * channels;
+        return [pixels[i], pixels[i + 1], pixels[i + 2]];
+    };
     return {
-        at(x, y) {
-            const i = Math.round(y - top) * stride + Math.round(x - left) * channels;
-            return [pixels[i], pixels[i + 1], pixels[i + 2]];
-        },
+        density,
+        width: pixbuf.get_width(),
+        height: pixbuf.get_height(),
+        own,
+        at: (x, y) => own(Math.round((x - left) * density), Math.round((y - top) * density)),
     };
 }
 
@@ -6724,6 +6876,26 @@ async function setMonitorScale(scale) {
         [serial, 1, [[0, 0, scale, 0, true, [[connector, mode[0], {}]]]], {}]));
 }
 
+// For a part: the main monitor at the scale ATELIER_TEST_SCALE asks for,
+// if it is at another (see tools/shell-test.sh), which the results say.
+// Resolves to what sets it back to 1, null if nothing was changed.
+async function useTestScale(label) {
+    const wanted = Number(GLib.getenv('ATELIER_TEST_SCALE') ?? 0);
+    if (!(wanted > 0) || wanted === global.display.get_monitor_scale(Main.layoutManager.primaryIndex))
+        return null;
+    const width = global.stage.width;
+    await setMonitorScale(wanted);
+    await waitFor(() => global.stage.width !== width, 5000);
+    await Scripting.sleep(2000);
+    results.push(`INFO  ${label} at ${wanted}×: a ${global.stage.width} × ${global.stage.height} stage`);
+    return async () => {
+        const scaled = global.stage.width;
+        await setMonitorScale(1);
+        await waitFor(() => global.stage.width !== scaled, 5000);
+        await Scripting.sleep(1000);
+    };
+}
+
 // Of some numbers: their mean, the 95th percentile and the largest.
 function spreadOf(values) {
     const sorted = [...values].sort((a, b) => a - b);
@@ -7812,6 +7984,7 @@ export async function run() {
         await part(testOverviewBar);
         await part(testBarStyles, ext);
         await part(testLiquidGlass, ext);
+        await part(testGlassEars, ext);
         await part(testGlassPictures, ext);
         await part(testVibrancy, ext);
         await part(testFullscreen, ext);
