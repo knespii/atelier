@@ -68,17 +68,25 @@ export function releaseKeptVibrancy() {
 
 /**
  * What lies over a surface's glass, as its actors are styled: each one's
- * background colour (a card's, a dock's wash), the most transparent first.
+ * background colour (a card's, a dock's wash) – over its own shadow, where
+ * the background lets that show through (St draws it under a see-through
+ * card's background) – the most transparent first.
  *
  * @param {...St.Widget|null} actors
- * @returns {object[]} {color, alpha} of each that has one
+ * @returns {object[]} {color, alpha} of each that has one, the lowest first
  */
 export function layersOf(...actors) {
     const layers = [];
     for (const actor of actors) {
         if (!actor?.get_stage?.())
             continue;
-        const {red, green, blue, alpha} = actor.get_theme_node().get_background_color();
+        const node = actor.get_theme_node();
+        const {red, green, blue, alpha} = node.get_background_color();
+        const shadow = alpha < 255 ? node.get_box_shadow() : null;
+        if (shadow && !shadow.inset && shadow.color.alpha > 0) {
+            const {red: r, green: g, blue: b, alpha: a} = shadow.color;
+            layers.push({color: rgbToHex([r, g, b]), alpha: a / 255});
+        }
         if (alpha > 0)
             layers.push({color: rgbToHex([red, green, blue]), alpha: alpha / 255});
     }
