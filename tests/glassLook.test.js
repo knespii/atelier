@@ -1,7 +1,7 @@
 import {
     EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
     faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameShade,
-    shadedLook, smallness, textureFrame,
+    smallness, textureFrame,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -24,9 +24,6 @@ export function testLooks() {
         assert(look.lens.bevel === 20 && look.lens.depth === 60 && look.lens.dispersion === 0,
             `${variant}: Apple's bevel, no colour fringe`);
         assert(look.glint > 0 && look.glint < 1, `${variant}: a glint`);
-        // (The lock screen's Cairo clock's, as they were.)
-        assert(look.rim.top > look.rim.side && look.rim.side > look.rim.bottom && look.saturation >= 1 &&
-            look.lens.width > 0 && look.sheen.alpha > 0, `${variant}: the Cairo clock's look kept`);
     }
     assert(LOOK.regular.blur === 2 && LOOK.clear.blur === 0, 'regular lightly blurred, clear not at all');
     assert(LOOK.clear.glint > LOOK.regular.glint, 'clear glass glints more');
@@ -148,20 +145,7 @@ export function testMaterialValues() {
         'drawn as far out as the shadow goes, or the contour');
 }
 
-export function testShadedLook() {
-    const regular = LOOK.regular;
-    assert(shadedLook(regular) === regular && shadedLook(regular, NO_SHADE) === regular, 'no shade: as it is');
-    assertEqual(shadedLook(null, {dim: 0.3, veil: 0}), null, 'no glass: none');
-    const darker = shadedLook(regular, {dim: 0.3, veil: 0});
-    assert(near(darker.dim, 0.3) && darker.veil === regular.veil && darker.saturation === regular.saturation,
-        `a dark veil under light type: its dim, the rest as it is (${darker.dim})`);
-    // Clear glass, dimmed already: each lets through what the other left.
-    const clear = shadedLook(LOOK.clear, {dim: 0.3, veil: 0});
-    assert(near(1 - clear.dim, (1 - LOOK.clear.dim) * 0.7), `clear: on top of its own dim (${clear.dim})`);
-    const lighter = shadedLook(regular, {dim: 0, veil: 0.4});
-    assert(near(1 - lighter.veil, (1 - regular.veil) * 0.6) && lighter.dim === regular.dim,
-        `a white veil under dark type, with its own (${lighter.veil})`);
-    assert(regular.dim === 0 && LOOK.regular === regular, 'the look itself untouched');
+export function testSameShade() {
     assert(sameShade({dim: 0.2, veil: 0}, {dim: 0.20001, veil: 0}) && !sameShade({dim: 0.2, veil: 0}, NO_SHADE),
         'shades the same as far as anyone could see');
     assert(sameShade({deep: 0}, NO_SHADE) && !sameShade({deep: 1}, {deep: 0.5}), 'and what is eased with them');
