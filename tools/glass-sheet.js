@@ -177,6 +177,17 @@ function main(argv) {
             ...(before ? [cell(`${before}/${wall}-${shot}.png`, `before: ${label}`)] : []),
             cell(`${now}/${wall}-${shot}.png`, `now: ${label}`),
         ];
+        // The widgets' cards of glass: their dark fill over it, or none.
+        const cards = styles.map(([prefix, style]) => ({
+            title: `widgets, regular, ${style}`,
+            cells: [
+                ...(before ? [cell(`${before}/${wall}-${prefix}regular-widgets.png`, 'before: card fill', {scale: 0.75})] : []),
+                cell(`${now}/${wall}-${prefix}regular-widgets.png`, 'now: the glassy card\'s dark fill on', {scale: 0.75}),
+                cell(`${now}/${wall}-${prefix}regular-widgets-bare.png`, 'now: no fill, just glass', {scale: 0.75}),
+            ],
+        }));
+        if (sheet(`${out}/widgets-${wall}.png`, `${title} Widgets – ${name}: card fill on or off`, cards))
+            made.push(`widgets-${wall}.png`);
         const surfaces = [
             ['island', [['top', 'one island, notch, at rest'], ['glance', 'the glance']]],
             ['bar', [['top', 'one island, notch'], ['capsules', 'capsules, floating island']]],

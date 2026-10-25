@@ -1108,42 +1108,18 @@
 /* What another profile (its palette, light or dark, glass or not) shows
    otherwise fades over. (Not the island: it has its own way of moving.) */
 .atelier-solid-fill,
-.atelier-glass-tint,
 .atelier-widget,
 .atelier-dock {
   transition-duration: 700ms;
 }
 
-/* Glass: the blurred wallpaper under a tint and its material
-   (shell/core/glassMaterial.js) – smoky in GNOME's dark style, light in
-   its light one, half as much for clear glass, and deep (dark whatever the
-   style) under what is styled for a dark surface only. The palette's hue
-   comes in from shell/core/theme.js. */
+/* Glass: the wallpaper under its material (shell/core/glassMaterial.js),
+   neutral, lighter or darker as GNOME's style has it. */
 
 .atelier-glass {
   background-color: transparent;
   border: none;
   box-shadow: none;
-}
-
-.atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.22);
-}
-
-.atelier-glass-smoky-clear .atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.11);
-}
-
-.atelier-glass-light .atelier-glass-tint {
-  background-color: rgba(246, 247, 250, 0.15);
-}
-
-.atelier-glass-light-clear .atelier-glass-tint {
-  background-color: rgba(246, 247, 250, 0.08);
-}
-
-.atelier-glass-deep .atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.68);
 }
 
 .atelier-island.atelier-island-glass {

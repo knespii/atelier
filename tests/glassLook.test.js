@@ -1,7 +1,7 @@
 import {
-    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, TINTS, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
+    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
     faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameShade,
-    shadedLook, smallness, textureFrame, tintOf,
+    shadedLook, smallness, textureFrame,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -133,10 +133,15 @@ export function testMaterialValues() {
         'the bevel and the contour');
     assertEqual(values.shadow, [EDGE.shadow.y * 2, EDGE.shadow.sigma * 2, EDGE.shadow.alpha, 0], 'the shadow');
     const light = materialValues(look, 1, {light: true});
-    assertEqual(light.face[1], FACES.light.T, 'the light style\'s face');
-    assertEqual(light.small.slice(0, 2), [FACES.light.T, FACES.light.lambda], 'the same for small controls');
+    assertEqual(light.lightFace, [FACES.light.lift, FACES.light.T, FACES.light.lambda, FACES.light.g],
+        'the light style\'s face beside the dark one');
+    assertEqual(light.face, values.face, 'the dark one whatever the style');
+    assertEqual(light.style, [1, look.contour.light], 'the light style\'s, and its contour');
+    assertEqual(materialValues(look, 1, {light: 0.25}).style[0], 0.25, 'on the way from one style to the other');
+    assertEqual(values.style, [0, look.contour.light], 'the dark style');
     assertEqual(light.shadow[2], 0, 'no shadow unless asked');
-    assertEqual(materialValues(LOOK.clear, 1, {light: true}).face[1], FACES.clear.T, 'clear glass\'s own');
+    const clear = materialValues(LOOK.clear, 1, {light: true});
+    assert(clear.face[1] === FACES.clear.T && clear.lightFace[1] === FACES.clear.T, 'clear glass\'s own in either');
     const none = materialValues(null);
     assertEqual(none.lens[3], 0, 'none: only the shape');
     assert(edgeReach(true) > EDGE.shadow.y + 2 * EDGE.shadow.sigma && edgeReach(false) < 2,
@@ -205,15 +210,6 @@ export function testBodyPastTheEdges() {
         'a dock along the bottom: only its top edge stays');
     assertEqual(bodyRect([1920, 0, 300, 30], {x: 1920, y: 0, width: 1280, height: 1024}),
         [1920 - 512, -512, 300 + 512, 30 + 512], 'on another monitor, its own edges');
-}
-
-export function testTints() {
-    assertEqual(tintOf(LOOK.regular, {light: false}), 'smoky', 'dark style: smoky');
-    assertEqual(tintOf(LOOK.regular, {light: true}), 'light', 'light style: light');
-    assertEqual(tintOf(LOOK.clear, {light: false}), 'smoky-clear', 'clear: less of it');
-    assertEqual(tintOf(LOOK.clear, {light: true}), 'light-clear', 'clear in the light style');
-    assertEqual(tintOf(LOOK.clear, {light: true, deep: true}), 'deep', 'deep whatever the style and variant');
-    assert(TINTS.every(tint => typeof tint === 'string') && TINTS.length === 5, 'five tints');
 }
 
 export function testBounds() {

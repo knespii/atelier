@@ -18,12 +18,12 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
-    NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, edgeReach, sameLight, textureFrame, tintOf,
+    NO_SHADE, REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
 } from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    setMaterialReach, textureDensity,
+    STYLE_TIME, setMaterialReach, textureDensity,
 } from './glassMaterial.js';
 
 // Live glass shows the windows over the bounds of its shapes, in steps of
@@ -354,10 +354,11 @@ class AtelierGlassSurface extends St.Widget {
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
-        // (Glass is neutral now, its face as GNOME's style has it: its tint
-        // stays out of sight.)
-        this._tint = new St.Widget({style_class: solid ? 'atelier-solid-fill' : 'atelier-glass-tint', visible: solid});
-        this.add_child(this._tint);
+        // (Solid: black over it. Glass is neutral, its face as GNOME's style
+        // has it, no tint of its own.)
+        this._fill = solid ? new St.Widget({style_class: 'atelier-solid-fill'}) : null;
+        if (this._fill)
+            this.add_child(this._fill);
 
         this._mask = new RoundedMaskEffect();
         this.add_effect_with_name('atelier-glass-mask', this._mask);
@@ -380,14 +381,17 @@ class AtelierGlassSurface extends St.Widget {
             this._bgManager?.destroy();
             this._bgManager = null;
         });
-        this._syncMaterial();
+        this._shades.set('style', {light: light ? 1 : 0});
         this._shades.set('deep', {deep: deep ? 1 : 0});
-        this._syncTint();
+        this._syncMaterial();
         this._build();
     }
 
+    // (Its face as GNOME's style has it now: on its way from one to the
+    // other over STYLE_TIME.)
     _syncMaterial() {
-        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle, shadow: true});
+        const {light = 0} = this._shades.shown('style');
+        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true});
     }
 
     /**
@@ -402,8 +406,8 @@ class AtelierGlassSurface extends St.Widget {
             return;
         this._look = look;
         this._lightStyle = light;
+        this._shades.set('style', {light: light ? 1 : 0}, STYLE_TIME);
         this._syncMaterial();
-        this._syncTint();
         this._syncShade();
         this._syncLive();
         glassLight.sync();
@@ -419,7 +423,6 @@ class AtelierGlassSurface extends St.Widget {
         if (deep === this._deep)
             return;
         this._deep = deep;
-        this._syncTint();
         this._syncShade();
         // (Eased to it, as a shade is.)
         this._shades.set('deep', {deep: deep ? 1 : 0});
@@ -458,6 +461,7 @@ class AtelierGlassSurface extends St.Widget {
         const {dim, veil} = this._shades.shown('glass');
         const {deep = 0} = this._shades.shown('deep');
         this._mask.setShade([dim, veil, deep]);
+        this._syncMaterial();
         const bounds = this._bounds();
         if (bounds)
             this._redrawWithin(bounds);
@@ -487,20 +491,6 @@ class AtelierGlassSurface extends St.Widget {
             x + width - this.x + margin, y + height - this.y + margin]);
     }
 
-    // Its tint as the stylesheet has it (stylesheet.css, the palette's in
-    // shell/core/theme.js): one class of its own for each.
-    _syncTint() {
-        if (this._solid)
-            return;
-        const wanted = `atelier-glass-${tintOf(this._look, {light: this._lightStyle, deep: this._deep})}`;
-        for (const tint of TINTS) {
-            if (`atelier-glass-${tint}` !== wanted)
-                this.remove_style_class_name(`atelier-glass-${tint}`);
-        }
-        this.add_style_class_name(wanted);
-    }
-
-
     /** @returns {object|null} the material it is drawn with */
     get look() {
         return this._look;
@@ -529,7 +519,7 @@ class AtelierGlassSurface extends St.Widget {
         }
         this.set_position(monitor.x + offsetX, monitor.y + offsetY);
         this.set_size(width, height);
-        this._tint.set_size(width, height);
+        this._fill?.set_size(width, height);
         this._wallpaper.set_position(-offsetX, -offsetY);
         if (!this._solid) {
             this._bgManager = new Background.BackgroundManager({

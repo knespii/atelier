@@ -9,7 +9,7 @@
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
-import Mtk from 'gi://Mtk';
+
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -21,11 +21,13 @@ import {syncTextureFrame} from '../core/glass.js';
 import {glassLight} from '../core/glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    setMaterialReach, textureDensity,
+    STYLE_TIME, setMaterialReach, textureDensity,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
 const MAX_RECTS = 32;
+// The key GNOME's style is eased by, among the widgets' shades.
+const STYLE = Symbol('style');
 
 // The widgets' rectangles (and the liquid), each with the light it catches
 // and its shade; a pixel is part of the one it is nearest to.
@@ -135,6 +137,8 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._count, 1, [Math.min(rects.length, MAX_RECTS)]);
         this.set_uniform_float(this._rects, 4, values);
         setLiquid(this, this._liquid, liquid);
+        // (Drawn anew as they are now: what it drew before was cached.)
+        this.queue_repaint();
     }
 
     /** @param {number[][]} lights - where each rect's light comes from, [x, y] */
@@ -193,6 +197,7 @@ class AtelierDesktopGlass extends St.Widget {
         this._shades = new GlassShades(this, keys => this._showShades(keys));
         this._look = look;
         this._lightStyle = light;
+        this._shades.set(STYLE, {light: light ? 1 : 0});
         this._syncMaterial();
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => {
             this._syncMaterial();
@@ -218,12 +223,16 @@ class AtelierDesktopGlass extends St.Widget {
             return;
         this._look = look;
         this._lightStyle = light;
+        this._shades.set(STYLE, {light: light ? 1 : 0}, STYLE_TIME);
         this._syncMaterial();
         glassLight.sync();
     }
 
+    // (Its face as GNOME's style has it now: on its way from one to the
+    // other over STYLE_TIME.)
     _syncMaterial() {
-        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle});
+        const {light = 0} = this._shades.shown(STYLE);
+        this._mask.setMaterial(this._look, glassScale(), {light});
     }
 
     /** @returns {object|null} the material it is drawn with */
@@ -312,6 +321,7 @@ class AtelierDesktopGlass extends St.Widget {
         if (!shade) {
             this._shades.delete(key);
             this._apply();
+            this.queue_redraw();
             return;
         }
         this._shades.set(key, shade);
@@ -325,22 +335,16 @@ class AtelierDesktopGlass extends St.Widget {
         return this._shades.wanted(key);
     }
 
-    // The shades as they are now, drawn again only where those widgets are.
+    // The shades as they are now, drawn again. (All of it: drawn again only
+    // within a widget's rectangle, the wallpaper in the texture the glass
+    // is painted from is drawn there only, and the other widgets' glass,
+    // drawn from that texture later, came out black.)
     _showShades(keys) {
+        if (keys.includes(STYLE))
+            this._syncMaterial();
         this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
-        this._rects.forEach((rect, i) => {
-            if (keys.includes(this._keys[i]))
-                this._redrawWithin(rect);
-        });
-    }
-
-    // Drawn again only within a rectangle of the layer (and its contour).
-    _redrawWithin([x, y, width, height]) {
-        const margin = Math.ceil(edgeReach(false) * glassScale()) + 2;
-        const [x1, y1] = [Math.floor(x) - margin, Math.floor(y) - margin];
-        this.queue_redraw_with_clip(new Mtk.Rectangle({
-            x: x1, y: y1, width: Math.ceil(x + width) + margin - x1, height: Math.ceil(y + height) + margin - y1,
-        }));
+        if (keys.length > 0)
+            this.queue_redraw();
     }
 
     /**
@@ -363,8 +367,7 @@ class AtelierDesktopGlass extends St.Widget {
 
     /**
      * @param {number[][]} lights - where each widget's light comes from
-     * @returns {boolean} whether any changed (those are drawn again, only
-     *   where they are)
+     * @returns {boolean} whether any changed (and it is drawn again)
      */
     setLights(lights) {
         const changes = wanted => wanted.map((light, i) => !this._lights[i] || !sameLight(light, this._lights[i]));
@@ -381,11 +384,8 @@ class AtelierDesktopGlass extends St.Widget {
         }
         this._lights = lights;
         this._mask.setLights(lights);
-        changed.forEach((yes, i) => {
-            const rect = this._rects[i];
-            if (yes && rect)
-                this._redrawWithin(rect);
-        });
+        // (All of it: _showShades().)
+        this.queue_redraw();
         return true;
     }
 
