@@ -19,10 +19,10 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, tintOf} from '../../lib/glassLook.js';
+import {NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, tintOf} from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
-    MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+    GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
 } from './glassMaterial.js';
 
 const BLUR_RADIUS = 36; // logical pixels
@@ -60,6 +60,7 @@ uniform vec4 partnerBody;
 uniform vec3 partnerLook;
 uniform vec2 glassLight;
 uniform vec4 glassFrame;
+uniform vec2 glassShade;
 
 float atelier_smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -125,9 +126,10 @@ float atelier_body(vec2 p) {
     return d;
 }
 
-void atelier_part(vec2 p, out vec4 frame, out vec2 light) {
+void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2 shade) {
     frame = glassFrame;
     light = glassLight;
+    shade = glassShade;
 }
 ${MATERIAL_DECLARATIONS}
 `;
@@ -167,7 +169,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassFrame'];
+            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassFrame', 'glassShade'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
         this.setDrop([0, 0, 0, 0], 0, 1);
@@ -175,6 +177,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.setPartner(null);
         this.setLight(REST_LIGHT);
         this.setFrame([0, 0, 0, 0]);
+        this.setShade([0, 0]);
         this.setMaterial(null, 1);
     }
 
@@ -229,6 +232,11 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     /** @param {number[]} frame - [x, y, width, height] the sheen runs across */
     setFrame(frame) {
         this.set_uniform_float(this._at.glassFrame, 4, frame);
+    }
+
+    /** @param {number[]} shade - its extra shade, [dim, veil] */
+    setShade(shade) {
+        this.set_uniform_float(this._at.glassShade, 2, shade);
     }
 
     /**
@@ -317,6 +325,9 @@ class AtelierGlassSurface extends St.Widget {
         this._partner = null;
         this._live = null;
         this._light = REST_LIGHT;
+        // The extra shade its type asks for (shell/core/vibrancy.js).
+        this._typeShade = NO_SHADE;
+        this._shades = new GlassShades(this, () => this._showShade());
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -338,6 +349,7 @@ class AtelierGlassSurface extends St.Widget {
         }
         this.connect('destroy', () => {
             glassLight.remove(this);
+            this._shades.destroy();
             Main.layoutManager.disconnectObject(this);
             St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
             this._bgManager?.destroy();
@@ -363,6 +375,7 @@ class AtelierGlassSurface extends St.Widget {
         this._lightStyle = light;
         this._mask.setMaterial(look, glassScale());
         this._syncTint();
+        this._syncShade();
         // (Less frosted, or as bright as the other style has it: blurred
         // anew.)
         if (this._frost !== blurred[0] || this._blurBrightness !== blurred[1])
@@ -381,6 +394,52 @@ class AtelierGlassSurface extends St.Widget {
             return;
         this._deep = deep;
         this._syncTint();
+        this._syncShade();
+    }
+
+    /** @returns {boolean} whether it is deep glass now */
+    get deep() {
+        return this._deep;
+    }
+
+    /**
+     * An extra shade, where the type on it would not read otherwise
+     * (lib/vibrancy.js): darker under light type, lighter under dark –
+     * eased to it. (None while it is deep: what is on it then is styled for
+     * that; nor solid or plain blurred glass.)
+     *
+     * @param {object} shade - {dim, veil}, 0 … 1 each
+     */
+    setShade(shade) {
+        this._typeShade = shade ?? NO_SHADE;
+        this._syncShade();
+    }
+
+    /** @returns {object} the extra shade it is to have, {dim, veil} */
+    get shade() {
+        return this._shades.wanted('glass');
+    }
+
+    _syncShade() {
+        const none = this._solid || !this._look || this._deep;
+        this._shades.set('glass', none ? NO_SHADE : this._typeShade);
+    }
+
+    // The shade as it is now, drawn again where its shapes are.
+    _showShade() {
+        const {dim, veil} = this._shades.shown('glass');
+        this._mask.setShade([dim, veil]);
+        const bounds = this._bounds();
+        if (bounds)
+            this._redrawWithin(bounds);
+    }
+
+    // Drawn again only within these bounds on the stage.
+    _redrawWithin([x, y, width, height]) {
+        const [x1, y1] = [Math.floor(x - this.x) - 2, Math.floor(y - this.y) - 2];
+        this.queue_redraw_with_clip(new Mtk.Rectangle({
+            x: x1, y: y1, width: Math.ceil(x + width - this.x) + 2 - x1, height: Math.ceil(y + height - this.y) + 2 - y1,
+        }));
     }
 
     // How frosted it is (LOOK's): its blur, a share of its own (its tint is
@@ -667,13 +726,8 @@ class AtelierGlassSurface extends St.Widget {
         this._light = light;
         this._mask.setLight(light);
         const bounds = this._bounds();
-        if (bounds) {
-            const [x, y, width, height] = bounds;
-            const [x1, y1] = [Math.floor(x - this.x) - 2, Math.floor(y - this.y) - 2];
-            this.queue_redraw_with_clip(new Mtk.Rectangle({
-                x: x1, y: y1, width: Math.ceil(x + width - this.x) + 2 - x1, height: Math.ceil(y + height - this.y) + 2 - y1,
-            }));
-        }
+        if (bounds)
+            this._redrawWithin(bounds);
         return true;
     }
 

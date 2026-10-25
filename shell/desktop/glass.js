@@ -3,7 +3,7 @@
 // move every frame (while a widget is dragged) without blurring anything
 // again – and where liquid flows (cards pouring to other places). It is
 // Liquid Glass (shell/core/glassMaterial.js), each widget catching its own
-// light.
+// light, and shaded as its own type needs (shell/core/vibrancy.js).
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -19,7 +19,7 @@ import {REST_LIGHT, sameLight} from '../../lib/glassLook.js';
 import {syncTextureFrame} from '../core/glass.js';
 import {glassLight} from '../core/glassLight.js';
 import {
-    MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+    GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
@@ -28,8 +28,8 @@ const BLUR_RADIUS = 40; // logical pixels
 // How bright the blur leaves the wallpaper, in the light style and the dark.
 const BLUR_BRIGHTNESS = {light: 1, smoky: 0.92};
 
-// The widgets' rectangles (and the liquid), each with the light it catches;
-// the sheen runs across the one a pixel is nearest to.
+// The widgets' rectangles (and the liquid), each with the light it catches
+// and its shade; the sheen runs across the one a pixel is nearest to.
 const DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
@@ -37,6 +37,7 @@ uniform float radius;
 uniform float count;
 uniform vec4 rects[${MAX_RECTS}];
 uniform vec2 lights[${MAX_RECTS}];
+uniform vec2 shades[${MAX_RECTS}];
 ${LIQUID_DECLARATIONS}
 
 float atelier_rect(vec2 p, vec4 r) {
@@ -61,10 +62,11 @@ float atelier_body(vec2 p) {
     return atelier_shape(p);
 }
 
-void atelier_part(vec2 p, out vec4 frame, out vec2 light) {
+void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2 shade) {
     float nearest = 100000.0;
     frame = vec4(0.0);
     light = vec2(0.0, -1.0);
+    shade = vec2(0.0);
     for (int i = 0; i < ${MAX_RECTS}; i++) {
         if (float(i) >= count)
             break;
@@ -73,6 +75,7 @@ void atelier_part(vec2 p, out vec4 frame, out vec2 light) {
             nearest = d;
             frame = rects[i];
             light = lights[i];
+            shade = shades[i];
         }
     }
 }
@@ -89,9 +92,11 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this._count = this.get_uniform_location('count');
         this._rects = this.get_uniform_location('rects');
         this._lights = this.get_uniform_location('lights');
+        this._shades = this.get_uniform_location('shades');
         this._liquid = liquidUniforms(this);
         this._material = materialUniforms(this);
         this.setLights([]);
+        this.setShades([]);
         this.setMaterial(null, 1);
     }
 
@@ -129,6 +134,13 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._lights, 2, values);
     }
 
+    /** @param {number[][]} shades - each rect's extra shade, [dim, veil] */
+    setShades(shades) {
+        const values = new Array(MAX_RECTS * 2).fill(0);
+        shades.slice(0, MAX_RECTS).forEach((shade, i) => values.splice(i * 2, 2, ...shade));
+        this.set_uniform_float(this._shades, 2, values);
+    }
+
     /**
      * @param {object|null} look - LOOK's, null for only the shapes
      * @param {number} scale - pixels in a logical pixel
@@ -156,9 +168,12 @@ class AtelierDesktopGlass extends St.Widget {
         this._mask = new RectsMaskEffect();
         this.add_effect_with_name('atelier-desktop-glass-mask', this._mask);
         this._rects = [];
+        this._keys = [];
         this._radius = 0;
         this._liquid = {};
         this._lights = [];
+        // Each widget's extra shade, by its key (shell/core/vibrancy.js).
+        this._shades = new GlassShades(this, keys => this._showShades(keys));
         this._look = look;
         this._lightStyle = light;
         this._mask.setMaterial(look, glassScale());
@@ -168,6 +183,7 @@ class AtelierDesktopGlass extends St.Widget {
         this.connect('notify::mapped', () => glassLight.sync());
         this.connect('destroy', () => {
             glassLight.remove(this);
+            this._shades.destroy();
             St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
             this._bgManager?.destroy();
             this._bgManager = null;
@@ -254,10 +270,12 @@ class AtelierDesktopGlass extends St.Widget {
      * @param {number[][]} rects - [x, y, width, height] in the layer
      * @param {number} radius - of their corners
      * @param {object} [liquid] - {boxes, capsules} (lib/liquid.js), in the layer
+     * @param {Array} [keys] - whose each rectangle is: its shade's key (setShade())
      */
-    setRects(rects, radius, liquid = {}) {
+    setRects(rects, radius, liquid = {}, keys = []) {
         const moved = rects.length !== this._rects.length;
         this._rects = rects;
+        this._keys = keys;
         this._radius = radius;
         this._liquid = liquid;
         // (Others than before: each with the light from above, until the
@@ -272,6 +290,58 @@ class AtelierDesktopGlass extends St.Widget {
 
     _apply() {
         this._mask.setRects([this.width, this.height], this._rects, this._radius, this._liquid);
+        this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
+    }
+
+    // [dim, veil] of a rectangle's shade as it is now.
+    _shadeAt(i) {
+        const key = this._keys[i];
+        if (key === undefined)
+            return [0, 0];
+        const {dim, veil} = this._shades.shown(key);
+        return [dim, veil];
+    }
+
+    /**
+     * A widget's extra shade, where its type would not read otherwise
+     * (lib/vibrancy.js): darker under light type, lighter under dark –
+     * eased to it. (None for plain blurred glass.)
+     *
+     * @param {*} key - the widget's, as setRects() has its rectangle
+     * @param {object|null} shade - {dim, veil}; null: the widget is gone
+     */
+    setShade(key, shade) {
+        if (!shade) {
+            this._shades.delete(key);
+            this._apply();
+            return;
+        }
+        this._shades.set(key, shade);
+    }
+
+    /**
+     * @param {*} key
+     * @returns {object} the extra shade it is to have, {dim, veil}
+     */
+    shadeOf(key) {
+        return this._shades.wanted(key);
+    }
+
+    // The shades as they are now, drawn again only where those widgets are.
+    _showShades(keys) {
+        this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
+        this._rects.forEach((rect, i) => {
+            if (keys.includes(this._keys[i]))
+                this._redrawWithin(rect);
+        });
+    }
+
+    // Drawn again only within a rectangle of the layer.
+    _redrawWithin([x, y, width, height]) {
+        const [x1, y1] = [Math.floor(x) - 2, Math.floor(y) - 2];
+        this.queue_redraw_with_clip(new Mtk.Rectangle({
+            x: x1, y: y1, width: Math.ceil(x + width) + 2 - x1, height: Math.ceil(y + height) + 2 - y1,
+        }));
     }
 
     /**
@@ -314,13 +384,8 @@ class AtelierDesktopGlass extends St.Widget {
         this._mask.setLights(lights);
         changed.forEach((yes, i) => {
             const rect = this._rects[i];
-            if (!yes || !rect)
-                return;
-            const [x, y, width, height] = rect;
-            const [x1, y1] = [Math.floor(x) - 2, Math.floor(y) - 2];
-            this.queue_redraw_with_clip(new Mtk.Rectangle({
-                x: x1, y: y1, width: Math.ceil(x + width) + 2 - x1, height: Math.ceil(y + height) + 2 - y1,
-            }));
+            if (yes && rect)
+                this._redrawWithin(rect);
         });
         return true;
     }

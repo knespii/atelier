@@ -14,6 +14,7 @@ import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.j
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
+import {NO_SHADE} from '../../lib/glassLook.js';
 import {effectiveWallpaper} from '../../lib/profiles.js';
 import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
@@ -489,6 +490,7 @@ export class IslandModule {
 
     _onPageClosed() {
         this._syncDeep();
+        this._syncShade();
         // Back at rest under the pointer: the glance may follow.
         if (!this._island.page && this._island.hover)
             this._onHover();
@@ -498,7 +500,12 @@ export class IslandModule {
     // dark surface only – the glass is deep, whatever GNOME's style.
     _syncDeep() {
         const page = this._island?.page;
-        this._glass?.setDeep(Boolean(page?.has_style_class_name?.('atelier-cc')));
+        const deep = Boolean(page?.has_style_class_name?.('atelier-cc'));
+        // (Its type worked out anew once it is not: on the glass as it is
+        // under the type, not as it was under GNOME's controls.)
+        if (this._glass && this._glass.deep && !deep)
+            this._vibrant?.all.forEach(surface => surface.update());
+        this._glass?.setDeep(deep);
     }
 
     /**
@@ -556,9 +563,27 @@ export class IslandModule {
     setGlassPartner(shape) {
         if (JSON.stringify(shape) === JSON.stringify(this._partner))
             return;
+        // (One glass with it or not: its type and shade with it or not.)
+        const joined = Boolean(shape) !== Boolean(this._partner);
         this._partner = shape;
         this._glass?.setPartner(shape);
         this._liquid?.setPartner(shape);
+        if (joined)
+            this._vibrant?.rest.update();
+    }
+
+    /**
+     * @returns {object|null} the extra shade its glass is to have, {dim,
+     *   veil} – which the bar's one island, one glass with it, has too;
+     *   null without glass
+     */
+    get glassShade() {
+        if (!this._glass)
+            return null;
+        // (None under a sheet's liquid or GNOME's controls: deep glass.)
+        if (this._liquid || this._glass.deep)
+            return NO_SHADE;
+        return this._typeShade();
     }
 
     /**
@@ -666,6 +691,7 @@ export class IslandModule {
         }
         if (this._vibrant) {
             this._vibrant.all.forEach(surface => surface.update());
+            this._syncShade();
             return;
         }
         const glass = {
@@ -673,13 +699,16 @@ export class IslandModule {
             blur: () => blurOf(this._glass),
             tint: () => glassLayers(this._glass),
             layers: () => layersOf(this._island),
+            shaded: () => this._syncShade(),
         };
         const rest = () => {
             const rect = this._island?.restRect();
             return rect ? {x: rect[0], y: rect[1], width: rect[2], height: rect[3]} : null;
         };
         const surfaces = {
-            rest: vibrancy.surface({...glass, id: 'island', inks: 'island', rect: rest}),
+            // (At rest in the bar's one island, one glass with it.)
+            rest: vibrancy.surface({...glass, id: 'island', inks: 'island', rect: rest,
+                oneWith: () => (this._partner ? 'bar' : null)}),
             open: vibrancy.surface({...glass, id: 'island-pages', inks: 'pages', rect: () => this._pageRegion()}),
             windows: vibrancy.surface({...glass, id: 'island-windows', inks: 'pages',
                 behind: () => vibrancy.windowSurface()}),
@@ -728,6 +757,23 @@ export class IslandModule {
         const [on, off] = overWindows ? [vibrant.windows, vibrant.open] : [vibrant.open, vibrant.windows];
         island.remove_style_class_name(off.scope);
         island.add_style_class_name(on.scope);
+        vibrant.page = on;
+        this._syncShade();
+    }
+
+    // The shade its type asks of its glass: at rest the time's, opened the
+    // page's, over the wallpaper or over windows.
+    _typeShade() {
+        const vibrant = this._vibrant;
+        if (!vibrant)
+            return NO_SHADE;
+        return (this._island?.page ? vibrant.page ?? vibrant.open : vibrant.rest).shade;
+    }
+
+    // Its glass shaded as its type asks (eased there). (The bar's one
+    // island follows it, one glass with it.)
+    _syncShade() {
+        this._glass?.setShade(this._typeShade());
     }
 
     _dropVibrancy() {
@@ -735,6 +781,7 @@ export class IslandModule {
         if (!vibrant)
             return;
         this._vibrant = null;
+        this._glass?.setShade(NO_SHADE);
         this._island?.disconnectObject(vibrant);
         Main.overview.disconnectObject(vibrant);
         for (const surface of vibrant.all) {

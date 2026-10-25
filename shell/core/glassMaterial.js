@@ -12,8 +12,10 @@
 //   float atelier_body(vec2 p) – the glass it is part of, for the lens and
 //     the rim: the shape, or more (a surface on the screen's edge goes on
 //     past it; the island's glass in the one island is one glass with it);
-//   void atelier_part(vec2 p, out vec4 frame, out vec2 light) – the box the
-//     sheen runs across, and where the light comes from, at p.
+//   void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2
+//     shade) – the box the sheen runs across, where the light comes from,
+//     and the glass's extra shade [dim, veil] (lib/glassLook.js
+//     shadedLook()), at p.
 //
 // Then, where the shape is:
 // - the lens: within lens.width of the body's edge, what is behind is
@@ -21,8 +23,9 @@
 //   merged by a smooth minimum bend as one), up to lens.shift at the very
 //   edge – bending outward, as through a convex lens; red a little farther,
 //   blue a little less (the aberration): a hint of colour at the rim only;
-// - richer and lighter (saturation, brightness), a dimming (clear glass)
-//   and a white veil over it;
+// - richer and lighter (saturation, brightness), a dimming (clear glass,
+//   and the extra shade under light type) and a white veil over it (and
+//   the extra shade under dark type);
 // - the rim: the body's edge catching the light, strongest where it faces
 //   it, faintest where it faces away;
 // - the sheen: a diagonal gloss from a corner, turning with the light;
@@ -30,6 +33,7 @@
 // Without the material (lens.w 0: solid surfaces, the glass turned off)
 // the shape is only cut out, as it always was.
 
+import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
@@ -38,7 +42,10 @@ import St from 'gi://St';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {lookOf, materialValues, resolveVariant} from '../../lib/glassLook.js';
+import {NO_SHADE, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
+
+// How long glass takes to take another shade, ms.
+const SHADE_TIME = 250;
 
 export const MATERIAL_DECLARATIONS = `
 uniform vec4 glassTone;
@@ -76,7 +83,8 @@ if (atelier_cover <= 0.0 || glassLens.w < 0.5) {
     float inward = -body;
     vec4 frame;
     vec2 light;
-    atelier_part(atelier_p, frame, light);
+    vec2 shade;
+    atelier_part(atelier_p, frame, light, shade);
     vec2 normal = vec2(0.0);
     float edged = 0.0;
     if (inward < max(glassLens.x, glassRim.w) + 1.0) {
@@ -102,8 +110,8 @@ if (atelier_cover <= 0.0 || glassLens.w < 0.5) {
     }
     float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
     color.rgb = clamp(mix(vec3(luma), color.rgb, glassTone.x) * glassTone.y, 0.0, color.a);
-    color.rgb *= 1.0 - glassTone.w;
-    color.rgb = mix(color.rgb, vec3(color.a), glassTone.z);
+    color.rgb *= (1.0 - glassTone.w) * (1.0 - shade.x);
+    color.rgb = mix(color.rgb, vec3(color.a), 1.0 - (1.0 - glassTone.z) * (1.0 - shade.y));
     if (edged > 0.0 && glassRim.w > 0.0) {
         float facing = dot(normal, light);
         float rim = facing >= 0.0 ? mix(glassRim.z, glassRim.x, facing) : mix(glassRim.z, glassRim.y, -facing);
@@ -226,6 +234,108 @@ export class GlassLook extends EventEmitter {
         this._a11y = null;
         this._interface?.disconnectObject(this);
         this._interface = null;
+    }
+}
+
+/**
+ * The extra shades of a glass (lib/glassLook.js shadedLook(): darker under
+ * light type, lighter under dark, where it would not read otherwise), each
+ * by a key – a surface has one, the widgets' glass one for each widget –
+ * eased to what they are to be over SHADE_TIME: at once with GNOME's
+ * animations off (its setting, as the light has it: St's is forced on in
+ * the tests) or the glass not shown. Only uniforms change meanwhile.
+ */
+export class GlassShades {
+    /**
+     * @param {Clutter.Actor} actor - the glass, whose frames ease them
+     * @param {Function} onChange - (keys) => the shades of these keys as
+     *   they are now (shown()) are to go to the GPU
+     */
+    constructor(actor, onChange) {
+        this._actor = actor;
+        this._onChange = onChange;
+        this._from = new Map();
+        this._to = new Map();
+        this._timeline = null;
+        // (Asked once a shade changes: glass that never takes one – solid,
+        // say – never asks.)
+        this._interface = null;
+    }
+
+    /**
+     * @param {*} key
+     * @returns {object} its shade as it is now, {dim, veil}
+     */
+    shown(key) {
+        const to = this.wanted(key);
+        const from = this._from.get(key) ?? to;
+        const t = this._timeline ? this._timeline.get_progress() : 1;
+        return {dim: from.dim + (to.dim - from.dim) * t, veil: from.veil + (to.veil - from.veil) * t};
+    }
+
+    /**
+     * @param {*} key
+     * @returns {object} the shade it is to have, {dim, veil}
+     */
+    wanted(key) {
+        return this._to.get(key) ?? NO_SHADE;
+    }
+
+    /**
+     * @param {*} key
+     * @param {object} shade - {dim, veil} it is to have
+     */
+    set(key, shade) {
+        if (sameShade(shade, this.wanted(key)))
+            return;
+        // (Each from where it is now: one on its way goes on from there.)
+        for (const other of new Set([...this._to.keys(), key]))
+            this._from.set(other, this.shown(other));
+        this._to.set(key, {dim: shade.dim, veil: shade.veil});
+        this._timeline?.stop();
+        this._timeline = null;
+        this._interface ??= new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        const animated = this._actor.mapped && St.Settings.get().enable_animations &&
+            this._interface.get_boolean('enable-animations');
+        if (!animated) {
+            this._settle();
+            return;
+        }
+        const timeline = new Clutter.Timeline({
+            actor: this._actor,
+            duration: SHADE_TIME * St.Settings.get().slow_down_factor,
+            progress_mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        const moving = [...this._to.keys()].filter(other => !sameShade(this._from.get(other), this.wanted(other)));
+        timeline.connect('new-frame', () => this._onChange(moving));
+        timeline.connect('completed', () => {
+            if (this._timeline === timeline)
+                this._settle();
+        });
+        this._timeline = timeline;
+        timeline.start();
+    }
+
+    /** @param {*} key - one gone */
+    delete(key) {
+        this._from.delete(key);
+        this._to.delete(key);
+    }
+
+    // Each as it is to be.
+    _settle() {
+        const changed = [...this._to.keys()].filter(key => !sameShade(this._from.get(key) ?? NO_SHADE, this.wanted(key)));
+        this._timeline?.stop();
+        this._timeline = null;
+        this._from = new Map(this._to);
+        this._onChange(changed);
+    }
+
+    destroy() {
+        this._timeline?.stop();
+        this._timeline = null;
+        this._interface = null;
+        this._onChange = () => {};
     }
 }
 
