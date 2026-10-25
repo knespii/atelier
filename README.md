@@ -335,17 +335,18 @@ it and a fine grain keeps its gradients from banding. Its tint follows
 GNOME's style – light in the light one, smoky but see-through in the dark
 one. Type and icons on it read on what is behind it: over a light wallpaper
 they turn dark, over a dark one they stay light, in the palette's hue,
-legible as APCA measures contrast. Where they would not read on the glass as
-it is – over a sky, say, or a wallpaper both light and dark there – the
-glass takes on as much shade as they need and no more, as Apple's Regular
-glass does: darker under light type, lighter under dark. The type stays
-light in the dark style and dark in the light one unless the other needs
-clearly less of it; over a dark wallpaper the glass stays as see-through as
-it is.
+legible as APCA measures contrast. The type stays light in the dark style
+and dark in the light one unless the other reads clearly better there. The
+glass itself never darkens on its own: it is darkened as much as you choose,
+the same on every surface.
 
 In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
 little darker under it to keep what is on it legible) or *Off* (solid
-surfaces). GNOME's high contrast keeps it off.
+surfaces). GNOME's high contrast keeps it off. *Darkening* (none by default)
+lays the same dark wash over all of the glass – the island, the bar, the
+dock, the widgets, the drip sheets and the lock screen's island and password
+popup; more of it keeps light type, GNOME's controls in the control centre
+among it, legible over bright wallpapers.
 
 ## Settings
 

@@ -16,9 +16,8 @@
 //   float atelier_others(vec2 p) – of that glass, what other surfaces draw
 //     (the one island's, for the island's glass): they draw its contour
 //     and shadow there;
-//   void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float
-//     thick) – where the light comes from at p, the glass's extra shade
-//     there [dim, veil] and the short side of the part of it p is in
+//   void atelier_part(vec2 p, out vec2 light, out float thick) – where the
+//     light comes from at p and the short side of the part of it p is in
 //     (its own rectangle, a drop, the one island…), in pixels.
 //
 // And, where it defines them (#define before the material's declarations):
@@ -29,7 +28,7 @@
 //     (the lock screen's clock: its figures' distances read from a texture,
 //     the normal stored with them);
 //   ATELIER_WASH: vec4 atelier_wash – a colour [r, g, b] the glass is
-//     washed towards after its shade, as much as a (the clock's tone, as
+//     washed towards after its dim, as much as a (the clock's tone, as
 //     its legibility plan has it).
 //
 // Then, only within the bounds it may draw in (glassReach):
@@ -43,8 +42,8 @@
 // - its face: neutral glass, lighter or darker as GNOME's style has it, a
 //   small control's dark glass lighter (atelier_face, lib/glassLook.js
 //   faceColor());
-// - the extra shade, as a wash: dimmed under light type, veiled under
-//   dark;
+// - its dim: darker as a whole, as the glass-dim setting has it (a dark
+//   wash, the same on every surface: lib/glassLook.js dimmedLook());
 // - its volume: a little darker towards its edge, inside;
 // - the glint: a thin bright line on the edge facing the light and on the
 //   opposite one;
@@ -63,15 +62,15 @@ import St from 'gi://St';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {EDGE, LENS_SHARE, NO_SHADE, SMALL, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
+import {EDGE, LENS_SHARE, SMALL, dimmedLook, lookOf, materialValues, resolveVariant, sameNumbers} from '../../lib/glassLook.js';
 
-// How long glass takes to take another shade, ms.
-const SHADE_TIME = 250;
+/** How long glass takes to darken as the glass-dim setting has it, ms. */
+export const DIM_TIME = 250;
 /** How long glass takes to turn from GNOME's dark style to its light one, ms. */
 export const STYLE_TIME = 700;
 
 const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassLightFace', 'glassSmall', 'glassGlint',
-    'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea'];
+    'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea', 'glassDim'];
 
 export const MATERIAL_DECLARATIONS = `
 uniform vec4 glassLens;
@@ -85,6 +84,7 @@ uniform vec4 glassEdge;
 uniform vec4 glassShadow;
 uniform vec4 glassReach;
 uniform vec2 glassArea;
+uniform float glassDim;
 
 vec2 atelier_lookup(vec2 p) {
     return (clamp(p, vec2(0.5), glassArea - vec2(0.5)) - origin) / size;
@@ -170,9 +170,8 @@ if (glassLens.w < 0.5) {
     float cover = clamp(0.5 - shape, 0.0, 1.0);
     float body = atelier_body(p);
     vec2 light;
-    vec2 shade;
     float thick;
-    atelier_part(p, light, shade, thick);
+    atelier_part(p, light, thick);
     vec2 across = vec2(-light.y, light.x);
     float d = -body;
     // (lib/glassLook.js lensOf().)
@@ -236,8 +235,7 @@ if (glassLens.w < 0.5) {
         vec3 f = mix(atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),
             mix(glassFace.z, glassSmall.y, small), glassFace.w)), atelier_face(c, glassLightFace), glassStyle.x);
         f = clamp(f, 0.0, 1.0);
-        f *= 1.0 - shade.x;
-        f = mix(f, vec3(1.0), shade.y);
+        f *= 1.0 - glassDim;
 #ifdef ATELIER_WASH
         f = mix(f, atelier_wash.rgb, atelier_wash.a);
 #endif
@@ -294,7 +292,7 @@ export function setMaterialReach(effect, uniforms, reach) {
  * @param {object|null} look - LOOK's (lib/glassLook.js), null for none
  * @param {number} scale - pixels in a logical pixel
  * @param {object} [options] - as lib/glassLook.js materialValues() takes
- *   them: {light, shadow, density}
+ *   them: {light, shadow, density, dim}
  */
 export function setMaterial(effect, uniforms, look, scale, options = {}) {
     const values = materialValues(look, scale, options);
@@ -308,6 +306,7 @@ export function setMaterial(effect, uniforms, look, scale, options = {}) {
     effect.set_uniform_float(uniforms.glassGlint, 4, values.glint);
     effect.set_uniform_float(uniforms.glassEdge, 4, values.edge);
     effect.set_uniform_float(uniforms.glassShadow, 4, values.shadow);
+    effect.set_uniform_float(uniforms.glassDim, 1, [values.dim]);
 }
 
 /**
@@ -326,8 +325,9 @@ export function glassScale() {
 
 /**
  * The glass to draw, as the glass-variant setting and GNOME's high contrast
- * have it (lib/glassLook.js resolveVariant()), light or smoky as GNOME's
- * style is; emits 'changed' when it changes.
+ * have it (lib/glassLook.js resolveVariant()), darkened as the glass-dim
+ * setting has it, light or smoky as GNOME's style is; emits 'changed' when
+ * it changes.
  */
 export class GlassLook extends EventEmitter {
     /** @param {Gio.Settings} settings - Atelier's */
@@ -339,10 +339,14 @@ export class GlassLook extends EventEmitter {
         this._a11y = a11y?.has_key('high-contrast')
             ? new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'}) : null;
         this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
-        settings.connectObject('changed::glass-variant', () => this._sync(), this);
+        settings.connectObject(
+            'changed::glass-variant', () => this._sync(),
+            'changed::glass-dim', () => this._sync(),
+            this);
         this._a11y?.connectObject('changed::high-contrast', () => this._sync(), this);
         this._interface.connectObject('changed::color-scheme', () => this._sync(), this);
-        [this._variant, this._light] = this._resolve();
+        [this._variant, this._light, this._dim] = this._resolve();
+        this._look = dimmedLook(lookOf(this._variant), this._dim);
     }
 
     _resolve() {
@@ -350,14 +354,17 @@ export class GlassLook extends EventEmitter {
             resolveVariant(this._settings.get_string('glass-variant'),
                 {highContrast: this._a11y?.get_boolean('high-contrast') ?? false}),
             this._interface.get_string('color-scheme') !== 'prefer-dark',
+            this._settings.get_double('glass-dim'),
         ];
     }
 
     _sync() {
-        const [variant, light] = this._resolve();
-        if (variant === this._variant && light === this._light)
+        const [variant, light, dim] = this._resolve();
+        if (variant === this._variant && light === this._light && dim === this._dim)
             return;
-        [this._variant, this._light] = [variant, light];
+        if (variant !== this._variant || dim !== this._dim)
+            this._look = dimmedLook(lookOf(variant), dim);
+        [this._variant, this._light, this._dim] = [variant, light, dim];
         this.emit('changed');
     }
 
@@ -371,9 +378,12 @@ export class GlassLook extends EventEmitter {
         return this._variant;
     }
 
-    /** @returns {object|null} the material (LOOK's), null when off */
+    /**
+     * @returns {object|null} the material (LOOK's, dimmed: lib/glassLook.js
+     *   dimmedLook()), null when off – the same object until it changes
+     */
     get look() {
-        return lookOf(this._variant);
+        return this._look;
     }
 
     /** @returns {boolean} whether there is glass at all */
@@ -391,18 +401,16 @@ export class GlassLook extends EventEmitter {
 }
 
 /**
- * The extra shades of a glass ({dim, veil}: darker under light type,
- * lighter under dark, where it would not read otherwise – or anything else
- * of numbers eased as they are, as {light}), each by a key – a surface has
- * one, the widgets' glass one for each widget – eased to what they are to
- * be over SHADE_TIME (or a time of their own): at once with GNOME's
+ * Numbers of a glass eased to what they are to be, each by a key – how
+ * light GNOME's style is ({light}), how dark the glass-dim setting has it
+ * ({dim}) – over DIM_TIME (or a time of their own): at once with GNOME's
  * animations off (its setting, as the light has it: St's is forced on in
  * the tests) or the glass not shown. Only uniforms change meanwhile.
  */
-export class GlassShades {
+export class GlassEasing {
     /**
      * @param {Clutter.Actor} actor - the glass, whose frames ease them
-     * @param {Function} onChange - (keys) => the shades of these keys as
+     * @param {Function} onChange - (keys) => the numbers of these keys as
      *   they are now (shown()) are to go to the GPU
      */
     constructor(actor, onChange) {
@@ -411,14 +419,14 @@ export class GlassShades {
         this._from = new Map();
         this._to = new Map();
         this._timeline = null;
-        // (Asked once a shade changes: glass that never takes one – solid,
-        // say – never asks.)
+        // (Asked once one changes: glass whose never do – solid, say –
+        // never asks.)
         this._interface = null;
     }
 
     /**
      * @param {*} key
-     * @returns {object} its shade as it is now, {dim, veil}
+     * @returns {object} its numbers as they are now
      */
     shown(key) {
         const to = this.wanted(key);
@@ -430,24 +438,24 @@ export class GlassShades {
 
     /**
      * @param {*} key
-     * @returns {object} the shade it is to have, {dim, veil}
+     * @returns {object} the numbers it is to have
      */
     wanted(key) {
-        return this._to.get(key) ?? NO_SHADE;
+        return this._to.get(key) ?? {};
     }
 
     /**
      * @param {*} key
-     * @param {object} shade - {dim, veil} it is to have
+     * @param {object} values - the numbers it is to have
      * @param {number} [duration] - how long it takes to get there, ms
      */
-    set(key, shade, duration = SHADE_TIME) {
-        if (sameShade(shade, this.wanted(key)))
+    set(key, values, duration = DIM_TIME) {
+        if (sameNumbers(values, this.wanted(key)))
             return;
         // (Each from where it is now: one on its way goes on from there.)
         for (const other of new Set([...this._to.keys(), key]))
             this._from.set(other, this.shown(other));
-        this._to.set(key, {...shade});
+        this._to.set(key, {...values});
         this._timeline?.stop();
         this._timeline = null;
         this._interface ??= new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
@@ -462,7 +470,7 @@ export class GlassShades {
             duration: duration * St.Settings.get().slow_down_factor,
             progress_mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
-        const moving = [...this._to.keys()].filter(other => !sameShade(this._from.get(other), this.wanted(other)));
+        const moving = [...this._to.keys()].filter(other => !sameNumbers(this._from.get(other), this.wanted(other)));
         timeline.connect('new-frame', () => this._onChange(moving));
         timeline.connect('completed', () => {
             if (this._timeline === timeline)
@@ -480,7 +488,7 @@ export class GlassShades {
 
     // Each as it is to be.
     _settle() {
-        const changed = [...this._to.keys()].filter(key => !sameShade(this._from.get(key) ?? NO_SHADE, this.wanted(key)));
+        const changed = [...this._to.keys()].filter(key => !sameNumbers(this._from.get(key) ?? {}, this.wanted(key)));
         this._timeline?.stop();
         this._timeline = null;
         this._from = new Map(this._to);

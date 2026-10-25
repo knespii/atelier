@@ -124,6 +124,12 @@
       <summary>Glass</summary>
       <description>How Atelier's glass looks wherever it has glass (the island, the bar, the dock, the widgets, the lock screen's clock). “regular”: Liquid Glass – what is behind it bends at its edges as through a lens, richer and lighter, its edges catching the light (and leaning towards the pointer); “clear”: more see-through, with a little dimming under it; “off”: solid surfaces, no blur, no light. GNOME's high contrast always turns it off.</description>
     </key>
+    <key name="glass-dim" type="d">
+      <range min="0" max="1"/>
+      <default>0</default>
+      <summary>Darkening of the glass</summary>
+      <description>How much darker all of Atelier's glass is (the island, the bar, the dock, the widgets, the drip sheets, the lock screen's island and password popup): 0 not at all, 1 black. The same on every surface, whatever is behind it; the type on the glass still turns darker or lighter to stay legible. More darkening keeps light type (GNOME's controls in the control centre, say) legible over bright wallpapers.</description>
+    </key>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>

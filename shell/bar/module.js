@@ -17,7 +17,6 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {NO_SHADE} from '../../lib/glassLook.js';
 import {COME_OUT_TIME, EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {GlassSurface} from '../core/glass.js';
 import {GlassLook} from '../core/glassMaterial.js';
@@ -333,8 +332,7 @@ export class BarModule {
     }
 
     // The one island and the island, of glass, are one glass: each knows
-    // the other's shape, to bend and catch the light as one, and the one
-    // island has the island's shade.
+    // the other's shape, to bend and catch the light as one.
     _syncPartners() {
         const surface = this._surfaces[0];
         if (this._stopped || this._look?.style !== 'island' || !surface?.glass)
@@ -342,21 +340,6 @@ export class BarModule {
         const islandModule = this._modules.get('island');
         surface.actor.setPartner(islandModule?.glassShape ?? null);
         islandModule?.setGlassPartner(surface.shape);
-        this._syncShades();
-    }
-
-    // Each surface's glass shaded as its type asks (shell/core/vibrancy.js):
-    // a capsule's or GNOME's bar of glass as its own; the one island as
-    // the island in it (as its own while there is none) – one glass, its
-    // type and the island's at rest worked out together.
-    _syncShades() {
-        if (this._stopped)
-            return;
-        const one = this._look?.style === 'island' ? this._modules.get('island')?.glassShade ?? null : null;
-        this._surfaces.forEach((surface, i) => {
-            if (surface.glass)
-                surface.actor.setShade(one ?? this._vibrant[i]?.shade ?? NO_SHADE);
-        });
     }
 
     /**
@@ -503,8 +486,6 @@ export class BarModule {
             ids = ['bar-left', 'bar-right'];
         if (this._vibrant.map(surface => surface.id).join() === ids.join()) {
             this._vibrant.forEach(surface => surface.update());
-            // (Its glass may be new.)
-            this._syncShades();
             return;
         }
         this._dropVibrancy();
@@ -520,7 +501,6 @@ export class BarModule {
                 inks: 'bar',
                 roots: parts[i].roots,
                 rect: () => this._restRects()[i] ?? null,
-                shaded: () => this._syncShades(),
             });
             surface.boxes = parts[i].boxes;
             surface.boxes.forEach(box => box.add_style_class_name(surface.scope));
@@ -549,7 +529,6 @@ export class BarModule {
             surface.destroy();
         }
         this._vibrant = [];
-        this._syncShades();
     }
 
     // Where each surface rests on the stage: as _updateSurfaces() places

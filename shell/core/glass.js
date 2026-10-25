@@ -18,11 +18,11 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
-    NO_SHADE, REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
+    REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
 } from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
-    GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+    GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
     STYLE_TIME, setMaterialReach, textureDensity,
 } from './glassMaterial.js';
 
@@ -59,8 +59,6 @@ uniform vec4 partner;
 uniform vec4 partnerBody;
 uniform vec3 partnerLook;
 uniform vec2 glassLight;
-uniform vec2 glassShade;
-uniform vec2 dropShade;
 
 float atelier_smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -131,11 +129,9 @@ float atelier_body(vec2 p) {
 
 // The short side of the part p is in: the rectangle's as it shows (not its
 // body's past the screen), a drop's or its neck's where they melt into it,
-// the partner's where it is the nearer; and its shade: the drop's own (a
-// sheet's form on it) where it is the drop.
-void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
+// the partner's where it is the nearer.
+void atelier_part(vec2 p, out vec2 light, out float thick) {
     light = glassLight;
-    shade = glassShade;
     float d = atelier_notch(p, rect, body, radii, ear);
     thick = min(rect.z, rect.w);
     float k = max(blend, 0.001);
@@ -152,7 +148,6 @@ void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
         float n = length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius;
         float w = clamp(0.5 + 0.5 * (d - n) / k, 0.0, 1.0);
         thick = mix(thick, 2.0 * min(drop.z, drop.w), w);
-        shade = mix(shade, dropShade, w);
         d = atelier_smin(d, n, k);
     }
     if (atelier_others(p) < d)
@@ -188,7 +183,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassShade', 'dropShade'];
+            'partner', 'partnerBody', 'partnerLook', 'glassLight'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
         this._look = [null, 1, {}];
@@ -196,7 +191,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.setNeck([0, 0, 0, 0]);
         this.setPartner(null);
         this.setLight(REST_LIGHT);
-        this.setShade([0, 0], [0, 0]);
         this.setReach(null);
         this.setMaterial(null, 1);
     }
@@ -254,15 +248,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.glassLight, 2, light);
     }
 
-    /**
-     * @param {number[]} shade - its extra shade, [dim, veil]
-     * @param {number[]} drop - its drop's, the same way
-     */
-    setShade(shade, drop) {
-        this.set_uniform_float(this._at.glassShade, 2, shade);
-        this.set_uniform_float(this._at.dropShade, 2, drop);
-    }
-
     /** @param {number[]|null} reach - [x1, y1, x2, y2] it draws within */
     setReach(reach) {
         setMaterialReach(this, this._material, reach);
@@ -271,7 +256,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     /**
      * @param {object|null} look - LOOK's, null for only the shape
      * @param {number} scale - pixels in a logical pixel
-     * @param {object} [options] - {light, shadow, density} (setMaterial())
+     * @param {object} [options] - {light, shadow, density, dim} (setMaterial())
      */
     setMaterial(look, scale, options = {}) {
         this._look = [look, scale, options];
@@ -359,10 +344,8 @@ class AtelierGlassSurface extends St.Widget {
         this._partner = null;
         this._live = null;
         this._light = REST_LIGHT;
-        // The extra shade its type asks for (shell/core/vibrancy.js).
-        this._typeShade = NO_SHADE;
-        this._dropShade = NO_SHADE;
-        this._shades = new GlassShades(this, () => this._showShade());
+        // GNOME's style and the glass's dim, eased.
+        this._eased = new GlassEasing(this, () => this._showEased());
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
@@ -387,13 +370,14 @@ class AtelierGlassSurface extends St.Widget {
         }
         this.connect('destroy', () => {
             glassLight.remove(this);
-            this._shades.destroy();
+            this._eased.destroy();
             Main.layoutManager.disconnectObject(this);
             St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
             this._bgManager?.destroy();
             this._bgManager = null;
         });
-        this._shades.set('style', {light: light ? 1 : 0});
+        this._eased.set('style', {light: light ? 1 : 0});
+        this._eased.set('dim', {dim: this._look?.dim ?? 0});
         this._syncMaterial();
         this._build();
         if (source && !solid)
@@ -434,16 +418,17 @@ class AtelierGlassSurface extends St.Widget {
         this._source?.set_position(-this.x, -this.y);
     }
 
-    // (Its face as GNOME's style has it now: on its way from one to the
-    // other over STYLE_TIME.)
+    // (Its face as GNOME's style has it now – on its way from one to the
+    // other over STYLE_TIME – and its dim, on its way to the look's.)
     _syncMaterial() {
-        const {light = 0} = this._shades.shown('style');
-        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true});
+        const {light = 0} = this._eased.shown('style');
+        const {dim = 0} = this._eased.shown('dim');
+        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true, dim});
     }
 
     /**
-     * Another material: another variant of glass, or of GNOME's style. (A
-     * solid surface has none.)
+     * Another material: another variant of glass, darkened otherwise
+     * (eased there), or of GNOME's style. (A solid surface has none.)
      *
      * @param {object|null} look - LOOK's, null for the plain wallpaper
      * @param {boolean} [light] - GNOME's style is light
@@ -453,57 +438,20 @@ class AtelierGlassSurface extends St.Widget {
             return;
         this._look = look;
         this._lightStyle = light;
-        this._shades.set('style', {light: light ? 1 : 0}, STYLE_TIME);
+        this._eased.set('style', {light: light ? 1 : 0}, STYLE_TIME);
+        this._eased.set('dim', {dim: look?.dim ?? 0});
         this._syncMaterial();
-        this._syncShade();
         this._syncLive();
         glassLight.sync();
     }
 
-    /**
-     * An extra shade, where the type on it would not read otherwise
-     * (lib/vibrancy.js): darker under light type, lighter under dark –
-     * eased to it. (None on solid or plain blurred glass.)
-     *
-     * @param {object} shade - {dim, veil}, 0 … 1 each
-     */
-    setShade(shade) {
-        this._typeShade = shade ?? NO_SHADE;
-        this._syncShade();
+    /** @returns {number} how much darker its glass is to be (its look's dim), 0 … 1 */
+    get dim() {
+        return this._eased.wanted('dim').dim ?? 0;
     }
 
-    /** @returns {object} the extra shade it is to have, {dim, veil} */
-    get shade() {
-        return this._shades.wanted('glass');
-    }
-
-    /**
-     * The drop's own shade, where the form on it would not read otherwise
-     * (a sheet's): eased to it, as setShade().
-     *
-     * @param {object} shade - {dim, veil}, 0 … 1 each
-     */
-    setDropShade(shade) {
-        this._dropShade = shade ?? NO_SHADE;
-        this._syncShade();
-    }
-
-    /** @returns {object} the extra shade its drop is to have, {dim, veil} */
-    get dropShade() {
-        return this._shades.wanted('drop');
-    }
-
-    _syncShade() {
-        const none = this._solid || !this._look;
-        this._shades.set('glass', none ? NO_SHADE : this._typeShade);
-        this._shades.set('drop', none ? NO_SHADE : this._dropShade);
-    }
-
-    // The shade as it is now, drawn again where its shapes are.
-    _showShade() {
-        const {dim, veil} = this._shades.shown('glass');
-        const drop = this._shades.shown('drop');
-        this._mask.setShade([dim, veil], [drop.dim ?? 0, drop.veil ?? 0]);
+    // As eased now, drawn again where its shapes are.
+    _showEased() {
         this._syncMaterial();
         const bounds = this._bounds();
         if (bounds)

@@ -120,10 +120,9 @@ vec2 atelier_normal(vec2 p) {
     return dot(atelier_clock_n, atelier_clock_n) > 0.25 ? normalize(atelier_clock_n) : vec2(0.0);
 }
 
-void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
+void atelier_part(vec2 p, out vec2 light, out float thick) {
     atelier_clock(p);
     light = glassLight;
-    shade = vec2(0.0);
     thick = atelier_clock_thick;
 }
 ${MATERIAL_DECLARATIONS}

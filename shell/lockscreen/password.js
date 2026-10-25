@@ -24,7 +24,7 @@ import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUti
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ShellEntry from 'resource:///org/gnome/shell/ui/shellEntry.js';
 
-import {NO_SHADE, edgeReach} from '../../lib/glassLook.js';
+import {edgeReach} from '../../lib/glassLook.js';
 import {boxOf, clamp01, gather, gatherBounds, spread} from '../../lib/liquid.js';
 import {MessageKind} from '../../lib/lockState.js';
 import {LiquidPaint} from '../core/liquid.js';
@@ -188,8 +188,8 @@ class MeltPopup {
     /**
      * @param {St.Widget} form
      * @param {Clutter.Actor} island
-     * @param {object|null} [glass] - {source, look, light, shade} of its
-     *   glass (popupGlass.js); null: black
+     * @param {object|null} [glass] - {source, look, light} of its glass
+     *   (popupGlass.js); null: black
      */
     constructor(form, island, glass = null) {
         this.form = form;
@@ -224,14 +224,6 @@ class MeltPopup {
     /** @returns {PopupGlass|LiquidPaint|null} what the popup is drawn in while it moves (and, of glass, rests) */
     get liquid() {
         return this._paint;
-    }
-
-    /** @param {object} shade - its glass's extra shade, {dim, veil} */
-    setShade(shade) {
-        if (this._glass)
-            this._glass.shade = shade ?? NO_SHADE;
-        if (this._paint instanceof PopupGlass)
-            this._paint.setShade(this._glass.shade);
     }
 
     _fit() {
@@ -394,9 +386,8 @@ export class PasswordField {
     /**
      * @param {LockIsland} island - the popup goes right under it
      * @param {object} [options]
-     * @param {Function} [options.glass] - () => {source, look, light,
-     *   shade} of the popup's glass as it opens (popupGlass.js), null:
-     *   black
+     * @param {Function} [options.glass] - () => {source, look, light} of
+     *   the popup's glass as it opens (popupGlass.js), null: black
      */
     constructor(island, {glass = () => null} = {}) {
         this._island = island;
@@ -550,11 +541,6 @@ export class PasswordField {
     /** @returns {PopupGlass|LiquidPaint|null} what the popup is drawn in, while it moves (and, of glass, rests) */
     get liquid() {
         return this._popup?.liquid ?? null;
-    }
-
-    /** @param {object} shade - the popup's glass's extra shade, {dim, veil} */
-    setShade(shade) {
-        this._popup?.setShade(shade);
     }
 
     // What GNOME says, unless typing has put it away.

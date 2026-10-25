@@ -4,8 +4,8 @@
 // over the lock screen's wallpaper as it shows – a clone of GNOME's
 // wallpapers and of their glass (glass.js), sharp or turned to glass as the
 // prompt comes up – bent at its edges, lightly blurred, its face neutral,
-// with a glint, a contour and a shadow, and as much extra shade as its
-// light type needs to read (lib/vibrancy.js promptShade()).
+// with a glint, a contour and a shadow, darkened as the glass-dim setting
+// has all of Atelier's glass.
 //
 // It covers only as far as the liquid flows (and its shadow round it), not
 // all of the monitor: what it is drawn in is made as it first shows, and
@@ -17,7 +17,7 @@ import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {NO_SHADE, REST_LIGHT, edgeReach} from '../../lib/glassLook.js';
+import {REST_LIGHT, edgeReach} from '../../lib/glassLook.js';
 import {WindowsClone, syncTextureFrame} from '../core/glass.js';
 import {
     MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
@@ -30,7 +30,6 @@ const DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
 uniform vec2 glassLight;
-uniform vec2 glassShade;
 uniform float partThick;
 ${LIQUID_DECLARATIONS}
 
@@ -46,9 +45,8 @@ float atelier_others(vec2 p) {
     return 100000.0;
 }
 
-void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
+void atelier_part(vec2 p, out vec2 light, out float thick) {
     light = glassLight;
-    shade = glassShade;
     thick = partThick;
 }
 ${MATERIAL_DECLARATIONS}
@@ -58,13 +56,12 @@ const PopupGlassEffect = GObject.registerClass(
 class AtelierLockPopupGlassEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
-        const names = ['origin', 'size', 'glassLight', 'glassShade', 'partThick'];
+        const names = ['origin', 'size', 'glassLight', 'partThick'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this.liquid = liquidUniforms(this);
         this.material = materialUniforms(this);
         this._look = [null, 1, {}];
         this.set_uniform_float(this._at.glassLight, 2, REST_LIGHT);
-        this.setShade(NO_SHADE);
         this.setThick(0);
     }
 
@@ -90,12 +87,6 @@ class AtelierLockPopupGlassEffect extends Shell.GLSLEffect {
         this.queue_repaint();
     }
 
-    /** @param {object} shade - {dim, veil} */
-    setShade({dim = 0, veil = 0}) {
-        this.set_uniform_float(this._at.glassShade, 2, [dim, veil]);
-        this.queue_repaint();
-    }
-
     /** @param {number} thick - the short side of its largest part, pixels */
     setThick(thick) {
         this.set_uniform_float(this._at.partThick, 1, [thick]);
@@ -112,11 +103,11 @@ class AtelierLockPopupGlass extends St.Widget {
      * @param {object} params
      * @param {Clutter.Actor} params.source - what is behind it: an actor
      *   as large as the stage, at its corner (GNOME's wallpapers)
-     * @param {object} params.look - lib/glassLook.js LOOK's
+     * @param {object} params.look - lib/glassLook.js LOOK's, dimmed
+     *   (dimmedLook())
      * @param {boolean} params.light - GNOME's style is light
-     * @param {object} [params.shade] - its extra shade, {dim, veil}
      */
-    _init({source, look, light, shade = NO_SHADE}) {
+    _init({source, look, light}) {
         super._init({reactive: false, clip_to_allocation: true});
         Shell.util_set_hidden_from_pick(this, true);
         this._behind = new WindowsClone({source});
@@ -125,8 +116,7 @@ class AtelierLockPopupGlass extends St.Widget {
         this._effect = new PopupGlassEffect();
         this.add_effect_with_name('atelier-popup-glass', this._effect);
         this._effect.setMaterial(look, glassScale(), {light, shadow: true});
-        this._effect.setShade(shade);
-        this._shade = shade;
+        this._look = look;
         /** The shapes it was given last. */
         this.shapes = {boxes: [], capsules: []};
         this.placedAt = null;
@@ -172,15 +162,9 @@ class AtelierLockPopupGlass extends St.Widget {
         ]);
     }
 
-    /** @param {object} shade - its extra shade, {dim, veil} */
-    setShade(shade) {
-        this._shade = shade ?? NO_SHADE;
-        this._effect.setShade(this._shade);
-    }
-
-    /** @returns {object} its extra shade, {dim, veil} */
-    get shade() {
-        return this._shade;
+    /** @returns {object} the material it is drawn with (its dim: look.dim) */
+    get look() {
+        return this._look;
     }
 
     /** @returns {Clutter.Actor|null} what its glass shows */

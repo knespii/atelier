@@ -8,8 +8,8 @@
 // unlocking itself never waits for it.
 // It is of the same glass as the session's (shell/core/glass.js), over the
 // lock screen's wallpaper as it shows – sharp, or turned to glass as the
-// prompt comes up – shaded as much as its light type needs; black, as the
-// session's island is, with the glass off.
+// prompt comes up – darkened as the glass-dim setting has all of it; black,
+// as the session's island is, with the glass off.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -20,7 +20,6 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {NO_SHADE} from '../../lib/glassLook.js';
 import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
@@ -59,7 +58,6 @@ export class LockIsland {
         this._barSettings = barSettings;
         this._source = source;
         this._glass = null;
-        this._shade = NO_SHADE;
         this._glassLook = settings ? new GlassLook(settings) : null;
         this.padlock = new Padlock();
         this._idle = new LockIdle(this.padlock);
@@ -138,17 +136,6 @@ export class LockIsland {
         return this._glassLook;
     }
 
-    /**
-     * The extra shade its glass takes, where its light type would not read
-     * otherwise (lib/vibrancy.js promptShade()): eased to it.
-     *
-     * @param {object} shade - {dim, veil}
-     */
-    setShade(shade) {
-        this._shade = shade ?? NO_SHADE;
-        this._glass?.setShade(this._shade);
-    }
-
     // A notch curves into the top edge with ears; a capsule floats. Of
     // glass, or black with the glass off (black ears).
     _syncLook() {
@@ -164,7 +151,6 @@ export class LockIsland {
         if (glass && !this._glass) {
             this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look,
                 light: this._glassLook.light, source: this._source});
-            this._glass.setShade(this._shade);
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
             this.actor.add_style_class_name('atelier-island-glass');
         } else if (!glass && this._glass) {

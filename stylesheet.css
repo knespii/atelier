@@ -1830,7 +1830,9 @@
 
 .atelier-desktop-modern.atelier-desktop-glassy .atelier-widget {
   background-color: rgba(14, 14, 18, 0);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  /* (The glass casts its own, outside it: a card's would show through it,
+     darker than the rest of the glass.) */
+  box-shadow: none;
 }
 
 /* Analogue: paper */

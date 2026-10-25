@@ -398,7 +398,19 @@ async function runSelftest(window) {
     appearance._settings.set_string('glass-variant', 'off');
     check(appearance._glassToggles.active_name === 'off' && glassRow.subtitle.startsWith('Solid'),
         'and the row follows the setting');
+    check(!appearance._dimRow.sensitive, 'solid surfaces: no darkening to set');
     appearance._settings.reset('glass-variant');
+    // Darkening: one slider for all of the glass, none to begin with,
+    // written as it moves, and following the setting.
+    const dimRow = appearance._dimRow;
+    check(dimRow.title === 'Darkening' && dimRow.sensitive && dimRow.subtitle.includes('legible') &&
+        appearance._dimScale.get_value() === 0 && appearance._settings.get_double('glass-dim') === 0,
+    `Darkening: none to begin with (${dimRow.subtitle})`);
+    appearance._dimScale.set_value(30);
+    check(Math.abs(appearance._settings.get_double('glass-dim') - 0.3) < 1e-9, 'the slider at 30 % darkens all of it 0.3');
+    appearance._settings.set_double('glass-dim', 0.6);
+    check(appearance._dimScale.get_value() === 60, 'and follows the setting');
+    appearance._settings.reset('glass-dim');
 
     // Island: the switches write the island's settings; turning it off
     // disables its options.

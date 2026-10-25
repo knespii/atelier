@@ -15,11 +15,9 @@ import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {NO_SHADE, sameShade} from '../../lib/glassLook.js';
 import {Phase, initialState, look, reduce} from '../../lib/lockState.js';
-import {promptShade} from '../../lib/vibrancy.js';
 import {LockBoard} from './board.js';
-import {GLASS, LockGlass} from './glass.js';
+import {LockGlass} from './glass.js';
 import {
     backgroundGroupOf, clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt, wallpaperBlursOf,
 } from './gnome.js';
@@ -58,8 +56,6 @@ export class LockModule {
         this._following = null;
         this._status = null;
         this._glass = null;
-        // The extra shade of the island's glass and the popup's.
-        this._shades = {island: NO_SHADE, popup: NO_SHADE};
         this.state = initialState();
     }
 
@@ -113,7 +109,6 @@ export class LockModule {
             this._island = new LockIsland(this._settings.get_child('bar'),
                 {settings: this._settings, source: backgroundGroupOf(this._dialog)});
             this._island.actor.connectObject('clicked', () => showPrompt(this._dialog), this);
-            this._island.glassLook?.connectObject('changed', () => this._syncShades(), this);
             // (It pops up right under the island, of the same glass.)
             if (this._lockSettings.get_boolean('password-field'))
                 this._field = new PasswordField(this._island, {glass: () => this._popupGlass()});
@@ -124,8 +119,6 @@ export class LockModule {
             this._board.destroy();
             this._board = null;
         }
-        // (What is behind the glass known, or anew: its shade worked out.)
-        this._board?.typography.connectObject('changed', () => this._syncShades(), this);
         // GNOME's blur at its fullest, as it has set it.
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const [blur] = wallpaperBlursOf(this._dialog);
@@ -135,16 +128,12 @@ export class LockModule {
         // sets its blur anew.
         promptProgressOf(this._dialog)?.connectObject('notify::value', () => this._follow(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => this._makeRoom(), this);
-        Main.layoutManager.connectObject('monitors-changed', () => {
-            this._makeRoom();
-            this._syncShades();
-        }, this);
+        Main.layoutManager.connectObject('monitors-changed', () => this._makeRoom(), this);
         this._room = this._progress();
         this._makeRoom();
         this._lockSettings.connectObject('changed::gnome-clock', () => this._syncClock(), this);
         this._syncClock();
         this._observer = new AuthObserver(this._dialog, event => this._dispatch(event));
-        this._syncShades();
         this._show();
         // Unlocked, GNOME turns its other extensions on again and the shell
         // stops a moment: by then the padlock shows open, still – drawn
@@ -189,57 +178,16 @@ export class LockModule {
 
     /**
      * The popup's glass as it opens: the island's, over the lock screen's
-     * wallpaper, shaded as its own type needs; null with the glass off.
+     * wallpaper; null with the glass off.
      *
-     * @returns {object|null} {source, look, light, shade}
+     * @returns {object|null} {source, look, light}
      */
     _popupGlass() {
         const glassLook = this._island?.glassLook;
         const source = backgroundGroupOf(this._dialog);
         if (!this._island?.glass || !glassLook?.look || !source)
             return null;
-        return {source, look: glassLook.look, light: glassLook.light, shade: this._shades.popup};
-    }
-
-    /**
-     * @returns {object} the extra shade of the island's glass and the
-     *   popup's, {island, popup}: each {dim, veil}
-     */
-    get shades() {
-        return {...this._shades};
-    }
-
-    // What the island's light type and the popup's need of their glass to
-    // read, over the wallpaper behind them as the prompt has it
-    // (lib/vibrancy.js promptShade()): from the wallpaper's sample the
-    // widgets' type is picked on, once it is there.
-    _syncShades() {
-        const glassLook = this._island?.glassLook;
-        const monitor = Main.layoutManager.primaryMonitor;
-        const typography = this._board?.typography;
-        if (!this._island || !monitor || !glassLook)
-            return;
-        const look = glassLook.glass ? glassLook.look : null;
-        const statsOf = ([x, y, width, height]) => (width > 0 && height > 0
-            ? typography?.statsOf([x / monitor.width, y / monitor.height, width / monitor.width,
-                height / monitor.height], monitor.width / monitor.height) ?? null
-            : null);
-        const options = {light: glassLook.light, brightness: GLASS.brightness};
-        const island = this._island.actor;
-        // (Where it is once out; on its monitor.)
-        const islandRect = island
-            ? [island.x - monitor.x, island.y - monitor.y, island.width, island.height] : [0, 0, 0, 0];
-        const shades = {
-            island: promptShade(statsOf(islandRect), look, options),
-            // (Its type on the field's pill.)
-            popup: promptShade(statsOf(this._field?.rect ?? [0, 0, 0, 0]), look,
-                {...options, layers: [{color: '#ffffff', alpha: 0.1}]}),
-        };
-        if (sameShade(shades.island, this._shades.island) && sameShade(shades.popup, this._shades.popup))
-            return;
-        this._shades = shades;
-        this._island.setShade(shades.island);
-        this._field?.setShade(shades.popup);
+        return {source, look: glassLook.look, light: glassLook.light};
     }
 
     /** @returns {number} GNOME's, from the clock (0) to the prompt (1) */
@@ -327,7 +275,6 @@ export class LockModule {
         this._field?.follow(event, this.state);
         // (The popup may have come up, or grown with what GNOME says.)
         this._makeRoom(true);
-        this._syncShades();
         if (this.state.phase === Phase.FAILED && before !== Phase.FAILED) {
             this._island?.shake();
             this._settleLater();
@@ -367,7 +314,6 @@ export class LockModule {
         const island = this._island;
         this._island = null;
         island?.actor?.disconnectObject(this);
-        island?.glassLook?.disconnectObject(this);
         if (island)
             island.handOver(onGone);
         else
@@ -389,10 +335,8 @@ export class LockModule {
         // (Unlocked, GNOME's prompt goes as it is: hidden.)
         this._field?.destroy({restore: !this._unlocking});
         this._field = null;
-        this._island?.glassLook?.disconnectObject(this);
         this._island?.destroy();
         this._island = null;
-        this._board?.typography.disconnectObject(this);
         this._lockSettings?.disconnectObject(this);
         promptProgressOf(this._dialog)?.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);

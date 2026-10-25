@@ -1,6 +1,6 @@
 import {
-    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
-    faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameShade,
+    EDGE, FACES, LOOK, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
+    dimmedLook, faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameNumbers,
     smallness, textureFrame,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
@@ -139,14 +139,27 @@ export function testMaterialValues() {
     assert(clear.face[1] === FACES.clear.T && clear.lightFace[1] === FACES.clear.T, 'clear glass\'s own in either');
     const none = materialValues(null);
     assertEqual(none.lens[3], 0, 'none: only the shape');
+    // Its dim: the look's (the glass-dim setting's), or on its way there.
+    assertEqual(values.dim, 0, 'not darkened by default');
+    assertEqual(materialValues(dimmedLook(look, 0.3), 1).dim, 0.3, 'darkened as the setting has it');
+    assertEqual(materialValues(dimmedLook(look, 0.3), 1, {dim: 0.1}).dim, 0.1, 'or on its way there');
+    assertEqual(none.dim, 0, 'none without glass');
     assert(edgeReach(true) > EDGE.shadow.y + 2 * EDGE.shadow.sigma && edgeReach(false) < 2,
         'drawn as far out as the shadow goes, or the contour');
 }
 
-export function testSameShade() {
-    assert(sameShade({dim: 0.2, veil: 0}, {dim: 0.20001, veil: 0}) && !sameShade({dim: 0.2, veil: 0}, NO_SHADE),
-        'shades the same as far as anyone could see');
-    assert(sameShade({light: 0}, NO_SHADE) && !sameShade({light: 1}, {light: 0.5}), 'and what is eased with them');
+export function testSameNumbers() {
+    assert(sameNumbers({dim: 0.2}, {dim: 0.20001}) && !sameNumbers({dim: 0.2}, {}),
+        'the same as far as anyone could see, none missing counted as 0');
+    assert(sameNumbers({light: 0}, {}) && !sameNumbers({light: 1}, {light: 0.5}), 'whatever is eased');
+}
+
+export function testDimmedLook() {
+    const look = dimmedLook(LOOK.regular, 0.4);
+    assert(look.dim === 0.4 && look.blur === LOOK.regular.blur && look.lens === LOOK.regular.lens,
+        'the look, darkened');
+    assert(Object.isFrozen(look) && LOOK.regular.dim === undefined, 'a look of its own, the variant\'s as it is');
+    assertEqual(dimmedLook(lookOf('off'), 0.4), null, 'solid surfaces: none');
 }
 
 export function testLightTowardThePointer() {

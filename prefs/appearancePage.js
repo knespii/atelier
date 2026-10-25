@@ -47,13 +47,15 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
             [this._palette, this._palette.connect('changed::variant',
                 () => this._variants.setSelected(this._palette.get_string('variant')))],
             [this._settings, this._settings.connect('changed::gtk-css-problem', () => this._syncProblem())],
-            [this._settings, this._settings.connect('changed::glass-variant', () => this._syncGlass())]);
+            [this._settings, this._settings.connect('changed::glass-variant', () => this._syncGlass())],
+            [this._settings, this._settings.connect('changed::glass-dim', () => this._syncDim())]);
         if (this._a11y)
             this._ids.push([this._a11y, this._a11y.connect('changed::high-contrast', () => this._syncGlass())]);
         this._syncPalette();
         this._syncSource();
         this._syncProblem();
         this._syncGlass();
+        this._syncDim();
     }
 
     disconnectSettings() {
@@ -134,7 +136,8 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
         return group;
     }
 
-    // Regular, clear or off – which GNOME's high contrast always turns off.
+    // Regular, clear or off – which GNOME's high contrast always turns off –
+    // and how much darker all of it is.
     _buildGlassGroup() {
         const group = new Adw.PreferencesGroup();
         this._glassRow = new Adw.ActionRow({title: 'Glass'});
@@ -148,6 +151,29 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
         });
         this._glassRow.add_suffix(naturalWidth(this._glassToggles));
         group.add(this._glassRow);
+
+        // The same on every surface of glass, written as it is moved.
+        this._dimRow = new Adw.ActionRow({
+            title: 'Darkening',
+            subtitle: 'The same on all of the glass. More keeps light type legible over bright wallpapers',
+        });
+        this._dimScale = new Gtk.Scale({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 100, step_increment: 5, page_increment: 10}),
+            draw_value: true,
+            value_pos: Gtk.PositionType.LEFT,
+            digits: 0,
+            width_request: 220,
+            valign: Gtk.Align.CENTER,
+        });
+        this._dimScale.set_format_value_func((_, value) => `${Math.round(value)} %`);
+        this._dimScale.connect('value-changed', () => {
+            const dim = Math.round(this._dimScale.get_value()) / 100;
+            if (Math.abs(dim - this._settings.get_double('glass-dim')) > 1e-6)
+                this._settings.set_double('glass-dim', dim);
+        });
+        this._dimRow.add_suffix(this._dimScale);
+        group.add(this._dimRow);
         const a11y = Gio.SettingsSchemaSource.get_default().lookup('org.gnome.desktop.a11y.interface', true);
         this._a11y = a11y?.has_key('high-contrast')
             ? new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'}) : null;
@@ -161,6 +187,14 @@ class AtelierAppearancePage extends Adw.PreferencesPage {
         const what = GLASS.find(([name]) => name === variant)?.[2] ?? '';
         this._glassRow.subtitle = this._a11y?.get_boolean('high-contrast') && variant !== 'off'
             ? `${what}. GNOME's high contrast keeps it off for now.` : what;
+        // (Solid surfaces are not darkened.)
+        this._dimRow.sensitive = variant !== 'off';
+    }
+
+    _syncDim() {
+        const percent = Math.round(this._settings.get_double('glass-dim') * 100);
+        if (Math.round(this._dimScale.get_value()) !== percent)
+            this._dimScale.set_value(percent);
     }
 
     _buildAppsGroup() {
