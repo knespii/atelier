@@ -315,8 +315,14 @@ class MeltPopup {
         const box = this.form.get_allocation_box();
         const rect = [box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1];
         const [left, top, right, bottom] = this._boundsOf(rect, Math.ceil(edgeReachOf()) + 1);
-        this._glassAt = [left, top];
-        this._placeGlass(glass, [left, top, right - left, bottom - top]);
+        // (Placed anew only where it changed: a texture of another size is
+        // made anew, a frame of its own on a large monitor.)
+        const [px, py] = [this.actor.x, this.actor.y];
+        if (left !== this._glassAt[0] || top !== this._glassAt[1] || right - left !== glass.width ||
+            bottom - top !== glass.height || glass.placedAt?.[0] !== px || glass.placedAt?.[1] !== py) {
+            this._glassAt = [left, top];
+            this._placeGlass(glass, [left, top, right - left, bottom - top]);
+        }
         const radius = this.form.get_theme_node().get_border_radius(St.Corner.TOPLEFT);
         glass.setShapes({boxes: [boxOf([rect[0] - left, rect[1] - top, rect[2], rect[3]], radius)], capsules: []});
     }

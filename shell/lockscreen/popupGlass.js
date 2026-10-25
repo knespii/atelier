@@ -129,6 +129,7 @@ class AtelierLockPopupGlass extends St.Widget {
         this._shade = shade;
         /** The shapes it was given last. */
         this.shapes = {boxes: [], capsules: []};
+        this.placedAt = null;
         this.setShapes(this.shapes);
     }
 
@@ -142,6 +143,8 @@ class AtelierLockPopupGlass extends St.Widget {
     place([x, y], [px, py], [width, height]) {
         this.set_position(x - px, y - py);
         this.set_size(width, height);
+        /** Where its parent was on the stage as it was placed. */
+        this.placedAt = [px, py];
         // (What is at the stage's corner at the stage's.)
         this._behind.set_position(-x, -y);
     }
