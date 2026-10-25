@@ -40,6 +40,7 @@ import {
     MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutOpacity, cutoutPath, modelPath, pictureState, workerPath,
 } from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
+import {GLASS_FULL} from '../lib/seeThrough.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
 import {fakeDepthModel} from '../tests/fakeOnnx.js';
 
@@ -1855,6 +1856,15 @@ async function testGlassPictures(ext) {
         if (desktop) {
             const area = desktop.area;
             await shot(`${name}-widgets`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
+            // (And the cards with no dark fill of their own over the
+            // glass: just glass, for the user to choose.)
+            if (controlCentre) {
+                desktopSettings.set_double('card-opacity', GLASS_FULL);
+                await Scripting.sleep(900);
+                await shot(`${name}-widgets-bare`, area.x, area.y, Math.min(area.width, 980), Math.min(area.height, 620));
+                desktopSettings.reset('card-opacity');
+                await Scripting.sleep(400);
+            }
         }
     }
 }
@@ -1973,6 +1983,20 @@ async function testGlassPaint(ext) {
     }
 }
 
+// A ramp down a picture of the monitor's size: dark above top, light below
+// bottom, a grey for every row between.
+function rampPicture(path, [width, height], [top, bottom]) {
+    const surface = new Cairo.ImageSurface(Cairo.Format.RGB24, width, height);
+    const cr = new Cairo.Context(surface);
+    const ramp = new Cairo.LinearGradient(0, top, 0, bottom);
+    ramp.addColorStopRGB(0, 20 / 255, 20 / 255, 20 / 255);
+    ramp.addColorStopRGB(1, 235 / 255, 235 / 255, 235 / 255);
+    cr.setSource(ramp);
+    cr.paint();
+    surface.writeToPNG(path);
+    cr.$dispose();
+}
+
 // Grey bands across a picture of the monitor's size: [top, bottom, grey]
 // each, the rest of another grey.
 function bandsPicture(path, [width, height], bands, rest) {
@@ -2012,16 +2036,21 @@ function rowOf(pixels, x1, x2, y) {
     return sum.map(v => v / (x2 - x1 + 1));
 }
 
-// Liquid Glass (shell/core/glassMaterial.js): what is behind bends near the
-// glass's edges, not in its middle, red more than blue only there; the
-// edges catch a light from above – the top's the most, the bottom's the
-// least – which leans towards the pointer when it is near (only then, and
-// only for the glass it is near); at rest nothing is drawn; 'off' and
-// GNOME's high contrast make the surfaces solid; the overview's blurred
-// wallpaper has the grain. (ATELIER_TEST_SCALE: all of it with the monitor
-// at that scale.)
+// Liquid Glass (shell/core/glassMaterial.js): what is behind is looked up
+// farther in near the glass's edges, as far as lib/glassLook.js lensDepth()
+// says, the outer part of its bevel a mirrored copy, its middle as it is;
+// almost clear (an edge behind it stays sharp); no colour fringe; neutral,
+// and as light or dark as faceColor() has it; a glint on the edges facing
+// the light from the top left and the opposite ones, which leans towards
+// the pointer when it is near (only then, and only for the glass it is
+// near); a contour and a shadow outside it, none along a notch's screen
+// edge; at rest nothing is drawn; deep glass under the control centre and
+// GNOME's style eased to; 'off' and GNOME's high contrast make the surfaces
+// solid; the overview's blurred wallpaper has the grain.
+// (ATELIER_TEST_SCALE: all of it with the monitor at that scale.)
 async function testLiquidGlass(ext) {
-    const {LOOK, REST_LIGHT, sameLight} = await import('../lib/glassLook.js');
+    const {LOOK, REST_LIGHT, faceColor, faceOf, lensDepth, lensOf, sameLight, smallness} =
+        await import('../lib/glassLook.js');
     const back = await useTestScale('Liquid Glass');
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
@@ -2070,81 +2099,184 @@ async function testLiquidGlass(ext) {
         const GlassSurface = islandModule._glass?.constructor;
         if (!check(Boolean(GlassSurface && islandModule._glass.look), 'the island\'s glass is Liquid Glass'))
             return;
-        // A big glass over the bands, its top edge 8 pixels above where a
-        // light band turns dark – a straight line of the wallpaper.
+        const grey = ([r, g, b]) => (r + g + b) / 3;
+        // A big glass over a ramp – darker above, lighter below, a grey for
+        // every row – its top edge where the ramp begins: what the lens
+        // shows at each row of its middle says how far in it looked.
         glass = new GlassSurface({monitorIndex: Main.layoutManager.primaryIndex, reach: 1, look: LOOK.regular});
         Main.layoutManager.uiGroup.add_child(glass);
-        const [x0, y0, w, h] = [monitor.x + px(560), monitor.y + px(592), px(800), px(260)];
+        const [x0, y0, w, h] = [monitor.x + px(560), monitor.y + px(400), px(800), px(260)];
+        const ramp = `${dir}/ramp.png`;
+        rampPicture(ramp, [monitor.width, monitor.height], [px(390), px(510)]);
+        await show(ramp);
         glass.setShape(x0, y0, w, h, px(24));
         const mid = Math.round(x0 + w / 2);
-        const profile = async name => {
-            await Scripting.sleep(300);
-            await screenshotArea(`liquid-glass/${name}`, x0, y0, w, h);
-            const pixels = pixelsOf(`liquid-glass/${name}`, [x0, y0]);
-            return y => rowOf(pixels, mid - 10, mid + 10, y);
-        };
-        // (No rim, no sheen: the lens alone, and the same glass without it.)
-        const material = LOOK.regular;
-        const bare = {...material, rim: {...material.rim, top: 0, bottom: 0, side: 0}, sheen: {...material.sheen, alpha: 0}};
-        glass._mask.setMaterial(bare, scale);
-        const lensed = await profile('lens');
-        glass._mask.setMaterial({...bare, aberration: 0, lens: {...material.lens, shift: 0}}, scale);
-        const flat = await profile('no-lens');
-        glass._mask.setMaterial(material, scale);
-        const grey = ([r, g, b]) => (r + g + b) / 3;
-        const between = (row, at) => {
-            const below = Math.floor(at);
-            return grey(row(below)) * (1 - (at - below)) + grey(row(below + 1)) * (at - below);
-        };
-        // How much farther in the glass without the lens looks as the
-        // lensed one does at y.
-        const from = y => {
-            const target = grey(lensed(y));
-            let [best, error] = [0, Infinity];
-            for (let d = 0; d <= px(24); d += 0.25) {
-                const off = Math.abs(between(flat, y + d) - target);
-                if (off < error)
-                    [best, error] = [d, off];
+        // Each row of the screenshot's own pixels across the middle: its
+        // depth into the glass (logical pixels) and its colour.
+        const rowsOf = async name => {
+            await Scripting.sleep(400);
+            await screenshotArea(`liquid-glass/${name}`, mid - px(20), y0, px(40), px(160));
+            const pixels = pixelsOf(`liquid-glass/${name}`, [mid - px(20), y0]);
+            const rows = [];
+            for (let row = 0; row < pixels.height; row++) {
+                const sum = [0, 0, 0];
+                for (let column = 0; column < pixels.width; column++)
+                    pixels.own(column, row).forEach((v, c) => (sum[c] += v));
+                rows.push({d: (row + 0.5) / pixels.density, color: sum.map(v => v / pixels.width)});
             }
-            return best;
+            return rows;
         };
-        const nearEdge = [1, 3, 6].map(d => from(y0 + px(d)));
-        const middle = [40, 100, 160].map(d => Math.abs(grey(lensed(y0 + px(d))) - grey(flat(y0 + px(d)))));
-        check(nearEdge.every(d => d >= px(2)) && nearEdge[0] > nearEdge[2] && middle.every(d => d <= 2),
-            `near the top edge the wallpaper's line is looked at from farther in, less so farther from the edge ` +
-            `(${nearEdge.map(d => d.toFixed(1))} px at 1, 3, 6 px in); in the middle, as it is (${middle.map(Math.round)})`);
-        // Red from farther in than blue: where the light band turns dark,
-        // red and blue apart within the lens, not beyond it.
-        const apart = y => {
-            const [r, , b] = lensed(y);
-            return r - b;
+        // (Clear glass, steeper on the ramp; no blur, glint, grain, bevel or
+        // contour: the lens alone, and the same glass without it.)
+        const plain = {...LOOK.clear, glint: 0, grain: 0};
+        const without = async look => {
+            glass._mask.setMaterial(look, scale, {light: false, shadow: true});
+            glass._mask.set_uniform_float(glass._mask._material.glassEdge, 4, [0, 1, 0, 0]);
+            glass._mask.queue_repaint();
         };
-        const inside = apart(y0 + px(40));
-        const rim = Math.max(...[1, 2, 3, 4].map(d => Math.abs(apart(y0 + px(d)) - inside)));
-        const beyond = Math.max(...[20, 28].map(d => Math.abs(apart(y0 + px(d)) - inside)));
-        check(rim >= 4 && beyond <= 2,
-            `red and blue apart at the rim only (by ${rim.toFixed(1)} there, ${beyond.toFixed(1)} past the lens)`);
-        // (To look at: stripes bending at its edges.)
-        const stripes = `${dir}/stripes.png`;
-        stripesPicture(stripes, [monitor.width, monitor.height], px(90));
-        await show(stripes);
-        glass.setShape(x0, monitor.y + px(300), w, px(300), px(40));
-        await Scripting.sleep(300);
-        await screenshotArea('liquid-glass/stripes', x0 - px(60), monitor.y + px(240), w + px(120), px(420));
-        await show(bands);
+        await without(plain);
+        const lensed = await rowsOf('lens');
+        await without({...plain, lens: {...plain.lens, bevel: 0}});
+        const flat = await rowsOf('no-lens');
+        // Where the glass without the lens shows what the lensed one shows
+        // at a depth: how much farther in it looked.
+        const valueAt = d => {
+            const at = Math.min(flat.length - 1.001, Math.max(0, d / (flat[1].d - flat[0].d) - 0.5));
+            const below = Math.floor(at);
+            return grey(flat[below].color) * (1 - (at - below)) + grey(flat[below + 1].color) * (at - below);
+        };
+        const looked = d => {
+            const row = lensed.reduce((best, r) => (Math.abs(r.d - d) < Math.abs(best.d - d) ? r : best));
+            const target = grey(row.color);
+            let [best, error] = [0, Infinity];
+            for (let shift = 0; shift <= px(70); shift += 0.125) {
+                const off = Math.abs(valueAt(row.d + shift) - target);
+                if (off < error)
+                    [best, error] = [shift, off];
+            }
+            return [row.d, best];
+        };
+        const {bevel, depth} = lensOf(plain.lens, h, scale);
+        const depths = [3, 6, 10, 14].map(d => px(d)).map(looked);
+        const offs = depths.map(([d, shift]) => shift - lensDepth(d, bevel, depth));
+        check(offs.every(off => Math.abs(off) <= 1.5 * scale),
+            `the lens looks as far in as lensDepth() says, ±1.5 px (${depths.map(([d, s], i) =>
+                `${d.toFixed(1)} in: ${s.toFixed(1)} for ${(s - offs[i]).toFixed(1)}`).join('; ')})`);
+        // Where it looks (in, plus how far) falls before it rises: a mirror.
+        const [[d2, s2], [d8, s8]] = [px(2), px(8)].map(looked);
+        check(d2 + s2 > d8 + s8 + 4 * scale,
+            `its outer bevel a mirrored copy (${(d2 + s2).toFixed(1)} px in looked at ${d2.toFixed(1)} in, ` +
+            `${(d8 + s8).toFixed(1)} at ${d8.toFixed(1)})`);
+        const middle = [px(40), px(100), px(150)].map(d => {
+            const [l, f] = [lensed, flat].map(rows => rows.reduce((best, r) => (Math.abs(r.d - d) < Math.abs(best.d - d) ? r : best)));
+            return Math.abs(grey(l.color) - grey(f.color));
+        });
+        check(middle.every(off => off <= 2), `in the middle, as it is (${middle.map(Math.round)})`);
+        // No colour fringe: over grey, grey at the rim too.
+        const fringe = Math.max(...lensed.filter(r => r.d < px(8)).map(r => chromaOf(r.color)));
+        check(fringe <= 3, `no colour at the rim (r, g, b apart by ${fringe.toFixed(1)} at most)`);
+        await screenshotArea('liquid-glass/ramp', x0 - px(20), y0 - px(20), w + px(40), px(200));
 
-        // The rim: in the light band, flat, the top edge catches the light
-        // the most, the bottom the least.
+        // Almost clear: a sharp edge behind regular glass's middle stays
+        // nearly as sharp (its blur's sigma 2 px, GNOME's of before 18).
+        await show(bands);
+        glass.setShape(x0, monitor.y + px(520), w, px(240), px(24));
+        glass._mask.setMaterial({...LOOK.regular, grain: 0}, scale, {light: false, shadow: true});
+        await Scripting.sleep(400);
+        await screenshotArea('liquid-glass/edge', mid - px(10), monitor.y + px(580), px(20), px(40));
+        const edgePixels = pixelsOf('liquid-glass/edge', [mid - px(10), monitor.y + px(580)]);
+        const column = [];
+        for (let row = 0; row < edgePixels.height; row++)
+            column.push(grey(edgePixels.own(Math.round(edgePixels.width / 2), row)));
+        const [high, low] = [column[0], column.at(-1)];
+        const crossing = share => column.findIndex(v => v <= high - (high - low) * share);
+        const edgeWidth = (crossing(0.9) - crossing(0.1)) / edgePixels.density;
+        check(high - low > 40 && edgeWidth > 0 && edgeWidth <= 7 * scale,
+            `almost clear: an edge behind it 10 to 90 % over ${edgeWidth.toFixed(1)} px`);
+
+        // The face, as faceColor() has it (within 4 levels), neutral over
+        // grey: dark glass and light, over a grey and a blue.
+        const faces = [];
+        for (const color of ['#808080', '#3a6ea5']) {
+            await show(makePicture(`liquid-glass-${color.slice(1)}`, color));
+            for (const light of [false, true]) {
+                glass.setLook(LOOK.regular, light);
+                glass._mask.setMaterial({...LOOK.regular, grain: 0}, scale, {light, shadow: true});
+                await Scripting.sleep(900);
+                const name = `liquid-glass/face-${color.slice(1)}-${light ? 'light' : 'dark'}`;
+                await screenshotArea(name, mid - px(30), monitor.y + px(620), px(60), px(40));
+                const drawn = averageColor(name, 0, 0, px(60), px(40));
+                const wanted = faceColor(hexToRgb(color).map(v => v / 255), faceOf(LOOK.regular, {light}),
+                    {small: smallness(240)}).map(v => Math.round(v * 255));
+                faces.push({color, light, drawn, wanted});
+            }
+        }
+        const worstFace = Math.max(...faces.map(f => colorDistance(f.drawn, f.wanted)));
+        check(worstFace <= 4, `the face as faceColor() has it, within 4 (${faces.map(f =>
+            `${f.color} ${f.light ? 'light' : 'dark'}: ${f.drawn} for ${f.wanted}`).join('; ')})`);
+        const greys = faces.filter(f => f.color === '#808080').map(f => chromaOf(f.drawn));
+        check(greys.every(c => c <= 2), `neutral: over grey, grey (${greys})`);
+        glass.setLook(LOOK.regular, false);
+
+        // A 96 px circle over grey: a glint on its edges facing the top
+        // left and the bottom right – more on the lit side – and least
+        // side-on; a contour and a shadow outside it.
+        await show(makePicture('liquid-glass-grey', '#808080'));
+        // (GNOME's dark style again, all of the way.)
+        await Scripting.sleep(900);
+        const r = px(48);
+        const [cx, cy] = [x0 + px(200), monitor.y + px(400)];
+        glass.setShape(cx - r, cy - r, 2 * r, 2 * r, r);
+        await Scripting.sleep(500);
+        const circleShot = async name => {
+            await screenshotArea(`liquid-glass/${name}`, cx - r - px(20), cy - r - px(20), 2 * r + px(40), 2 * r + px(40));
+            return pixelsOf(`liquid-glass/${name}`, [cx - r - px(20), cy - r - px(20)]);
+        };
+        // (Along a ray from its middle: the brightest just inside its edge,
+        // the darkest just outside.)
+        const along = (pixels, degrees, from, to, pick) => {
+            const a = degrees * Math.PI / 180;
+            const values = [];
+            for (let o = from; o <= to; o += 0.25)
+                values.push(grey(pixels.at(cx + Math.cos(a) * (r + o * scale), cy + Math.sin(a) * (r + o * scale))));
+            return pick(...values);
+        };
+        const glintAt = (pixels, degrees) => along(pixels, degrees, -3, 0, Math.max);
+        const resting = await circleShot('circle');
+        const [tl, tr, br, bl] = [225, 315, 45, 135].map(a => glintAt(resting, a));
+        check(tl > tr + 15 && br > bl + 15 && tl >= br,
+            `a glint at the top left and the bottom right, more on the lit side (${[tl, tr, br, bl].map(Math.round)})`);
+        const ground = grey(resting.at(cx + r + px(15), cy - r));
+        // (The darkest pixel just outside its top right, its own pixels'
+        // middles 0.3 to 2 px out.)
+        let contour = 255;
+        const [ox, oy] = [cx - r - px(20), cy - r - px(20)];
+        for (let row = 0; row < resting.height; row++) {
+            for (let column = 0; column < resting.width; column++) {
+                const [x, y] = [ox + (column + 0.5) / resting.density, oy + (row + 0.5) / resting.density];
+                const out = Math.hypot(x - cx, y - cy) - r;
+                if (x > cx && y < cy && out >= 0.3 * scale && out <= 2 * scale)
+                    contour = Math.min(contour, grey(resting.own(column, row)));
+            }
+        }
+        const shadow = grey(resting.at(cx, cy + r + px(6)));
+        check(contour < ground - 8 && shadow < ground - 3,
+            `a contour (${Math.round(contour)}) and a shadow below (${Math.round(shadow)}) on ${Math.round(ground)} round it`);
+        // (The light from the left more than from above, as the pointer
+        // is there.)
+        await pointerTo(cx - r - px(60), cy);
+        await Scripting.sleep(300);
+        const leaningLeft = await circleShot('circle-leaning');
+        check(glintAt(leaningLeft, 180) > glintAt(resting, 180) + 5,
+            `the pointer at its left: the glint there grows (${Math.round(glintAt(resting, 180))} → ` +
+            `${Math.round(glintAt(leaningLeft, 180))})`);
+        await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
+
+        // The bands again: a rect for the light to lean on.
+        await show(bands);
         glass.setShape(x0, monitor.y + px(380), w, px(140), px(24));
         const [top, bottom] = [monitor.y + px(380), monitor.y + px(520) - 1];
         await Scripting.sleep(300);
-        await screenshotArea('liquid-glass/rim', x0, top, w, bottom - top + 1);
-        const rimPixels = pixelsOf('liquid-glass/rim', [x0, top]);
-        const at = y => grey(rowOf(rimPixels, mid - 10, mid + 10, y));
-        const topLight = at(top) - at(top + px(6));
-        const bottomLight = at(bottom) - at(bottom - px(6));
-        check(topLight > bottomLight + 10 && bottomLight > 2,
-            `the top edge catches the light more than the bottom (${topLight.toFixed(1)} vs ${bottomLight.toFixed(1)})`);
         await screenshotArea('liquid-glass/rim-wide', x0 - 40, top - 40, w + 80, bottom - top + 81);
 
         // The light leans towards the pointer near the glass – and only
@@ -2170,7 +2302,7 @@ async function testLiquidGlass(ext) {
             'its left edge catches more of it');
         await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
         await Scripting.sleep(200);
-        check(glass.light[0] === REST_LIGHT[0] && glass.light[1] === REST_LIGHT[1], 'away, from above again');
+        check(glass.light[0] === REST_LIGHT[0] && glass.light[1] === REST_LIGHT[1], 'away, from the top left again');
 
         // Still, nothing is drawn.
         let frames = 0;
@@ -2291,29 +2423,34 @@ async function testLiquidGlass(ext) {
             await restPointer();
         }
 
-        // Its tint: smoky in GNOME's dark style, deep under the control
-        // centre's GNOME controls (styled for a dark surface only), light
-        // in the light style – the wallpaper not dimmed by its blur then.
+        // Neutral glass, no tint of its own and no blur but its shader's;
+        // deep under the control centre's GNOME controls (styled for a
+        // dark surface only), eased there and back; GNOME's style eased to.
         iface.set_string('color-scheme', 'prefer-dark');
-        await Scripting.sleep(300);
+        await Scripting.sleep(900);
         const islandGlass = islandModule._glass;
-        const blurOf = surface => surface._bgManager?.backgroundActor?.get_effect('atelier-glass-blur')?.brightness;
-        check(hasClass(islandGlass, 'atelier-glass-smoky') && blurOf(islandGlass) < 1,
-            `dark style: smoky glass, the blur dimming a little (${blurOf(islandGlass)})`);
+        const blurred = surface => surface._bgManager?.backgroundActor?.get_effects().some(e => e instanceof Shell.BlurEffect);
+        check(islandGlass.get_n_children() === 1 && !blurred(islandGlass),
+            'neutral glass: the wallpaper alone in it, no blur of GNOME\'s');
         Main.panel.toggleQuickSettings();
         await waitFor(() => hasClass(island.page, 'atelier-cc'), 2000);
-        check(hasClass(islandGlass, 'atelier-glass-deep') && !hasClass(islandGlass, 'atelier-glass-smoky'),
-            'the control centre open: deep glass under it');
+        await Scripting.sleep(100);
+        const easing = islandGlass._shades.shown('deep').deep;
+        await Scripting.sleep(500);
+        check(islandGlass.deep && easing > 0 && easing < 1 && islandGlass._shades.shown('deep').deep === 1,
+            `the control centre open: deep glass under it, eased there (${easing.toFixed(2)} on the way)`);
         Main.panel.closeQuickSettings();
         await waitFor(() => island.page === null, 2000);
-        check(hasClass(islandGlass, 'atelier-glass-smoky') && !hasClass(islandGlass, 'atelier-glass-deep'),
-            'closed, smoky again');
+        await Scripting.sleep(500);
+        check(!islandGlass.deep && islandGlass._shades.shown('deep').deep === 0, 'closed, not deep again');
         iface.set_string('color-scheme', 'prefer-light');
-        await Scripting.sleep(300);
-        check(hasClass(islandModule._glass, 'atelier-glass-light') && blurOf(islandModule._glass) === 1,
-            `light style: light glass, the wallpaper as bright as it is (${blurOf(islandModule._glass)})`);
+        await Scripting.sleep(250);
+        const turning = islandModule._glass._shades.shown('style').light;
+        await Scripting.sleep(800);
+        check(turning > 0 && turning < 1 && islandModule._glass._shades.shown('style').light === 1,
+            `the light style: its face eased to (${turning.toFixed(2)} on the way)`);
         iface.set_string('color-scheme', scheme);
-        await Scripting.sleep(300);
+        await Scripting.sleep(900);
 
         // With GNOME's animations off, the light stays above.
         iface.set_boolean('enable-animations', false);
@@ -2330,9 +2467,8 @@ async function testLiquidGlass(ext) {
         // Clear: another look, live; off, and with high contrast: solid.
         settings.set_string('glass-variant', 'clear');
         await Scripting.sleep(300);
-        check(islandModule._glass?.look?.dim === LOOK.clear.dim &&
-            (!desktop?._glass || desktop._glass.look?.dim === LOOK.clear.dim),
-        'clear: the island and the widgets are of clear glass');
+        check(islandModule._glass?.look?.face === 'clear' && (!desktop?._glass || desktop._glass.look?.face === 'clear'),
+            'clear: the island and the widgets are of clear glass');
         const solid = () => !islandModule._glass && !island.has_style_class_name('atelier-island-glass') &&
             !desktop?._glass && !(ext.stateObj.modules.get('dock')?.dock?.glass ?? false);
         settings.set_string('glass-variant', 'off');
@@ -2388,14 +2524,6 @@ async function testLiquidGlass(ext) {
     }
 }
 
-// The notch's ears, where its glass curves into the top edge of the screen
-// and its lens looks up towards it – at the scale ATELIER_TEST_SCALE asks
-// for, if any: the one island's ears and the island's own, of regular and
-// clear glass, light and smoky, show no colour foreign to the wallpaper and
-// the glass there. Over a wallpaper of one colour, each pixel round them is
-// the wallpaper, the glass beside it, white (its rim, its sheen) or a mix of
-// them: the lens looks up nothing but the glass's own pixels – past them
-// its texture is clear, and red looked up there would leave a blue speck.
 // Pixels of Atelier's own as a second texture of a Shell.GLSLEffect
 // (shell/core/glassShapeTexture.js): its texels read back in cogl_sampler1
 // as they were given, any R and G (each byte / 255, nothing premultiplied or
@@ -2570,7 +2698,18 @@ async function testGlassLayerSpike() {
     }
 }
 
+// The notch's ears, where its glass curves into the top edge of the screen
+// and its lens looks up towards it – at the scale ATELIER_TEST_SCALE asks
+// for, if any: the one island's ears and the island's own, of regular and
+// clear glass, in GNOME's dark style and its light one, show no colour
+// foreign to the wallpaper and the glass there. Over a wallpaper of one
+// colour, each pixel round them is the wallpaper, the glass beside it,
+// white (its glint), black (its contour and shadow, along its arcs) or a
+// mix of them: the lens looks up nothing but the glass's own pixels – past
+// them its texture is clear, and red looked up there would leave a blue
+// speck. Along the screen's edge, no contour: the glass goes on past it.
 async function testGlassEars(ext) {
+    const {EDGE} = await import('../lib/glassLook.js');
     const settings = ext.stateObj._settings;
     const bar = settings.get_child('bar');
     const barModule = ext.stateObj.modules.get('bar');
@@ -2635,10 +2774,19 @@ async function testGlassEars(ext) {
                         density = pixels.density;
                         const wallpaper = middleOf(pixels, outer, 12, 2, 3);
                         const glass = middleOf(pixels, inner, 10, 8, 6);
+                        // (The glint takes the glass towards beyond white,
+                        // with what colour it has – lib/glassLook.js
+                        // EDGE.glint – each channel only as far as white:
+                        // any of the colours on that way.)
+                        const luma = 0.2126 * glass[0] + 0.7152 * glass[1] + 0.0722 * glass[2];
+                        const beyond = glass.map(v => EDGE.glint.white * 255 + EDGE.glint.colour * (v - luma));
+                        const glints = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1].map(t =>
+                            glass.map((v, c) => Math.min(255, Math.max(0, v + (beyond[c] - v) * t))));
                         for (let row = 0; row < pixels.height; row++) {
                             for (let column = 0; column < pixels.width; column++) {
                                 const color = pixels.own(column, row);
-                                const off = offMixes(color, wallpaper, glass, [255, 255, 255]);
+                                const off = Math.min(offMixes4(color, wallpaper, glass, [255, 255, 255], [0, 0, 0]),
+                                    ...glints.map(glint => offMixes4(color, wallpaper, glass, glint, [0, 0, 0])));
                                 if (off > worst[0]) {
                                     worst = [off, `${shot.slice('glass-ears/'.length)} (${column}, ${row}): ${color}, ` +
                                         `the glass ${glass}, the wallpaper ${wallpaper}`];
@@ -2651,6 +2799,18 @@ async function testGlassEars(ext) {
             check(shown === 4 && worst[0] <= 24,
                 `${label} at ${density}×: no colour foreign to the wallpaper and the glass there ` +
                 `(${shown} of 4 glasses shown; at most ${worst[0].toFixed(1)} off, ${worst[1]})`);
+            // Along the top of the screen inside the notch, beside its
+            // corner, no contour: as light as a little below.
+            const shape = shapeOf();
+            if (shape) {
+                const topShot = `glass-ears/${name}-top`;
+                const x = Math.round(shape[0] + 14);
+                await screenshotArea(topShot, x, 0, 8, 8);
+                const pixels = pixelsOf(topShot, [x, 0]);
+                const [edge, below] = [middleOf(pixels, 0, 0, 8, 1), middleOf(pixels, 0, 4, 8, 2)];
+                check(colorDistance(edge, below) <= 6,
+                    `${label}: no contour along the screen's edge (${edge} at the edge, ${below} below)`);
+            }
         }
     } finally {
         ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
@@ -2660,6 +2820,22 @@ async function testGlassEars(ext) {
         await wallpapersSettled();
         await back?.();
     }
+}
+
+// How far a colour is from all those mixed of four others, in RGB: none
+// inside the four's tetrahedron, else as far as from its nearest face.
+function offMixes4(p, a, b, c, d) {
+    const minus = (u, v) => u.map((x, i) => x - v[i]);
+    const [u, v, w, q] = [minus(b, a), minus(c, a), minus(d, a), minus(p, a)];
+    const det = (x, y, z) => x[0] * (y[1] * z[2] - y[2] * z[1]) - x[1] * (y[0] * z[2] - y[2] * z[0]) +
+        x[2] * (y[0] * z[1] - y[1] * z[0]);
+    const whole = det(u, v, w);
+    if (Math.abs(whole) > 1e-6) {
+        const [s, t, r] = [det(q, v, w) / whole, det(u, q, w) / whole, det(u, v, q) / whole];
+        if (s >= 0 && t >= 0 && r >= 0 && s + t + r <= 1)
+            return 0;
+    }
+    return Math.min(offMixes(p, a, b, c), offMixes(p, a, b, d), offMixes(p, a, c, d), offMixes(p, b, c, d));
 }
 
 // How far a colour is from all those mixed of three others, in RGB.
@@ -2697,17 +2873,18 @@ function actorWith(root, name) {
     return null;
 }
 
-// Vibrancy: type and icons on glass read on what is behind the glass –
-// over a light wallpaper dark, over a dark one as they are set; each side
-// of the bar, the island, the dock and each widget on what is behind it;
-// the palette's colours in their hue; an open page over windows as set;
-// all of it as set again with the glass off. Where the type would not read
-// on the glass as it is, the glass takes a shade – darker under light type
-// in the dark style – eased there: read off the screen, the type reads;
-// over a dark wallpaper, no shade. (The glass drawn here is Liquid Glass,
-// smoky in the dark style: what is predicted – its blur, its tint, its
-// material – is what is drawn, but for the light its edges catch and its
-// sheen. ATELIER_TEST_SCALE: with the monitor at that scale.)
+// Vibrancy: type and icons on glass read on what is behind the glass. In
+// GNOME's dark style its glass is dark, the type light over anything, the
+// glass shaded darker where it would not read otherwise; in its light
+// style, over a light wallpaper dark, over a dark one as they are set –
+// each side of the bar, the island, the dock and each widget on what is
+// behind it; the palette's colours in their hue; an open page over windows
+// as set; all of it as set again with the glass off. Read off the screen,
+// the type reads, and as much as predicted (5 Lc either way, over a
+// wallpaper of one colour); over a dark wallpaper, no shade. (The glass
+// drawn here is Liquid Glass: what is predicted – its blur and its face –
+// is what is drawn, but for its edges. ATELIER_TEST_SCALE: with the
+// monitor at that scale.)
 async function testVibrancy(ext) {
     const {sameShade} = await import('../lib/glassLook.js');
     const {readingNeed} = await import('../lib/vibrancy.js');
@@ -2787,6 +2964,8 @@ async function testVibrancy(ext) {
     // workspaces, the system menu), the dock's Show Applications icon,
     // the widgets. Says those that fall short.
     const SHORT = 5;
+    // How far the drawn may be from the predicted, Lc.
+    const DRIFT = 5;
     const DRAWN = [
         ['island', 'the island\'s time', time, 'island', 'island'],
         ['bar-left', 'the workspaces', leftButton, 'bar', 'bar-left'],
@@ -2795,20 +2974,28 @@ async function testVibrancy(ext) {
         ['clock', 'the clock', () => widget('clock'), 'widget', 'widget-clock'],
         ['date', 'the date', () => widget('date'), 'widget', 'widget-date'],
     ];
+    // (And, as .drift, how far each drawn is from what was predicted.)
     const short = async (label, ids = DRAWN.map(([id]) => id)) => {
         const falling = [];
+        falling.drift = [];
         for (const [id, name, actor, inks, surface] of DRAWN.filter(([part]) => ids.includes(part))) {
             const drawn = actor() ? await drawnContrast(`vibrancy/${label}-${id}`, actor()) : null;
             const need = readingNeed(inks);
             const predicted = vibrancy.surfaceOf(surface)?.backdrop;
-            results.push(`INFO  ${label}: ${name} Lc ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)} ` +
-                `(${drawn?.light ? 'light' : 'dark'} ${drawn?.type} on ${drawn?.glass}, predicted ` +
-                `${drawn?.light ? predicted?.light : predicted?.dark}; shade ${shades()[id]?.dim}/${shades()[id]?.veil})`);
+            const glassThere = drawn?.light ? predicted?.light : predicted?.dark;
+            const expected = drawn && glassThere ? Math.abs(contrastLc(hexToRgb(drawn.type), hexToRgb(glassThere))) : null;
+            results.push(`INFO  ${label}: ${name} Lc ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)}, predicted ` +
+                `${expected?.toFixed(0)} (${drawn?.light ? 'light' : 'dark'} ${drawn?.type} on ${drawn?.glass}, ` +
+                `predicted ${glassThere}; shade ${shades()[id]?.dim}/${shades()[id]?.veil})`);
             if (!drawn || drawn.lc < need - SHORT)
                 falling.push(`${name} ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)}`);
+            if (drawn && expected !== null)
+                falling.drift.push([name, drawn.lc - expected]);
         }
         return falling;
     };
+    const drifted = found => found.drift.filter(([, off]) => Math.abs(off) > DRIFT)
+        .map(([name, off]) => `${name} ${off > 0 ? '+' : ''}${off.toFixed(0)}`);
 
     const back = await useTestScale('Vibrancy');
     try {
@@ -2838,18 +3025,32 @@ async function testVibrancy(ext) {
         const asSet = shown();
         check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => asSet[part] === '#ffffff'),
             `all of it as it is set, white (${JSON.stringify(asSet)})`);
-        check(vibrancy.stylesheet === null, `no colours of its own (${vibrancy.stylesheet})`);
         check(Object.values(shades()).every(unshaded), `no glass shaded: as see-through as it is (${shadesText()})`);
         const onDark = await short('dark');
         check(onDark.length === 0, `read off the screen, it reads (${onDark.join(', ') || 'all of it'})`);
+        check(drifted(onDark).length === 0, `as much as predicted, ±${DRIFT} (${drifted(onDark).join(', ') || 'all of it'})`);
         await screenshot('32a-vibrancy-dark');
 
-        // A light wallpaper: dark type, as emphatic as it is set – readable
-        // on the glass as it is predicted.
+        await testShadedGlass();
+
+        // The dark style over a light wallpaper: its dark glass and light
+        // type, the glass shaded darker.
         showWallpaper(light);
         await wallpapersSettled();
+        check(await settle(() => ['island', 'bar-left', 'bar-right'].every(id => polarity(id) === 'light') &&
+            shades().island?.dim > 0 && ink(time()) === '#ffffff'),
+        `the dark style over a light wallpaper: light type on glass shaded darker (${shadesText()})`);
+        const lightDark = await short('light-dark-style');
+        check(lightDark.length === 0, `read off the screen, it reads (${lightDark.join(', ') || 'all of it'})`);
+        check(drifted(lightDark).length === 0,
+            `as much as predicted, ±${DRIFT} (${drifted(lightDark).join(', ') || 'all of it'})`);
+        await screenshot('32a2-vibrancy-light-dark-style');
+
+        // The light style over a light wallpaper: dark type, as emphatic as
+        // it is set – readable on the glass as it is predicted.
+        desktopInterface.set_string('color-scheme', 'prefer-light');
         check(await settle(() => isDark(ink(time())) && isDark(ink(widget('clock')))),
-            `on a light wallpaper, dark type (${JSON.stringify(shown())})`);
+            `the light style over a light wallpaper, dark type (${JSON.stringify(shown())})`);
         const onLight = shown();
         check(['time', 'left', 'right', 'dock', 'clock', 'date'].every(part => isDark(onLight[part])),
             `the bar's sides, the island, the dock and the widgets (${JSON.stringify(onLight)})`);
@@ -2872,15 +3073,13 @@ async function testVibrancy(ext) {
             `no glass darker for it (${shadesText()})`);
         const lightShort = await short('light');
         check(lightShort.length === 0, `read off the screen, it reads (${lightShort.join(', ') || 'all of it'})`);
+        check(drifted(lightShort).length === 0,
+            `as much as predicted, ±${DRIFT} (${drifted(lightShort).join(', ') || 'all of it'})`);
         await screenshot('32b-vibrancy-light');
 
-        await testShadedGlass();
-        showWallpaper(light);
-        await wallpapersSettled();
-        check(await settle(() => isDark(ink(time())) && isDark(ink(widget('clock')))), 'a light wallpaper again');
-
         // Open over the wallpaper, the glance is dark too; over a window
-        // (live glass, what it shows not known), as set.
+        // (live glass, what it shows not known), dark in the light style
+        // (its windows taken to be light), as set in the dark one.
         await pointerTo(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
         await Scripting.sleep(700);
@@ -2895,22 +3094,21 @@ async function testVibrancy(ext) {
         await pointerTo(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
         await Scripting.sleep(700);
-        check(polarity('island-windows') === 'light' && glanceTime() && ink(glanceTime()) === '#ffffff',
-            `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
-        await screenshotIsland('32d-vibrancy-glance-window', 420);
-        // In the light style, its windows are taken to be light.
-        desktopInterface.set_string('color-scheme', 'prefer-light');
         check(await settle(() => polarity('island-windows') === 'dark' && isDark(ink(glanceTime()))),
             `over a window, in the light style, dark (${glanceTime() && ink(glanceTime())})`);
         await screenshotIsland('32d2-vibrancy-glance-window-light-style', 420);
         desktopInterface.set_string('color-scheme', 'prefer-dark');
+        check(await settle(() => polarity('island-windows') === 'light' && ink(glanceTime()) === '#ffffff'),
+            `over a window, in the dark style, as set (${glanceTime() && ink(glanceTime())})`);
+        await screenshotIsland('32d-vibrancy-glance-window', 420);
+        desktopInterface.set_string('color-scheme', 'prefer-light');
         await wallpapersSettled();
         await restPointer();
         await waitFor(() => island.page === null, 3000);
 
-        // A dock more opaque near windows: dark type on its clear glass
-        // away from them, light on its dark wash near one – in a class of
-        // its own, no stylesheet made anew as windows come and go.
+        // A dock more opaque near windows (the light style): dark type on
+        // its glass away from them, light on its dark wash near one – in a
+        // class of its own, no stylesheet made anew as windows come and go.
         dockSettings.set_string('transparency-mode', 'DYNAMIC');
         const container = () => dock().container;
         const scope = 'atelier-vibrant-dock-0';
@@ -2932,8 +3130,8 @@ async function testVibrancy(ext) {
         dockSettings.reset('transparency-mode');
         await Scripting.sleep(400);
 
-        // Light at the left, dark at the right: each side, each widget, on
-        // what is behind it.
+        // Light at the left, dark at the right (the light style): each
+        // side, each widget, on what is behind it.
         showWallpaper(halves);
         await wallpapersSettled();
         check(await settle(() => polarity('bar-left') === 'dark' && polarity('bar-right') === 'light' &&
@@ -2952,6 +3150,7 @@ async function testVibrancy(ext) {
             `glass off: type as set (${JSON.stringify(shown())})`);
         settings.reset('glass-variant');
         check(await settle(() => isDark(ink(widget('clock')))), 'and back');
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
     } finally {
         desktopInterface.set_string('color-scheme', scheme);
         desktopInterface.reset('enable-animations');
@@ -2969,10 +3168,10 @@ async function testVibrancy(ext) {
 
     // A sky, between light and dark: in the dark style light type, which
     // reads there only on glass shaded darker – the island's, the bar's,
-    // the widgets' – eased to it; read off the screen, it reads, the
-    // glance's too, and at rest nothing is worked out anew or drawn. In
-    // the one island, the bar's glass and the island's shaded alike: no
-    // seam where they meet. In the light style the type reads too.
+    // the widgets' – eased to it; read off the screen, it reads, as much as
+    // predicted, the glance's too, and at rest nothing is worked out anew
+    // or drawn. In the one island, the bar's glass and the island's shaded
+    // alike: no seam where they meet. In the light style the type reads too.
     async function testShadedGlass() {
         showWallpaper(sky);
         await wallpapersSettled();
@@ -2984,6 +3183,8 @@ async function testVibrancy(ext) {
         await Scripting.sleep(400);
         const skyShort = await short('sky');
         check(skyShort.length === 0, `read off the screen, it reads (${skyShort.join(', ') || 'all of it'})`);
+        check(drifted(skyShort).length === 0,
+            `as much as predicted, ±${DRIFT} (${drifted(skyShort).join(', ') || 'all of it'})`);
         await screenshot('32b2-vibrancy-sky');
         // At rest: nothing worked out anew, nothing drawn.
         const sync = vibrancy._sync;
