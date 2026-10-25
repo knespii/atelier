@@ -56,14 +56,18 @@ import {EDGE, LENS_SHARE, NO_SHADE, SMALL, lookOf, materialValues, resolveVarian
 
 // How long glass takes to take another shade, ms.
 const SHADE_TIME = 250;
+/** How long glass takes to turn from GNOME's dark style to its light one, ms. */
+export const STYLE_TIME = 700;
 
-const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassSmall', 'glassDeep', 'glassGlint', 'glassEdge',
-    'glassShadow', 'glassReach', 'glassArea'];
+const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassLightFace', 'glassSmall', 'glassDeep', 'glassGlint',
+    'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea'];
 
 export const MATERIAL_DECLARATIONS = `
 uniform vec4 glassLens;
 uniform vec4 glassBlur;
 uniform vec4 glassFace;
+uniform vec4 glassLightFace;
+uniform vec2 glassStyle;
 uniform vec4 glassSmall;
 uniform vec4 glassDeep;
 uniform vec4 glassGlint;
@@ -184,7 +188,8 @@ if (glassLens.w < 0.5) {
         float contour = 0.0;
         if (edged && body < atelier_others(p)) {
             float band = clamp(glassEdge.z + 0.5 - body, 0.0, 1.0);
-            contour = glassEdge.w * (${EDGE.contour.least} + ${1 - EDGE.contour.least} * side) * band;
+            contour = mix(glassEdge.w, glassStyle.y, glassStyle.x) *
+                (${EDGE.contour.least} + ${1 - EDGE.contour.least} * side) * band;
         }
         float shadow = 0.0;
         if (glassShadow.z > 0.0) {
@@ -211,8 +216,10 @@ if (glassLens.w < 0.5) {
             c = atelier_behind(p);
         }
         float small = 1.0 - smoothstep(${SMALL[0]}.0 * glassSmall.z, ${SMALL[1]}.0 * glassSmall.z, thick);
-        vec3 f = atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),
-            mix(glassFace.z, glassSmall.y, small), glassFace.w));
+        // (GNOME's style's face: the dark one, the light one, or on its
+        // way from one to the other.)
+        vec3 f = mix(atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),
+            mix(glassFace.z, glassSmall.y, small), glassFace.w)), atelier_face(c, glassLightFace), glassStyle.x);
         if (shade.z > 0.0)
             f = mix(f, atelier_face(c, glassDeep), shade.z);
         f = clamp(f, 0.0, 1.0);
@@ -279,6 +286,8 @@ export function setMaterial(effect, uniforms, look, scale, options = {}) {
     effect.set_uniform_float(uniforms.glassLens, 4, values.lens);
     effect.set_uniform_float(uniforms.glassBlur, 4, values.blur);
     effect.set_uniform_float(uniforms.glassFace, 4, values.face);
+    effect.set_uniform_float(uniforms.glassLightFace, 4, values.lightFace);
+    effect.set_uniform_float(uniforms.glassStyle, 2, values.style);
     effect.set_uniform_float(uniforms.glassSmall, 4, [values.small[0], values.small[1], scale, 1 / density]);
     effect.set_uniform_float(uniforms.glassDeep, 4, values.deep);
     effect.set_uniform_float(uniforms.glassGlint, 4, values.glint);
@@ -371,7 +380,7 @@ export class GlassLook extends EventEmitter {
  * lighter under dark, where it would not read otherwise – or anything else
  * of numbers eased as they are, as {deep}), each by a key – a surface has
  * one, the widgets' glass one for each widget – eased to what they are to
- * be over SHADE_TIME: at once with GNOME's
+ * be over SHADE_TIME (or a time of their own): at once with GNOME's
  * animations off (its setting, as the light has it: St's is forced on in
  * the tests) or the glass not shown. Only uniforms change meanwhile.
  */
@@ -415,8 +424,9 @@ export class GlassShades {
     /**
      * @param {*} key
      * @param {object} shade - {dim, veil} it is to have
+     * @param {number} [duration] - how long it takes to get there, ms
      */
-    set(key, shade) {
+    set(key, shade, duration = SHADE_TIME) {
         if (sameShade(shade, this.wanted(key)))
             return;
         // (Each from where it is now: one on its way goes on from there.)
@@ -434,7 +444,7 @@ export class GlassShades {
         }
         const timeline = new Clutter.Timeline({
             actor: this._actor,
-            duration: SHADE_TIME * St.Settings.get().slow_down_factor,
+            duration: duration * St.Settings.get().slow_down_factor,
             progress_mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
         const moving = [...this._to.keys()].filter(other => !sameShade(this._from.get(other), this.wanted(other)));

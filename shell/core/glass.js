@@ -23,7 +23,7 @@ import {
 import {glassLight} from './glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    setMaterialReach, textureDensity,
+    STYLE_TIME, setMaterialReach, textureDensity,
 } from './glassMaterial.js';
 
 // Live glass shows the windows over the bounds of its shapes, in steps of
@@ -381,13 +381,17 @@ class AtelierGlassSurface extends St.Widget {
             this._bgManager?.destroy();
             this._bgManager = null;
         });
-        this._syncMaterial();
+        this._shades.set('style', {light: light ? 1 : 0});
         this._shades.set('deep', {deep: deep ? 1 : 0});
+        this._syncMaterial();
         this._build();
     }
 
+    // (Its face as GNOME's style has it now: on its way from one to the
+    // other over STYLE_TIME.)
     _syncMaterial() {
-        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle, shadow: true});
+        const {light = 0} = this._shades.shown('style');
+        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true});
     }
 
     /**
@@ -402,6 +406,7 @@ class AtelierGlassSurface extends St.Widget {
             return;
         this._look = look;
         this._lightStyle = light;
+        this._shades.set('style', {light: light ? 1 : 0}, STYLE_TIME);
         this._syncMaterial();
         this._syncShade();
         this._syncLive();
@@ -456,6 +461,7 @@ class AtelierGlassSurface extends St.Widget {
         const {dim, veil} = this._shades.shown('glass');
         const {deep = 0} = this._shades.shown('deep');
         this._mask.setShade([dim, veil, deep]);
+        this._syncMaterial();
         const bounds = this._bounds();
         if (bounds)
             this._redrawWithin(bounds);

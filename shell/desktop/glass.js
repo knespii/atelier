@@ -21,11 +21,13 @@ import {syncTextureFrame} from '../core/glass.js';
 import {glassLight} from '../core/glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    setMaterialReach, textureDensity,
+    STYLE_TIME, setMaterialReach, textureDensity,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
 const MAX_RECTS = 32;
+// The key GNOME's style is eased by, among the widgets' shades.
+const STYLE = Symbol('style');
 
 // The widgets' rectangles (and the liquid), each with the light it catches
 // and its shade; a pixel is part of the one it is nearest to.
@@ -193,6 +195,7 @@ class AtelierDesktopGlass extends St.Widget {
         this._shades = new GlassShades(this, keys => this._showShades(keys));
         this._look = look;
         this._lightStyle = light;
+        this._shades.set(STYLE, {light: light ? 1 : 0});
         this._syncMaterial();
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => {
             this._syncMaterial();
@@ -218,12 +221,16 @@ class AtelierDesktopGlass extends St.Widget {
             return;
         this._look = look;
         this._lightStyle = light;
+        this._shades.set(STYLE, {light: light ? 1 : 0}, STYLE_TIME);
         this._syncMaterial();
         glassLight.sync();
     }
 
+    // (Its face as GNOME's style has it now: on its way from one to the
+    // other over STYLE_TIME.)
     _syncMaterial() {
-        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle});
+        const {light = 0} = this._shades.shown(STYLE);
+        this._mask.setMaterial(this._look, glassScale(), {light});
     }
 
     /** @returns {object|null} the material it is drawn with */
@@ -327,6 +334,11 @@ class AtelierDesktopGlass extends St.Widget {
 
     // The shades as they are now, drawn again only where those widgets are.
     _showShades(keys) {
+        if (keys.includes(STYLE)) {
+            this._syncMaterial();
+            this._rects.forEach(rect => this._redrawWithin(rect));
+            return;
+        }
         this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
         this._rects.forEach((rect, i) => {
             if (keys.includes(this._keys[i]))
