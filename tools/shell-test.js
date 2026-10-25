@@ -7683,9 +7683,15 @@ async function testLockFreeStretch() {
     if (check(Boolean(added), `a clock on the desktop where a card fits (${JSON.stringify(spot)})`)) {
         await Scripting.sleep(400);
         const [cx, cy] = centerOf(added._editHandle);
+        // (What is under the pointer there, and whether the press took the
+        // corner: said if it fails.)
+        const picked = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, cx, cy);
+        const under = picked === added._editHandle ? 'the corner' : `${picked?.constructor.name} ` +
+            `${picked?.get_style_class_name?.() ?? ''}`.trim();
         // (Three cells and a bit wider, two and a bit taller – as tall as
         // a clock gets on the desktop, and a little past it: nearest a card.)
         await pointerDown(cx, cy);
+        const took = desktop._editor?._drag?.stretch ?? false;
         await pointerAlong(cx, cy, cx + (3 * PITCH + 10) * scale, cy + (2 * PITCH + 14) * scale);
         await Scripting.sleep(300);
         const shadow = desktop._editor._ghost;
@@ -7695,7 +7701,8 @@ async function testLockFreeStretch() {
         check(desktopSaved?.size === 'card' && added.entry.size === 'card' && shown[0] === px(8) && shown[1] === px(4) &&
             await waitFor(() => added.width === px(8) && added.height === px(4), 1000),
         `on the desktop, stretched to an odd size, a widget takes the nearest of its sizes (${desktopSaved?.size}, ` +
-        `the shadow ${shown.join('×')})`);
+        `the shadow ${shown.join('×')}${took ? '' : `; pressed at ${cx.toFixed(0)}, ${cy.toFixed(0)} on ${under}, ` +
+            `no stretch began; its corner ${added._editHandle?.mapped ? 'shown' : 'not shown'}`})`);
         desktop.removeWidget(added.entry.id);
     }
     desktop.stopEditing();
