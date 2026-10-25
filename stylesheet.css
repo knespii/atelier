@@ -1816,14 +1816,14 @@
   spacing: 6px;
 }
 
-/* Modern: dark cards; of glass, the blurred wallpaper under a dark tint */
+/* Modern: dark cards; of glass, the glass alone, no tint over it */
 .atelier-desktop-modern .atelier-widget {
   background-color: rgba(18, 18, 22, 0.94);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
 .atelier-desktop-modern.atelier-desktop-glassy .atelier-widget {
-  background-color: rgba(14, 14, 18, 0.38);
+  background-color: rgba(14, 14, 18, 0);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
 }
 

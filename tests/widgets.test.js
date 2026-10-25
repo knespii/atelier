@@ -184,8 +184,8 @@ export function testGoogleTasks() {
 export function testCardStyle() {
     assertEqual(cardStyle('modern', 1), '', 'the look as it is');
     assertEqual(cardStyle('glassy', 0.5),
-        'background-color: rgba(14, 14, 18, 0.063); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);',
-        'of glass, the tint goes first');
+        'background-color: rgba(14, 14, 18, 0); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);',
+        'of glass, no tint over it: only the shadow fades');
     assert(cardStyle('glassy', 0.3).startsWith('background-color: rgba(14, 14, 18, 0);'), 'then only glass');
     assertEqual([cardGlass(1), cardGlass(0.4), cardGlass(0.2), cardGlass(0)], [1, 1, 0.5, 0], 'and then the glass goes');
     assert(cardStyle('modern', 0.5).includes('rgba(18, 18, 22, 0.47)'), 'solid cards: just less of it');
