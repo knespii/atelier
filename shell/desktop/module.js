@@ -497,7 +497,8 @@ export class DesktopModule {
     // On cards of glass, each widget's type follows what is behind its card
     // (shell/core/vibrancy.js): the wallpaper where it rests on its cell,
     // under the card's own colour (as it is before it melts, while it
-    // flows), as much of the glass as shows.
+    // flows), as much of the glass as shows – and so does the shade of the
+    // glass under it.
     _syncVibrancy() {
         const vibrancy = this._glass ? this._modules.get('vibrancy') : null;
         for (const widget of this._widgets.values()) {
@@ -516,6 +517,7 @@ export class DesktopModule {
                             widget._vibrantLayers = layersOf(widget);
                         return widget._vibrantLayers ?? [];
                     },
+                    shaded: () => this._glass?.setShade(widget.entry.id, widget._vibrant?.shade ?? null),
                 });
                 widget.add_style_class_name(widget._vibrant.scope);
             } else if (!wanted && widget._vibrant) {
@@ -532,6 +534,7 @@ export class DesktopModule {
         widget.remove_style_class_name(widget._vibrant.scope);
         widget._vibrant.destroy();
         widget._vibrant = null;
+        this._glass?.setShade(widget.entry.id, null);
     }
 
     // Where a widget rests on the stage: on its cell, as big as its size
@@ -894,14 +897,14 @@ export class DesktopModule {
         if (!this._glass)
             return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        // (As big as they are drawn, growing in or shrinking away.)
-        const rects = [...this._widgets.values()]
-            .filter(widget => widget.visible && widget.opacity > 0 && !widget.melted)
-            .map(widget => {
-                const [w, h] = [widget.width * widget.scale_x, widget.height * widget.scale_y];
-                return [widget.x + (widget.width - w) / 2, widget.y + (widget.height - h) / 2, w, h];
-            });
-        this._glass.setRects(rects, RADIUS * scale, this._liquidShapes ?? {});
+        // (As big as they are drawn, growing in or shrinking away; each
+        // shaded as its type asks.)
+        const shown = [...this._widgets.values()].filter(widget => widget.visible && widget.opacity > 0 && !widget.melted);
+        const rects = shown.map(widget => {
+            const [w, h] = [widget.width * widget.scale_x, widget.height * widget.scale_y];
+            return [widget.x + (widget.width - w) / 2, widget.y + (widget.height - h) / 2, w, h];
+        });
+        this._glass.setRects(rects, RADIUS * scale, this._liquidShapes ?? {}, shown.map(widget => widget.entry.id));
     }
 
     _refresh(kind) {

@@ -22,6 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {
     dockRect, dropIndex, fitIconSize, isHorizontal, maxLength, strutRect,
 } from '../../lib/dockGeometry.js';
+import {NO_SHADE} from '../../lib/glassLook.js';
 import {GlassSurface} from '../core/glass.js';
 import {blurOf, glassLayers} from '../core/vibrancy.js';
 import {scrollDock} from './actions.js';
@@ -517,10 +518,10 @@ export class Dock extends EventEmitter {
     /**
      * Of glass, its marks, separators, highlights and Show Applications
      * icon follow what is behind the glass (shell/core/vibrancy.js), where
-     * it rests shown, under its wash – placed anew, or its wash changed.
-     * More opaque near windows (DYNAMIC), it has its type for that in a
-     * class of its own, put on as windows come and go: no stylesheet is
-     * made anew for them.
+     * it rests shown, under its wash – placed anew, or its wash changed –
+     * and so does its glass's shade. More opaque near windows (DYNAMIC), it
+     * has its type for that in a class of its own, put on as windows come
+     * and go: no stylesheet is made anew for them.
      */
     updateVibrancy() {
         if (!this._vibrancy || !this._glass || !this.theming)
@@ -539,15 +540,27 @@ export class Dock extends EventEmitter {
                 tint: () => glassLayers(this._glass),
                 strength: () => this.theming?.washOf(near).strength ?? 1,
                 layers: () => this.theming?.washOf(near).layers ?? [],
+                shaded: () => this._syncShade(),
             }));
         }
-        const now = this._vibrant[this._vibrant.length > 1 && this.theming.near ? 1 : 0];
+        const now = this._vibrantNow();
         for (const surface of this._vibrant) {
             if (surface === now)
                 this._container.add_style_class_name(surface.scope);
             else
                 this._container.remove_style_class_name(surface.scope);
         }
+        this._syncShade();
+    }
+
+    // Its type now: near windows or away from them.
+    _vibrantNow() {
+        return this._vibrant?.[this._vibrant.length > 1 && this.theming?.near ? 1 : 0] ?? null;
+    }
+
+    // Its glass shaded as its type now asks (eased there).
+    _syncShade() {
+        this._glass?.setShade(this._vibrantNow()?.shade ?? NO_SHADE);
     }
 
     _dropVibrancy() {
@@ -556,6 +569,7 @@ export class Dock extends EventEmitter {
             surface.destroy();
         }
         this._vibrant = null;
+        this._syncShade();
     }
 
     syncGlass() {

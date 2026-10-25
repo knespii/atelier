@@ -335,7 +335,13 @@ it and a fine grain keeps its gradients from banding. Its tint follows
 GNOME's style – light in the light one, smoky but see-through in the dark
 one. Type and icons on it read on what is behind it: over a light wallpaper
 they turn dark, over a dark one they stay light, in the palette's hue,
-legible as APCA measures contrast.
+legible as APCA measures contrast. Where they would not read on the glass as
+it is – over a sky, say, or a wallpaper both light and dark there – the
+glass takes on as much shade as they need and no more, as Apple's Regular
+glass does: darker under light type, lighter under dark. The type stays
+light in the dark style and dark in the light one unless the other needs
+clearly less of it; over a dark wallpaper the glass stays as see-through as
+it is.
 
 In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
 little darker under it to keep what is on it legible) or *Off* (solid

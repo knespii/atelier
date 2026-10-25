@@ -1,6 +1,6 @@
 import {
-    LOOK, REST_LIGHT, TINTS, VARIANTS, bodyRect, boundsOf, lightToward, lookOf, materialValues, resolveVariant,
-    sameLight, tintOf,
+    LOOK, NO_SHADE, REST_LIGHT, TINTS, VARIANTS, bodyRect, boundsOf, lightToward, lookOf, materialValues, resolveVariant,
+    sameLight, sameShade, shadedLook, tintOf,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -44,6 +44,24 @@ export function testMaterialValues() {
     const none = materialValues(null);
     assertEqual(none.lens[3], 0, 'none: only the shape');
     assertEqual(none.tone, [1, 1, 0, 0], 'and what is behind as it is');
+}
+
+export function testShadedLook() {
+    const regular = LOOK.regular;
+    assert(shadedLook(regular) === regular && shadedLook(regular, NO_SHADE) === regular, 'no shade: as it is');
+    assertEqual(shadedLook(null, {dim: 0.3, veil: 0}), null, 'no glass: none');
+    const darker = shadedLook(regular, {dim: 0.3, veil: 0});
+    assert(near(darker.dim, 0.3) && darker.veil === regular.veil && darker.saturation === regular.saturation,
+        `a dark veil under light type: its dim, the rest as it is (${darker.dim})`);
+    // Clear glass, dimmed already: each lets through what the other left.
+    const clear = shadedLook(LOOK.clear, {dim: 0.3, veil: 0});
+    assert(near(1 - clear.dim, (1 - LOOK.clear.dim) * 0.7), `clear: on top of its own dim (${clear.dim})`);
+    const lighter = shadedLook(regular, {dim: 0, veil: 0.4});
+    assert(near(1 - lighter.veil, (1 - regular.veil) * 0.6) && lighter.dim === regular.dim,
+        `a white veil under dark type, with its own (${lighter.veil})`);
+    assert(regular.dim === 0 && LOOK.regular === regular, 'the look itself untouched');
+    assert(sameShade({dim: 0.2, veil: 0}, {dim: 0.20001, veil: 0}) && !sameShade({dim: 0.2, veil: 0}, NO_SHADE),
+        'shades the same as far as anyone could see');
 }
 
 export function testLightTowardThePointer() {

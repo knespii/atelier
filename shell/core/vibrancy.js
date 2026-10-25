@@ -2,7 +2,10 @@
 // the island, the bar's sides, the docks, the widgets' cards – say where
 // they rest and what lies over their glass, and their type and icons get
 // the colours that read there, each surface in a class of its own, from
-// one stylesheet.
+// one stylesheet; and their glass the extra shade the type needs to read,
+// which each surface's owner puts on its glass (eased there, on the GPU).
+// Surfaces that are one glass – the bar's one island and the island at
+// rest in it – take one polarity and one shade, the most either needs.
 //
 // What is behind a surface is the wallpaper as GNOME draws it on its
 // monitor: sampled small once for each wallpaper (in GdkPixbuf's worker
@@ -25,12 +28,13 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {placement} from '../../lib/depth.js';
 import {frost, parseColor} from '../../lib/glassBackdrop.js';
-import {lookOf, resolveVariant} from '../../lib/glassLook.js';
+import {NO_SHADE, lookOf, resolveVariant, shadedLook} from '../../lib/glassLook.js';
 import {regionStats} from '../../lib/lockLook.js';
 import {rgbToHex} from '../../lib/palette.js';
 import {sampleWallpaper} from '../../lib/thumbnails.js';
 import {
-    backdropOf, pictureRegion, scopeOf, steadied, surfaceRules, vibrancyStylesheet, withBackground,
+    backdropOf, pictureRegion, polarityOf, readingNeed, scopeOf, shadeNeeded, shadeOf, steadied, surfaceRules,
+    vibrancyStylesheet, withBackground,
 } from '../../lib/vibrancy.js';
 import {wallpaperShown} from '../../lib/wallpaperPalette.js';
 
@@ -64,17 +68,25 @@ export function releaseKeptVibrancy() {
 
 /**
  * What lies over a surface's glass, as its actors are styled: each one's
- * background colour (a card's, a dock's wash), the most transparent first.
+ * background colour (a card's, a dock's wash) – over its own shadow, where
+ * the background lets that show through (St draws it under a see-through
+ * card's background) – the most transparent first.
  *
  * @param {...St.Widget|null} actors
- * @returns {object[]} {color, alpha} of each that has one
+ * @returns {object[]} {color, alpha} of each that has one, the lowest first
  */
 export function layersOf(...actors) {
     const layers = [];
     for (const actor of actors) {
         if (!actor?.get_stage?.())
             continue;
-        const {red, green, blue, alpha} = actor.get_theme_node().get_background_color();
+        const node = actor.get_theme_node();
+        const {red, green, blue, alpha} = node.get_background_color();
+        const shadow = alpha < 255 ? node.get_box_shadow() : null;
+        if (shadow && !shadow.inset && shadow.color.alpha > 0) {
+            const {red: r, green: g, blue: b, alpha: a} = shadow.color;
+            layers.push({color: rgbToHex([r, g, b]), alpha: a / 255});
+        }
         if (alpha > 0)
             layers.push({color: rgbToHex([red, green, blue]), alpha: alpha / 255});
     }
@@ -241,7 +253,7 @@ class Stylesheet {
 class VibrantSurface {
     constructor(vibrancy, {
         id, inks, roots, rect = () => null, behind = null, blur = () => 1, tint = () => [], strength = () => 1,
-        layers = () => [],
+        layers = () => [], oneWith = () => null, shaded = () => {},
     }) {
         this._vibrancy = vibrancy;
         this.id = id;
@@ -253,12 +265,16 @@ class VibrantSurface {
         this.tint = tint;
         this.strength = strength;
         this.layers = layers;
+        this.oneWith = oneWith;
+        this.shaded = shaded;
         /** the class its type's colours are in */
         this.scope = scopeOf(id);
         /** 'light' or 'dark' type, as last worked out (null: as set) */
         this.polarity = null;
-        /** what its glass comes out as, as last worked out (lib/vibrancy.js backdropOf()) */
+        /** what its glass comes out as, shaded, as last worked out (lib/vibrancy.js backdropOf()) */
         this.backdrop = null;
+        /** the extra shade its glass is to have, {dim, veil}, as last worked out */
+        this.shade = NO_SHADE;
     }
 
     /** It rests elsewhere now, or what lies over its glass changed. */
@@ -368,7 +384,13 @@ export class VibrancyModule {
      *   shows, 0 … 1 (fading, it lets the wallpaper through)
      * @param {Function} [params.layers] - () => what lies over its glass,
      *   as tint (layersOf(): a card's colour, a wash)
-     * @returns {VibrantSurface} with its class (scope), update() and destroy()
+     * @param {Function} [params.oneWith] - () => the id of the surface its
+     *   glass is one with (the island at rest in the bar's one island), or
+     *   null: one polarity for both, and one shade, the most either needs
+     * @param {Function} [params.shaded] - () => …, once it is worked out
+     *   anew: its shade (surface.shade) is to go on its glass
+     * @returns {VibrantSurface} with its class (scope), its type's polarity
+     *   and its glass's shade as last worked out, update() and destroy()
      */
     surface(params) {
         this._surfaces.get(params.id)?.destroy();
@@ -509,7 +531,8 @@ export class VibrancyModule {
         }
     }
 
-    // Every surface's type worked out, into the stylesheet.
+    // Every surface's type and its glass's shade worked out: the colours
+    // into the stylesheet, the shades to the surfaces' owners.
     _sync() {
         if (!this._stylesheet)
             return;
@@ -517,11 +540,17 @@ export class VibrancyModule {
             {highContrast: this._a11y?.get_boolean('high-contrast') ?? false});
         const look = lookOf(variant);
         const palette = this._currentPalette();
-        const rules = [];
+        // (The polarity GNOME's style implies: light type in its dark style.)
+        const prefer = this._interface.get_string('color-scheme') === 'prefer-dark' ? 'light' : 'dark';
+        // What each surface's type needs of its glass, by the glass as it
+        // is (never as shaded: its shade isn't read back), those that are
+        // one glass together.
+        const glasses = new Map();
         for (const surface of this._surfaces.values()) {
             const was = surface.polarity;
             surface.polarity = null;
             surface.backdrop = null;
+            surface.shade = NO_SHADE;
             // (Solid surfaces: their colours as set.)
             if (!look)
                 continue;
@@ -533,19 +562,43 @@ export class VibrancyModule {
             }
             if (!stats)
                 continue;
-            // (Steadied, and as dark or light as it was where either would
-            // do: a stylesheet made anew restyles the whole shell.)
-            const backdrop = steadied(backdropOf(stats, look, {
+            const options = {
                 blur: surface.blur(), tint: surface.tint(), strength: surface.strength(), layers: surface.layers(),
-            }));
-            const result = surfaceRules({
-                roots: surface.roots, scope: surface.scope, inks: surface.inks, backdrop, was,
-            }, palette);
-            surface.backdrop = backdrop;
-            surface.polarity = result.polarity;
-            rules.push(...result.rules);
+            };
+            const need = readingNeed(surface.inks, palette);
+            const needed = Object.fromEntries(['light', 'dark'].map(polarity =>
+                [polarity, shadeNeeded(stats, look, polarity, need, options)]));
+            const glass = surface.oneWith() ?? surface.id;
+            glasses.set(glass, [...glasses.get(glass) ?? [], {surface, stats, options, needed, was}]);
+        }
+        const rules = [];
+        for (const parts of glasses.values()) {
+            const needed = Object.fromEntries(['light', 'dark'].map(polarity =>
+                [polarity, Math.max(...parts.map(part => part.needed[polarity]))]));
+            // (As dark or light as it was where either would do about as
+            // well, and the glass steadied: a stylesheet made anew
+            // restyles the whole shell.)
+            const polarity = polarityOf(needed, {prefer, was: parts.find(part => part.was)?.was ?? null});
+            const shade = shadeOf(polarity, needed);
+            for (const {surface, stats, options} of parts) {
+                const backdrop = steadied(backdropOf(stats, shadedLook(look, shade), options));
+                rules.push(...surfaceRules({
+                    roots: surface.roots, scope: surface.scope, inks: surface.inks, backdrop, polarity,
+                }, palette));
+                surface.backdrop = backdrop;
+                surface.polarity = polarity;
+                surface.shade = shade;
+            }
         }
         this._stylesheet.set(vibrancyStylesheet(rules))
             .catch(e => console.warn(`Atelier: the colours of the type on glass are not loaded: ${e.message}`));
+        // (Once all are worked out: a glass shaded as another's reads its.)
+        for (const surface of [...this._surfaces.values()]) {
+            try {
+                surface.shaded();
+            } catch (e) {
+                console.error(`Atelier: the ${surface.id}'s glass isn't shaded`, e);
+            }
+        }
     }
 }
