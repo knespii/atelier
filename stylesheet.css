@@ -1532,7 +1532,7 @@
   -atelier-ring-color: #ff7b72;
 }
 
-/* The lock screen's password popup, in the middle: black as the island */
+/* The lock screen's password popup, in the middle: of glass as the island, or black */
 
 /* (No spacing: GNOME's caps lock warning is there even while it is 0 high.) */
 .atelier-lock-sheet {
@@ -1543,6 +1543,12 @@
   background-color: #000000;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   color: #f4f4f5;
+}
+
+/* (Of glass, as the island: the glass is drawn under it, with its shadow.) */
+.atelier-lock-sheet.atelier-lock-sheet-glass {
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .atelier-lock-avatar {

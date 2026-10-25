@@ -16,9 +16,9 @@
 //   float atelier_others(vec2 p) – of that glass, what other surfaces draw
 //     (the one island's, for the island's glass): they draw its contour
 //     and shadow there;
-//   void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float
+//   void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float
 //     thick) – where the light comes from at p, the glass's extra shade
-//     there [dim, veil, deep] and the short side of the part of it p is in
+//     there [dim, veil] and the short side of the part of it p is in
 //     (its own rectangle, a drop, the one island…), in pixels.
 //
 // And, where it defines them (#define before the material's declarations):
@@ -41,8 +41,8 @@
 //   shimmer;
 // - what is behind, lightly blurred (lib/glassLook.js blurTaps());
 // - its face: neutral glass, lighter or darker as GNOME's style has it, a
-//   small control's dark glass lighter, deep glass darkest (atelier_face,
-//   lib/glassLook.js faceColor());
+//   small control's dark glass lighter (atelier_face, lib/glassLook.js
+//   faceColor());
 // - the extra shade, as a wash: dimmed under light type, veiled under
 //   dark;
 // - its volume: a little darker towards its edge, inside;
@@ -70,7 +70,7 @@ const SHADE_TIME = 250;
 /** How long glass takes to turn from GNOME's dark style to its light one, ms. */
 export const STYLE_TIME = 700;
 
-const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassLightFace', 'glassSmall', 'glassDeep', 'glassGlint',
+const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassLightFace', 'glassSmall', 'glassGlint',
     'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea'];
 
 export const MATERIAL_DECLARATIONS = `
@@ -80,7 +80,6 @@ uniform vec4 glassFace;
 uniform vec4 glassLightFace;
 uniform vec2 glassStyle;
 uniform vec4 glassSmall;
-uniform vec4 glassDeep;
 uniform vec4 glassGlint;
 uniform vec4 glassEdge;
 uniform vec4 glassShadow;
@@ -171,7 +170,7 @@ if (glassLens.w < 0.5) {
     float cover = clamp(0.5 - shape, 0.0, 1.0);
     float body = atelier_body(p);
     vec2 light;
-    vec3 shade;
+    vec2 shade;
     float thick;
     atelier_part(p, light, shade, thick);
     vec2 across = vec2(-light.y, light.x);
@@ -236,8 +235,6 @@ if (glassLens.w < 0.5) {
         // way from one to the other.)
         vec3 f = mix(atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),
             mix(glassFace.z, glassSmall.y, small), glassFace.w)), atelier_face(c, glassLightFace), glassStyle.x);
-        if (shade.z > 0.0)
-            f = mix(f, atelier_face(c, glassDeep), shade.z);
         f = clamp(f, 0.0, 1.0);
         f *= 1.0 - shade.x;
         f = mix(f, vec3(1.0), shade.y);
@@ -308,7 +305,6 @@ export function setMaterial(effect, uniforms, look, scale, options = {}) {
     effect.set_uniform_float(uniforms.glassLightFace, 4, values.lightFace);
     effect.set_uniform_float(uniforms.glassStyle, 2, values.style);
     effect.set_uniform_float(uniforms.glassSmall, 4, [values.small[0], values.small[1], scale, 1 / density]);
-    effect.set_uniform_float(uniforms.glassDeep, 4, values.deep);
     effect.set_uniform_float(uniforms.glassGlint, 4, values.glint);
     effect.set_uniform_float(uniforms.glassEdge, 4, values.edge);
     effect.set_uniform_float(uniforms.glassShadow, 4, values.shadow);
@@ -397,7 +393,7 @@ export class GlassLook extends EventEmitter {
 /**
  * The extra shades of a glass ({dim, veil}: darker under light type,
  * lighter under dark, where it would not read otherwise – or anything else
- * of numbers eased as they are, as {deep}), each by a key – a surface has
+ * of numbers eased as they are, as {light}), each by a key – a surface has
  * one, the widgets' glass one for each widget – eased to what they are to
  * be over SHADE_TIME (or a time of their own): at once with GNOME's
  * animations off (its setting, as the light has it: St's is forced on in

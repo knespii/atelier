@@ -1,8 +1,8 @@
 // The lock screen's wallpaper as glass while the password is asked: blurred
 // as GNOME blurs it, but its colours kept – a little richer, darkened far
 // less than GNOME darkens it, and only towards the edges. The type stays
-// legible by itself: a soft shadow round each widget's type, and
-// the popup is black.
+// legible by itself: a soft shadow round each widget's type, and the
+// island's and the popup's glass shaded as much as theirs needs.
 //
 // The glass is each wallpaper drawn a second time and made glass once – one
 // small shader on it, under GNOME's blur at its fullest – laid over the

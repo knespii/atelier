@@ -228,7 +228,7 @@ class Stylesheet {
 class VibrantSurface {
     constructor(vibrancy, {
         id, inks, roots, rect = () => null, behind = null, strength = () => 1, layers = () => [],
-        oneWith = () => null, shaded = () => {},
+        oneWith = () => null, shaded = () => {}, fixed = null,
     }) {
         this._vibrancy = vibrancy;
         this.id = id;
@@ -240,6 +240,8 @@ class VibrantSurface {
         this.layers = layers;
         this.oneWith = oneWith;
         this.shaded = shaded;
+        /** the polarity its type always has, null: as it reads best */
+        this.fixed = fixed;
         /** the class its type's colours are in */
         this.scope = scopeOf(id);
         /** 'light' or 'dark' type, as last worked out (null: as set) */
@@ -359,6 +361,9 @@ export class VibrancyModule {
      *   null: one polarity for both, and one shade, the most either needs
      * @param {Function} [params.shaded] - () => …, once it is worked out
      *   anew: its shade (surface.shade) is to go on its glass
+     * @param {string} [params.fixed] - the polarity its type always has
+     *   ('light': GNOME's controls, styled for a dark surface only), its
+     *   glass shaded for it; none: as it reads best
      * @returns {VibrantSurface} with its class (scope), its type's polarity
      *   and its glass's shade as last worked out, update() and destroy()
      */
@@ -562,7 +567,8 @@ export class VibrancyModule {
             // (As dark or light as it was where either would do about as
             // well, and the glass steadied: a stylesheet made anew
             // restyles the whole shell.)
-            const polarity = polarityOf(needed, {prefer, was: parts.find(part => part.was)?.was ?? null});
+            const fixed = parts.find(part => part.surface.fixed)?.surface.fixed;
+            const polarity = fixed ?? polarityOf(needed, {prefer, was: parts.find(part => part.was)?.was ?? null});
             const shade = shadeOf(polarity, needed);
             for (const {surface, stats, options} of parts) {
                 const backdrop = steadied(backdropOf(stats, look, {...options, shade}));

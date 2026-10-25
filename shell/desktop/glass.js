@@ -67,10 +67,10 @@ float atelier_others(vec2 p) {
     return 100000.0;
 }
 
-void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
+void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
     float nearest = 100000.0;
     light = vec2(${REST_LIGHT[0]}, ${REST_LIGHT[1]});
-    shade = vec3(0.0);
+    shade = vec2(0.0);
     thick = 0.0;
     for (int i = 0; i < ${MAX_RECTS}; i++) {
         if (float(i) >= count)
@@ -79,7 +79,7 @@ void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
         if (d < nearest) {
             nearest = d;
             light = lights[i];
-            shade = vec3(shades[i], 0.0);
+            shade = shades[i];
             thick = min(rects[i].z, rects[i].w);
         }
     }

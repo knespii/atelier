@@ -157,6 +157,11 @@ export const LiquidSheet = GObject.registerClass({
         return this._closingPromise;
     }
 
+    /** @returns {number[]|null} where its panel is on the stage, [x, y, width, height], once it opens */
+    get rect() {
+        return this._rect ?? null;
+    }
+
     // Centered on the main monitor, a little above the middle, and below
     // the island at rest far enough to fall.
     _place() {

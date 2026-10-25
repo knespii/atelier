@@ -6,6 +6,10 @@
 // stays a moment over the session's own island, which is built anew under
 // it, and goes back up; the session's island comes out after it. The
 // unlocking itself never waits for it.
+// It is of the same glass as the session's (shell/core/glass.js), over the
+// lock screen's wallpaper as it shows – sharp, or turned to glass as the
+// prompt comes up – shaded as much as its light type needs; black, as the
+// session's island is, with the glass off.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -16,8 +20,11 @@ import St from 'gi://St';
 import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {NO_SHADE} from '../../lib/glassLook.js';
 import {EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
+import {GlassSurface} from '../core/glass.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {SteadyTimeline} from '../core/steadyTimeline.js';
 import {Island} from '../island/island.js';
 import {Padlock} from './padlock.js';
@@ -25,6 +32,9 @@ import {Padlock} from './padlock.js';
 const AFTERGLOW = 250; // how long the open padlock stays once unlocked, ms
 const RETRACT_TIME = 280; // going back up, once unlocked
 const PADDING = 5; // above and below the padlock's ring, logical pixels
+// How far down the monitor its glass reaches: the island, its contour and
+// its shadow.
+const GLASS_REACH = 0.25;
 
 // The island at rest: the padlock.
 const LockIdle = GObject.registerClass({
@@ -39,9 +49,18 @@ const LockIdle = GObject.registerClass({
 export class LockIsland {
     /**
      * @param {Gio.Settings} barSettings - the bar's: the island's shape
+     * @param {object} [options]
+     * @param {Gio.Settings} [options.settings] - Atelier's: the glass
+     *   (none: black)
+     * @param {Clutter.Actor} [options.source] - what its glass shows: the
+     *   lock screen's wallpapers (none: the wallpaper, sharp)
      */
-    constructor(barSettings) {
+    constructor(barSettings, {settings = null, source = null} = {}) {
         this._barSettings = barSettings;
+        this._source = source;
+        this._glass = null;
+        this._shade = NO_SHADE;
+        this._glassLook = settings ? new GlassLook(settings) : null;
         this.padlock = new Padlock();
         this._idle = new LockIdle(this.padlock);
         this.actor = new Island(this._idle);
@@ -64,9 +83,11 @@ export class LockIsland {
             'notify::y', () => this._syncEars(),
             'notify::translation-y', () => this._syncEars(),
             'notify::width', () => this._syncEars(),
+            'notify::height', () => this._syncEars(),
             'notify::visible', () => this._syncEars(),
             'notify::opacity', () => this._syncEars(),
             this);
+        this._glassLook?.connectObject('changed', () => this._syncLook(), this);
         // However it goes: also with all of GNOME's UI when the shell quits.
         this.actor.connect('destroy', () => this._onDestroyed());
         this._syncLook();
@@ -107,17 +128,55 @@ export class LockIsland {
             this.padlock.shake();
     }
 
-    // A notch curves into the top edge with ears; a capsule floats.
+    /** @returns {GlassSurface|null} its glass (none: black) */
+    get glass() {
+        return this._glass;
+    }
+
+    /** @returns {GlassLook|null} the glass as it is to be drawn (shell/core/glassMaterial.js) */
+    get glassLook() {
+        return this._glassLook;
+    }
+
+    /**
+     * The extra shade its glass takes, where its light type would not read
+     * otherwise (lib/vibrancy.js promptShade()): eased to it.
+     *
+     * @param {object} shade - {dim, veil}
+     */
+    setShade(shade) {
+        this._shade = shade ?? NO_SHADE;
+        this._glass?.setShade(this._shade);
+    }
+
+    // A notch curves into the top edge with ears; a capsule floats. Of
+    // glass, or black with the glass off (black ears).
     _syncLook() {
+        if (!this.actor)
+            return;
         this._notch = this._barSettings.get_string('island-shape') === 'notch';
         this._ear = this._notch ? EAR_RADIUS : 0;
         if (this._notch)
             this.actor.add_style_class_name('atelier-island-notch');
         else
             this.actor.remove_style_class_name('atelier-island-notch');
-        if (this._notch && !this._ears) {
+        const glass = Boolean(this._glassLook?.glass);
+        if (glass && !this._glass) {
+            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look,
+                light: this._glassLook.light, source: this._source});
+            this._glass.setShade(this._shade);
+            Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
+            this.actor.add_style_class_name('atelier-island-glass');
+        } else if (!glass && this._glass) {
+            this.actor.remove_style_class_name('atelier-island-glass');
+            this._glass.destroy();
+            this._glass = null;
+        }
+        this._glass?.setLook(this._glassLook.look, this._glassLook.light);
+        const ears = this._notch && !glass;
+        if (ears && !this._ears) {
             this._ears = new NotchEars(this.actor);
-        } else if (!this._notch && this._ears) {
+        } else if (!ears && this._ears) {
             this._ears.destroy();
             this._ears = null;
         }
@@ -125,13 +184,29 @@ export class LockIsland {
         this._queueLayout();
     }
 
+    // The ears, or the glass, where the island is (out of the top edge, or
+    // on its way).
     _syncEars() {
-        if (!this._ears || !this.actor)
-            return;
         const actor = this.actor;
+        if (!actor)
+            return;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        this._ears.show(actor.visible && actor.opacity > 0, actor.opacity);
-        this._ears.setShape(actor.x, actor.y + actor.translation_y, actor.width, this._ear * scale);
+        const shown = actor.visible && actor.opacity > 0;
+        const y = actor.y + actor.translation_y;
+        if (this._ears) {
+            this._ears.show(shown, actor.opacity);
+            this._ears.setShape(actor.x, y, actor.width, this._ear * scale);
+        }
+        const glass = this._glass;
+        if (glass) {
+            glass.visible = shown;
+            glass.opacity = actor.opacity;
+            if (shown) {
+                const node = actor.get_theme_node();
+                glass.setShape(actor.x, y, actor.width, actor.height, node.get_border_radius(St.Corner.TOPLEFT),
+                    node.get_border_radius(St.Corner.BOTTOMLEFT), this._ear * scale);
+            }
+        }
     }
 
     _queueLayout() {
@@ -177,6 +252,8 @@ export class LockIsland {
             return;
         }
         Main.layoutManager.uiGroup.set_child_above_sibling(this.actor, null);
+        if (this._glass)
+            Main.layoutManager.uiGroup.set_child_below_sibling(this._glass, this.actor);
         this.showUnlocked();
         // (Counted in frames that come, as the padlock's moves: GNOME stops
         // the shell a moment now, turning its other extensions on.)
@@ -212,6 +289,8 @@ export class LockIsland {
         }
         this._ears?.destroy();
         this._ears = null;
+        this._glass?.destroy();
+        this._glass = null;
         this.actor.destroy();
     }
 
@@ -222,6 +301,11 @@ export class LockIsland {
         this._leaving = null;
         this._laterId = 0;
         this._barSettings.disconnectObject(this);
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
+        // (Its glass went with it, or goes with the rest of the UI.)
+        this._glass = null;
         Main.layoutManager.disconnectObject(this);
         Main.layoutManager.panelBox.disconnectObject(this);
         // (Ears left are going with the rest of the UI.)

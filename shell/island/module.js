@@ -41,6 +41,9 @@ const GLASS_REACH = 0.9;
 // What a page open in the island covers, about (the glance), logical
 // pixels: where its type has to read.
 const PAGE_REGION = [400, 300];
+// What lies under GNOME's controls' type in the control centre (their
+// pills, stylesheet.css), and under a sheet's fields and buttons.
+const CONTROL_PILL = Object.freeze({color: '#ffffff', alpha: 0.1});
 
 // Whether a window shows anywhere in a rectangle of the stage (on the
 // workspace shown).
@@ -97,6 +100,7 @@ export class IslandModule {
         this._liquid = null;
         this._partner = null;
         this._vibrant = null;
+        this._openRect = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -177,10 +181,7 @@ export class IslandModule {
             'notify::hover', () => this._onHover(),
             'clicked', (_, button) => this._onClicked(button),
             'page-closed', () => this._onPageClosed(),
-            'page-opened', () => {
-                this._raise();
-                this._syncDeep();
-            },
+            'page-opened', () => this._raise(),
             'idle-resized', () => this._queueLayout(),
             this);
         this._slot.connectObject('notify::allocation', () => this._queueLayout(), this);
@@ -343,8 +344,9 @@ export class IslandModule {
         // The drop is of the island's stuff, and the island is drawn along
         // with it, so they flow into each other.
         const glass = this._glassy();
-        // (Deep: a sheet's form is styled for a dark surface.)
-        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light, deep: true});
+        // (The same glass as all of it; where the form on it would not read,
+        // its drop takes a shade of its own.)
+        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light});
         this._liquid.setPartner(this._partner);
         Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
         const sheet = new LiquidSheet(island, this._liquid, form);
@@ -354,6 +356,7 @@ export class IslandModule {
         this._clearTimeout('show-glance');
         this._syncShape();
         sheet.open();
+        this._syncSheetInk();
         return sheet;
     }
 
@@ -362,6 +365,10 @@ export class IslandModule {
         this._sheet = null;
         this._liquid?.destroy();
         this._liquid = null;
+        if (this._vibrant) {
+            this._vibrant.form = null;
+            this._vibrant.sheet.update();
+        }
         if (this._island)
             this._syncShape();
     }
@@ -489,23 +496,10 @@ export class IslandModule {
     }
 
     _onPageClosed() {
-        this._syncDeep();
         this._syncShade();
         // Back at rest under the pointer: the glance may follow.
         if (!this._island.page && this._island.hover)
             this._onHover();
-    }
-
-    // Under GNOME's own controls – the control centre's page, styled for a
-    // dark surface only – the glass is deep, whatever GNOME's style.
-    _syncDeep() {
-        const page = this._island?.page;
-        const deep = Boolean(page?.has_style_class_name?.('atelier-cc'));
-        // (Its type worked out anew once it is not: on the glass as it is
-        // under the type, not as it was under GNOME's controls.)
-        if (this._glass && this._glass.deep && !deep)
-            this._vibrant?.all.forEach(surface => surface.update());
-        this._glass?.setDeep(deep);
     }
 
     /**
@@ -580,9 +574,6 @@ export class IslandModule {
     get glassShade() {
         if (!this._glass)
             return null;
-        // (None under a sheet's liquid or GNOME's controls: deep glass.)
-        if (this._liquid || this._glass.deep)
-            return NO_SHADE;
         return this._typeShade();
     }
 
@@ -631,7 +622,6 @@ export class IslandModule {
         this._glass?.setLook(this._glassLook.look, this._glassLook.light);
         if (glass)
             this._liquid?.setLook(this._glassLook.look, this._glassLook.light);
-        this._syncDeep();
         this._syncVibrancy();
         // Black ears; glass draws its own.
         const ears = this._ear > 0 && !glass;
@@ -683,6 +673,9 @@ export class IslandModule {
     // the bar; open, the wallpaper under the page – or windows: its glass
     // is live then, and what they show isn't read back from the screen;
     // they are taken to be the palette's surface, in the style apps are in.
+    // GNOME's own controls (the control centre) and a sheet's form, styled
+    // for a dark surface only, keep their light type: the glass under them
+    // is the same glass, shaded as much as that type needs to read there.
     _syncVibrancy() {
         const vibrancy = this._glass ? this._modules?.get('vibrancy') : null;
         if (!vibrancy) {
@@ -710,6 +703,19 @@ export class IslandModule {
             open: vibrancy.surface({...glass, id: 'island-pages', inks: 'pages', rect: () => this._pageRegion()}),
             windows: vibrancy.surface({...glass, id: 'island-windows', inks: 'pages',
                 behind: () => vibrancy.windowSurface()}),
+            // (On the controls' own pills, as see-through as they are set.)
+            controls: vibrancy.surface({...glass, id: 'island-controls', inks: 'controls', fixed: 'light',
+                rect: () => this._openRect ?? this._pageRegion(),
+                layers: () => [...layersOf(this._island), CONTROL_PILL]}),
+            controlsOverWindows: vibrancy.surface({...glass, id: 'island-controls-windows', inks: 'controls',
+                fixed: 'light', behind: () => vibrancy.windowSurface(),
+                layers: () => [...layersOf(this._island), CONTROL_PILL]}),
+            sheet: vibrancy.surface({id: 'island-sheet', inks: 'forms', fixed: 'light', roots: ['.atelier-sheet'],
+                rect: () => this._sheetRect(), layers: () => [CONTROL_PILL], shaded: () => this._syncShade()}),
+            sheetOverWindows: vibrancy.surface({id: 'island-sheet-windows', inks: 'forms', fixed: 'light',
+                roots: ['.atelier-sheet'],
+                behind: () => (this._sheet ? vibrancy.windowSurface() : null), layers: () => [CONTROL_PILL],
+                shaded: () => this._syncShade()}),
         };
         this._vibrant = {...surfaces, all: Object.values(surfaces)};
         this._island.add_style_class_name(this._vibrant.rest.scope);
@@ -744,19 +750,44 @@ export class IslandModule {
             return;
         const page = island.page;
         let overWindows = false;
-        if (page && !Main.overview.visible) {
+        this._openRect = null;
+        if (page) {
             const [, width] = page.get_preferred_width(-1);
             const [, height] = page.get_preferred_height(width);
             const rect = island.restRect();
-            overWindows = rect !== null && Number.isFinite(width + height) && windowsUnder({
-                x: rect[0] + rect[2] / 2 - width / 2, y: rect[1], width, height,
-            });
+            if (rect !== null && Number.isFinite(width + height) && width > 0 && height > 0)
+                this._openRect = {x: Math.round(rect[0] + rect[2] / 2 - width / 2), y: rect[1], width, height};
+            overWindows = Boolean(this._openRect) && !Main.overview.visible && windowsUnder(this._openRect);
         }
-        const [on, off] = overWindows ? [vibrant.windows, vibrant.open] : [vibrant.open, vibrant.windows];
-        island.remove_style_class_name(off.scope);
+        // (GNOME's controls: light type kept, the glass shaded for it.)
+        const controls = Boolean(page?.has_style_class_name?.('atelier-cc'));
+        const pairs = controls ? [vibrant.controlsOverWindows, vibrant.controls] : [vibrant.windows, vibrant.open];
+        const on = overWindows ? pairs[0] : pairs[1];
+        for (const surface of [vibrant.windows, vibrant.open, vibrant.controls, vibrant.controlsOverWindows]) {
+            if (surface !== on)
+                island.remove_style_class_name(surface.scope);
+        }
         island.add_style_class_name(on.scope);
         vibrant.page = on;
         this._syncShade();
+    }
+
+    // Where a sheet is on the stage, while one is open.
+    _sheetRect() {
+        const rect = this._sheet?.rect;
+        return rect ? {x: rect[0], y: rect[1], width: rect[2], height: rect[3]} : null;
+    }
+
+    // A sheet's form is over windows (its liquid is live) or over the
+    // wallpaper: the shade its drop takes is worked out for that.
+    _syncSheetInk() {
+        const vibrant = this._vibrant;
+        if (!vibrant)
+            return;
+        const rect = this._sheetRect();
+        vibrant.form = rect && !Main.overview.visible && windowsUnder(rect)
+            ? vibrant.sheetOverWindows : vibrant.sheet;
+        vibrant.sheet.update();
     }
 
     // The shade its type asks of its glass: at rest the time's, opened the
@@ -768,10 +799,14 @@ export class IslandModule {
         return (this._island?.page ? vibrant.page ?? vibrant.open : vibrant.rest).shade;
     }
 
-    // Its glass shaded as its type asks (eased there). (The bar's one
-    // island follows it, one glass with it.)
+    // Its glass shaded as its type asks (eased there), and a sheet's drop
+    // as its form does. (The bar's one island follows it, one glass with
+    // it.)
     _syncShade() {
-        this._glass?.setShade(this._typeShade());
+        const shade = this._typeShade();
+        this._glass?.setShade(shade);
+        this._liquid?.setShade(shade);
+        this._liquid?.setDropShade(this._sheet && this._vibrant?.form ? this._vibrant.form.shade : NO_SHADE);
     }
 
     _dropVibrancy() {

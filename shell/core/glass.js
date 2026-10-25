@@ -59,7 +59,8 @@ uniform vec4 partner;
 uniform vec4 partnerBody;
 uniform vec3 partnerLook;
 uniform vec2 glassLight;
-uniform vec3 glassShade;
+uniform vec2 glassShade;
+uniform vec2 dropShade;
 
 float atelier_smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -130,8 +131,9 @@ float atelier_body(vec2 p) {
 
 // The short side of the part p is in: the rectangle's as it shows (not its
 // body's past the screen), a drop's or its neck's where they melt into it,
-// the partner's where it is the nearer.
-void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
+// the partner's where it is the nearer; and its shade: the drop's own (a
+// sheet's form on it) where it is the drop.
+void atelier_part(vec2 p, out vec2 light, out vec2 shade, out float thick) {
     light = glassLight;
     shade = glassShade;
     float d = atelier_notch(p, rect, body, radii, ear);
@@ -148,7 +150,9 @@ void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
     if (drop.z > 0.0 && drop.w > 0.0) {
         vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
         float n = length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius;
-        thick = mix(thick, 2.0 * min(drop.z, drop.w), clamp(0.5 + 0.5 * (d - n) / k, 0.0, 1.0));
+        float w = clamp(0.5 + 0.5 * (d - n) / k, 0.0, 1.0);
+        thick = mix(thick, 2.0 * min(drop.z, drop.w), w);
+        shade = mix(shade, dropShade, w);
         d = atelier_smin(d, n, k);
     }
     if (atelier_others(p) < d)
@@ -184,7 +188,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassShade'];
+            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassShade', 'dropShade'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
         this._look = [null, 1, {}];
@@ -192,7 +196,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.setNeck([0, 0, 0, 0]);
         this.setPartner(null);
         this.setLight(REST_LIGHT);
-        this.setShade([0, 0, 0]);
+        this.setShade([0, 0], [0, 0]);
         this.setReach(null);
         this.setMaterial(null, 1);
     }
@@ -250,9 +254,13 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.glassLight, 2, light);
     }
 
-    /** @param {number[]} shade - its extra shade, [dim, veil, deep] */
-    setShade(shade) {
-        this.set_uniform_float(this._at.glassShade, 3, shade);
+    /**
+     * @param {number[]} shade - its extra shade, [dim, veil]
+     * @param {number[]} drop - its drop's, the same way
+     */
+    setShade(shade, drop) {
+        this.set_uniform_float(this._at.glassShade, 2, shade);
+        this.set_uniform_float(this._at.dropShade, 2, drop);
     }
 
     /** @param {number[]|null} reach - [x1, y1, x2, y2] it draws within */
@@ -294,10 +302,11 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     }
 });
 
-// The windows' group as it is on the stage, one to one, for live glass.
-// (The group says it has no size, and a plain clone scales its source to
-// its own size: by infinity, to nothing.)
-const WindowsClone = GObject.registerClass(
+// The windows' group as it is on the stage, one to one, for live glass –
+// or any other actor that is as large as the stage. (The group says it has
+// no size, and a plain clone scales its source to its own size: by
+// infinity, to nothing.)
+export const WindowsClone = GObject.registerClass(
 class AtelierWindowsClone extends Clutter.Clone {
     vfunc_allocate(box) {
         this.set_allocation(box);
@@ -325,11 +334,13 @@ class AtelierGlassSurface extends St.Widget {
      *   LOOK's), none for the plain wallpaper; never for solid surfaces
      * @param {boolean} [params.light] - GNOME's style is light: light glass
      *   (else dark)
-     * @param {boolean} [params.deep] - dark glass whatever the style, for
-     *   what is styled for a dark surface only (a sheet's form)
+     * @param {Clutter.Actor} [params.source] - what is behind it, instead
+     *   of the wallpaper: an actor as large as the stage, at its corner,
+     *   whose picture its glass shows (the lock screen's wallpapers, sharp
+     *   or turned to glass); the wallpaper again once it is gone
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
-        solid = false, look = null, light = false, deep = false} = {}) {
+        solid = false, look = null, light = false, source = null} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -341,7 +352,7 @@ class AtelierGlassSurface extends St.Widget {
         this._solid = solid;
         this._look = solid ? null : look;
         this._lightStyle = light;
-        this._deep = deep;
+        this._source = null;
         this._shape = null;
         this._drop = null;
         this._neck = null;
@@ -350,6 +361,7 @@ class AtelierGlassSurface extends St.Widget {
         this._light = REST_LIGHT;
         // The extra shade its type asks for (shell/core/vibrancy.js).
         this._typeShade = NO_SHADE;
+        this._dropShade = NO_SHADE;
         this._shades = new GlassShades(this, () => this._showShade());
 
         this._wallpaper = new Clutter.Actor();
@@ -382,9 +394,44 @@ class AtelierGlassSurface extends St.Widget {
             this._bgManager = null;
         });
         this._shades.set('style', {light: light ? 1 : 0});
-        this._shades.set('deep', {deep: deep ? 1 : 0});
         this._syncMaterial();
         this._build();
+        if (source && !solid)
+            this.setSource(source);
+    }
+
+    /**
+     * What is behind it: an actor's picture (a clone of it), or the
+     * wallpaper (null) – as the constructor's source.
+     *
+     * @param {Clutter.Actor|null} source
+     */
+    setSource(source) {
+        if (this._solid || source === (this._source?.source ?? null))
+            return;
+        this._source?.destroy();
+        this._source = null;
+        if (source) {
+            const clone = new WindowsClone({source});
+            clone.set_size(global.stage.width, global.stage.height);
+            this.insert_child_above(clone, this._wallpaper);
+            // (Gone, the wallpaper shows again.)
+            source.connectObject('destroy', () => this.setSource(null), clone);
+            clone.connect('destroy', () => source.disconnectObject?.(clone));
+            this._source = clone;
+            this._syncSource();
+        }
+        this._wallpaper.visible = !this._source && !this._live;
+    }
+
+    /** @returns {Clutter.Actor|null} what its glass shows instead of the wallpaper */
+    get source() {
+        return this._source?.source ?? null;
+    }
+
+    // (What is at the stage's corner at the stage's: the clone in it.)
+    _syncSource() {
+        this._source?.set_position(-this.x, -this.y);
     }
 
     // (Its face as GNOME's style has it now: on its way from one to the
@@ -414,30 +461,9 @@ class AtelierGlassSurface extends St.Widget {
     }
 
     /**
-     * Dark glass whatever GNOME's style, under what is styled for a dark
-     * surface only (GNOME's own controls in the control centre).
-     *
-     * @param {boolean} deep
-     */
-    setDeep(deep) {
-        if (deep === this._deep)
-            return;
-        this._deep = deep;
-        this._syncShade();
-        // (Eased to it, as a shade is.)
-        this._shades.set('deep', {deep: deep ? 1 : 0});
-    }
-
-    /** @returns {boolean} whether it is deep glass now */
-    get deep() {
-        return this._deep;
-    }
-
-    /**
      * An extra shade, where the type on it would not read otherwise
      * (lib/vibrancy.js): darker under light type, lighter under dark –
-     * eased to it. (None while it is deep: what is on it then is styled for
-     * that; nor solid or plain blurred glass.)
+     * eased to it. (None on solid or plain blurred glass.)
      *
      * @param {object} shade - {dim, veil}, 0 … 1 each
      */
@@ -451,16 +477,33 @@ class AtelierGlassSurface extends St.Widget {
         return this._shades.wanted('glass');
     }
 
+    /**
+     * The drop's own shade, where the form on it would not read otherwise
+     * (a sheet's): eased to it, as setShade().
+     *
+     * @param {object} shade - {dim, veil}, 0 … 1 each
+     */
+    setDropShade(shade) {
+        this._dropShade = shade ?? NO_SHADE;
+        this._syncShade();
+    }
+
+    /** @returns {object} the extra shade its drop is to have, {dim, veil} */
+    get dropShade() {
+        return this._shades.wanted('drop');
+    }
+
     _syncShade() {
-        const none = this._solid || !this._look || this._deep;
+        const none = this._solid || !this._look;
         this._shades.set('glass', none ? NO_SHADE : this._typeShade);
+        this._shades.set('drop', none ? NO_SHADE : this._dropShade);
     }
 
     // The shade as it is now, drawn again where its shapes are.
     _showShade() {
         const {dim, veil} = this._shades.shown('glass');
-        const {deep = 0} = this._shades.shown('deep');
-        this._mask.setShade([dim, veil, deep]);
+        const drop = this._shades.shown('drop');
+        this._mask.setShade([dim, veil], [drop.dim ?? 0, drop.veil ?? 0]);
         this._syncMaterial();
         const bounds = this._bounds();
         if (bounds)
@@ -521,6 +564,8 @@ class AtelierGlassSurface extends St.Widget {
         this.set_size(width, height);
         this._fill?.set_size(width, height);
         this._wallpaper.set_position(-offsetX, -offsetY);
+        this._source?.set_size(global.stage.width, global.stage.height);
+        this._syncSource();
         if (!this._solid) {
             this._bgManager = new Background.BackgroundManager({
                 container: this._wallpaper,
@@ -552,13 +597,15 @@ class AtelierGlassSurface extends St.Widget {
             const windows = new WindowsClone({source: global.window_group});
             windows.set_size(global.stage.width, global.stage.height);
             this._live.add_child(windows);
-            this.insert_child_above(this._live, this._wallpaper);
+            this.insert_child_above(this._live, this._source ?? this._wallpaper);
             this._wallpaper.hide();
+            this._source?.hide();
             this._syncLive();
         } else {
             this._live.destroy();
             this._live = null;
-            this._wallpaper.show();
+            this._source?.show();
+            this._wallpaper.visible = !this._source;
         }
     }
 

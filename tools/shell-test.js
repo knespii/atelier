@@ -1802,8 +1802,8 @@ async function testGlassPictures(ext) {
         }
     }
 
-    // (Each look: the bar as the user has it, the glance and – deep glass –
-    // the control centre over it, capsules, the dock, the widgets.)
+    // (Each look: the bar as the user has it, the glance and the control
+    // centre over it – the same glass – capsules, the dock, the widgets.)
     async function shootGlass(name, controlCentre) {
         // The one island, a notch, as the user has it.
         bar.set_string('style', 'island');
@@ -2044,8 +2044,9 @@ function rowOf(pixels, x1, x2, y) {
 // the light from the top left and the opposite ones, which leans towards
 // the pointer when it is near (only then, and only for the glass it is
 // near); a contour and a shadow outside it, none along a notch's screen
-// edge; at rest nothing is drawn; deep glass under the control centre and
-// GNOME's style eased to; 'off' and GNOME's high contrast make the surfaces
+// edge; at rest nothing is drawn; the same glass under the control centre,
+// shaded only as its light type needs; GNOME's style eased to; a drop's
+// shade of its own; 'off' and GNOME's high contrast make the surfaces
 // solid; the overview's blurred wallpaper has the grain.
 // (ATELIER_TEST_SCALE: all of it with the monitor at that scale.)
 async function testLiquidGlass(ext) {
@@ -2326,8 +2327,8 @@ async function testLiquidGlass(ext) {
 
         // An extra shade, as the type on glass asks for one where it would
         // not read otherwise (shell/core/vibrancy.js), is drawn: a dark veil
-        // over the light band, a white one over the dark – none while the
-        // glass is deep (under GNOME's controls) or plain.
+        // over the light band, a white one over the dark – a drop's of its
+        // own (a sheet's form), none on plain glass.
         const middleOf = async (name, y) => {
             await Scripting.sleep(500);
             await screenshotArea(`liquid-glass/${name}`, mid - px(20), y, px(40), px(20));
@@ -2339,10 +2340,9 @@ async function testLiquidGlass(ext) {
         const dimmed = await middleOf('shade-dim', lightBand);
         check(dimmed < unshaded * 0.8 && dimmed > unshaded * 0.6,
             `a dark veil of 0.3 drawn: ${unshaded.toFixed(0)} → ${dimmed.toFixed(0)}`);
-        glass.setDeep(true);
-        const deep = glass.shade;
-        glass.setDeep(false);
-        check(deep.dim === 0 && deep.veil === 0 && glass.shade.dim === 0.3, 'none while it is deep, again after');
+        glass.setDropShade({dim: 0.5, veil: 0});
+        check(glass.dropShade.dim === 0.5 && glass.shade.dim === 0.3, 'a drop\'s shade of its own, the rest\'s as it was');
+        glass.setDropShade({dim: 0, veil: 0});
         glass.setLook(null);
         check(glass.shade.dim === 0, 'none on plain glass');
         glass.setLook(LOOK.regular);
@@ -2437,8 +2437,9 @@ async function testLiquidGlass(ext) {
         }
 
         // Neutral glass, no tint of its own and no blur but its shader's;
-        // deep under the control centre's GNOME controls (styled for a
-        // dark surface only), eased there and back; GNOME's style eased to.
+        // the same under the control centre's GNOME controls (styled for a
+        // dark surface only): no darker glass, only as much shade as their
+        // light type needs, as the rest; GNOME's style eased to.
         iface.set_string('color-scheme', 'prefer-dark');
         await Scripting.sleep(900);
         const islandGlass = islandModule._glass;
@@ -2447,15 +2448,19 @@ async function testLiquidGlass(ext) {
             'neutral glass: the wallpaper alone in it, no blur of GNOME\'s');
         Main.panel.toggleQuickSettings();
         await waitFor(() => hasClass(island.page, 'atelier-cc'), 2000);
-        await Scripting.sleep(100);
-        const easing = islandGlass._shades.shown('deep').deep;
-        await Scripting.sleep(500);
-        check(islandGlass.deep && easing > 0 && easing < 1 && islandGlass._shades.shown('deep').deep === 1,
-            `the control centre open: deep glass under it, eased there (${easing.toFixed(2)} on the way)`);
+        const vibrant = islandModule._vibrant;
+        const controls = () => [vibrant?.controls, vibrant?.controlsOverWindows].includes(vibrant?.page);
+        check(await waitFor(() => controls() && vibrant.page.polarity === 'light', 2000),
+            'the control centre open: its GNOME controls keep their light type');
+        await Scripting.sleep(700);
+        const {SHADE} = await import('../lib/vibrancy.js');
+        check(!('deep' in islandGlass) &&
+            JSON.stringify(islandGlass.shade) === JSON.stringify(vibrant.page.shade) && islandGlass.shade.dim <= SHADE.most,
+        `the same glass under them, shaded as their type needs and no more (${JSON.stringify(islandGlass.shade)})`);
         Main.panel.closeQuickSettings();
         await waitFor(() => island.page === null, 2000);
         await Scripting.sleep(500);
-        check(!islandGlass.deep && islandGlass._shades.shown('deep').deep === 0, 'closed, not deep again');
+        check(JSON.stringify(islandGlass.shade) === JSON.stringify(vibrant.rest.shade), 'closed, as its time needs again');
         iface.set_string('color-scheme', 'prefer-light');
         await Scripting.sleep(250);
         const turning = islandModule._glass._shades.shown('style').light;
@@ -5791,8 +5796,8 @@ async function testLockPasswordField() {
         // The key that wakes the lock screen goes into the popup.
         await pressKey(Clutter.KEY_a);
         // (Its liquid round the middle of the monitor, as far as the drop
-        // gets, not over all of it.)
-        const liquid = () => field()?._popup?._paint;
+        // gets, not over all of it: of glass, as the island.)
+        const liquid = () => field()?.liquid;
         const inTheMiddle = () => {
             const paint = liquid();
             if (!paint?.has_allocation())
@@ -5804,8 +5809,27 @@ async function testLockPasswordField() {
                 Math.abs(px + pw / 2 - (x + width / 2)) <= 1 && Math.abs(py + ph / 2 - (y + height / 2)) <= 1;
         };
         check(await waitFor(inTheMiddle, 1000), 'a key: the password popup spreads out of a drop in the middle');
-        check(await waitFor(shown, 3000) && !liquid(), 'and is there');
+        const group = shield._dialog._backgroundGroup;
+        check(liquid()?.constructor.name === 'AtelierLockPopupGlass' && liquid().source === group,
+            'of glass, over the lock screen\'s wallpaper as it shows');
+        check(await waitFor(shown, 3000) && liquid()?.source === group && liquid().shapes.boxes.length === 1,
+            'and is there, its glass under it');
         const form = field().form;
+        const formBox = [...form.get_transformed_position(), ...form.get_transformed_size()];
+        const [gx, gy] = liquid().get_transformed_position();
+        const [cx, cy, hw, hh] = liquid().shapes.boxes[0];
+        check(Math.abs(gx + cx - (formBox[0] + formBox[2] / 2)) <= 1 && Math.abs(gy + cy - (formBox[1] + formBox[3] / 2)) <= 1 &&
+            Math.abs(2 * hw - formBox[2]) <= 1 && Math.abs(2 * hh - formBox[3]) <= 1,
+        `the glass the form's own box (${[cx, cy, hw, hh].map(Math.round)})`);
+        check(hasClass(form, 'atelier-lock-sheet-glass') && form.get_theme_node().get_background_color().alpha === 0,
+            'the form itself see-through, not black');
+        const lockIsland = lock().island;
+        check(lockIsland.glass?.source === group && lockIsland.glass.visible &&
+            hasClass(lockIsland.actor, 'atelier-island-glass') && !lockIsland._ears,
+        'the island of the same glass, over the same');
+        check(JSON.stringify(liquid().shade) === JSON.stringify(lock().shades.popup) &&
+            JSON.stringify(lockIsland.glass.shade) === JSON.stringify(lock().shades.island),
+        `each shaded as its type needs (${JSON.stringify(lock().shades)})`);
         const monitor = Main.layoutManager.primaryMonitor;
         const [x, y] = centerOf(form);
         check(Math.abs(x - (monitor.x + monitor.width / 2)) <= 1 && Math.abs(y - (monitor.y + monitor.height / 2)) <= 1,
@@ -5905,6 +5929,27 @@ async function testLockPasswordField() {
         check(await waitFor(() => !sheet(), 2000), 'the popup gone');
     } finally {
         await locked.unlock();
+    }
+
+    // The glass off: the island and the popup black, as they were.
+    const atelierSettings = atelier()._settings;
+    atelierSettings.set_string('glass-variant', 'off');
+    locked = await lockForTest();
+    try {
+        await waitFor(() => lock()?.island?.actor, 3000);
+        const island = lock().island;
+        check(!island.glass && !hasClass(island.actor, 'atelier-island-glass'), 'the glass off: the island black');
+        await pressKey(Clutter.KEY_a);
+        check(await waitFor(() => field()?.liquid, 1000) && field().liquid.constructor.name === 'AtelierLiquidPaint',
+            'the popup spreads out of black liquid');
+        check(await waitFor(() => shown() && !field().liquid, 3000) &&
+            field().form.get_theme_node().get_background_color().alpha === 255 &&
+            !hasClass(field().form, 'atelier-lock-sheet-glass'), 'and is black, the liquid dried');
+        await restPointer();
+        await screenshot('85-lock-password-off');
+    } finally {
+        await locked.unlock();
+        atelierSettings.reset('glass-variant');
         lockSettings.reset('widgets');
         lockSettings.reset('gnome-clock');
     }
@@ -7309,8 +7354,9 @@ async function testLockPromptPace() {
             const tag = `at ${density}×, a clock of ${[clock.width, clock.height].map(Math.round).join('×')} px`;
             // (How opaque the wallpaper's glass is over it.)
             const frosted = () => wallpaperGlass(module).shown;
-            // (The popup's liquid, timed and measured once it is there.)
-            const liquid = () => field?._popup?._paint ?? null;
+            // (The popup's liquid while it moves – of glass, it stays under
+            // the popup – timed and measured once it is there.)
+            const liquid = () => (field?._popup?._timeline ? field.liquid : null);
             let liquidSize = null;
             const sample = () => {
                 const paint = liquid();
@@ -8739,6 +8785,114 @@ async function testLockFonts() {
     }
 }
 
+// Pictures of the glass to compare one version of Atelier with another,
+// only when asked for by name (ATELIER_TEST_ONLY=testGlassComparePictures),
+// on ATELIER_TEST_WALLPAPER's pictures, in GNOME's dark style: the control
+// centre over the wallpaper and over a dark window, and the lock screen at
+// rest and with its password popup up (shell-test's own made-up check). In
+// tests/output/shell/glass-compare.
+async function testGlassComparePictures(ext) {
+    if (!ONLY?.includes('testGlassComparePictures'))
+        return;
+    const sources = (GLib.getenv('ATELIER_TEST_WALLPAPER') ?? '').split(':').filter(Boolean);
+    if (sources.length === 0) {
+        results.push('INFO  no ATELIER_TEST_WALLPAPER: no pictures to compare');
+        return;
+    }
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const lockSettings = settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = iface.get_string('color-scheme');
+    const dir = `${OUTPUT}/glass-compare`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lock = () => atelier().lockModules?.get('lockscreen');
+    const island = () => atelier().modules.get('island')?.island;
+    // (A dark window: GTK's dark theme.)
+    const openDark = async title => {
+        const code = `
+            imports.gi.versions.Gtk = '4.0';
+            const {Gio, Gtk} = imports.gi;
+            const app = new Gtk.Application({application_id: 'org.atelier.CompareTest',
+                flags: Gio.ApplicationFlags.NON_UNIQUE});
+            app.connect('activate', () => {
+                Gtk.Settings.get_default().gtk_application_prefer_dark_theme = true;
+                const window = new Gtk.ApplicationWindow({application: app, title: '${title}',
+                    default_width: 900, default_height: 700});
+                window.set_child(new Gtk.Label({label: 'Wired · Wi-Fi · Bluetooth · Lorem ipsum dolor sit amet'}));
+                window.present();
+            });
+            app.run([]);`;
+        testWindows.set(title, Gio.Subprocess.new(['gjs', '-c', code], Gio.SubprocessFlags.NONE));
+        const find = () => global.get_window_actors().map(actor => actor.meta_window)
+            .find(window => window?.get_title() === title) ?? null;
+        await waitFor(() => find()?.get_compositor_private()?.mapped, 15000);
+        await Scripting.sleep(300);
+        return find();
+    };
+    const controlCentre = async name => {
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island()?.page, 'atelier-cc'), 3000);
+        await restPointer();
+        await Scripting.sleep(1200);
+        const i = island();
+        await screenshotArea(`glass-compare/${name}`, Math.max(0, Math.round(i.x - 40)), 0,
+            Math.round(i.width + 80), Math.round(i.y + i.height + 30));
+        Main.panel.closeQuickSettings();
+        await waitFor(() => island()?.page === null, 2000);
+        await Scripting.sleep(400);
+    };
+    try {
+        iface.set_string('color-scheme', 'prefer-dark');
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        for (const source of sources) {
+            const name = GLib.path_get_basename(source).replace(/\.[^.]+$/, '').replace(/^[0-9a-f]{8}-/, '');
+            background.set_string('picture-uri', uriOf(source));
+            background.set_string('picture-uri-dark', uriOf(source));
+            background.set_string('picture-options', 'zoom');
+            await wallpapersSettled();
+            await Scripting.sleep(1500);
+            await controlCentre(`${name}-cc`);
+            // A dark window under the lower part of it, as the user had it.
+            const window = await openDark('Atelier compare');
+            const monitor = Main.layoutManager.primaryMonitor;
+            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+            await moveTestWindow(window, [monitor.x + Math.round(monitor.width / 2 - 450 * scale),
+                monitor.y + Math.round(130 * scale), Math.round(900 * scale), Math.round(700 * scale)]);
+            await controlCentre(`${name}-cc-window`);
+            await closeTestWindows();
+            // The lock screen, at rest and with its popup up.
+            const locked = await lockForTest();
+            try {
+                await waitFor(() => lock()?.island?.actor && lock().board, 5000);
+                await restPointer();
+                await Scripting.sleep(2500);
+                await screenshot(`glass-compare/${name}-lock-rest`);
+                await pressKey(Clutter.KEY_a);
+                await waitFor(() => lock()._field?.form?.opacity === 255 && lock().room === 1, 4000);
+                await restPointer();
+                await Scripting.sleep(1500);
+                await screenshot(`glass-compare/${name}-lock-prompt`);
+            } finally {
+                await locked.unlock();
+            }
+            results.push(`INFO  glass to compare on ${name}: pictures in ${dir}`);
+        }
+    } finally {
+        await closeTestWindows();
+        iface.set_string('color-scheme', scheme);
+        ['style', 'island-shape', 'surface', 'compact'].forEach(key => bar.reset(key));
+        kept.forEach(([key, value]) => background.set_string(key, value));
+        lockSettings.reset('widgets');
+    }
+}
+
 export async function run() {
     // GNOME's helper for these scripts quits after a while without calls,
     // and the shell then exits at once instead of shutting down as at the
@@ -8855,6 +9009,8 @@ export async function run() {
         await part(testDisableCleansUp, atelier);
         await part(testSwitcherPopupGoesWithAtelier);
         await part(testSystemItemLater);
+        // (Only by name.)
+        await part(testGlassComparePictures, ext);
         // (After the parts that keep the modules they started with: this
         // turns Atelier off and on.)
         await part(testLockScreen, ext);

@@ -4,8 +4,8 @@ import {minimumLc} from '../lib/apca.js';
 import {NO_SHADE, faceColor, lookOf} from '../lib/glassLook.js';
 import {buildPalette, hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {
-    COLOURED, INKS, MARK_LC, READ_LC, REFERENCE, SHADE, SLACK, backdropOf, designedOf, glassOver, inkOn,
-    lcOf, needOf,
+    COLOURED, INKS, MARK_LC, PROMPT_GLASS, READ_LC, REFERENCE, SHADE, SLACK, backdropOf, designedOf, glassOver,
+    inkOn, lcOf, needOf, promptShade,
     pictureRegion, polarityOf, readingNeed, scopeOf, shadeFor, shadeNeeded, shadeOf, steadied, surfaceRules,
     vibrancyStylesheet, withBackground,
 } from '../lib/vibrancy.js';
@@ -192,6 +192,50 @@ export function testShade() {
     assert(shadeNeeded(mixed, REGULAR, 'light', island) === shadeNeeded(flat('#d0d0d0'), REGULAR, 'light', island) &&
         shadeNeeded(mixed, REGULAR, 'dark', island) === shadeNeeded(flat('#303030'), REGULAR, 'dark', island),
     'light type where it is lightest, dark where it is darkest');
+}
+
+// GNOME's own controls (the control centre) and a sheet's form, styled for
+// a dark surface only, keep their light type wherever they are: their glass
+// is shaded for it, as the rest – over a dark backdrop not at all.
+export function testControlsKeepTheirType() {
+    for (const inks of ['controls', 'forms']) {
+        assertEqual(readingNeed(inks), READ_LC, `${inks}: as much as type reads at`);
+        for (const wallpaper of [DARK, '#748bad', LIGHT, '#ffffff']) {
+            assertEqual(surfaceRules({roots: ['.r'], scope: 's', inks, backdrop: on(wallpaper), polarity: 'light'}),
+                [], `${inks} over ${wallpaper}: light type as it is set`);
+        }
+        const pill = {layers: [{color: '#ffffff', alpha: 0.1}]};
+        assertEqual(shadeNeeded(flat('#1e1e1e'), REGULAR, 'light', readingNeed(inks), pill), 0,
+            `${inks} over a dark window: the glass as it is`);
+        assert(shadeNeeded(flat('#fafafa'), REGULAR, 'light', readingNeed(inks), pill) > 0,
+            `${inks} over a light window: shaded`);
+    }
+}
+
+// The lock screen's island and popup over its wallpaper as the prompt has
+// it: no shade over a dark one, as much as the popup's type needs over a
+// light one, never more than PROMPT_GLASS.most.
+export function testPromptShade() {
+    assertEqual(promptShade(null, REGULAR), NO_SHADE, 'nothing known behind it: none');
+    assertEqual(promptShade(flat('#ffffff'), null), NO_SHADE, 'no glass: none');
+    for (const wallpaper of [DARK, '#000000', '#2a3140', '#202a3c'])
+        assertEqual(promptShade(flat(wallpaper), REGULAR, {brightness: 0.86}), NO_SHADE, `over ${wallpaper}: none`);
+    const pill = [{color: '#ffffff', alpha: 0.1}];
+    for (const [wallpaper, light] of [['#c8d4ec', false], ['#ffffff', false], ['#a0a0a0', true], [LIGHT, true]]) {
+        const shade = promptShade(flat(wallpaper), REGULAR, {light, brightness: 0.86, layers: pill});
+        assert(shade.dim > 0 && shade.dim <= PROMPT_GLASS.most && shade.veil === 0,
+            `over ${wallpaper}${light ? ', light style' : ''}: shaded, no more than the most (${shade.dim})`);
+        const glass = glassOver(wallpaper, REGULAR, {light, shade, layers: pill});
+        assert(shade.dim === PROMPT_GLASS.most || lcOf({color: '#ffffff'}, glass, 'light') >= READ_LC - 8,
+            `and white reads on it (${glass})`);
+    }
+    // Its tenths half way to its mean (the prompt's blur), and darker as
+    // the wallpaper's glass is.
+    const mixed = {mean: '#606060', tenths: {dark: '#202020', middle: '#606060', light: '#f0f0f0'}};
+    assert(promptShade(mixed, REGULAR).dim < promptShade(flat('#f0f0f0'), REGULAR).dim,
+        'blurred: less than over its lightest tenth alone');
+    assert(promptShade(flat('#d0d0d0'), REGULAR, {brightness: 0.86}).dim < promptShade(flat('#d0d0d0'), REGULAR).dim,
+        'darkened: less');
 }
 
 export function testSteadied() {

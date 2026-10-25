@@ -51,7 +51,7 @@ export function testFaces() {
     const chroma = rgb => Math.max(...rgb) - Math.min(...rgb);
     assert(sky[2] > sky[1] && sky[1] > sky[0] && chroma(sky) / Math.max(...sky) > 0.55 / 0.95,
         `a sky stays blue, a little richer (${sky})`);
-    for (const face of ['light', 'dark', 'clear', 'deep'])
+    for (const face of ['light', 'dark', 'clear'])
         assert(FACES[face].g >= FACES[face].T, `${face}: no less colourful than it lets light through`);
     // Small controls of dark glass: lighter over light backdrops.
     assert(faceColor(grey(0.9), 'dark', {small: 1})[0] > faceColor(grey(0.9), 'dark')[0],
@@ -63,11 +63,9 @@ export function testFaces() {
     // Neutral: a grey stays grey; colour stays its hue, a little richer.
     const red = faceColor([0.8, 0.2, 0.2], 'light');
     assert(red[0] > red[1] && near(red[1], red[2]), `a red stays red (${red})`);
-    // Deep: darker than dark, eased towards.
-    const deep = faceColor(grey(0.8), 'dark', {deep: 1})[0];
-    const half = faceColor(grey(0.8), 'dark', {deep: 0.5})[0];
-    assert(deep < faceColor(grey(0.8), 'dark')[0] && near(half, (deep + faceColor(grey(0.8), 'dark')[0]) / 2),
-        `deep glass darker, eased (${deep}, ${half})`);
+    // One glass everywhere: no darker face for what is styled for a dark
+    // surface (its shade keeps that legible).
+    assertEqual(Object.keys(FACES).sort(), ['clear', 'dark', 'light'], 'the faces there are');
     assert(faceColor([1, 0, 0], 'light').every(v => v >= 0 && v <= 1), 'within 0 … 1');
 }
 
@@ -124,7 +122,7 @@ export function testMaterialValues() {
     const dark = FACES.dark;
     assertEqual(values.face, [dark.lift, dark.T, dark.lambda, dark.g], 'the dark style\'s face');
     assertEqual(values.small, [dark.small.T, dark.small.lambda, 2, 0], 'and its small controls\'');
-    assertEqual(values.deep, [FACES.deep.lift, FACES.deep.T, FACES.deep.lambda, FACES.deep.g], 'deep glass\'s');
+    assert(!('deep' in values), 'no deep glass\'s');
     assertEqual(values.glint, [look.glint, EDGE.glint.side, EDGE.glint.near * 2, EDGE.glint.far * 2], 'the glint');
     assertEqual(values.edge, [EDGE.bevel.amount, EDGE.bevel.reach * 2, EDGE.contour.width * 2, look.contour.dark],
         'the bevel and the contour');
@@ -148,7 +146,7 @@ export function testMaterialValues() {
 export function testSameShade() {
     assert(sameShade({dim: 0.2, veil: 0}, {dim: 0.20001, veil: 0}) && !sameShade({dim: 0.2, veil: 0}, NO_SHADE),
         'shades the same as far as anyone could see');
-    assert(sameShade({deep: 0}, NO_SHADE) && !sameShade({deep: 1}, {deep: 0.5}), 'and what is eased with them');
+    assert(sameShade({light: 0}, NO_SHADE) && !sameShade({light: 1}, {light: 0.5}), 'and what is eased with them');
 }
 
 export function testLightTowardThePointer() {
