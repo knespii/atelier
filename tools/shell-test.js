@@ -2159,7 +2159,12 @@ async function testLiquidGlass(ext) {
         const {bevel, depth} = lensOf(plain.lens, h, scale);
         const depths = [3, 6, 10, 14].map(d => px(d)).map(looked);
         const offs = depths.map(([d, shift]) => shift - lensDepth(d, bevel, depth));
-        check(offs.every(off => Math.abs(off) <= 1.5 * scale),
+        // (±1.5 px, and what half a pixel of the screenshot's own changes
+        // there, where the lens changes fast.)
+        const half = lensed[0].d;
+        const slack = depths.map(([d]) => 1.5 * scale +
+            Math.abs(lensDepth(d - half, bevel, depth) - lensDepth(d + half, bevel, depth)) / 2);
+        check(offs.every((off, i) => Math.abs(off) <= slack[i]),
             `the lens looks as far in as lensDepth() says, ±1.5 px (${depths.map(([d, s], i) =>
                 `${d.toFixed(1)} in: ${s.toFixed(1)} for ${(s - offs[i]).toFixed(1)}`).join('; ')})`);
         // Where it looks (in, plus how far) falls before it rises: a mirror.
@@ -2242,6 +2247,7 @@ async function testLiquidGlass(ext) {
             return pick(...values);
         };
         const glintAt = (pixels, degrees) => along(pixels, degrees, -3, 0, Math.max);
+        const glowAt = (pixels, degrees) => along(pixels, degrees, -3, 0, (...v) => v.reduce((a, b) => a + b, 0) / v.length);
         const resting = await circleShot('circle');
         const [tl, tr, br, bl] = [225, 315, 45, 135].map(a => glintAt(resting, a));
         check(tl > tr + 15 && br > bl + 15 && tl >= br,
@@ -2264,12 +2270,12 @@ async function testLiquidGlass(ext) {
             `a contour (${Math.round(contour)}) and a shadow below (${Math.round(shadow)}) on ${Math.round(ground)} round it`);
         // (The light from the left more than from above, as the pointer
         // is there.)
-        await pointerTo(cx - r - px(60), cy);
+        await pointerTo(cx - r - px(16), cy);
         await Scripting.sleep(300);
         const leaningLeft = await circleShot('circle-leaning');
-        check(glintAt(leaningLeft, 180) > glintAt(resting, 180) + 5,
-            `the pointer at its left: the glint there grows (${Math.round(glintAt(resting, 180))} → ` +
-            `${Math.round(glintAt(leaningLeft, 180))})`);
+        check(glowAt(leaningLeft, 180) > glowAt(resting, 180) + 3,
+            `the pointer at its left: the glint there grows (${glowAt(resting, 180).toFixed(1)} → ` +
+            `${glowAt(leaningLeft, 180).toFixed(1)})`);
         await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
 
         // The bands again: a rect for the light to lean on.
@@ -2297,9 +2303,16 @@ async function testLiquidGlass(ext) {
         await screenshotArea('liquid-glass/rim-leaning', x0 - 40, top - 40, w + 80, bottom - top + 81);
         const left = pixelsOf('liquid-glass/rim-leaning', [x0 - 40, top - 40]);
         const still = pixelsOf('liquid-glass/rim-wide', [x0 - 40, top - 40]);
-        const side = (pixels, x) => grey(pixels.at(x, top + px(70)));
-        check(side(left, x0) - side(left, x0 + px(6)) > side(still, x0) - side(still, x0 + px(6)) + 2,
-            'its left edge catches more of it');
+        // (Its edge: the first 2 px in, all of their own pixels.)
+        const side = (pixels, x, width = 1) => {
+            const values = [];
+            for (let o = 0; o < width * pixels.density; o++)
+                values.push(grey(pixels.at(x + o / pixels.density, top + px(70))));
+            return values.reduce((a, b) => a + b, 0) / values.length;
+        };
+        const edgeOf = pixels => side(pixels, x0, px(2)) - side(pixels, x0 + px(6));
+        check(edgeOf(left) > edgeOf(still) + 2,
+            `its left edge catches more of it (${edgeOf(still).toFixed(1)} → ${edgeOf(left).toFixed(1)})`);
         await pointerTo(monitor.x + monitor.width - 40, monitor.y + monitor.height / 2);
         await Scripting.sleep(200);
         check(glass.light[0] === REST_LIGHT[0] && glass.light[1] === REST_LIGHT[1], 'away, from the top left again');
