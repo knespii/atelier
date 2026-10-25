@@ -340,7 +340,8 @@ export class IslandModule {
         // with it, so they flow into each other.
         const glass = this._glassy();
         // (The same glass as all of it.)
-        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light});
+        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light,
+            yields: true});
         this._liquid.setPartner(this._partner);
         Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
         const sheet = new LiquidSheet(island, this._liquid, form);
@@ -591,7 +592,8 @@ export class IslandModule {
             island.remove_style_class_name('atelier-island-notch');
 
         if (glass && !this._glass) {
-            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look, light: this._glassLook.light});
+            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look, light: this._glassLook.light,
+                yields: true});
             this._glass.setPartner(this._partner);
             Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
             island.add_style_class_name('atelier-island-glass');

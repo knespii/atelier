@@ -29,7 +29,11 @@
 //     the normal stored with them);
 //   ATELIER_WASH: vec4 atelier_wash – a colour [r, g, b] the glass is
 //     washed towards after its dim, as much as a (the clock's tone, as
-//     its legibility plan has it).
+//     its legibility plan has it);
+//   ATELIER_OWN_BODY: float atelier_own_body(vec2 p) – its body without
+//     the other surfaces' glass (atelier_others): its contour and shadow
+//     are kept from past the screen's edge by it, from the others' glass
+//     by theirs – not from where the others' is only the nearer.
 //
 // Then, only within the bounds it may draw in (glassReach):
 // - the lens: within a bevel of the body's edge, what is behind is looked
@@ -198,7 +202,16 @@ if (glassLens.w < 0.5) {
     if (cover < 1.0) {
         // (Past all of the glass this is one with only: not into another
         // surface's, nor past a screen's edge.)
+#ifdef ATELIER_OWN_BODY
+        // (Its own past the screen's edge, and none of what the others'
+        // glass covers – of a pixel both cover, only what neither does:
+        // where the others' is only the nearer, the shadow cast from where
+        // this one is goes on.)
+        float keep = (1.0 - clamp(shape - atelier_own_body(p), 0.0, 1.0)) *
+            (1.0 - max(cover, clamp(0.5 - atelier_others(p), 0.0, 1.0))) / (1.0 - cover);
+#else
         float keep = 1.0 - clamp(shape - body, 0.0, 1.0);
+#endif
         float contour = 0.0;
         if (edged && body < atelier_others(p)) {
             float band = clamp(glassEdge.z + 0.5 - body, 0.0, 1.0);

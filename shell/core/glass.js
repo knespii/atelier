@@ -39,6 +39,11 @@ const LIVE_STEP = 64;
 // frame it grew into the control centre.)
 const FIT_STEP = 64;
 
+// How much nearer or farther a partner's shape is taken to be, in pixels,
+// so that where it is as near as a surface's own, only one of them draws
+// the contour and the shadow (GlassSurface's yields).
+const TIE = 0.05;
+
 // Pixels outside the rounded rectangle are dropped; its edge gets one pixel
 // of antialiasing. Everything is in pixels of the actor. The top and the
 // bottom corners may differ (a notch has square top corners), and a notch
@@ -53,6 +58,7 @@ const FIT_STEP = 64;
 // (partner: the one island the island's glass is in) – they are one glass,
 // whose edges each draws where its own shape is the nearer.
 const SHAPE_DECLARATIONS = `
+#define ATELIER_OWN_BODY
 uniform vec2 origin;
 uniform vec2 size;
 uniform vec4 rect;
@@ -66,6 +72,7 @@ uniform float blend;
 uniform vec4 partner;
 uniform vec4 partnerBody;
 uniform vec3 partnerLook;
+uniform float partnerTie;
 uniform vec2 glassLight;
 
 float atelier_smin(float a, float b, float k) {
@@ -102,6 +109,27 @@ float atelier_notch(vec2 p, vec4 r, vec4 b, vec2 corners, float e) {
         float left = atelier_ear(p, r.y, e, r.x - e, r.x + into, above);
         float right = atelier_ear(p, r.y, e, r.x + r.z + e, r.x + r.z - into, above);
         d = min(d, min(left, right));
+        if (d < 0.0) {
+            // Inside, as far from its edges as they are – each ear's arc
+            // flowing into a side below it, the top beyond them – not from
+            // where the rectangle and the ears' squares meet in it: its
+            // lens, rim and glint bent along those as along creases (a grey
+            // wedge inside each ear). The rectangle without its top, its
+            // sides from where the arcs meet them; beside it, the ears'
+            // outer sides; the arcs; the top.
+            float low = r.y + e;
+            float depth;
+            if (p.y >= low) {
+                depth = -atelier_rounded(p, vec4(b.x, b.y - 4096.0, b.z, b.w + 4096.0), corners);
+            } else {
+                float sides = max(min(p.x - b.x, b.x + b.z - p.x), 0.0);
+                depth = min(length(vec2(sides, low - p.y)), b.y + b.w - p.y);
+            }
+            depth = min(depth, p.y - (r.y - above));
+            depth = min(depth, min(p.x - (r.x - e), r.x + r.z + e - p.x));
+            depth = min(depth, min(length(p - vec2(r.x - e, low)), length(p - vec2(r.x + r.z + e, low))) - e);
+            d = -depth;
+        }
     }
     return d;
 }
@@ -122,25 +150,54 @@ float atelier_drip(vec2 p, float d) {
 }
 
 float atelier_shape(vec2 p) {
-    return atelier_drip(p, atelier_notch(p, rect, rect, radii, ear));
+    float d = atelier_drip(p, atelier_notch(p, rect, rect, radii, ear));
+    // (A pixel of its edge that its partner covers too – their sides one
+    // below the one island's ears, their bottoms one at rest – it covers
+    // only as much more as it covers: drawn by both, one over the other,
+    // its glass showed twice in it, a light line beside the ears. Over or
+    // under the partner, the two cover it as much as the more of them.)
+    if (partnerTie < 0.0 && d > -0.5 && partner.z > 0.0 && partner.w > 0.0) {
+        float own = clamp(0.5 - d, 0.0, 1.0);
+        float other = clamp(0.5 - atelier_notch(p, partner, partner, partnerLook.xy, partnerLook.z), 0.0, 1.0);
+        if (other > 0.0)
+            return 0.5 - max(own - other, 0.0) / max(1.0 - other, 0.0001);
+    }
+    return d;
 }
 
-float atelier_others(vec2 p) {
+// (Where the other is as near as its own – the island's glass at rest in
+// the one island, their bottoms one; grown out of it, their sides below the
+// ears – one of them draws the contour and the shadow there, the one the
+// tie goes to (partnerTie a little more, the other one a little less):
+// neither did, and the one island had none under the island, nor beside its
+// ears as the island grew.)
+float atelier_partner(vec2 p) {
     if (partner.z > 0.0 && partner.w > 0.0)
         return atelier_notch(p, partner, partnerBody, partnerLook.xy, partnerLook.z);
     return 100000.0;
 }
 
+float atelier_others(vec2 p) {
+    return atelier_partner(p) + partnerTie;
+}
+
+float atelier_own_body(vec2 p) {
+    return atelier_drip(p, atelier_notch(p, rect, body, radii, ear));
+}
+
 float atelier_body(vec2 p) {
-    return min(atelier_drip(p, atelier_notch(p, rect, body, radii, ear)), atelier_others(p));
+    return min(atelier_own_body(p), atelier_others(p));
 }
 
 // The short side of the part p is in: the rectangle's as it shows (not its
 // body's past the screen), a drop's or its neck's where they melt into it,
-// the partner's where it is the nearer.
+// the partner's where it is the nearer. (Their rectangles', not their
+// ears': where the island's glass and the one island are as near, inside
+// as they grow apart, each its own – deeper in the one island's ears, the
+// island's glass looked like the one island's down to them.)
 void atelier_part(vec2 p, out vec2 light, out float thick) {
     light = glassLight;
-    float d = atelier_notch(p, rect, body, radii, ear);
+    float d = atelier_rounded(p, body, radii);
     thick = min(rect.z, rect.w);
     float k = max(blend, 0.001);
     if (neck.w > 0.0) {
@@ -158,7 +215,7 @@ void atelier_part(vec2 p, out vec2 light, out float thick) {
         thick = mix(thick, 2.0 * min(drop.z, drop.w), w);
         d = atelier_smin(d, n, k);
     }
-    if (atelier_others(p) < d)
+    if (partner.z > 0.0 && partner.w > 0.0 && atelier_rounded(p, partnerBody, partnerLook.xy) < d)
         thick = min(partner.z, partner.w);
 }
 ${MATERIAL_DECLARATIONS}
@@ -191,7 +248,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'glassLight'];
+            'partner', 'partnerBody', 'partnerLook', 'partnerTie', 'glassLight'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
         this._look = [null, 1, {}];
@@ -240,13 +297,16 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
      * Another surface's shape this one's glass is one with.
      *
      * @param {object|null} partner - {rect, body, radii, ear} as setShape()
-     *   has them, null for none
+     *   has them, and yields: where they are as near, the other draws the
+     *   contour and the shadow; null for none
      */
     setPartner(partner) {
-        const {rect = [0, 0, 0, 0], body = rect, radii = [0, 0], ear = 0} = partner ?? {};
+        const {rect = [0, 0, 0, 0], body = rect, radii = [0, 0], ear = 0, yields = false} = partner ?? {};
         this.set_uniform_float(this._at.partner, 4, rect);
         this.set_uniform_float(this._at.partnerBody, 4, body);
         this.set_uniform_float(this._at.partnerLook, 3, [...radii, ear]);
+        // (Far more than the distances' rounding, far less than a pixel.)
+        this.set_uniform_float(this._at.partnerTie, 1, [yields ? -TIE : TIE]);
     }
 
     /** @param {number[]} light - where it comes from, [x, y] (y down) */
@@ -327,9 +387,13 @@ class AtelierGlassSurface extends St.Widget {
      *   of the wallpaper: an actor as large as the stage, at its corner,
      *   whose picture its glass shows (the lock screen's wallpapers, sharp
      *   or turned to glass); the wallpaper again once it is gone
+     * @param {boolean} [params.yields] - where its partner's shape
+     *   (setPartner()) is as near as its own, the partner draws their
+     *   contour and shadow (the island's glass, in the bar's one island,
+     *   which is always shown); else this one
      */
     _init({monitorIndex = Main.layoutManager.primaryIndex, reach = 1, fromBottom = false, side = null,
-        solid = false, look = null, light = false, source = null} = {}) {
+        solid = false, look = null, light = false, source = null, yields = false} = {}) {
         super._init({style_class: 'atelier-glass', reactive: false, clip_to_allocation: true});
         // As big as the top of the monitor and above the overview: dragging
         // a window onto a workspace looks for the target among all actors,
@@ -352,6 +416,7 @@ class AtelierGlassSurface extends St.Widget {
         this._drop = null;
         this._neck = null;
         this._partner = null;
+        this._yields = yields;
         this._live = null;
         this._light = REST_LIGHT;
         // GNOME's style and the glass's dim, eased.
@@ -722,7 +787,8 @@ class AtelierGlassSurface extends St.Widget {
             this._mask.setPartner(null);
         } else {
             const [x, y, width, height, radius, bottomRadius = radius, ear = 0] = shape;
-            this._mask.setPartner({...this._shapeIn([x, y, width, height], radius, bottomRadius), ear});
+            this._mask.setPartner({...this._shapeIn([x, y, width, height], radius, bottomRadius), ear,
+                yields: this._yields});
         }
         this._syncFrame();
     }

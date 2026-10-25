@@ -2821,6 +2821,9 @@ async function testGlassEars(ext) {
                     `${label}: no contour along the screen's edge (${edge} at the edge, ${below} below)`);
             }
         }
+        iface.set_string('color-scheme', 'prefer-dark');
+        settings.set_string('glass-variant', 'regular');
+        await earsAsOnePiece(ext, dir, notches, [flat, `${dir}/waves.png`]);
     } finally {
         ['style', 'sides', 'surface', 'island-shape', 'compact'].forEach(key => bar.reset(key));
         settings.reset('glass-variant');
@@ -2828,6 +2831,186 @@ async function testGlassEars(ext) {
         kept.forEach(([key, value]) => background.set_string(key, value));
         await wallpapersSettled();
         await back?.();
+    }
+}
+
+// The notch as one piece of glass at its ears (testGlassEars) – at rest,
+// in the glance and with a notification in the island; the one island's
+// (whose ears are the bar's glass, the island's glass one with it) and the
+// island's own: its contour and shadow, over a wallpaper of one colour, go
+// on along each ear's arc and down the side below it with no step – as
+// dark beside the side all the way down it (no lighter band beside the
+// ears: where both glasses' sides are one, one of them draws them), as
+// dark under the bottom all along it (under the island resting in the one
+// island too); and over smooth waves, the glass a little way in, which its
+// lens bends, goes on with no crease where the ear's arc meets the side.
+// Steps in luma between samples half a logical pixel apart, along those
+// ways (paths: a side's, from the screen's edge round the arc and down).
+async function earsAsOnePiece(ext, dir, notches, [flat, waves]) {
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const island = ext.stateObj.modules.get('island').island;
+    const barModule = ext.stateObj.modules.get('bar');
+    const bar = ext.stateObj._settings.get_child('bar');
+    // (Diagonal waves, smooth: what the lens bends shows.)
+    const [width, height] = [global.stage.width, global.stage.height];
+    {
+        const surface = new Cairo.ImageSurface(Cairo.Format.RGB24, width, height);
+        const cr = new Cairo.Context(surface);
+        // (Up and down every 30 px along it.)
+        const length = Math.hypot(width, height);
+        const gradient = new Cairo.LinearGradient(0, 0, width, height);
+        for (let i = 0; i * 30 <= length; i++) {
+            const [r, g, b] = i % 2 ? [0.8, 0.8, 0.9] : [0.25, 0.3, 0.55];
+            gradient.addColorStopRGB(i * 30 / length, r, g, b);
+        }
+        cr.setSource(gradient);
+        cr.paint();
+        surface.writeToPNG(waves);
+        cr.$dispose();
+    }
+    const luma = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    // (Luma at a point of a picture, in logical pixels from its corner,
+    // its pixels round it mixed: no step from one to the next.)
+    const between = (pixels, x, y) => {
+        const [u, v] = [x * pixels.density - 0.5, y * pixels.density - 0.5];
+        const [c, r] = [Math.floor(u), Math.floor(v)];
+        const [fu, fv] = [u - c, v - r];
+        const at = (i, j) => luma(pixels.own(Math.min(Math.max(i, 0), pixels.width - 1),
+            Math.min(Math.max(j, 0), pixels.height - 1)));
+        return (at(c, r) * (1 - fu) + at(c + 1, r) * fu) * (1 - fv) +
+            (at(c, r + 1) * (1 - fu) + at(c + 1, r + 1) * fu) * fv;
+    };
+    const steps = values => values.slice(1).reduce((most, v, i) => Math.max(most, Math.abs(v - values[i])), 0);
+    // [x, y] along a side of a notch, d out of its glass (inside: below
+    // 0), from the screen's edge round its ear (centre c, radius e) and
+    // down its side at x to bottom, half a logical pixel apart.
+    const wayOf = (x, out, e, bottom, d) => {
+        const points = [];
+        const radius = Math.max(e - d, 0.5);
+        const c = [x + out * e, e];
+        const arc = Math.PI / 2;
+        for (let s = 0; s <= arc * radius; s += 0.5) {
+            // (From straight up from its centre towards the side.)
+            const a = s / radius;
+            const point = [c[0] - out * radius * Math.sin(a), c[1] - radius * Math.cos(a)];
+            if (point[1] >= 1)
+                points.push(point);
+        }
+        for (let y = e; y <= bottom; y += 0.5)
+            points.push([x + out * d, y]);
+        return points;
+    };
+    // (A source of its own for each: a source's next one may wait.)
+    let source = null;
+    let count = 0;
+    const states = [
+        ['at rest', async () => {
+            await restPointer();
+            await waitFor(() => island.page === null, 3000);
+            return true;
+        }],
+        ['in the glance', async () => {
+            await pointerTo(...centerOf(island));
+            return waitFor(() => hasClass(island.page, 'atelier-glance'), 3000);
+        }],
+        ['with a notification', async () => {
+            await restPointer();
+            await waitFor(() => island.page === null, 3000);
+            source = appSource('Screenshot', `org.gnome.Screenshot.ears${count++}`, 'camera-photo-symbolic');
+            const notification = await notify(source, 'Screenshot captured', 'You can paste the image from the clipboard.');
+            return waitFor(() => showsNotification(island, notification), 6000);
+        }],
+    ];
+    try {
+        for (const [name, label, style, shapeOf] of notches) {
+            bar.set_string('style', style);
+            // [worst, where] of each measure, and whether it was shown, by state
+            const worsts = new Map(states.map(([state]) => [state,
+                {shown: true, outside: [0, ''], inside: [0, ''], beside: [0, ''], under: [0, '']}]));
+            for (const wallpaper of [flat, waves]) {
+                const picture = wallpaper === flat ? 'flat' : 'waves';
+                background.set_string('picture-uri', uriOf(wallpaper));
+                background.set_string('picture-uri-dark', uriOf(wallpaper));
+                await wallpapersSettled();
+                for (const [state, reach] of states) {
+                    const worst = worsts.get(state);
+                    const note = (key, value, where) => {
+                        if (value > worst[key][0])
+                            worst[key] = [value, where];
+                    };
+                    worst.shown &&= await reach();
+                    await Scripting.sleep(1200);
+                    const shape = shapeOf();
+                    if (!shape) {
+                        worst.shown = false;
+                        continue;
+                    }
+                    const [x, y, w, h, , bottomRadius, e] = shape;
+                    // (Its sides go on down as far as all the glass's
+                    // there does: the island's glass grown out of the one
+                    // island.)
+                    const all = [shape, name === 'one' ? ext.stateObj.modules.get('island').glassShape : null]
+                        .filter(Boolean);
+                    const named = `glass-ears/whole-${name}-${state.replaceAll(' ', '-')}`;
+                    for (const [side, sideX, out] of [['left', x, -1], ['right', x + w, 1]]) {
+                        const along = all.filter(s => Math.abs((out < 0 ? s[0] : s[0] + s[2]) - sideX) < 0.5);
+                        const bottom = Math.max(...along.map(s => s[1] + s[3] - s[5])) - 3;
+                        const shot = `${named}-${side}-${picture}`;
+                        const left = Math.round(sideX - 24);
+                        await screenshotArea(shot, left, 0, 48, Math.ceil(bottom + 30));
+                        const pixels = pixelsOf(shot, [left, 0]);
+                        const way = (d, key) => {
+                            const values = wayOf(sideX, out, e, bottom, d).map(([px, py]) => between(pixels, px - left, py));
+                            note(key, steps(values), `${side}, ${picture}`);
+                        };
+                        if (wallpaper === flat) {
+                            way(3, 'outside');
+                            // Beside the side, below the ear (and its
+                            // shadow's offset): each column as dark all
+                            // the way down.
+                            for (let k = 1; k <= 10; k++) {
+                                const column = [];
+                                for (let row = e + 6; row <= bottom; row++)
+                                    column.push(luma(pixels.at(sideX + out * k, row)));
+                                if (column.length >= 3)
+                                    note('beside', Math.max(...column) - Math.min(...column), `${side}, ${k} px out`);
+                            }
+                        } else {
+                            way(-5, 'inside');
+                        }
+                    }
+                    // Under the bottom, as dark all along it.
+                    const [from, to] = [x + bottomRadius + 2, x + w - bottomRadius - 2];
+                    const under = Math.round(all.reduce((most, s) => Math.max(most, s[1] + s[3]), 0));
+                    if (wallpaper === flat && to > from && Math.abs(under - (y + h)) < 0.5) {
+                        const shot = `${named}-under`;
+                        await screenshotArea(shot, Math.floor(from), under, Math.ceil(to - from), 12);
+                        const pixels = pixelsOf(shot, [Math.floor(from), under]);
+                        for (let row = 1; row <= 10; row++) {
+                            const values = [];
+                            for (let column = Math.ceil(from); column <= to; column += 2)
+                                values.push(luma(pixels.at(column, under + row)));
+                            note('under', Math.max(...values) - Math.min(...values), `${row} px under`);
+                        }
+                    }
+                    await restPointer();
+                    source?.destroy();
+                    source = null;
+                }
+            }
+            for (const [state] of states) {
+                const {shown, ...worst} = worsts.get(state);
+                const said = Object.entries(worst).map(([key, [v, where]]) => `${key} ${v.toFixed(1)}${where ? ` (${where})` : ''}`);
+                check(shown && worst.outside[0] <= 2 && worst.inside[0] <= 7 && worst.beside[0] <= 6 && worst.under[0] <= 3,
+                    `${label} ${state}: one piece of glass – its contour, its shadow and its lens go on round the ` +
+                    `ears and along it with no step (${shown ? '' : 'not shown; '}most luma steps: ${said.join(', ')})`);
+            }
+        }
+    } finally {
+        source?.destroy();
+        background.set_string('picture-uri', uriOf(flat));
+        background.set_string('picture-uri-dark', uriOf(flat));
+        await wallpapersSettled();
     }
 }
 
