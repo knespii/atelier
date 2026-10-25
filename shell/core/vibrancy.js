@@ -22,7 +22,7 @@
 import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Shell from 'gi://Shell';
+
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -95,34 +95,7 @@ export function layersOf(...actors) {
     return layers;
 }
 
-/**
- * @param {St.Widget|null} glass - a surface of Atelier's glass (shell/core/glass.js)
- * @returns {object[]} its tint over the blurred wallpaper, as styled, if it has one
- */
-export function glassLayers(glass) {
-    const tints = glass?.get_children?.().filter(child => child.visible && child.has_style_class_name?.('atelier-glass-tint'));
-    return layersOf(...tints ?? []);
-}
 
-/**
- * @param {Clutter.Actor|null} glass - a surface of glass (shell/core/glass.js,
- *   shell/desktop/glass.js)
- * @returns {number} how bright its blur leaves the wallpaper (GNOME's blur
- *   dims what it blurs when asked to): its first blur's, a few actors deep;
- *   1 for none
- */
-export function blurOf(glass) {
-    let level = glass ? [glass] : [];
-    for (let depth = 0; depth < 4 && level.length > 0; depth++) {
-        for (const actor of level) {
-            const blur = actor.get_effects().find(effect => effect instanceof Shell.BlurEffect);
-            if (blur)
-                return blur.brightness;
-        }
-        level = level.flatMap(actor => actor.get_children());
-    }
-    return 1;
-}
 
 // A picture decoded small, its longer side so long, turned as its camera
 // says. (In GdkPixbuf's threads.)
@@ -254,8 +227,8 @@ class Stylesheet {
 // A surface whose type follows what is behind its glass.
 class VibrantSurface {
     constructor(vibrancy, {
-        id, inks, roots, rect = () => null, behind = null, blur = () => 1, tint = () => [], strength = () => 1,
-        layers = () => [], oneWith = () => null, shaded = () => {},
+        id, inks, roots, rect = () => null, behind = null, strength = () => 1, layers = () => [],
+        oneWith = () => null, shaded = () => {},
     }) {
         this._vibrancy = vibrancy;
         this.id = id;
@@ -263,8 +236,6 @@ class VibrantSurface {
         this.roots = roots;
         this.rect = rect;
         this.behind = behind;
-        this.blur = blur;
-        this.tint = tint;
         this.strength = strength;
         this.layers = layers;
         this.oneWith = oneWith;
@@ -379,14 +350,10 @@ export class VibrancyModule {
      *   {x, y, width, height}; null: nowhere now
      * @param {Function} [params.behind] - () => the colour behind it,
      *   '#rrggbb', instead of the wallpaper where it rests
-     * @param {Function} [params.blur] - () => how bright its blur leaves the
-     *   wallpaper (blurOf())
-     * @param {Function} [params.tint] - () => what is in its glass, under
-     *   the material, [{color, alpha}] (glassLayers())
      * @param {Function} [params.strength] - () => how much of its glass
      *   shows, 0 … 1 (fading, it lets the wallpaper through)
      * @param {Function} [params.layers] - () => what lies over its glass,
-     *   as tint (layersOf(): a card's colour, a wash)
+     *   [{color, alpha}] (layersOf(): a card's colour, a wash)
      * @param {Function} [params.oneWith] - () => the id of the surface its
      *   glass is one with (the island at rest in the bar's one island), or
      *   null: one polarity for both, and one shade, the most either needs
@@ -578,8 +545,7 @@ export class VibrancyModule {
             const rect = surface.rect();
             const small = rect?.width > 0 && rect.height > 0 ? smallness(Math.min(rect.width, rect.height) / scale) : 0;
             const options = {
-                light, small, blur: surface.blur(), tint: surface.tint(), strength: surface.strength(),
-                layers: surface.layers(),
+                light, small, strength: surface.strength(), layers: surface.layers(),
             };
             // (A little more where the glass hardly blurs: SHARP.)
             const reading = readingNeed(surface.inks, palette);

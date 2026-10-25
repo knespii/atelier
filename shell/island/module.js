@@ -20,7 +20,7 @@ import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
 import {GlassLook} from '../core/glassMaterial.js';
-import {blurOf, glassLayers, layersOf} from '../core/vibrancy.js';
+import {layersOf} from '../core/vibrancy.js';
 import {switcherWidth} from '../switcherContent.js';
 import {CalendarBridge} from './calendar.js';
 import {GlancePage} from './glance.js';
@@ -696,8 +696,6 @@ export class IslandModule {
         }
         const glass = {
             roots: ['.atelier-island'],
-            blur: () => blurOf(this._glass),
-            tint: () => glassLayers(this._glass),
             layers: () => layersOf(this._island),
             shaded: () => this._syncShade(),
         };

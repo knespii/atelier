@@ -24,7 +24,6 @@ import {
 } from '../../lib/dockGeometry.js';
 import {NO_SHADE} from '../../lib/glassLook.js';
 import {GlassSurface} from '../core/glass.js';
-import {blurOf, glassLayers} from '../core/vibrancy.js';
 import {scrollDock} from './actions.js';
 import {DockHider} from './hider.js';
 import {DockItem} from './icon.js';
@@ -536,8 +535,6 @@ export class Dock extends EventEmitter {
                 inks: 'dock',
                 roots: ['.atelier-dock'],
                 rect: () => this._rect,
-                blur: () => blurOf(this._glass),
-                tint: () => glassLayers(this._glass),
                 strength: () => this.theming?.washOf(near).strength ?? 1,
                 layers: () => this.theming?.washOf(near).layers ?? [],
                 shaded: () => this._syncShade(),

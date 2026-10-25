@@ -28,7 +28,7 @@ import {
 import {paintStage} from '../core/compat.js';
 import {GlassLook} from '../core/glassMaterial.js';
 import {LiquidPaint} from '../core/liquid.js';
-import {blurOf, glassLayers, layersOf} from '../core/vibrancy.js';
+import {layersOf} from '../core/vibrancy.js';
 import {DesktopEditor} from './editor.js';
 import {DesktopGlass} from './glass.js';
 import {CalendarWidget} from './kinds/calendar.js';
@@ -509,8 +509,6 @@ export class DesktopModule {
                     inks: 'widget',
                     roots: ['.atelier-widget'],
                     rect: () => this._restRect(widget),
-                    blur: () => blurOf(this._glass),
-                    tint: () => glassLayers(this._glass),
                     strength: () => cardGlass(this._desktopSettings.get_double('card-opacity')),
                     layers: () => {
                         if (!widget.melted)

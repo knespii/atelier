@@ -21,7 +21,6 @@ import {NO_SHADE} from '../../lib/glassLook.js';
 import {COME_OUT_TIME, EAR_RADIUS, NOTCH_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {GlassSurface} from '../core/glass.js';
 import {GlassLook} from '../core/glassMaterial.js';
-import {blurOf, glassLayers} from '../core/vibrancy.js';
 import {ContentPage} from '../island/page.js';
 import {CompactBar} from './compact.js';
 import {ClaudeIndicator, WeatherIndicator} from './indicators.js';
@@ -521,8 +520,6 @@ export class BarModule {
                 inks: 'bar',
                 roots: parts[i].roots,
                 rect: () => this._restRects()[i] ?? null,
-                blur: () => blurOf(this._surfaces[i]?.actor),
-                tint: () => glassLayers(this._surfaces[i]?.actor),
                 shaded: () => this._syncShades(),
             });
             surface.boxes = parts[i].boxes;

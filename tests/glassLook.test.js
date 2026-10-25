@@ -1,7 +1,7 @@
 import {
-    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, TINTS, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
+    EDGE, FACES, LOOK, NO_SHADE, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
     faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameShade,
-    shadedLook, smallness, textureFrame, tintOf,
+    shadedLook, smallness, textureFrame,
 } from '../lib/glassLook.js';
 import {assert, assertEqual} from './util.js';
 
@@ -205,15 +205,6 @@ export function testBodyPastTheEdges() {
         'a dock along the bottom: only its top edge stays');
     assertEqual(bodyRect([1920, 0, 300, 30], {x: 1920, y: 0, width: 1280, height: 1024}),
         [1920 - 512, -512, 300 + 512, 30 + 512], 'on another monitor, its own edges');
-}
-
-export function testTints() {
-    assertEqual(tintOf(LOOK.regular, {light: false}), 'smoky', 'dark style: smoky');
-    assertEqual(tintOf(LOOK.regular, {light: true}), 'light', 'light style: light');
-    assertEqual(tintOf(LOOK.clear, {light: false}), 'smoky-clear', 'clear: less of it');
-    assertEqual(tintOf(LOOK.clear, {light: true}), 'light-clear', 'clear in the light style');
-    assertEqual(tintOf(LOOK.clear, {light: true, deep: true}), 'deep', 'deep whatever the style and variant');
-    assert(TINTS.every(tint => typeof tint === 'string') && TINTS.length === 5, 'five tints');
 }
 
 export function testBounds() {
