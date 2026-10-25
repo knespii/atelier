@@ -1,35 +1,45 @@
 // Liquid Glass on the GPU: the material every glass surface of Atelier's is
 // drawn with (lib/glassLook.js says how it looks) – one GLSL snippet after
 // the texture lookup of a Shell.GLSLEffect, whose texture is what is behind
-// the surface, blurred (its actor, painted offscreen). The snippet looks
-// that texture up again where the lens has it (cogl_sampler0, at
-// coordinates of its own), which GNOME 48 to 50 all allow.
+// the surface, sharp (its actor, painted offscreen). The snippet looks that
+// texture up again where the lens has it, blurred with a few taps of its
+// own (cogl_sampler0, at coordinates of its own), which GNOME 48 to 50 all
+// allow.
 //
 // Each effect declares its shape, as signed distances in pixels of its
 // actor (below 0 inside):
 //
 //   float atelier_shape(vec2 p) – what the surface covers;
 //   float atelier_body(vec2 p) – the glass it is part of, for the lens and
-//     the rim: the shape, or more (a surface on the screen's edge goes on
+//     the edges: the shape, or more (a surface on the screen's edge goes on
 //     past it; the island's glass in the one island is one glass with it);
-//   void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2
-//     shade) – the box the sheen runs across, where the light comes from,
-//     and the glass's extra shade [dim, veil] (lib/glassLook.js
-//     shadedLook()), at p.
+//   float atelier_others(vec2 p) – of that glass, what other surfaces draw
+//     (the one island's, for the island's glass): they draw its contour
+//     and shadow there;
+//   void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float
+//     thick) – where the light comes from at p, the glass's extra shade
+//     there [dim, veil, deep] and the short side of the part of it p is in
+//     (its own rectangle, a drop, the one island…), in pixels.
 //
-// Then, where the shape is:
-// - the lens: within lens.width of the body's edge, what is behind is
-//   looked up farther in, along the body's normal (its gradient: shapes
-//   merged by a smooth minimum bend as one), up to lens.shift at the very
-//   edge – bending outward, as through a convex lens; red a little farther,
-//   blue a little less (the aberration): a hint of colour at the rim only;
-// - richer and lighter (saturation, brightness), a dimming (clear glass,
-//   and the extra shade under light type) and a white veil over it (and
-//   the extra shade under dark type);
-// - the rim: the body's edge catching the light, strongest where it faces
-//   it, faintest where it faces away;
-// - the sheen: a diagonal gloss from a corner, turning with the light;
-// - a fine grain, against banding.
+// Then, only within the bounds it may draw in (glassReach):
+// - the lens: within a bevel of the body's edge, what is behind is looked
+//   up farther in, along the body's normal (its gradient: shapes merged by
+//   a smooth minimum bend as one), the more the nearer the edge, its outer
+//   part a mirrored, squeezed copy (lib/glassLook.js lensDepth()) – right
+//   at the edge, where that changes fastest, a few taps more against
+//   shimmer;
+// - what is behind, lightly blurred (lib/glassLook.js blurTaps());
+// - its face: neutral glass, lighter or darker as GNOME's style has it, a
+//   small control's dark glass lighter, deep glass darkest (atelier_face,
+//   lib/glassLook.js faceColor());
+// - the extra shade, as a wash: dimmed under light type, veiled under
+//   dark;
+// - its volume: a little darker towards its edge, inside;
+// - the glint: a thin bright line on the edge facing the light and on the
+//   opposite one;
+// - a fine grain, against banding;
+// - and outside its body (not past a screen's edge, nor where another
+//   surface's glass goes on): a fine contour, and a soft shadow.
 // Without the material (lens.w 0: solid surfaces, the glass turned off)
 // the shape is only cut out, as it always was.
 
@@ -42,20 +52,83 @@ import St from 'gi://St';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {NO_SHADE, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
+import {EDGE, LENS_SHARE, NO_SHADE, SMALL, lookOf, materialValues, resolveVariant, sameShade} from '../../lib/glassLook.js';
 
 // How long glass takes to take another shade, ms.
 const SHADE_TIME = 250;
 
+const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassSmall', 'glassDeep', 'glassGlint', 'glassEdge',
+    'glassShadow', 'glassReach', 'glassArea'];
+
 export const MATERIAL_DECLARATIONS = `
-uniform vec4 glassTone;
 uniform vec4 glassLens;
-uniform vec4 glassRim;
-uniform vec4 glassSheen;
+uniform vec4 glassBlur;
+uniform vec4 glassFace;
+uniform vec4 glassSmall;
+uniform vec4 glassDeep;
+uniform vec4 glassGlint;
+uniform vec4 glassEdge;
+uniform vec4 glassShadow;
+uniform vec4 glassReach;
 uniform vec2 glassArea;
 
 vec2 atelier_lookup(vec2 p) {
     return (clamp(p, vec2(0.5), glassArea - vec2(0.5)) - origin) / size;
+}
+
+vec4 atelier_tap(vec2 p) {
+    return texture2D(cogl_sampler0, atelier_lookup(p));
+}
+
+// What is behind at p, blurred: one tap, five or nine (lib/glassLook.js
+// blurTaps()), unpremultiplied.
+vec3 atelier_behind(vec2 p) {
+    float h = glassBlur.y;
+    float w = glassBlur.z;
+    vec4 sum;
+    if (glassBlur.x < 2.0) {
+        sum = atelier_tap(p);
+    } else if (glassBlur.x < 6.0) {
+        sum = atelier_tap(p) * (1.0 - 4.0 * w) + (atelier_tap(p + vec2(h, h)) + atelier_tap(p + vec2(-h, h)) +
+            atelier_tap(p + vec2(h, -h)) + atelier_tap(p + vec2(-h, -h))) * w;
+    } else {
+        sum = vec4(0.0);
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                float wx = i == 0 ? 1.0 - 2.0 * w : w;
+                float wy = j == 0 ? 1.0 - 2.0 * w : w;
+                sum += atelier_tap(p + vec2(float(i), float(j)) * h) * (wx * wy);
+            }
+        }
+    }
+    return sum.rgb / max(sum.a, 0.0001);
+}
+
+float atelier_luma(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// A face's neutral transfer (lib/glassLook.js FACES): [lift, T, λ, g].
+vec3 atelier_face(vec3 c, vec4 face) {
+    float y = atelier_luma(c);
+    return vec3(face.x + face.y * y * (1.0 + face.z * (1.0 - y))) + face.w * (c - vec3(y));
+}
+
+// How far in the lens looks, d in from the edge (lib/glassLook.js lensDepth()).
+float atelier_lens(float d, float bevel, float depth) {
+    float u = 1.0 - clamp(d / max(bevel, 0.0001), 0.0, 1.0);
+    return depth * (1.0 - sqrt(max(1.0 - u * u, 0.0)));
+}
+
+// What the lens shows at p, d in from the edge whose outward normal is n.
+vec3 atelier_bent(vec2 p, vec2 n, float d, float bevel, float depth) {
+    float shift = atelier_lens(d, bevel, depth);
+    vec3 c = atelier_behind(p - n * shift);
+    if (glassLens.z > 0.0) {
+        c.r = atelier_behind(p - n * shift * (1.0 + glassLens.z)).r;
+        c.b = atelier_behind(p - n * shift * (1.0 - glassLens.z)).b;
+    }
+    return c;
 }
 
 float atelier_hash(vec2 p) {
@@ -63,71 +136,101 @@ float atelier_hash(vec2 p) {
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
 }
-
-vec3 atelier_light_over(vec3 color, float alpha, float amount) {
-    return color + amount * (vec3(alpha) - color);
-}
 `;
 
-// (Premultiplied colours throughout: the texture's, and the actor's opacity
-// in cogl_color_in.)
+// (Premultiplied colours in and out: the texture's, and the actor's
+// opacity in cogl_color_in. Lengths in the actor's pixels; glassSmall.z
+// is how many of them make a logical pixel, glassSmall.w how wide a texel
+// of its texture is.)
 export const MATERIAL_CODE = `
 vec2 atelier_uv = cogl_tex_coord_in[0].xy;
 vec2 atelier_p = origin + atelier_uv * size;
-float atelier_cover = clamp(0.5 - atelier_shape(atelier_p), 0.0, 1.0);
-if (atelier_cover <= 0.0 || glassLens.w < 0.5) {
-    cogl_color_out *= atelier_cover;
+if (glassLens.w < 0.5) {
+    cogl_color_out *= clamp(0.5 - atelier_shape(atelier_p), 0.0, 1.0);
+} else if (atelier_p.x < glassReach.x || atelier_p.y < glassReach.y ||
+    atelier_p.x > glassReach.z || atelier_p.y > glassReach.w) {
+    cogl_color_out = vec4(0.0);
 } else {
-    vec4 color = cogl_color_out;
-    float body = atelier_body(atelier_p);
-    float inward = -body;
-    vec4 frame;
+    vec2 p = atelier_p;
+    float shape = atelier_shape(p);
+    float cover = clamp(0.5 - shape, 0.0, 1.0);
+    float body = atelier_body(p);
     vec2 light;
-    vec2 shade;
-    atelier_part(atelier_p, frame, light, shade);
+    vec3 shade;
+    float thick;
+    atelier_part(p, light, shade, thick);
+    vec2 across = vec2(-light.y, light.x);
+    float d = -body;
+    // (lib/glassLook.js lensOf().)
+    float large = smoothstep(${LENS_SHARE.between[0]}.0 * glassSmall.z, ${LENS_SHARE.between[1]}.0 * glassSmall.z, thick);
+    float bevel = min(glassLens.x, thick * mix(${LENS_SHARE.small[0]}, ${LENS_SHARE.large[0]}, large));
+    float depth = min(glassLens.y, thick * mix(${LENS_SHARE.small[1]}, ${LENS_SHARE.large[1]}, large));
     vec2 normal = vec2(0.0);
-    float edged = 0.0;
-    if (inward < max(glassLens.x, glassRim.w) + 1.0) {
-        vec2 slope = vec2(atelier_body(atelier_p + vec2(1.0, 0.0)) - body,
-            atelier_body(atelier_p + vec2(0.0, 1.0)) - body);
+    bool edged = false;
+    if (d < max(max(bevel, glassEdge.y), glassGlint.w) + 1.0 && body < glassEdge.z + 1.5) {
+        vec2 slope = vec2(atelier_body(p + vec2(1.0, 0.0)) - body, atelier_body(p + vec2(0.0, 1.0)) - body);
         float steep = length(slope);
         if (steep > 0.0001) {
             normal = slope / steep;
-            edged = 1.0;
-        }
-        float t = clamp(inward / max(glassLens.x, 0.0001), 0.0, 1.0);
-        float bend = glassLens.y * (1.0 - t) * (1.0 - t);
-        if (bend > 0.01 && edged > 0.0) {
-            // (Never past the actor: a notch's ears bend towards the top
-            // of the screen.)
-            vec2 inwards = normal * bend;
-            vec4 middle = texture2D(cogl_sampler0, atelier_lookup(atelier_p - inwards));
-            float red = texture2D(cogl_sampler0, atelier_lookup(atelier_p - inwards * (1.0 + glassLens.z))).r;
-            float blue = texture2D(cogl_sampler0, atelier_lookup(atelier_p - inwards * (1.0 - glassLens.z))).b;
-            color = vec4(red, middle.g, blue, middle.a) * cogl_color_in;
-            color.rgb = min(color.rgb, vec3(color.a));
+            edged = true;
         }
     }
-    float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-    color.rgb = clamp(mix(vec3(luma), color.rgb, glassTone.x) * glassTone.y, 0.0, color.a);
-    color.rgb *= (1.0 - glassTone.w) * (1.0 - shade.x);
-    color.rgb = mix(color.rgb, vec3(color.a), 1.0 - (1.0 - glassTone.z) * (1.0 - shade.y));
-    if (edged > 0.0 && glassRim.w > 0.0) {
-        float facing = dot(normal, light);
-        float rim = facing >= 0.0 ? mix(glassRim.z, glassRim.x, facing) : mix(glassRim.z, glassRim.y, -facing);
-        float across = 1.0 - smoothstep(0.0, glassRim.w, inward - 0.5);
-        color.rgb = atelier_light_over(color.rgb, color.a, rim * across);
+    float side = abs(dot(normal, across));
+    vec4 outside = vec4(0.0);
+    if (cover < 1.0) {
+        // (Past all of the glass this is one with only: not into another
+        // surface's, nor past a screen's edge.)
+        float keep = 1.0 - clamp(shape - body, 0.0, 1.0);
+        float contour = 0.0;
+        if (edged && body < atelier_others(p)) {
+            float band = clamp(glassEdge.z + 0.5 - body, 0.0, 1.0);
+            contour = glassEdge.w * (${EDGE.contour.least} + ${1 - EDGE.contour.least} * side) * band;
+        }
+        float shadow = 0.0;
+        if (glassShadow.z > 0.0) {
+            vec2 q = p - vec2(0.0, glassShadow.x);
+            float under = atelier_body(q);
+            if (under < atelier_others(q))
+                shadow = glassShadow.z / (1.0 + exp(min(1.702 * under / glassShadow.y, 30.0)));
+        }
+        outside = vec4(0.0, 0.0, 0.0, (1.0 - (1.0 - contour) * (1.0 - shadow)) * keep);
     }
-    if (glassSheen.x > 0.0 && frame.z > 0.0 && frame.w > 0.0) {
-        float angle = glassSheen.z + atan(light.x, -light.y);
-        vec2 towards = vec2(sin(angle), -cos(angle));
-        float span = abs(frame.z * towards.x) + abs(frame.w * towards.y);
-        float along = dot(atelier_p - frame.xy - frame.zw * 0.5, towards) / max(span, 1.0) + 0.5;
-        float sheen = glassSheen.x * clamp(1.0 - along / max(glassSheen.y, 0.0001), 0.0, 1.0);
-        color.rgb = atelier_light_over(color.rgb, color.a, sheen);
+    vec4 glass = vec4(0.0);
+    if (cover > 0.0) {
+        vec3 c;
+        if (edged && d < bevel) {
+            c = atelier_bent(p, normal, d, bevel, depth);
+            // (Right at the edge the lens looks up what changes fastest
+            // there: what the pixel covers, averaged.)
+            if (d < 2.0 * glassSmall.z) {
+                float t = glassSmall.w / 3.0;
+                c = (c + atelier_bent(p - normal * t, normal, d + t, bevel, depth) +
+                    atelier_bent(p + normal * t, normal, max(d - t, 0.0), bevel, depth)) / 3.0;
+            }
+        } else {
+            c = atelier_behind(p);
+        }
+        float small = 1.0 - smoothstep(${SMALL[0]}.0 * glassSmall.z, ${SMALL[1]}.0 * glassSmall.z, thick);
+        vec3 f = atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),
+            mix(glassFace.z, glassSmall.y, small), glassFace.w));
+        if (shade.z > 0.0)
+            f = mix(f, atelier_face(c, glassDeep), shade.z);
+        f = clamp(f, 0.0, 1.0);
+        f *= 1.0 - shade.x;
+        f = mix(f, vec3(1.0), shade.y);
+        float rim = 1.0 - clamp(d / max(glassEdge.y, 0.0001), 0.0, 1.0);
+        f *= 1.0 - glassEdge.x * rim * rim;
+        if (edged) {
+            float lit = dot(normal, light) >= 0.0 ? 1.0 : glassGlint.y;
+            float glint = glassGlint.x * (${EDGE.glint.least} + ${1 - EDGE.glint.least} * (1.0 - side)) * lit *
+                (clamp(1.0 - d / glassGlint.z, 0.0, 1.0) +
+                ${EDGE.glint.share} * clamp(1.0 - d / glassGlint.w, 0.0, 1.0));
+            f = mix(f, vec3(${EDGE.glint.white}) + ${EDGE.glint.colour} * (f - vec3(atelier_luma(f))), glint);
+        }
+        f += (atelier_hash(floor(gl_FragCoord.xy)) - 0.5) * glassBlur.w;
+        glass = vec4(clamp(f, 0.0, 1.0), 1.0);
     }
-    color.rgb += (atelier_hash(floor(gl_FragCoord.xy)) - 0.5) * glassSheen.w * color.a;
-    cogl_color_out = clamp(color, 0.0, 1.0) * atelier_cover;
+    cogl_color_out = (glass * cover + outside * (1.0 - cover)) * cogl_color_in.a;
 }
 `;
 
@@ -138,8 +241,7 @@ if (atelier_cover <= 0.0 || glassLens.w < 0.5) {
  * @returns {object} to give to setMaterial()
  */
 export function materialUniforms(effect) {
-    return Object.fromEntries(['glassTone', 'glassLens', 'glassRim', 'glassSheen', 'glassArea']
-        .map(name => [name, effect.get_uniform_location(name)]));
+    return Object.fromEntries(UNIFORMS.map(name => [name, effect.get_uniform_location(name)]));
 }
 
 /**
@@ -155,15 +257,42 @@ export function setMaterialArea(effect, uniforms, area) {
 /**
  * @param {Shell.GLSLEffect} effect
  * @param {object} uniforms - from materialUniforms()
+ * @param {number[]|null} reach - [x1, y1, x2, y2] in its actor: nothing is
+ *   drawn past it (its shapes, their contour and shadow); null: nothing at
+ *   all
+ */
+export function setMaterialReach(effect, uniforms, reach) {
+    effect.set_uniform_float(uniforms.glassReach, 4, reach ?? [0, 0, -1, -1]);
+}
+
+/**
+ * @param {Shell.GLSLEffect} effect
+ * @param {object} uniforms - from materialUniforms()
  * @param {object|null} look - LOOK's (lib/glassLook.js), null for none
  * @param {number} scale - pixels in a logical pixel
+ * @param {object} [options] - as lib/glassLook.js materialValues() takes
+ *   them: {light, shadow, density}
  */
-export function setMaterial(effect, uniforms, look, scale) {
-    const {tone, lens, rim, sheen} = materialValues(look, scale);
-    effect.set_uniform_float(uniforms.glassTone, 4, tone);
-    effect.set_uniform_float(uniforms.glassLens, 4, lens);
-    effect.set_uniform_float(uniforms.glassRim, 4, rim);
-    effect.set_uniform_float(uniforms.glassSheen, 4, sheen);
+export function setMaterial(effect, uniforms, look, scale, options = {}) {
+    const values = materialValues(look, scale, options);
+    const density = options.density ?? 1;
+    effect.set_uniform_float(uniforms.glassLens, 4, values.lens);
+    effect.set_uniform_float(uniforms.glassBlur, 4, values.blur);
+    effect.set_uniform_float(uniforms.glassFace, 4, values.face);
+    effect.set_uniform_float(uniforms.glassSmall, 4, [values.small[0], values.small[1], scale, 1 / density]);
+    effect.set_uniform_float(uniforms.glassDeep, 4, values.deep);
+    effect.set_uniform_float(uniforms.glassGlint, 4, values.glint);
+    effect.set_uniform_float(uniforms.glassEdge, 4, values.edge);
+    effect.set_uniform_float(uniforms.glassShadow, 4, values.shadow);
+}
+
+/**
+ * @param {Clutter.Actor} actor
+ * @returns {number} texels of its offscreen texture in one of its pixels:
+ *   its resource scale, rounded up (lib/glassLook.js textureFrame())
+ */
+export function textureDensity(actor) {
+    return Math.ceil(actor.get_resource_scale?.() ?? 1);
 }
 
 /** @returns {number} pixels in a logical pixel, as St has it */
@@ -238,10 +367,11 @@ export class GlassLook extends EventEmitter {
 }
 
 /**
- * The extra shades of a glass (lib/glassLook.js shadedLook(): darker under
- * light type, lighter under dark, where it would not read otherwise), each
- * by a key – a surface has one, the widgets' glass one for each widget –
- * eased to what they are to be over SHADE_TIME: at once with GNOME's
+ * The extra shades of a glass ({dim, veil}: darker under light type,
+ * lighter under dark, where it would not read otherwise – or anything else
+ * of numbers eased as they are, as {deep}), each by a key – a surface has
+ * one, the widgets' glass one for each widget – eased to what they are to
+ * be over SHADE_TIME: at once with GNOME's
  * animations off (its setting, as the light has it: St's is forced on in
  * the tests) or the glass not shown. Only uniforms change meanwhile.
  */
@@ -270,7 +400,8 @@ export class GlassShades {
         const to = this.wanted(key);
         const from = this._from.get(key) ?? to;
         const t = this._timeline ? this._timeline.get_progress() : 1;
-        return {dim: from.dim + (to.dim - from.dim) * t, veil: from.veil + (to.veil - from.veil) * t};
+        return Object.fromEntries(Object.keys({...from, ...to}).map(name =>
+            [name, (from[name] ?? 0) + ((to[name] ?? 0) - (from[name] ?? 0)) * t]));
     }
 
     /**
@@ -291,7 +422,7 @@ export class GlassShades {
         // (Each from where it is now: one on its way goes on from there.)
         for (const other of new Set([...this._to.keys(), key]))
             this._from.set(other, this.shown(other));
-        this._to.set(key, {dim: shade.dim, veil: shade.veil});
+        this._to.set(key, {...shade});
         this._timeline?.stop();
         this._timeline = null;
         this._interface ??= new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});

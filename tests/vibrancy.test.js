@@ -1,10 +1,10 @@
 import GLib from 'gi://GLib';
 
 import {minimumLc} from '../lib/apca.js';
-import {NO_SHADE, lookOf, shadedLook} from '../lib/glassLook.js';
-import {buildPalette, hexToOklch, luminance} from '../lib/palette.js';
+import {NO_SHADE, faceColor, lookOf} from '../lib/glassLook.js';
+import {buildPalette, hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {
-    COLOURED, INKS, MARK_LC, READ_LC, REFERENCE, SHADE, SHEEN_UNDER_TYPE, SLACK, backdropOf, designedOf, glassOver, inkOn,
+    COLOURED, INKS, MARK_LC, READ_LC, REFERENCE, SHADE, SLACK, backdropOf, designedOf, glassOver, inkOn,
     lcOf, needOf,
     pictureRegion, polarityOf, readingNeed, scopeOf, shadeFor, shadeNeeded, shadeOf, steadied, surfaceRules,
     vibrancyStylesheet, withBackground,
@@ -21,8 +21,11 @@ const on = (wallpaper, look = REGULAR, options = {}) => backdropOf(flat(wallpape
 // wallpaper, and the polarity it takes (GNOME's dark style unless said).
 const neededOn = (wallpaper, inks = 'island', look = REGULAR, options = {}) => Object.fromEntries(['light', 'dark']
     .map(polarity => [polarity, shadeNeeded(flat(wallpaper), look, polarity, readingNeed(inks), options)]));
+// (Dark type preferred: GNOME's light style, light glass.)
 const polarityFor = (wallpaper, choice = {}, inks = 'island', options = {}) =>
-    polarityOf(neededOn(wallpaper, inks, REGULAR, options), choice);
+    polarityOf(neededOn(wallpaper, inks, REGULAR, {light: choice.prefer === 'dark', ...options}), choice);
+// In GNOME's light style: light glass.
+const LIGHT_STYLE = {light: true};
 const greys = (from, to, step) => Array.from({length: Math.floor((to - from) / step) + 1},
     (_, i) => `#${(from + i * step).toString(16).padStart(2, '0').repeat(3)}`);
 const hueDistance = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
@@ -34,44 +37,59 @@ const SURFACES = Object.keys(INKS);
 
 export function testGlassOver() {
     assertEqual(glassOver('#3a6ea5', null), '#3a6ea5', 'no glass: what is behind it, as it is');
-    // A grey: as light as the material makes it, then veiled (128 × 1.15,
-    // 8 % of the way to white).
-    assertEqual(glassOver('#808080', REGULAR), '#9c9c9c', 'grey, lighter');
-    assertEqual(glassOver('#ffffff', REGULAR), '#ffffff', 'white stays white');
-    assert(luminance(glassOver('#000000', REGULAR)) > 0, 'black, a little veiled');
+    // A grey, as the face makes it (lib/glassLook.js faceColor()): dark
+    // glass in GNOME's dark style, light glass in its light one.
+    const face = (hex, name, options) => `#${faceColor(hexToRgb(hex).map(v => v / 255), name, options)
+        .map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('')}`;
+    assertEqual(glassOver('#808080', REGULAR), face('#808080', 'dark'), 'grey, through dark glass');
+    assertEqual(glassOver('#808080', REGULAR, {light: true}), face('#808080', 'light'), 'and light glass');
+    assertEqual(glassOver('#808080', REGULAR, {small: 1}), face('#808080', 'dark', {small: 1}), 'a small control');
+    assertEqual(glassOver('#808080', CLEAR, {light: true}), face('#808080', 'clear'), 'clear glass, either style');
+    assertEqual(glassOver('#000000', REGULAR), '#050505', 'black, as dark through dark glass');
+    assertEqual(glassOver('#ffffff', REGULAR, {light: true}), '#ffffff', 'white, white through light glass');
     for (const color of ['#141a24', '#3a6ea5', '#9aa8b8', '#e9b949']) {
-        const glass = glassOver(color, REGULAR);
-        assert(luminance(glass) > luminance(color), `${color}: lighter through the glass (${glass})`);
-        assert(hexToOklch(glass)[1] >= hexToOklch(color)[1] - 0.005, `${color}: as colourful at least (${glass})`);
-        assert(luminance(glassOver(color, lookOf('clear'))) < luminance(glass),
-            `${color}: clear glass, dimmed, darker than regular`);
+        const dark = glassOver(color, REGULAR);
+        const light = glassOver(color, REGULAR, {light: true});
+        assert(luminance(light) > luminance(color) && luminance(light) > luminance(dark),
+            `${color}: light glass lighter (${light}, ${dark})`);
+        const [, chroma, hue] = hexToOklch(light);
+        assert(chroma < 0.02 || Math.abs(((hue - hexToOklch(color)[2] + 540) % 360) - 180) < 12,
+            `${color}: its hue kept (${light})`);
     }
     assertEqual(glassOver('#3a6ea5', REGULAR, {strength: 0}), '#3a6ea5', 'none of the glass shows: the wallpaper');
-    // A blur that dims what it blurs (GNOME's, asked to): 128 × 0.75 first.
+    // The extra shade, after the face: dimmed, then veiled.
+    const grey = hexToRgb(glassOver('#808080', REGULAR))[0];
+    assertEqual(glassOver('#808080', REGULAR, {shade: {dim: 0.5, veil: 0}}),
+        `#${Math.round(grey * 0.5).toString(16).padStart(2, '0').repeat(3)}`, 'dimmed by the shade');
+    assertEqual(glassOver('#808080', REGULAR, {shade: {dim: 0, veil: 1}}), '#ffffff', 'or veiled');
+    // A blur that dims what it blurs: 128 × 0.75 first.
     assertEqual(glassOver('#808080', REGULAR, {blur: 0.75}), glassOver('#606060', REGULAR), 'dimmed by the blur first');
-    const covered = glassOver('#ffffff', REGULAR, {layers: [{color: '#000000', alpha: 0.5}]});
+    const covered = glassOver('#ffffff', CLEAR, {layers: [{color: '#000000', alpha: 0.5}]});
     assertEqual(covered, '#808080', 'a layer over the glass: half of it black, half white');
     const tinted = glassOver('#ffffff', REGULAR, {tint: [{color: '#000000', alpha: 0.6}]});
-    assertEqual(tinted, glassOver('#666666', REGULAR), 'a tint in the glass: under its material');
+    assertEqual(tinted, glassOver('#666666', REGULAR), 'a tint in the glass: under its face');
     const backdrop = backdropOf({mean: '#808080', tenths: {dark: '#202020', middle: '#808080', light: '#e0e0e0'}}, REGULAR);
     assert(luminance(backdrop.dark) < luminance(backdrop.mean) && luminance(backdrop.mean) < luminance(backdrop.light),
         'where it is darkest, on the whole and where lightest');
 }
 
 export function testPolarity() {
-    for (const prefer of ['light', 'dark']) {
-        const style = prefer === 'light' ? 'the dark style' : 'the light style';
-        assertEqual(polarityFor(DARK, {prefer}), 'light', `${style}: over a dark wallpaper, light type`);
-        assertEqual(polarityFor('#000000', {prefer}), 'light', `${style}: over black too`);
-        assertEqual(polarityFor(LIGHT, {prefer}), 'dark', `${style}: over a light one, dark type`);
-        assertEqual(polarityFor('#ffffff', {prefer}), 'dark', `${style}: over white too`);
-    }
+    // GNOME's dark style: dark glass, light type over anything, the glass
+    // dimmed where it must be.
+    for (const wallpaper of [DARK, '#000000', LIGHT, '#ffffff'])
+        assertEqual(polarityFor(wallpaper, {prefer: 'light'}), 'light', `the dark style: over ${wallpaper}, light type`);
+    // Its light style: light glass, dark type over a light wallpaper, light
+    // over a dark one.
+    assertEqual(polarityFor(DARK, {prefer: 'dark'}), 'light', 'the light style: over a dark wallpaper, light type');
+    assertEqual(polarityFor('#000000', {prefer: 'dark'}), 'light', 'over black too');
+    assertEqual(polarityFor(LIGHT, {prefer: 'dark'}), 'dark', 'over a light one, dark type');
+    assertEqual(polarityFor('#ffffff', {prefer: 'dark'}), 'dark', 'over white too');
     // In between, the polarity GNOME's style implies keeps the benefit of
     // the doubt: the other only where it needs clearly less shade.
     const biased = {light: 0, dark: 0};
     for (const grey of greys(60, 220, 4)) {
-        const needed = neededOn(grey);
         for (const prefer of ['light', 'dark']) {
+            const needed = neededOn(grey, 'island', REGULAR, {light: prefer === 'dark'});
             const other = prefer === 'light' ? 'dark' : 'light';
             assertEqual(polarityOf(needed, {prefer}), needed[other] + SHADE.margin < needed[prefer] ? other : prefer,
                 `${grey}, ${prefer} type preferred (${JSON.stringify(needed)})`);
@@ -79,16 +97,19 @@ export function testPolarity() {
                 biased[prefer]++;
         }
     }
-    assert(biased.light > 0 && biased.dark > 0,
+    // (Dark glass never needs less for dark type: the dark style's light
+    // type is never in doubt.)
+    assert(biased.dark > 0,
         `where the other needs only a little less shade, the style's stays (${JSON.stringify(biased)})`);
     // Where either would do about as well, it stays as it was: the other,
     // taken, until the style's is clearly better again; the style's as it
-    // would be anyway.
-    for (const prefer of ['light', 'dark']) {
+    // would be anyway. (In the light style: in the dark one, light type is
+    // never in doubt.)
+    for (const prefer of ['dark']) {
         const other = prefer === 'light' ? 'dark' : 'light';
         let kept = 0;
         for (const grey of greys(100, 220, 2)) {
-            const needed = neededOn(grey);
+            const needed = neededOn(grey, 'island', REGULAR, {light: prefer === 'dark'});
             if (polarityOf(needed, {prefer, was: other}) === other && polarityOf(needed, {prefer}) === prefer)
                 kept++;
             assertEqual(polarityOf(needed, {prefer, was: prefer}), polarityOf(needed, {prefer}),
@@ -115,7 +136,8 @@ export function testShade() {
     assertEqual(readingNeed('dock'), minimumLc(32, 700), 'the dock: its Show Applications icon, the most');
     assertEqual(readingNeed('nothing'), 0, 'nothing to read');
     // None over a dark backdrop for light type, nor over a light one for
-    // dark type; none at all with nothing to read or without the glass.
+    // dark type through light glass; none at all with nothing to read or
+    // without the glass.
     for (const surface of SURFACES) {
         const need = readingNeed(surface);
         for (const wallpaper of [DARK, '#000000', '#2a3140']) {
@@ -123,23 +145,21 @@ export function testShade() {
                 `${surface} over ${wallpaper}: light type, no shade`);
         }
         for (const wallpaper of [LIGHT, '#ffffff']) {
-            assertEqual(shadeNeeded(flat(wallpaper), REGULAR, 'dark', need), 0,
+            assertEqual(shadeNeeded(flat(wallpaper), REGULAR, 'dark', need, LIGHT_STYLE), 0,
                 `${surface} over ${wallpaper}: dark type, no shade`);
         }
     }
     assertEqual(shadeNeeded(flat('#c0c0c0'), REGULAR, 'light', 0), 0, 'nothing to read: no shade');
     assertEqual(shadeNeeded(flat('#c0c0c0'), null, 'light', island), 0, 'no glass: no shade');
-    // More over a lighter backdrop, as much as it takes (where its sheen
-    // lies over the glass too) – in steps, a step less too little – up to
-    // the most.
+    // More over a lighter backdrop, as much as it takes – in steps, a step
+    // less too little – up to the most.
     let before = 0;
     for (const grey of greys(0, 255, 5)) {
         for (const look of [REGULAR, CLEAR]) {
             const needed = shadeNeeded(flat(grey), look, 'light', island);
             assert(Math.abs(needed / SHADE.step - Math.round(needed / SHADE.step)) < 1e-9 || needed === 1,
                 `${grey}: in steps (${needed})`);
-            const sheen = look.sheen.alpha * look.sheen.surface * SHEEN_UNDER_TYPE;
-            const glass = shaded => steadied(on(grey, shadedLook(look, {dim: shaded, veil: sheen}))).light;
+            const glass = shaded => steadied(on(grey, look, {shade: {dim: shaded, veil: 0}})).light;
             assert(needed === 1 || lcOf({color: '#ffffff'}, glass(needed), 'light') >= island,
                 `${grey}: white reads on the glass so shaded (${needed})`);
             assert(needed === 0 || lcOf({color: '#ffffff'}, glass(needed - SHADE.step), 'light') < island,
@@ -156,16 +176,19 @@ export function testShade() {
     assertEqual(shadeFor('light', 0), NO_SHADE, 'none: no shade');
     // Dark type: a white veil, more over a darker backdrop, past the most
     // over black.
-    const dark = greys(0, 255, 15).reverse().map(grey => shadeNeeded(flat(grey), REGULAR, 'dark', island));
+    const dark = greys(0, 255, 15).reverse().map(grey => shadeNeeded(flat(grey), REGULAR, 'dark', island, LIGHT_STYLE));
     assert(dark.every((needed, i) => i === 0 || needed >= dark[i - 1]) && dark.at(-1) > SHADE.most,
         `dark type over darker and darker backdrops: more veil (${dark})`);
-    // Clear glass, dimmed already: less, but some over a light backdrop.
-    assert(shadeNeeded(flat('#a0a0a0'), CLEAR, 'light', island) < shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island) &&
-        shadeNeeded(flat('#c0c0c0'), CLEAR, 'light', island) > 0, 'clear glass: less shade, still some');
+    // Clear glass lets more of a light backdrop through than dark glass:
+    // more; a small control's dark glass, lighter, more over white.
+    assert(shadeNeeded(flat('#a0a0a0'), CLEAR, 'light', island) > shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island),
+        'clear glass: more shade');
+    assert(shadeNeeded(flat('#ffffff'), REGULAR, 'light', island, {small: 1}) >
+        shadeNeeded(flat('#ffffff'), REGULAR, 'light', island), 'a small control of dark glass: more over white');
     // What lies over the glass counts: a card's dark colour, less.
     const card = {layers: [{color: '#0e0e12', alpha: 0.38}]};
-    assert(shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island, card) <
-        shadeNeeded(flat('#a0a0a0'), REGULAR, 'light', island), 'a dark card over the glass: less');
+    assert(shadeNeeded(flat('#e0e0e0'), REGULAR, 'light', island, card) <
+        shadeNeeded(flat('#e0e0e0'), REGULAR, 'light', island), 'a dark card over the glass: less');
     // Where the backdrop spans both, the worst tenth for each.
     const mixed = {mean: '#808080', tenths: {dark: '#303030', middle: '#808080', light: '#d0d0d0'}};
     assert(shadeNeeded(mixed, REGULAR, 'light', island) === shadeNeeded(flat('#d0d0d0'), REGULAR, 'light', island) &&
@@ -217,14 +240,17 @@ export function testStaysOnDark() {
             const polarity = polarityOf(needed);
             const rules = surfaceRules({roots: ['.r'], scope: 's', inks: surface,
                 backdrop: on(wallpaper, REGULAR, {layers}), polarity}, palette);
-            assertEqual([polarity, shadeOf(polarity, needed), rules], ['light', NO_SHADE, []],
-                `${wallpaper}, ${surface}: as it is set, the glass as it is`);
+            // (Dark glass is a little lighter than Atelier's dark: a colour
+            // of the palette's or the microphone's orange may go lighter.)
+            assertEqual([polarity, shadeOf(polarity, needed), rules.filter(rule => rule.includes('255, 255, 255'))],
+                ['light', NO_SHADE, []], `${wallpaper}, ${surface}: white type as it is set, the glass as it is`);
+            assert(rules.length <= 2, `${wallpaper}, ${surface}: a colour or two at most (${rules})`);
         }
     }
     // Glass a little lighter than Atelier's dark (a deep green wallpaper):
-    // white type as it is; one of another colour (the microphone's
-    // orange, the palette's grey) a little lighter, in its hue, where it
-    // would fall short.
+    // white type as it is, or a little more opaque; one of another colour
+    // (the microphone's orange, the palette's grey) a little lighter, in
+    // its hue, where it would fall short.
     const green = on('#1d2b1f');
     assertEqual(polarityFor('#1d2b1f'), 'light', 'light type');
     let lighter = 0;
@@ -236,18 +262,19 @@ export function testStaysOnDark() {
                 continue;
             const [l, c, h] = hexToOklch(designed.color);
             const [l2, , h2] = hexToOklch(shown.color);
-            assert(designed.color !== '#ffffff' && l2 > l && (c < 0.01 || hueDistance(h, h2) < 6),
-                `${surface} ${ink.selector}: not white, lighter in its hue (${shown.color})`);
+            const opaquer = designed.color === '#ffffff' && shown.color === '#ffffff' && shown.alpha > designed.alpha;
+            assert(opaquer || (designed.color !== '#ffffff' && l2 > l && (c < 0.01 || hueDistance(h, h2) < 6)),
+                `${surface} ${ink.selector}: white more opaque, or lighter in its hue (${shown.color})`);
             lighter++;
         }
     }
-    assert(lighter <= 4, `a few colours only (${lighter})`);
+    assert(lighter <= 5, `a few colours only (${lighter})`);
 }
 
 export function testDarkOnLight() {
     for (const surface of ['island', 'pages', 'bar', 'dock']) {
-        const backdrop = on(LIGHT);
-        assertEqual(polarityFor(LIGHT, {}, surface), 'dark', `${surface}: dark type`);
+        const backdrop = on(LIGHT, REGULAR, LIGHT_STYLE);
+        assertEqual(polarityFor(LIGHT, {prefer: 'dark'}, surface), 'dark', `${surface}: dark type`);
         for (const ink of INKS[surface].filter(i => ['text', 'icon', 'mark'].includes(i.kind))) {
             const shown = inkOn(ink, backdrop, 'dark', palette);
             const designed = designedOf(ink, palette);
@@ -259,7 +286,7 @@ export function testDarkOnLight() {
                 `${surface} ${ink.selector}: reads as set (Lc ${lc.toFixed(1)} of ${need.toFixed(1)})`);
         }
     }
-    const backdrop = on(LIGHT);
+    const backdrop = on(LIGHT, REGULAR, LIGHT_STYLE);
     const time = inkOn(inkOf('island', '& .atelier-island-time'), backdrop, 'dark');
     const date = inkOn(inkOf('island', '& .atelier-island-date'), backdrop, 'dark');
     assertEqual(time, {color: '#000000', alpha: 1}, 'the time black');
@@ -277,8 +304,8 @@ export function testDarkOnLight() {
 export function testOnlyAsFarAsNeeded() {
     // A middling backdrop: light type, the quieter type a little more
     // opaque – just enough.
-    const backdrop = on('#4a5262');
-    assertEqual([polarityFor('#4a5262'), neededOn('#4a5262').light], ['light', 0], 'still light type, unshaded');
+    const backdrop = on('#8a92a2');
+    assertEqual([polarityFor('#8a92a2'), neededOn('#8a92a2').light], ['light', 0], 'still light type, unshaded');
     const date = inkOf('island', '& .atelier-island-date');
     const shown = inkOn(date, backdrop, 'light');
     const need = needOf(date);
@@ -298,7 +325,7 @@ export function testOnlyAsFarAsNeeded() {
             `${grey}: as set where it falls short by ${SLACK} at most (Lc ${lc.toFixed(1)})`);
     }
     // Dark type only as dark as it is set to stand out.
-    const light = on(LIGHT);
+    const light = on(LIGHT, REGULAR, LIGHT_STYLE);
     const suffix = inkOn(inkOf('pages', '& .atelier-glance-suffix'), light, 'dark');
     const suffixNeed = needOf(inkOf('pages', '& .atelier-glance-suffix'), designedOf(inkOf('pages', '& .atelier-glance-suffix')), 'dark');
     assert(Math.abs(lcOf(suffix, light.dark, 'dark') - suffixNeed) < 1.5 && luminance(suffix.color) > 0.01,

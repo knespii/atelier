@@ -1,13 +1,11 @@
-// Atelier's glass: the wallpaper under a surface, blurred, like GNOME's lock
-// screen – a static blur, which costs nothing while it stays – and drawn as
-// Liquid Glass (shell/core/glassMaterial.js): bending at its edges, which
-// catch the light. For a while, it may be live glass instead: of what is
-// under it now, the windows too, blurred again whenever that changes.
-// A surface is the blurred wallpaper of the top of its monitor (or of
-// another edge, for a dock), masked to a rounded rectangle that can move and
-// change size every frame (the island growing) without blurring anything
-// again – and to a drop beside it, which melts into it where they meet (the
-// island dripping).
+// Atelier's glass: the wallpaper under a surface, drawn as Liquid Glass
+// (shell/core/glassMaterial.js) – lightly blurred, bending at its edges,
+// which catch the light. For a while, it may be live glass instead: of what
+// is under it now, the windows too. A surface is the wallpaper of the top
+// of its monitor (or of another edge, for a dock), masked to a rounded
+// rectangle that can move and change size every frame (the island growing)
+// without anything but the shader's uniforms changing – and to a drop
+// beside it, which melts into it where they meet (the island dripping).
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -19,17 +17,18 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, sameLight, textureFrame, tintOf} from '../../lib/glassLook.js';
+import {
+    NO_SHADE, REST_LIGHT, TINTS, bodyRect, boundsOf, edgeReach, sameLight, textureFrame, tintOf,
+} from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+    setMaterialReach, textureDensity,
 } from './glassMaterial.js';
 
-const BLUR_RADIUS = 36; // logical pixels
-// How bright the blur leaves the wallpaper, under light glass and smoky.
-const BLUR_BRIGHTNESS = {light: 1, smoky: 0.92};
-// Live glass is blurred over the bounds of its shapes, in steps of this many
-// logical pixels (so it isn't made anew every frame they change).
+// Live glass shows the windows over the bounds of its shapes, in steps of
+// this many logical pixels (so it isn't laid out anew every frame they
+// change).
 const LIVE_STEP = 64;
 
 // Pixels outside the rounded rectangle are dropped; its edge gets one pixel
@@ -43,7 +42,8 @@ const LIVE_STEP = 64;
 // together like liquid.
 // The glass's body is the same, but past the screen's edges the rectangle
 // lies on (body), and one with another surface's shape this one lies in
-// (partner: the one island the island's glass is in) – they are one glass.
+// (partner: the one island the island's glass is in) – they are one glass,
+// whose edges each draws where its own shape is the nearer.
 const SHAPE_DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
@@ -59,8 +59,7 @@ uniform vec4 partner;
 uniform vec4 partnerBody;
 uniform vec3 partnerLook;
 uniform vec2 glassLight;
-uniform vec4 glassFrame;
-uniform vec2 glassShade;
+uniform vec3 glassShade;
 
 float atelier_smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -119,17 +118,41 @@ float atelier_shape(vec2 p) {
     return atelier_drip(p, atelier_notch(p, rect, rect, radii, ear));
 }
 
-float atelier_body(vec2 p) {
-    float d = atelier_drip(p, atelier_notch(p, rect, body, radii, ear));
+float atelier_others(vec2 p) {
     if (partner.z > 0.0 && partner.w > 0.0)
-        d = min(d, atelier_notch(p, partner, partnerBody, partnerLook.xy, partnerLook.z));
-    return d;
+        return atelier_notch(p, partner, partnerBody, partnerLook.xy, partnerLook.z);
+    return 100000.0;
 }
 
-void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2 shade) {
-    frame = glassFrame;
+float atelier_body(vec2 p) {
+    return min(atelier_drip(p, atelier_notch(p, rect, body, radii, ear)), atelier_others(p));
+}
+
+// The short side of the part p is in: the rectangle's as it shows (not its
+// body's past the screen), a drop's or its neck's where they melt into it,
+// the partner's where it is the nearer.
+void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
     light = glassLight;
     shade = glassShade;
+    float d = atelier_notch(p, rect, body, radii, ear);
+    thick = min(rect.z, rect.w);
+    float k = max(blend, 0.001);
+    if (neck.w > 0.0) {
+        vec2 pa = p - neck.xy;
+        vec2 ba = vec2(0.0, neck.z - neck.y);
+        float s = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
+        float n = length(pa - ba * s) - neck.w;
+        thick = mix(thick, 2.0 * neck.w, clamp(0.5 + 0.5 * (d - n) / k, 0.0, 1.0));
+        d = atelier_smin(d, n, k);
+    }
+    if (drop.z > 0.0 && drop.w > 0.0) {
+        vec2 dq = abs(p - drop.xy) - drop.zw + vec2(dropRadius);
+        float n = length(max(dq, 0.0)) + min(max(dq.x, dq.y), 0.0) - dropRadius;
+        thick = mix(thick, 2.0 * min(drop.z, drop.w), clamp(0.5 + 0.5 * (d - n) / k, 0.0, 1.0));
+        d = atelier_smin(d, n, k);
+    }
+    if (atelier_others(p) < d)
+        thick = min(partner.z, partner.w);
 }
 ${MATERIAL_DECLARATIONS}
 `;
@@ -161,20 +184,26 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassFrame', 'glassShade'];
+            'partner', 'partnerBody', 'partnerLook', 'glassLight', 'glassShade'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
+        this._look = [null, 1, {}];
         this.setDrop([0, 0, 0, 0], 0, 1);
         this.setNeck([0, 0, 0, 0]);
         this.setPartner(null);
         this.setLight(REST_LIGHT);
-        this.setFrame([0, 0, 0, 0]);
-        this.setShade([0, 0]);
+        this.setShade([0, 0, 0]);
+        this.setReach(null);
         this.setMaterial(null, 1);
     }
 
     vfunc_paint_target(node, paintContext) {
         syncTextureFrame(this, this._at.origin, this._at.size);
+        // (Its blur's taps are as many texels apart as its texture has.)
+        const [look, scale, options] = this._look;
+        const density = this.get_actor() ? textureDensity(this.get_actor()) : 1;
+        if (look && density !== (options.density ?? 1))
+            this.setMaterial(look, scale, {...options, density});
         super.vfunc_paint_target(node, paintContext);
     }
 
@@ -221,22 +250,24 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._at.glassLight, 2, light);
     }
 
-    /** @param {number[]} frame - [x, y, width, height] the sheen runs across */
-    setFrame(frame) {
-        this.set_uniform_float(this._at.glassFrame, 4, frame);
+    /** @param {number[]} shade - its extra shade, [dim, veil, deep] */
+    setShade(shade) {
+        this.set_uniform_float(this._at.glassShade, 3, shade);
     }
 
-    /** @param {number[]} shade - its extra shade, [dim, veil] */
-    setShade(shade) {
-        this.set_uniform_float(this._at.glassShade, 2, shade);
+    /** @param {number[]|null} reach - [x1, y1, x2, y2] it draws within */
+    setReach(reach) {
+        setMaterialReach(this, this._material, reach);
     }
 
     /**
      * @param {object|null} look - LOOK's, null for only the shape
      * @param {number} scale - pixels in a logical pixel
+     * @param {object} [options] - {light, shadow, density} (setMaterial())
      */
-    setMaterial(look, scale) {
-        setMaterial(this, this._material, look, scale);
+    setMaterial(look, scale, options = {}) {
+        this._look = [look, scale, options];
+        setMaterial(this, this._material, look, scale, options);
         this.queue_repaint();
     }
 
@@ -291,9 +322,9 @@ class AtelierGlassSurface extends St.Widget {
      * @param {boolean} [params.solid] - black instead of glass: the same
      *   shapes, changing every frame without anything being laid out anew
      * @param {object|null} [params.look] - the material (lib/glassLook.js
-     *   LOOK's), none for plain blurred glass; never for solid surfaces
+     *   LOOK's), none for the plain wallpaper; never for solid surfaces
      * @param {boolean} [params.light] - GNOME's style is light: light glass
-     *   (else smoky)
+     *   (else dark)
      * @param {boolean} [params.deep] - dark glass whatever the style, for
      *   what is styled for a dark surface only (a sheet's form)
      */
@@ -323,7 +354,9 @@ class AtelierGlassSurface extends St.Widget {
 
         this._wallpaper = new Clutter.Actor();
         this.add_child(this._wallpaper);
-        this._tint = new St.Widget({style_class: solid ? 'atelier-solid-fill' : 'atelier-glass-tint'});
+        // (Glass is neutral now, its face as GNOME's style has it: its tint
+        // stays out of sight.)
+        this._tint = new St.Widget({style_class: solid ? 'atelier-solid-fill' : 'atelier-glass-tint', visible: solid});
         this.add_child(this._tint);
 
         this._mask = new RoundedMaskEffect();
@@ -331,8 +364,8 @@ class AtelierGlassSurface extends St.Widget {
 
         Main.layoutManager.connectObject('monitors-changed', () => this._build(), this);
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => {
-            this._blurBackground();
-            this._mask.setMaterial(this._look, glassScale());
+            this._syncMaterial();
+            this._syncReach();
         }, this);
         // (Its light is looked after while it shows.)
         if (!solid) {
@@ -347,31 +380,32 @@ class AtelierGlassSurface extends St.Widget {
             this._bgManager?.destroy();
             this._bgManager = null;
         });
-        this._mask.setMaterial(this._look, glassScale());
+        this._syncMaterial();
+        this._shades.set('deep', {deep: deep ? 1 : 0});
         this._syncTint();
         this._build();
+    }
+
+    _syncMaterial() {
+        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle, shadow: true});
     }
 
     /**
      * Another material: another variant of glass, or of GNOME's style. (A
      * solid surface has none.)
      *
-     * @param {object|null} look - LOOK's, null for plain blurred glass
+     * @param {object|null} look - LOOK's, null for the plain wallpaper
      * @param {boolean} [light] - GNOME's style is light
      */
     setLook(look, light = this._lightStyle) {
         if (this._solid || (look === this._look && light === this._lightStyle))
             return;
-        const blurred = [this._frost, this._blurBrightness];
         this._look = look;
         this._lightStyle = light;
-        this._mask.setMaterial(look, glassScale());
+        this._syncMaterial();
         this._syncTint();
         this._syncShade();
-        // (Less frosted, or as bright as the other style has it: blurred
-        // anew.)
-        if (this._frost !== blurred[0] || this._blurBrightness !== blurred[1])
-            this._syncBlur();
+        this._syncLive();
         glassLight.sync();
     }
 
@@ -387,6 +421,8 @@ class AtelierGlassSurface extends St.Widget {
         this._deep = deep;
         this._syncTint();
         this._syncShade();
+        // (Eased to it, as a shade is.)
+        this._shades.set('deep', {deep: deep ? 1 : 0});
     }
 
     /** @returns {boolean} whether it is deep glass now */
@@ -420,30 +456,35 @@ class AtelierGlassSurface extends St.Widget {
     // The shade as it is now, drawn again where its shapes are.
     _showShade() {
         const {dim, veil} = this._shades.shown('glass');
-        this._mask.setShade([dim, veil]);
+        const {deep = 0} = this._shades.shown('deep');
+        this._mask.setShade([dim, veil, deep]);
         const bounds = this._bounds();
         if (bounds)
             this._redrawWithin(bounds);
     }
 
-    // Drawn again only within these bounds on the stage.
+    // Drawn again only within these bounds on the stage (and as far round
+    // them as its contour and shadow go).
     _redrawWithin([x, y, width, height]) {
-        const [x1, y1] = [Math.floor(x - this.x) - 2, Math.floor(y - this.y) - 2];
+        const margin = Math.ceil(edgeReach(true) * glassScale()) + 2;
+        const [x1, y1] = [Math.floor(x - this.x) - margin, Math.floor(y - this.y) - margin];
         this.queue_redraw_with_clip(new Mtk.Rectangle({
-            x: x1, y: y1, width: Math.ceil(x + width - this.x) + 2 - x1, height: Math.ceil(y + height - this.y) + 2 - y1,
+            x: x1, y: y1,
+            width: Math.ceil(x + width - this.x) + margin - x1, height: Math.ceil(y + height - this.y) + margin - y1,
         }));
     }
 
-    // How frosted it is (LOOK's): its blur, a share of its own (its tint is
-    // as the stylesheet has it for each).
-    get _frost() {
-        return this._look?.frost ?? 1;
-    }
-
-    // Light glass shows the wallpaper as bright as it is; smoky glass dims
-    // it a little before its tint.
-    get _blurBrightness() {
-        return this._lightStyle ? BLUR_BRIGHTNESS.light : BLUR_BRIGHTNESS.smoky;
+    // What the shader draws within: its shapes, their contour and shadow.
+    _syncReach() {
+        const bounds = this._bounds();
+        if (!bounds) {
+            this._mask.setReach(null);
+            return;
+        }
+        const margin = edgeReach(true) * glassScale();
+        const [x, y, width, height] = bounds;
+        this._mask.setReach([x - this.x - margin, y - this.y - margin,
+            x + width - this.x + margin, y + height - this.y + margin]);
     }
 
     // Its tint as the stylesheet has it (stylesheet.css, the palette's in
@@ -459,14 +500,6 @@ class AtelierGlassSurface extends St.Widget {
         this.add_style_class_name(wanted);
     }
 
-    _syncBlur() {
-        this._blurBackground();
-        const live = this._live?.get_effect('atelier-glass-blur');
-        if (live) {
-            live.radius = BLUR_RADIUS * glassScale() * this._frost;
-            live.brightness = this._blurBrightness;
-        }
-    }
 
     /** @returns {object|null} the material it is drawn with */
     get look() {
@@ -504,8 +537,6 @@ class AtelierGlassSurface extends St.Widget {
                 monitorIndex: this._monitorIndex,
                 controlPosition: false,
             });
-            this._bgManager.connect('changed', () => this._blurBackground());
-            this._blurBackground();
         }
         if (this._shape)
             this.setShape(...this._shape);
@@ -518,7 +549,7 @@ class AtelierGlassSurface extends St.Widget {
 
     /**
      * Live glass: of what is under the surface now, the windows too, rather
-     * than of the wallpaper. Dearer – blurred again whenever that changes –
+     * than of the wallpaper. Dearer – drawn again whenever that changes –
      * so for a while only, over the bounds of its shapes.
      *
      * @param {boolean} live
@@ -527,16 +558,10 @@ class AtelierGlassSurface extends St.Widget {
         if (this._solid || live === (this._live !== null))
             return;
         if (live) {
-            const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
             this._live = new St.Widget({clip_to_allocation: true});
             const windows = new WindowsClone({source: global.window_group});
             windows.set_size(global.stage.width, global.stage.height);
             this._live.add_child(windows);
-            this._live.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
-                mode: Shell.BlurMode.ACTOR,
-                radius: BLUR_RADIUS * scale * this._frost,
-                brightness: this._blurBrightness,
-            }));
             this.insert_child_above(this._live, this._wallpaper);
             this._wallpaper.hide();
             this._syncLive();
@@ -547,8 +572,8 @@ class AtelierGlassSurface extends St.Widget {
         }
     }
 
-    // The live glass where the shapes are, and as far around as the blur
-    // reaches, so its edges are blurred like the rest.
+    // The live glass where the shapes are, and as far around as the blur's
+    // taps reach, so its edges are blurred like the rest.
     _syncLive() {
         if (!this._live)
             return;
@@ -569,8 +594,8 @@ class AtelierGlassSurface extends St.Widget {
             this._live.hide();
             return;
         }
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const margin = BLUR_RADIUS * scale;
+        const scale = glassScale();
+        const margin = (3 * (this._look?.blur ?? 0) + 2) * scale;
         const step = LIVE_STEP * scale;
         const down = v => Math.floor(v / step) * step;
         const up = v => Math.ceil(v / step) * step;
@@ -585,18 +610,6 @@ class AtelierGlassSurface extends St.Widget {
         this._live.show();
     }
 
-    _blurBackground() {
-        const actor = this._bgManager?.backgroundActor;
-        if (!actor)
-            return;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        actor.remove_effect_by_name('atelier-glass-blur');
-        actor.add_effect_with_name('atelier-glass-blur', new Shell.BlurEffect({
-            mode: Shell.BlurMode.ACTOR,
-            radius: BLUR_RADIUS * scale * this._frost,
-            brightness: this._blurBrightness,
-        }));
-    }
 
     /**
      * Fill a rounded rectangle, in stage coordinates.
@@ -676,16 +689,14 @@ class AtelierGlassSurface extends St.Widget {
         return boundsOf(rects);
     }
 
-    // What the sheen runs across and the light leans by: all of the glass
-    // it is part of.
+    // What the light leans by: all of the glass it is part of.
     _glassBounds() {
         const partner = this._partner;
         return boundsOf([this._bounds() ?? [0, 0, 0, 0], partner?.slice(0, 4) ?? [0, 0, 0, 0]]);
     }
 
     _syncFrame() {
-        const bounds = this._glassBounds();
-        this._mask.setFrame(bounds ? [bounds[0] - this.x, bounds[1] - this.y, bounds[2], bounds[3]] : [0, 0, 0, 0]);
+        this._syncReach();
         glassLight.refresh(this);
     }
 

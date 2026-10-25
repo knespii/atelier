@@ -1,9 +1,10 @@
-// Glass under the widgets: one blurred copy of the wallpaper for the whole
-// desktop, shown only where the widgets are – rounded rectangles that may
-// move every frame (while a widget is dragged) without blurring anything
-// again – and where liquid flows (cards pouring to other places). It is
+// Glass under the widgets: one copy of the wallpaper for the whole desktop,
+// shown only where the widgets are – rounded rectangles that may move every
+// frame (while a widget is dragged) with only the shader's uniforms
+// changing – and where liquid flows (cards pouring to other places). It is
 // Liquid Glass (shell/core/glassMaterial.js), each widget catching its own
-// light, and shaded as its own type needs (shell/core/vibrancy.js).
+// light, and shaded as its own type needs (shell/core/vibrancy.js); the
+// cards cast their own shadows (their style's), the glass none.
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -15,21 +16,19 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {REST_LIGHT, sameLight} from '../../lib/glassLook.js';
+import {REST_LIGHT, boundsOf, edgeReach, sameLight} from '../../lib/glassLook.js';
 import {syncTextureFrame} from '../core/glass.js';
 import {glassLight} from '../core/glassLight.js';
 import {
     GlassShades, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
+    setMaterialReach, textureDensity,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
 const MAX_RECTS = 32;
-const BLUR_RADIUS = 40; // logical pixels
-// How bright the blur leaves the wallpaper, in the light style and the dark.
-const BLUR_BRIGHTNESS = {light: 1, smoky: 0.92};
 
 // The widgets' rectangles (and the liquid), each with the light it catches
-// and its shade; the sheen runs across the one a pixel is nearest to.
+// and its shade; a pixel is part of the one it is nearest to.
 const DECLARATIONS = `
 uniform vec2 origin;
 uniform vec2 size;
@@ -62,20 +61,24 @@ float atelier_body(vec2 p) {
     return atelier_shape(p);
 }
 
-void atelier_part(vec2 p, out vec4 frame, out vec2 light, out vec2 shade) {
+float atelier_others(vec2 p) {
+    return 100000.0;
+}
+
+void atelier_part(vec2 p, out vec2 light, out vec3 shade, out float thick) {
     float nearest = 100000.0;
-    frame = vec4(0.0);
-    light = vec2(0.0, -1.0);
-    shade = vec2(0.0);
+    light = vec2(${REST_LIGHT[0]}, ${REST_LIGHT[1]});
+    shade = vec3(0.0);
+    thick = 0.0;
     for (int i = 0; i < ${MAX_RECTS}; i++) {
         if (float(i) >= count)
             break;
         float d = atelier_rect(p, rects[i]);
         if (d < nearest) {
             nearest = d;
-            frame = rects[i];
             light = lights[i];
-            shade = shades[i];
+            shade = vec3(shades[i], 0.0);
+            thick = min(rects[i].z, rects[i].w);
         }
     }
 }
@@ -95,8 +98,10 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this._shades = this.get_uniform_location('shades');
         this._liquid = liquidUniforms(this);
         this._material = materialUniforms(this);
+        this._look = [null, 1, {}];
         this.setLights([]);
         this.setShades([]);
+        this.setReach(null);
         this.setMaterial(null, 1);
     }
 
@@ -106,6 +111,11 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
 
     vfunc_paint_target(node, paintContext) {
         syncTextureFrame(this, this._origin, this._size);
+        // (Its blur's taps are as many texels apart as its texture has.)
+        const [look, scale, options] = this._look;
+        const density = this.get_actor() ? textureDensity(this.get_actor()) : 1;
+        if (look && density !== (options.density ?? 1))
+            this.setMaterial(look, scale, {...options, density});
         super.vfunc_paint_target(node, paintContext);
     }
 
@@ -141,12 +151,19 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         this.set_uniform_float(this._shades, 2, values);
     }
 
+    /** @param {number[]|null} reach - [x1, y1, x2, y2] it draws within */
+    setReach(reach) {
+        setMaterialReach(this, this._material, reach);
+    }
+
     /**
      * @param {object|null} look - LOOK's, null for only the shapes
      * @param {number} scale - pixels in a logical pixel
+     * @param {object} [options] - {light, density} (setMaterial())
      */
-    setMaterial(look, scale) {
-        setMaterial(this, this._material, look, scale);
+    setMaterial(look, scale, options = {}) {
+        this._look = [look, scale, options];
+        setMaterial(this, this._material, look, scale, options);
         this.queue_repaint();
     }
 });
@@ -176,9 +193,11 @@ class AtelierDesktopGlass extends St.Widget {
         this._shades = new GlassShades(this, keys => this._showShades(keys));
         this._look = look;
         this._lightStyle = light;
-        this._mask.setMaterial(look, glassScale());
-        St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor',
-            () => this._mask.setMaterial(this._look, glassScale()), this);
+        this._syncMaterial();
+        St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', () => {
+            this._syncMaterial();
+            this._apply();
+        }, this);
         glassLight.add(this);
         this.connect('notify::mapped', () => glassLight.sync());
         this.connect('destroy', () => {
@@ -197,26 +216,14 @@ class AtelierDesktopGlass extends St.Widget {
     setLook(look, light = this._lightStyle) {
         if (look === this._look && light === this._lightStyle)
             return;
-        const blurred = [this._frost, this._blurBrightness];
         this._look = look;
         this._lightStyle = light;
-        this._mask.setMaterial(look, glassScale());
-        // (Less frosted, or as bright as the other style has it: blurred
-        // anew.)
-        if (this._frost !== blurred[0] || this._blurBrightness !== blurred[1])
-            this._blur();
+        this._syncMaterial();
         glassLight.sync();
     }
 
-    // How frosted it is (LOOK's): a share of its blur.
-    get _frost() {
-        return this._look?.frost ?? 1;
-    }
-
-    // In GNOME's light style, the wallpaper as bright as it is; in its dark
-    // one, dimmed a little (the cards' own colour is over it).
-    get _blurBrightness() {
-        return this._lightStyle ? BLUR_BRIGHTNESS.light : BLUR_BRIGHTNESS.smoky;
+    _syncMaterial() {
+        this._mask.setMaterial(this._look, glassScale(), {light: this._lightStyle});
     }
 
     /** @returns {object|null} the material it is drawn with */
@@ -235,7 +242,7 @@ class AtelierDesktopGlass extends St.Widget {
         if (!monitor)
             return;
         this._wallpaper.set_position(monitor.x - area.x, monitor.y - area.y);
-        // A new copy of the wallpaper for another monitor only: blurring it
+        // A new copy of the wallpaper for another monitor only: loading it
         // again shows. (The work area changes as workspaces come and go.)
         const key = [index, monitor.x, monitor.y, monitor.width, monitor.height].join(' ');
         if (this._bgManager && key === this._monitorKey)
@@ -247,21 +254,6 @@ class AtelierDesktopGlass extends St.Widget {
             monitorIndex: index,
             controlPosition: false,
         });
-        this._bgManager.connect('changed', () => this._blur());
-        this._blur();
-    }
-
-    _blur() {
-        const actor = this._bgManager?.backgroundActor;
-        if (!actor)
-            return;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        actor.remove_effect_by_name('atelier-blur');
-        actor.add_effect_with_name('atelier-blur', new Shell.BlurEffect({
-            mode: Shell.BlurMode.ACTOR,
-            radius: BLUR_RADIUS * scale * this._frost,
-            brightness: this._blurBrightness,
-        }));
     }
 
     /**
@@ -291,6 +283,12 @@ class AtelierDesktopGlass extends St.Widget {
     _apply() {
         this._mask.setRects([this.width, this.height], this._rects, this._radius, this._liquid);
         this._mask.setShades(this._rects.map((_, i) => this._shadeAt(i)));
+        // (Liquid may flow anywhere: all of it then.)
+        const liquid = (this._liquid.boxes?.length ?? 0) + (this._liquid.capsules?.length ?? 0) > 0;
+        const bounds = liquid ? [0, 0, this.width, this.height] : boundsOf(this._rects.slice(0, MAX_RECTS));
+        const margin = edgeReach(false) * glassScale();
+        this._mask.setReach(bounds && [bounds[0] - margin, bounds[1] - margin,
+            bounds[0] + bounds[2] + margin, bounds[1] + bounds[3] + margin]);
     }
 
     // [dim, veil] of a rectangle's shade as it is now.
@@ -336,11 +334,12 @@ class AtelierDesktopGlass extends St.Widget {
         });
     }
 
-    // Drawn again only within a rectangle of the layer.
+    // Drawn again only within a rectangle of the layer (and its contour).
     _redrawWithin([x, y, width, height]) {
-        const [x1, y1] = [Math.floor(x) - 2, Math.floor(y) - 2];
+        const margin = Math.ceil(edgeReach(false) * glassScale()) + 2;
+        const [x1, y1] = [Math.floor(x) - margin, Math.floor(y) - margin];
         this.queue_redraw_with_clip(new Mtk.Rectangle({
-            x: x1, y: y1, width: Math.ceil(x + width) + 2 - x1, height: Math.ceil(y + height) + 2 - y1,
+            x: x1, y: y1, width: Math.ceil(x + width) + margin - x1, height: Math.ceil(y + height) + margin - y1,
         }));
     }
 
