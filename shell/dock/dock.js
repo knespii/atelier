@@ -132,7 +132,8 @@ export class Dock extends EventEmitter {
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
             const reach = horizontal || !monitor ? 0.25
                 : Math.min(1, (SIDE_GLASS + edgeReach(true)) * scale / monitor.width);
-            // (Of the wallpaper's colours, as the island's glass.)
+            // (Of the wallpaper, as the island's glass – and of the windows
+            // too near them: syncGlass().)
             this._glass = new GlassSurface({monitorIndex, side: this._side, reach, look, light});
             this._glass.add_style_class_name('atelier-dock-glass');
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
@@ -519,29 +520,35 @@ export class Dock extends EventEmitter {
      * Of glass, its marks, separators, highlights and Show Applications
      * icon follow what is behind the glass (shell/core/vibrancy.js), where
      * it rests shown, under its wash – placed anew, or its wash changed.
-     * More opaque near windows (DYNAMIC), it
-     * has its type for that in a class of its own, put on as windows come
-     * and go: no stylesheet is made anew for them.
+     * Near windows, its glass is live, of them, which are taken to be the
+     * palette's surface (in the style apps are in), under its wash there
+     * (more opaque, under DYNAMIC): it has its type for that in a class of
+     * its own, put on as windows come and go – no stylesheet is made anew
+     * for them.
      */
     updateVibrancy() {
         if (!this._vibrancy || !this._glass || !this.theming)
             return;
-        const states = this._settings.get_string('transparency-mode') === 'DYNAMIC' ? [false, true] : [undefined];
-        if (this._vibrant?.length === states.length) {
+        if (this._vibrant) {
             this._vibrant.forEach(surface => surface.update());
         } else {
-            this._dropVibrancy();
-            this._vibrant = states.map(near => this._vibrancy.surface({
+            this._vibrant = [false, true].map(near => this._vibrancy.surface({
                 id: `dock-${this._monitorIndex}${near ? '-near' : ''}`,
                 inks: 'dock',
                 roots: ['.atelier-dock'],
                 rect: () => this._rect,
+                ...near ? {behind: () => this._vibrancy.windowSurface()} : {},
                 strength: () => this.theming?.washOf(near).strength ?? 1,
                 layers: () => this.theming?.washOf(near).layers ?? [],
             }));
         }
-        const now = this._vibrantNow();
-        for (const surface of this._vibrant) {
+        this._syncVibrant();
+    }
+
+    // Its type now: near windows or away from them.
+    _syncVibrant() {
+        const now = this._vibrant?.[this.theming?.near ? 1 : 0] ?? null;
+        for (const surface of this._vibrant ?? []) {
             if (surface === now)
                 this._container.add_style_class_name(surface.scope);
             else
@@ -549,9 +556,10 @@ export class Dock extends EventEmitter {
         }
     }
 
-    // Its type now: near windows or away from them.
-    _vibrantNow() {
-        return this._vibrant?.[this._vibrant.length > 1 && this.theming?.near ? 1 : 0] ?? null;
+    /** A window came near it or went away (DockTheming): its glass and its type follow. */
+    syncNear() {
+        this.syncGlass();
+        this._syncVibrant();
     }
 
     _dropVibrancy() {
@@ -573,6 +581,11 @@ export class Dock extends EventEmitter {
             : Math.abs(this._container.translation_x) >= width;
         this._glass.visible = this.actor.visible && !away;
         this._glass.setShape(x, y, width, height, radius);
+        // Near windows, its glass is live – of them too, as the island's
+        // open – rather than of the wallpaper alone, which showed over them
+        // where they were behind it; away from them, of the wallpaper,
+        // which costs nothing.
+        this._glass.setLive(Boolean(this.theming?.near));
     }
 
     // A wheel scrolls a row of icons that keep their size along it.
