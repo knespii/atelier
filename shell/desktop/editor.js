@@ -1,8 +1,10 @@
 // Editing the desktop's widgets. The widgets come up over the windows, on a
 // dimmed screen with the grid they snap to: drag one to move it, or the
 // handle on its corner to stretch it – it takes the size it comes in that
-// is nearest (a click on the handle gives it the next one). While dragging,
-// a shadow on the grid shows where it lands. Its button removes it. More
+// is nearest (a click on the handle gives it the next one); one that may
+// have a size of its own (the lock screen's glass clock), the whole cells
+// nearest. While dragging, a shadow on the grid shows where it lands. Its
+// button removes it. More
 // are dragged out of the gallery at the bottom (a click on the clock lets
 // its faces flow out of it, to drag out one of them). Done (or Esc) puts them back
 // under the windows.
@@ -21,7 +23,9 @@ import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUti
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {gather, overflow, spread} from '../../lib/liquid.js';
-import {CLOCK_FACES, KINDS, UNIT, cellOrigin, cellsAt, cellsOf, pixelSize} from '../../lib/widgets.js';
+import {
+    CLOCK_FACES, KINDS, UNIT, cellOrigin, cellsAt, cellsOf, freeLimits, freeSize, pixelSize,
+} from '../../lib/widgets.js';
 import {setCursor} from '../core/compat.js';
 import {LiquidPaint} from '../core/liquid.js';
 
@@ -357,7 +361,7 @@ export class DesktopEditor {
         controls.add_child(remove);
         widget.add_child(controls);
         widget._editControls = controls;
-        if (this._kinds[widget.entry.kind]?.sizes.length > 1) {
+        if (this._kinds[widget.entry.kind]?.sizes.length > 1 || freeLimits(widget.entry, this._kinds)) {
             widget._editHandle = new ResizeHandle();
             widget._editHandle.connect('notify::hover', () => this._syncCursor());
             widget.add_child(widget._editHandle);
@@ -660,11 +664,16 @@ export class DesktopEditor {
 
     // Its corner with the pointer, within the sizes it comes in (and a
     // little past them); it shows what it would at the size nearest to
-    // that, which the shadow has.
+    // that, which the shadow has. One that may have a size of its own goes
+    // from its least to the grid's edges, and shows itself as big as it is
+    // (it lays itself out for any size): the shadow has the whole cells it
+    // lands on.
     _stretch(drag, dx, dy) {
         const {widget} = drag;
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const sizes = this._kinds[widget.entry.kind].sizes.map(size => pixelSize(size).map(v => v * scale));
+        const free = freeLimits(widget.entry, this._kinds);
+        const sizes = (free ? this._freeBounds(widget.entry, free) : this._kinds[widget.entry.kind].sizes)
+            .map(size => pixelSize(size).map(v => v * scale));
         const give = (value, axis) => {
             const min = Math.min(...sizes.map(size => size[axis]));
             const max = Math.max(...sizes.map(size => size[axis]));
@@ -677,9 +686,17 @@ export class DesktopEditor {
         const [width, height] = [give(drag.width + dx, 0), give(drag.height + dy, 1)];
         widget.set_size(Math.round(width), Math.round(height));
         drag.target = this._desktop.sizeFor(widget.entry.id, cellsOf(width / scale), cellsOf(height / scale));
-        if (drag.target !== widget.entry.size)
+        if (!free && drag.target !== widget.entry.size)
             widget.fill(drag.target);
-        this._showGhost(widget.entry);
+        this._showGhost({...widget.entry, size: drag.target});
+    }
+
+    // The least and the most a widget of a size of its own may be where it
+    // is: its kind's limits, and the grid's edges.
+    _freeBounds({x, y}, {min, max}) {
+        const [columns, rows] = this._desktop.grid;
+        const most = [Math.min(max[0], columns - x), Math.min(max[1], rows - y)];
+        return [freeSize(...min), freeSize(...most.map((n, axis) => Math.max(n, min[axis])))];
     }
 
     _onRelease(event) {

@@ -254,7 +254,8 @@ class AtelierClockWidget extends DesktopWidget {
      * @param {number} t
      */
     setInline(t) {
-        if (!this._stacked)
+        // (Stacked and left so: nothing moved – nothing drawn anew.)
+        if (!this._stacked || (t === 0 && this._inline === 0))
             return;
         this._inline = t;
         const width = actor => actor.get_preferred_width(-1)[1];

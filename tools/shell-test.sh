@@ -27,7 +27,9 @@ SUITE="${1:-main}"
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 ROOT="$REPO/tests/output/shell"
-MONITORS="--virtual-monitor 1920x1080"
+# (ATELIER_TEST_MONITOR=3840x2160, say, and ATELIER_TEST_SCALE=2: a part
+# that measures how fast something is drawn does it at that scale.)
+MONITORS="--virtual-monitor ${ATELIER_TEST_MONITOR:-1920x1080}"
 if [ "$SUITE" = two-monitors ]; then
     # The main monitor and a smaller one beside it.
     ROOT="$REPO/tests/output/shell-two-monitors"
@@ -186,7 +188,7 @@ env -u XDG_SESSION_ID -u DISPLAY -u WAYLAND_SOCKET -u GNOME_KEYRING_CONTROL -u S
     dbus-run-session -- timeout --kill-after=5 "${ATELIER_TEST_TIMEOUT:-1500}" \
     gnome-shell --headless $MONITORS $NO_X11 $MODE \
         --wayland-display=atelier-test-0 --force-animations \
-        --automation-script="$REPO/tools/shell-test.js" \
+        --automation-script="$REPO/tools/shell-test-entry.js" \
     > "$ROOT/shell.log" 2>&1 || status=$?
 
 echo "gnome-shell exited with status $status (log: $ROOT/shell.log)"

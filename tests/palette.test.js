@@ -1,6 +1,6 @@
 import {
-    PRESETS, VARIANTS, buildPalette, contrastRatio, extractSwatches, hexToOklch, hexToRgb,
-    nearestAccent, oklabToRgbUnclamped, oklchToRgb, pickSource, rgbToHex, rgbToOklab,
+    PRESETS, VARIANTS, buildPalette, contrastRatio, extractSwatches, hexToOklch, hexToRgb, luminance,
+    nearestAccent, oklabToRgbUnclamped, oklchToRgb, pickSource, rgbLuminance, rgbToHex, rgbToOklab,
 } from '../lib/palette.js';
 import {assert, assertEqual} from './util.js';
 
@@ -108,4 +108,10 @@ export function testNearestAccent() {
     assertEqual(nearestAccent('#e62d42'), 'red');
     assertEqual(nearestAccent('#3a944a'), 'green');
     assertEqual(nearestAccent('#777777'), 'slate');
+}
+
+export function testPixelLuminance() {
+    // A picture's pixels, many at a time: as luminance() has their colours.
+    for (const rgb of [[0, 0, 0], [255, 255, 255], [10, 128, 250], [1, 2, 3], [128.4, -3, 300], [254.6, 0.5, 77]])
+        assertEqual(rgbLuminance(rgb), luminance(rgbToHex(rgb)), `${rgb}`);
 }

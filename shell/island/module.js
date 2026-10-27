@@ -18,6 +18,8 @@ import {effectiveWallpaper} from '../../lib/profiles.js';
 import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
 import {GlassSurface} from '../core/glass.js';
+import {GlassLook} from '../core/glassMaterial.js';
+import {layersOf} from '../core/vibrancy.js';
 import {switcherWidth} from '../switcherContent.js';
 import {CalendarBridge} from './calendar.js';
 import {GlancePage} from './glance.js';
@@ -35,6 +37,23 @@ const GLANCE_DELAY = 300;
 const GLANCE_HIDE_DELAY = 250;
 // How far down the screen the island may grow, for its glass.
 const GLASS_REACH = 0.9;
+// What a page open in the island covers, about (the glance), logical
+// pixels: where its type has to read.
+const PAGE_REGION = [400, 300];
+
+// Whether a window shows anywhere in a rectangle of the stage (on the
+// workspace shown).
+function windowsUnder({x, y, width, height}) {
+    const workspace = global.workspace_manager.get_active_workspace();
+    return global.get_window_actors().some(actor => {
+        const window = actor.meta_window;
+        if (!window || window.minimized || !window.showing_on_its_workspace() ||
+            !window.located_on_workspace(workspace) || window.get_window_type() === Meta.WindowType.DESKTOP)
+            return false;
+        const frame = window.get_frame_rect();
+        return frame.x < x + width && frame.x + frame.width > x && frame.y < y + height && frame.y + frame.height > y;
+    });
+}
 
 // Keeps the island's place in the center of the top bar.
 const IslandSlot = GObject.registerClass(
@@ -75,6 +94,8 @@ export class IslandModule {
         this._ear = 0;
         this._sheet = null;
         this._liquid = null;
+        this._partner = null;
+        this._vibrant = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -173,8 +194,9 @@ export class IslandModule {
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this.togglePowerMenu());
 
-        // What it is made of and its shape follow the top bar's look; its
-        // glass and the ears of a notch follow it every frame it changes.
+        // What it is made of and its shape follow the top bar's look (and
+        // the glass's variant: off, it is black); its glass and the ears of
+        // a notch follow it every frame it changes.
         this._barSettings = this._settings.get_child('bar');
         this._barSettings.connectObject(
             'changed::surface', () => this._syncLook(),
@@ -182,6 +204,8 @@ export class IslandModule {
             'changed::style', () => this._syncLook(),
             'changed::compact', () => this._syncLook(),
             this);
+        this._glassLook = new GlassLook(this._settings);
+        this._glassLook.connectObject('changed', () => this._syncLook(), this);
         this._island.connectObject(
             'notify::x', () => this._syncShape(),
             'notify::y', () => this._syncShape(),
@@ -202,6 +226,10 @@ export class IslandModule {
         Main.wm.removeKeybinding('atelier-power-menu');
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
+        this._glassLook?.disconnectObject(this);
+        this._glassLook?.destroy();
+        this._glassLook = null;
+        this._dropVibrancy();
         this._sheet?.destroy();
         this._sheet = null;
         this._liquid?.destroy();
@@ -310,8 +338,11 @@ export class IslandModule {
             return null;
         // The drop is of the island's stuff, and the island is drawn along
         // with it, so they flow into each other.
-        const glass = this._barSettings.get_string('surface') === 'glass';
-        this._liquid = new GlassSurface({solid: !glass});
+        const glass = this._glassy();
+        // (The same glass as all of it.)
+        this._liquid = new GlassSurface({solid: !glass, look: this._glassLook.look, light: this._glassLook.light,
+            yields: true});
+        this._liquid.setPartner(this._partner);
         Main.layoutManager.uiGroup.insert_child_below(this._liquid, island);
         const sheet = new LiquidSheet(island, this._liquid, form);
         Main.layoutManager.uiGroup.insert_child_above(sheet, this._liquid);
@@ -429,10 +460,15 @@ export class IslandModule {
         if (top?.get_parent() !== group)
             return;
         const children = group.get_children();
-        [this._glass, this._liquid, this._sheet, ...this._ears?.actors ?? [], this._island]
+        const ours = [this._glass, this._liquid, this._sheet, ...this._ears?.actors ?? [], this._island]
             .filter(actor => actor?.get_parent() === group)
-            .sort((a, b) => children.indexOf(a) - children.indexOf(b))
-            .forEach(actor => group.set_child_below_sibling(actor, top));
+            .sort((a, b) => children.indexOf(a) - children.indexOf(b));
+        // (Already there, right under the top windows: left as it is –
+        // restacked, all of it is drawn again, a frame of its own.)
+        const at = children.indexOf(top);
+        if (ours.every((actor, i) => children[at - ours.length + i] === actor))
+            return;
+        ours.forEach(actor => group.set_child_below_sibling(actor, top));
     }
 
     /**
@@ -497,12 +533,53 @@ export class IslandModule {
         this._island.setAnchor(Math.round(x + slotWidth / 2), Math.round(panelY + (panelHeight - height) / 2));
         if (restyled)
             this._island.relayout();
+        // (Where it rests may have moved: its type follows.)
+        this._vibrant?.all.forEach(surface => surface.update());
+    }
+
+    // Of glass, as the top bar has it – unless the glass is off.
+    _glassy() {
+        return this._barSettings.get_string('surface') === 'glass' && this._glassLook.glass;
+    }
+
+    /**
+     * The shape of the glass the island lies in, which its own glass is one
+     * with (the bar's one island), as GlassSurface.setPartner() takes it.
+     *
+     * @param {number[]|null} shape - on the stage, null for none
+     */
+    setGlassPartner(shape) {
+        if (JSON.stringify(shape) === JSON.stringify(this._partner))
+            return;
+        // (One glass with it or not: its type with it or not.)
+        const joined = Boolean(shape) !== Boolean(this._partner);
+        this._partner = shape;
+        this._glass?.setPartner(shape);
+        this._liquid?.setPartner(shape);
+        if (joined)
+            this._vibrant?.rest.update();
+    }
+
+    /**
+     * @returns {number[]|null} the island's shape on the stage, as its glass
+     *   has it ([x, y, width, height, radius, bottomRadius, ear]); null
+     *   while it isn't shown
+     */
+    get glassShape() {
+        const island = this._island;
+        if (this._stopped || !island?.visible || island.opacity === 0)
+            return null;
+        const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const node = island.get_theme_node();
+        // (Moved by its translation as it comes out.)
+        return [island.x, island.y + island.translation_y, island.width, island.height,
+            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
     }
 
     _syncLook() {
         const island = this._island;
         const notch = this._barSettings.get_string('island-shape') === 'notch';
-        const glass = this._barSettings.get_string('surface') === 'glass';
+        const glass = this._glassy();
         const style = this._barSettings.get_string('style');
         // A notch curves into the top edge – unless it is part of one island
         // with the whole bar, whose shape has the ears then.
@@ -515,7 +592,9 @@ export class IslandModule {
             island.remove_style_class_name('atelier-island-notch');
 
         if (glass && !this._glass) {
-            this._glass = new GlassSurface({reach: GLASS_REACH});
+            this._glass = new GlassSurface({reach: GLASS_REACH, look: this._glassLook.look, light: this._glassLook.light,
+                yields: true});
+            this._glass.setPartner(this._partner);
             Main.layoutManager.uiGroup.insert_child_below(this._glass, island);
             island.add_style_class_name('atelier-island-glass');
         } else if (!glass && this._glass) {
@@ -523,6 +602,11 @@ export class IslandModule {
             this._glass.destroy();
             this._glass = null;
         }
+        // (Regular or clear, light or smoky.)
+        this._glass?.setLook(this._glassLook.look, this._glassLook.light);
+        if (glass)
+            this._liquid?.setLook(this._glassLook.look, this._glassLook.light);
+        this._syncVibrancy();
         // Black ears; glass draws its own.
         const ears = this._ear > 0 && !glass;
         if (ears && !this._ears) {
@@ -565,6 +649,98 @@ export class IslandModule {
         if (this._ears) {
             this._ears.show(shown, island.opacity);
             this._ears.setShape(island.x, y, island.width, ear);
+        }
+    }
+
+    // Of glass, its type and icons follow what is behind the glass
+    // (shell/core/vibrancy.js): at rest, the wallpaper round its place in
+    // the bar; open, the wallpaper under the page – or windows: its glass
+    // is live then, and what they show isn't read back from the screen;
+    // they are taken to be the palette's surface, in the style apps are in.
+    // (GNOME's own controls – the control centre – and a sheet's form are
+    // styled for a dark surface only: their light type stays as it is.)
+    _syncVibrancy() {
+        const vibrancy = this._glass ? this._modules?.get('vibrancy') : null;
+        if (!vibrancy) {
+            this._dropVibrancy();
+            return;
+        }
+        if (this._vibrant) {
+            this._vibrant.all.forEach(surface => surface.update());
+            return;
+        }
+        const glass = {
+            roots: ['.atelier-island'],
+            layers: () => layersOf(this._island),
+        };
+        const rest = () => {
+            const rect = this._island?.restRect();
+            return rect ? {x: rect[0], y: rect[1], width: rect[2], height: rect[3]} : null;
+        };
+        const surfaces = {
+            // (At rest in the bar's one island, one glass with it.)
+            rest: vibrancy.surface({...glass, id: 'island', inks: 'island', rect: rest,
+                oneWith: () => (this._partner ? 'bar' : null)}),
+            open: vibrancy.surface({...glass, id: 'island-pages', inks: 'pages', rect: () => this._pageRegion()}),
+            windows: vibrancy.surface({...glass, id: 'island-windows', inks: 'pages',
+                behind: () => vibrancy.windowSurface()}),
+        };
+        this._vibrant = {...surfaces, all: Object.values(surfaces)};
+        this._island.add_style_class_name(this._vibrant.rest.scope);
+        // Opened, as what is behind the page has it (not every frame it grows).
+        this._island.connectObject('page-opened', () => this._syncPageInk(), this._vibrant);
+        Main.overview.connectObject(
+            'showing', () => this._syncPageInk(),
+            'hidden', () => this._syncPageInk(),
+            this._vibrant);
+        this._syncPageInk();
+    }
+
+    // Where a page opens, about: under the island at rest, as wide and as
+    // tall as the glance.
+    _pageRegion() {
+        const rect = this._island?.restRect();
+        if (!rect)
+            return null;
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const [width, height] = PAGE_REGION.map(v => v * scale);
+        return {x: Math.round(rect[0] + rect[2] / 2 - width / 2), y: rect[1], width, height};
+    }
+
+    // The page open is over windows (live glass) or over the wallpaper:
+    // its type as it reads on either. (The overview's glass is of the
+    // wallpaper.)
+    _syncPageInk() {
+        const island = this._island;
+        const vibrant = this._vibrant;
+        // (Not once the shell has taken its UI down as it quits.)
+        if (!vibrant || !island || this._stopped)
+            return;
+        const page = island.page;
+        let overWindows = false;
+        if (page && !Main.overview.visible) {
+            const [, width] = page.get_preferred_width(-1);
+            const [, height] = page.get_preferred_height(width);
+            const rect = island.restRect();
+            overWindows = rect !== null && Number.isFinite(width + height) && windowsUnder({
+                x: rect[0] + rect[2] / 2 - width / 2, y: rect[1], width, height,
+            });
+        }
+        const [on, off] = overWindows ? [vibrant.windows, vibrant.open] : [vibrant.open, vibrant.windows];
+        island.remove_style_class_name(off.scope);
+        island.add_style_class_name(on.scope);
+    }
+
+    _dropVibrancy() {
+        const vibrant = this._vibrant;
+        if (!vibrant)
+            return;
+        this._vibrant = null;
+        this._island?.disconnectObject(vibrant);
+        Main.overview.disconnectObject(vibrant);
+        for (const surface of vibrant.all) {
+            this._island?.remove_style_class_name(surface.scope);
+            surface.destroy();
         }
     }
 

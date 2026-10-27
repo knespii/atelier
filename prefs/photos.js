@@ -13,7 +13,7 @@ import Gtk from 'gi://Gtk';
 import {PhotoGallery} from '../lib/gallery.js';
 import {INTERVALS, cleanSelection, intervalOf, toggleSelection} from '../lib/photos.js';
 import {keepWidgets} from '../lib/profiles.js';
-import {SIZE_NAMES, parseLayout, serializeLayout} from '../lib/widgets.js';
+import {parseLayout, serializeLayout, sizeName} from '../lib/widgets.js';
 import {naturalWidth, toast} from './widgets.js';
 
 Gio._promisify(Gtk.FileDialog.prototype, 'open_multiple', 'open_multiple_finish');
@@ -229,7 +229,7 @@ class AtelierPhotoWidgetsGroup extends Adw.PreferencesGroup {
             const photos = cleanSelection(entry.photos, known);
             const interval = INTERVALS.find(([seconds]) => seconds === intervalOf(entry))?.[1] ?? `${intervalOf(entry)} s`;
             const row = new Adw.ActionRow({
-                title: `Photo ${entries.length > 1 ? `${i + 1} ` : ''}(${SIZE_NAMES[entry.size] ?? entry.size})`,
+                title: `Photo ${entries.length > 1 ? `${i + 1} ` : ''}(${sizeName(entry.size)})`,
                 subtitle: photos.length === 0 ? 'No photos picked: the picture below'
                     : `${photos.length} photo${photos.length === 1 ? '' : 's'}, each for ${interval}`,
             });

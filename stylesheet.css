@@ -1108,22 +1108,18 @@
 /* What another profile (its palette, light or dark, glass or not) shows
    otherwise fades over. (Not the island: it has its own way of moving.) */
 .atelier-solid-fill,
-.atelier-glass-tint,
 .atelier-widget,
 .atelier-dock {
   transition-duration: 700ms;
 }
 
-/* Glass: the blurred wallpaper, a little darker */
+/* Glass: the wallpaper under its material (shell/core/glassMaterial.js),
+   neutral, lighter or darker as GNOME's style has it. */
 
 .atelier-glass {
   background-color: transparent;
   border: none;
   box-shadow: none;
-}
-
-.atelier-glass-tint {
-  background-color: rgba(12, 12, 14, 0.38);
 }
 
 .atelier-island.atelier-island-glass {
@@ -1536,7 +1532,7 @@
   -atelier-ring-color: #ff7b72;
 }
 
-/* The lock screen's password popup, in the middle: black as the island */
+/* The lock screen's password popup, in the middle: of glass as the island, or black */
 
 /* (No spacing: GNOME's caps lock warning is there even while it is 0 high.) */
 .atelier-lock-sheet {
@@ -1547,6 +1543,12 @@
   background-color: #000000;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   color: #f4f4f5;
+}
+
+/* (Of glass, as the island: the glass is drawn under it, with its shadow.) */
+.atelier-lock-sheet.atelier-lock-sheet-glass {
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .atelier-lock-avatar {
@@ -1820,15 +1822,17 @@
   spacing: 6px;
 }
 
-/* Modern: dark cards; of glass, the blurred wallpaper under a dark tint */
+/* Modern: dark cards; of glass, the glass alone, no tint over it */
 .atelier-desktop-modern .atelier-widget {
   background-color: rgba(18, 18, 22, 0.94);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
 .atelier-desktop-modern.atelier-desktop-glassy .atelier-widget {
-  background-color: rgba(14, 14, 18, 0.38);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  background-color: rgba(14, 14, 18, 0);
+  /* (The glass casts its own, outside it: a card's would show through it,
+     darker than the rest of the glass.) */
+  box-shadow: none;
 }
 
 /* Analogue: paper */
@@ -2800,8 +2804,11 @@
 /* ── Dock: indicators and badges (B3) ── */
 
 /* The running marks of the other styles, drawn where the dot is: a
-   little off the icon's edge towards the dock's edge. */
+   little off the icon's edge towards the dock's edge, white unless the
+   app's or the settings' colour is asked for (on glass, as vibrancy has it:
+   shell/core/vibrancy.js). */
 .atelier-dock .atelier-dock-indicator {
+  color: #ffffff;
   offset-y: 2px;
 }
 

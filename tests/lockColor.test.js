@@ -1,8 +1,8 @@
-import {blend, contrastLc, minimumLc} from '../lib/apca.js';
+import {apcaY, blend, contrastLc, minimumLc} from '../lib/apca.js';
 import {
     CUBE, TINT, clockColors, colorCube, regionPixels, tenths, typeColors, wallpaperColors,
 } from '../lib/lockColor.js';
-import {extractSwatches, hexToOklch, hexToRgb, rgbToOklab} from '../lib/palette.js';
+import {extractSwatches, hexToOklch, hexToRgb, rgbToHex, rgbToOklab} from '../lib/palette.js';
 import {assert, assertEqual} from './util.js';
 
 // The pixels of a picture 96 × 60 (as the lock screen samples one): each
@@ -54,6 +54,13 @@ export function testTenths() {
     assertEqual(tenths(grays), {dark: '#141414', middle: '#646464', light: '#b4b4b4'},
         'a tenth up from the darkest, half way, a tenth down from the lightest');
     assertEqual(tenths([]), null);
+    // Many as light as others (a picture of a few colours): as the pixels
+    // sorted by their Y (a stable sort) have them.
+    const few = picture([['#101418', 0.3], ['#5a6472', 0.3], ['#c8ccd2', 0.3], [RED, 0.1]], 600)
+        .map(rgb => rgb.map(v => v - v % 16));
+    const sorted = few.map(rgb => ({rgb, y: apcaY(rgb)})).sort((a, b) => a.y - b.y);
+    const at = share => rgbToHex(sorted[Math.floor(share * sorted.length)].rgb);
+    assertEqual(tenths(few), {dark: at(0.1), middle: at(0.5), light: at(0.9)}, 'as sorted');
 }
 
 export function testColorCube() {

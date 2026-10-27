@@ -1,7 +1,15 @@
+import GLib from 'gi://GLib';
+
+import {bundledFile, fontAt, systemFontFile} from '../lib/glyphOutlines.js';
 import {contoursOf, dotsMap, heightMap, inkOf, profileOf, stretchGlyph, stretchOutline, strokeOf} from '../lib/glyphStretch.js';
+import {STRETCH} from '../lib/lockLook.js';
+import {TYPEFACES, styleFor, typefaceFor, variationsFor} from '../lib/lockType.js';
+import {crookedness, crossings, shapeOf, stemsAstray, strokeChange} from './glyphChecks.js';
 import {assert, assertEqual} from './util.js';
 
 const STRETCHES = [1.6, 2.2, 2.8];
+// From a little taller to the tallest the clock stretches.
+const TALL = [1.5, 2, 2.5, 3, 4, 5, STRETCH.max];
 
 // Outlines as HarfBuzz draws them (y up): a rectangle, a circle (four
 // arcs, the other way round for a hole), a ring.
@@ -210,4 +218,123 @@ export function testQuadraticCurves() {
 export function testStroke() {
     assert(near(strokeOf(ring(500, 500, 400, 300)), 100, 2), `a ring's: its thickness (${strokeOf(ring(500, 500, 400, 300))})`);
     assertEqual(strokeOf([]), 0);
+}
+
+// The fonts the glass clock draws its figures in: Inter as the glass face
+// sets it (its weight and width, a large clock's optical size) and heavy,
+// Roboto Flex, and where the system has them the shell's Cantarell and the
+// rounded and serif typefaces' first family.
+function clockFonts() {
+    const {weight, width} = styleFor(typefaceFor('inter'), 'glass');
+    const typeface = id => TYPEFACES.find(t => t.id === id);
+    const installed = id => typeface(id).families.map(family => [family, systemFontFile(family, weight)])
+        .find(([, path]) => path) ?? [id, null];
+    return [
+        ['Inter', bundledFile('Inter.ttf'), typeface('inter').axes, weight],
+        ['Inter', bundledFile('Inter.ttf'), typeface('inter').axes, 800],
+        ['Roboto Flex', bundledFile('RobotoFlex.ttf'), typeface('flex').axes, weight],
+        ['Cantarell', systemFontFile('Cantarell'), null, weight],
+        [...installed('rounded'), null, weight],
+        [...installed('serif'), null, weight],
+    ].filter(([, path]) => path).map(([name, path, fontAxes, fontWeight]) => {
+        const {variations} = variationsFor(fontAxes, {weight: fontWeight, width, size: 400});
+        return {name: `${name} ${variations}`, font: fontAt(path, variations)};
+    });
+}
+
+const glyphOf = (font, char) => font.shape(char, ['tnum', 'case']).glyphs[0].glyph;
+
+export function testFiguresStayAsDrawn() {
+    // Every figure, every height: no curve bent anew (no inflection, no
+    // corner it hadn't), the outline not crossing itself, lines straight,
+    // stems upright where they were, every figure exactly as tall, its
+    // horizontal strokes as thick.
+    for (const {name, font} of clockFonts()) {
+        const {top, bottom, stroke} = font.figures;
+        for (const char of '0123456789:') {
+            const glyph = glyphOf(font, char);
+            const {commands, ink} = font.outline(glyph);
+            const shape = shapeOf(commands);
+            const crossed = crossings(commands);
+            for (const stretch of TALL) {
+                const out = font.stretched(glyph, stretch);
+                const what = `${name} "${char}" × ${stretch}`;
+                const after = shapeOf(out);
+                assert(after.length === shape.length &&
+                    after.every((c, i) => c.inflections <= shape[i].inflections && c.corners <= shape[i].corners),
+                `${what}: nothing bent (${JSON.stringify(shape)} → ${JSON.stringify(after)})`);
+                assert(crossings(out) <= crossed, `${what}: crossing itself no more than it did`);
+                const lines = crookedness(commands, out);
+                assert(lines !== null && lines.worst < 1e-9, `${what}: its slanted lines straight (${lines?.worst})`);
+                assertEqual(stemsAstray(commands, out), 0, `${what}: its stems upright where they were`);
+                const stretched = inkOf(out);
+                assert(stretched.x1 === ink.x1 && stretched.x2 === ink.x2, `${what}: as wide`);
+                if (char === ':')
+                    continue;
+                assert(near(stretched.y2, ink.y2 + (stretch - 1) * (top - bottom), 1e-6) && near(stretched.y1, ink.y1, 1e-6),
+                    `${what}: its foot where it was, its top up by all of the extra height (${ink.y2} → ${stretched.y2})`);
+                const change = strokeChange(commands, out, 1.5 * stroke);
+                assert(change < 0.002 * stroke, `${what}: its horizontal strokes as thick (${change} of ${stroke})`);
+            }
+        }
+    }
+}
+
+export function testTurnsMoveAsTheyAre() {
+    // A "0": its top half moved up as it is, its bottom half where it was,
+    // straight upright sides between.
+    const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const glyph = glyphOf(font, '0');
+    const {commands} = font.outline(glyph);
+    const {top, bottom} = font.figures;
+    const nodes = list => list.filter(([op]) => op !== 'Z').map(v => v.slice(-2));
+    const middle = (inkOf(commands).y1 + inkOf(commands).y2) / 2;
+    for (const stretch of [1.5, 3, 6]) {
+        const out = nodes(font.stretched(glyph, stretch));
+        const extra = (stretch - 1) * (top - bottom);
+        for (const [x, y] of nodes(commands)) {
+            const to = y > middle + 1 ? y + extra : y < middle - 1 ? y : null;
+            if (to !== null)
+                assert(out.some(([ox, oy]) => ox === x && near(oy, to, 1e-6)), `× ${stretch}: ${x}, ${y} to ${to}`);
+        }
+        // (The curves measured finely, not exactly: to a hundredth.)
+        const sides = runs(font.stretched(glyph, stretch), 'y', middle + extra / 2);
+        const before = runs(commands, 'y', middle);
+        assert(sides.length === 2 && sides.every((run, i) => near(run[0], before[i][0], 0.01) && near(run[1], before[i][1], 0.01)),
+            `× ${stretch}: its sides as thick, upright (${sides}, ${before})`);
+    }
+}
+
+export function testBarsKeepTheirPlace() {
+    // A "4": its crossbar as thick, and as far up the height that grows
+    // as it was drawn (a typeface's own tall figures have it so).
+    const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const glyph = glyphOf(font, '4');
+    const {commands, ink} = font.outline(glyph);
+    const height = font.figures.top - font.figures.bottom;
+    // (Right of the stem: the crossbar alone.)
+    const x = ink.x2 - 50;
+    const [[foot, head]] = runs(commands, 'x', x);
+    for (const stretch of TALL) {
+        const [bar] = runs(font.stretched(glyph, stretch), 'x', x);
+        assert(near(bar[1] - bar[0], head - foot, 1e-6), `× ${stretch}: as thick (${bar})`);
+        const [was, is] = [foot / (height - (head - foot)), bar[0] / (stretch * height - (head - foot))];
+        assert(near(is, was, 0.01), `× ${stretch}: as far up (${was} → ${is})`);
+    }
+}
+
+export function testStretchIsQuick() {
+    // Once a glyph's profile is made, stretching it again (a frame of a
+    // stretch being dragged) takes a few hundredths of a millisecond.
+    const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const glyphs = [...'0123456789:'].map(char => glyphOf(font, char));
+    glyphs.forEach(glyph => font.stretched(glyph, 1));
+    const started = GLib.get_monotonic_time();
+    let count = 0;
+    for (let stretch = 1.01; stretch <= STRETCH.max; stretch += 0.05) {
+        glyphs.forEach(glyph => font.stretched(glyph, stretch));
+        count += glyphs.length;
+    }
+    const each = (GLib.get_monotonic_time() - started) / 1000 / count;
+    assert(each < 0.5, `well under a millisecond a glyph (${each.toFixed(4)} ms)`);
 }

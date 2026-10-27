@@ -22,6 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {
     dockRect, dropIndex, fitIconSize, isHorizontal, maxLength, strutRect,
 } from '../../lib/dockGeometry.js';
+import {edgeReach} from '../../lib/glassLook.js';
 import {GlassSurface} from '../core/glass.js';
 import {scrollDock} from './actions.js';
 import {DockHider} from './hider.js';
@@ -36,7 +37,7 @@ import {appWindows, windowOptions} from './windows.js';
 
 const MARGIN = 8; // between the dock and its edge, logical pixels
 // How much of a monitor's width the glass of a dock at its side may take,
-// logical pixels.
+// logical pixels (and as much again as its shadow reaches past it).
 const SIDE_GLASS = 160;
 
 // Settings the dock lays its apps out again for.
@@ -49,13 +50,17 @@ export class Dock extends EventEmitter {
      * @param {object} params
      * @param {Gio.Settings} params.settings - the dock's
      * @param {boolean} params.glass - of glass rather than dark
+     * @param {object|null} [params.look] - the glass's material (LOOK's)
+     * @param {boolean} [params.light] - GNOME's style is light: light glass
      * @param {number} params.monitorIndex - the monitor it is on
      * @param {boolean} params.main - the main dock (with the pill and the
      *   shortcuts), not one on another monitor
      * @param {object} params.services - what all docks share: {windows,
      *   badges, locations, spread, hotkeys, musicPill}
+     * @param {VibrancyModule|null} [params.vibrancy] - what colours type
+     *   on glass (shell/core/vibrancy.js)
      */
-    constructor({settings, glass, monitorIndex, main, services}) {
+    constructor({settings, glass, look = null, light = false, monitorIndex, main, services, vibrancy = null}) {
         super();
         this._settings = settings;
         this._services = services;
@@ -68,6 +73,8 @@ export class Dock extends EventEmitter {
         this._items = new Map(); // app id → DockItem
         this._running = []; // ids of running apps not pinned, in the order they came
         this._rect = null;
+        this._vibrancy = null;
+        this._vibrant = null;
         this._showApps = null;
         this._timers = new Timers();
         this._ctx = {dock: this, settings, services, side: this._side};
@@ -123,9 +130,10 @@ export class Dock extends EventEmitter {
         if (glass) {
             const monitor = this.monitor;
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-            const reach = horizontal || !monitor ? 0.25 : Math.min(1, SIDE_GLASS * scale / monitor.width);
-            // (Grey: the dock's colour is its own, not the wallpaper's.)
-            this._glass = new GlassSurface({monitorIndex, side: this._side, reach, neutral: true});
+            const reach = horizontal || !monitor ? 0.25
+                : Math.min(1, (SIDE_GLASS + edgeReach(true)) * scale / monitor.width);
+            // (Of the wallpaper's colours, as the island's glass.)
+            this._glass = new GlassSurface({monitorIndex, side: this._side, reach, look, light});
             this._glass.add_style_class_name('atelier-dock-glass');
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
             this._container.add_style_class_name('atelier-dock-glassy');
@@ -137,6 +145,7 @@ export class Dock extends EventEmitter {
             this.actor.connect('notify::allocation', () => this.syncGlass());
             // (Away with the dock, as when a window is full screen.)
             this.actor.connect('notify::visible', () => this.syncGlass());
+            this._vibrancy = vibrancy;
         }
 
         const align = horizontal ? 'y_align' : 'x_align';
@@ -448,6 +457,7 @@ export class Dock extends EventEmitter {
         }
         this.syncGlass();
         this.theming.sync();
+        this.updateVibrancy();
         this.emit('placed', rect);
     }
 
@@ -484,12 +494,72 @@ export class Dock extends EventEmitter {
         return true;
     }
 
+    /** @returns {boolean} whether it is of glass */
+    get glass() {
+        return Boolean(this._glass);
+    }
+
+    /**
+     * @param {object|null} look - another material for its glass (LOOK's)
+     * @param {boolean} light - GNOME's style is light: light glass
+     */
+    setGlassLook(look, light) {
+        this._glass?.setLook(look, light);
+    }
+
     /** @param {number} value - how much of its glass shows, 0–1 (eased) */
     set glassOpacity(value) {
         const opacity = Math.round(Math.min(1, Math.max(0, value)) * 255);
         if (!this._glass || this._glass.opacity === opacity && !this._glass.get_transition('opacity'))
             return;
         this._glass.ease({opacity, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+    }
+
+    /**
+     * Of glass, its marks, separators, highlights and Show Applications
+     * icon follow what is behind the glass (shell/core/vibrancy.js), where
+     * it rests shown, under its wash – placed anew, or its wash changed.
+     * More opaque near windows (DYNAMIC), it
+     * has its type for that in a class of its own, put on as windows come
+     * and go: no stylesheet is made anew for them.
+     */
+    updateVibrancy() {
+        if (!this._vibrancy || !this._glass || !this.theming)
+            return;
+        const states = this._settings.get_string('transparency-mode') === 'DYNAMIC' ? [false, true] : [undefined];
+        if (this._vibrant?.length === states.length) {
+            this._vibrant.forEach(surface => surface.update());
+        } else {
+            this._dropVibrancy();
+            this._vibrant = states.map(near => this._vibrancy.surface({
+                id: `dock-${this._monitorIndex}${near ? '-near' : ''}`,
+                inks: 'dock',
+                roots: ['.atelier-dock'],
+                rect: () => this._rect,
+                strength: () => this.theming?.washOf(near).strength ?? 1,
+                layers: () => this.theming?.washOf(near).layers ?? [],
+            }));
+        }
+        const now = this._vibrantNow();
+        for (const surface of this._vibrant) {
+            if (surface === now)
+                this._container.add_style_class_name(surface.scope);
+            else
+                this._container.remove_style_class_name(surface.scope);
+        }
+    }
+
+    // Its type now: near windows or away from them.
+    _vibrantNow() {
+        return this._vibrant?.[this._vibrant.length > 1 && this.theming?.near ? 1 : 0] ?? null;
+    }
+
+    _dropVibrancy() {
+        for (const surface of this._vibrant ?? []) {
+            this._container?.remove_style_class_name(surface.scope);
+            surface.destroy();
+        }
+        this._vibrant = null;
     }
 
     syncGlass() {
@@ -601,6 +671,7 @@ export class Dock extends EventEmitter {
         this.hider.destroy();
         this.intellihide.destroy();
         this.theming.destroy();
+        this._dropVibrancy();
         AppFavorites.getAppFavorites().disconnectObject(this);
         Shell.AppSystem.get_default().disconnectObject(this);
         this._services.windows.disconnectObject(this);

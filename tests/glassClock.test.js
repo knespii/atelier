@@ -3,7 +3,9 @@ import {
     learn, lineOf, opticalSize, setLine, unlearnt,
 } from '../lib/glassClock.js';
 import {bundledFile, fontAt, systemFontFile} from '../lib/glyphOutlines.js';
+import {STRETCH} from '../lib/lockLook.js';
 import {styleFor, typefaceFor} from '../lib/lockType.js';
+import {pixelSize} from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
 const near = (a, b, tolerance = 1e-9) => Math.abs(a - b) <= tolerance;
@@ -83,17 +85,41 @@ export function testOpticalSize() {
     assertEqual(opticalSize('tall'), opticalSize('large'), 'as wide as a large one');
     assert(near(opticalSize('square') / opticalSize('large'), 180 / 372, 0.01), 'a square one: in proportion');
     assert(opticalSize('large', 0.9) > opticalSize('large'), 'drawn narrower, larger');
+    assertEqual(opticalSize('8x15'), opticalSize('large'), 'a size of its own: as wide as it is');
+    assert(near(opticalSize('12x6') / opticalSize('large'), 564 / 372, 0.01), 'wider: larger');
 }
 
 export function testFitSize() {
     const font = fontAt(bundledFile('Inter.ttf'), 'wght=600,opsz=32');
+    const lineAt = s => setLine(font, SAMPLE).advance * s / font.upem * 0.9;
     for (const width of [180, 336, 500]) {
         const size = fitSize(font, width, 0.9);
-        const lineAt = s => setLine(font, SAMPLE).advance * s / font.upem * 0.9;
         assert(lineAt(size) <= width * FILL && lineAt(size + 1) > width * FILL,
             `${width} px: as large as fits (${size} px, ${lineAt(size).toFixed(1)} px wide)`);
     }
     assertEqual(fitSize(font, 1), 8, 'never smaller than 8 px');
+    // In a box too flat for them, as tall as it is (and narrower than it).
+    const {top, bottom} = font.figures;
+    const figuresAt = s => (top - bottom) * s / font.upem;
+    assertEqual(fitSize(font, 564, 0.9, 1000), fitSize(font, 564, 0.9), 'room enough: by the width');
+    const flat = fitSize(font, 564, 0.9, 100);
+    assert(figuresAt(flat) <= 100 && figuresAt(flat + 1) > 100 && lineAt(flat) < 564 * FILL,
+        `a box 100 px high: figures as tall as fits (${flat} px, ${figuresAt(flat).toFixed(1)} px tall)`);
+}
+
+export function testTallestClockFilled() {
+    // The tallest of the clock's named sizes (8 by 12 cells, its face as
+    // big on the lock screen, the date line some 26 px over the digits)
+    // stretches them less than the most they may: its box is what limits
+    // them, in Inter and in Roboto Flex.
+    const [width, height] = pixelSize('tall');
+    for (const id of ['inter', 'flex']) {
+        const typeface = typefaceFor(id);
+        const {font, scaleX} = glassInstance(typeface, styleFor(typeface, 'glass'), {size: 'tall'});
+        const ink = (font.figures.top - font.figures.bottom) * fitSize(font, width, scaleX) / font.upem;
+        const stretch = (height - 26) / ink;
+        assert(stretch > 4 && stretch < STRETCH.max, `${id}: ×${stretch.toFixed(2)}, of ×${STRETCH.max} at most`);
+    }
 }
 
 export function testTabularWithout() {

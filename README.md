@@ -110,14 +110,17 @@ profile called **Original**, so there is always a way back.
   the state. Of glass, the open island is live: the windows under it show
   through, blurred.
 - **Lock screen**: the wallpaper stays sharp until the password is asked.
-  Then it turns to glass – blurred as GNOME blurs it, but its colours kept,
+  Then it fades into glass – blurred as GNOME blurs it, but its colours kept,
   a little richer, darker only towards the corners – the island comes out of the top edge with a padlock in a
   ring of ticks, and a popup of its own – the user's picture and name over
   the field, Enter sends it – spreads out of a drop in the middle of the
-  screen, while a clock of hours over minutes puts its minutes beside its
-  hours, as a digital clock, and goes up over the popup if it is still in
-  its way. A wave runs round the ring while GNOME checks the password (or a
-  face, with a PAM module such as Howdy), the ring shows faintly while a
+  screen. Meanwhile the clocks go, wholly (with the depth effect, together
+  with what stands in front of them, as one picture), and come back so as
+  the prompt goes; the other widgets dim. With the popup, a clock of hours
+  over minutes stays instead: it puts its minutes beside its hours, as a
+  digital clock, and goes up over the popup if it is still in its way. A
+  wave runs round the ring while GNOME checks the password (or a face,
+  with a PAM module such as Howdy), the ring shows faintly while a
   fingerprint reader waits, on a failure the ring cramps up in red as the
   padlock gives a jerky shake, and as the screen unlocks it springs open and
   hops for joy in a green ring that spreads out a little. What is typed goes
@@ -125,19 +128,25 @@ profile called **Original**, so there is always a way back.
   whenever GNOME asks for something else). Clocks – a stacked one too, the
   date over big hours over dimmer minutes – the date, and the weather and
   the battery in a line can be placed anywhere on it, on a mock lock screen
-  opened from the settings' Lock Screen page. Their type is in a tone of the
+  opened from the settings' Lock Screen page; dragged by its corner, a
+  widget takes the nearest of its sizes, the glass clock any size, cell by
+  cell. Their type is in a tone of the
   palette's hue, light or dark, picked from the wallpaper behind them so
   that it is legible there (contrast as APCA measures it), or in a color
   of one's own – any, or one of the wallpaper's that the settings offer,
   each shown where the clocks are; a part that would not read as it is is
   set a little heavier, or gets a soft shadow round its letters, and only
   that part. The glass clock is an iPhone's: the time in one line of tall
-  digits under a small date line, the font's own outlines grown taller
-  along their straight stems (curves and bars keep their weight), in Liquid
-  Glass – the wallpaper frosted behind them, tinted from what is behind,
-  light along their edges – and, with the depth effect, standing behind
-  what is near by a quarter of their height; as the minute turns, only the
-  figures that change rise into place.
+  digits under a small date line, as large as the clock is wide and as
+  tall as it is stretched, the font's own outlines grown taller along
+  their straight stems (curves and bars keep their weight), in Liquid
+  Glass – the wallpaper frosted and glowing through them, bent at their
+  edges with a hint of colour at the very rim, tinted from what is behind,
+  the light from above along their edges and a sheen across them; clear,
+  or solid digits, as the glass is chosen (see [Glass](#glass)) – and,
+  with the depth effect, behind what is
+  near wherever it covers them; as the minute turns, only the figures that
+  change rise into place.
   Its font is Inter or Roboto Flex (variable fonts that come with Atelier,
   loaded into the shell only), the shell's, or a rounded or serif one
   installed, the clocks' digits in the weight and width of one's choice.
@@ -148,11 +157,13 @@ profile called **Original**, so there is always a way back.
   wallpaper – a hill, a town, a person, the frame of a window – stands in
   front of the lock screen's own clocks, as on an iPhone, but never in
   front of the date over a clock, and the sky, distant mountains or the
-  view out of a window stay behind them; it goes as the prompt comes up and
-  the wallpaper blurs, and stays off where what stands in front would hide
-  more than a quarter of any digit of a clock, or 40 % of a clock as a
-  whole (a glass clock's digits stand behind it a quarter of their height
-  on purpose: the rest of each counts, and 60 % of the clock). A
+  view out of a window stay behind them; it goes with the clocks as the
+  prompt comes up and the wallpaper blurs, and stays off where what stands
+  in front would hide more than a quarter of any digit of a clock, or 40 %
+  of a clock as a
+  whole (a glass clock's digits may stand behind it a quarter of their
+  height at their feet besides – some 40 % of a digit in all – and 60 % of
+  the clock). A
   depth model, Depth Anything V2, sees how near each part of the wallpaper
   is, on this computer, in a background process of the session at the
   lowest priority, a moment after the wallpaper changes; the lock screen
@@ -311,6 +322,31 @@ Optional, in Settings → Appearance:
 - **Color GNOME Terminal** – a terminal profile "Atelier" (a copy of your
   default profile with the palette's colors) becomes the default; switching
   the option off brings your profile back.
+
+## Glass
+
+Atelier's glass – the island, the bar's capsules, the widgets, the dock and
+the lock screen's glass clock – is Liquid Glass, as iOS 26 has it: what is
+behind it bends at its edges as through a lens, red a little more than blue
+(a hint of colour at the very rim), and comes out richer and lighter; its
+edges catch a light from above that leans towards the pointer as it comes
+near (and stays put with GNOME's animations off); a soft sheen runs across
+it and a fine grain keeps its gradients from banding. Its tint follows
+GNOME's style – light in the light one, smoky but see-through in the dark
+one. Type and icons on it read on what is behind it: over a light wallpaper
+they turn dark, over a dark one they stay light, in the palette's hue,
+legible as APCA measures contrast. The type stays light in the dark style
+and dark in the light one unless the other reads clearly better there. The
+glass itself never darkens on its own: it is darkened as much as you choose,
+the same on every surface.
+
+In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
+little darker under it to keep what is on it legible) or *Off* (solid
+surfaces). GNOME's high contrast keeps it off. *Darkening* (none by default)
+lays the same dark wash over all of the glass – the island, the bar, the
+dock, the widgets, the drip sheets and the lock screen's island and password
+popup; more of it keeps light type, GNOME's controls in the control centre
+among it, legible over bright wallpapers.
 
 ## Settings
 

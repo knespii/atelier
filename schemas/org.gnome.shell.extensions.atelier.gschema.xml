@@ -33,6 +33,12 @@
     <value nick="glass" value="1"/>
   </enum>
 
+  <enum id="org.gnome.shell.extensions.atelier.GlassVariant">
+    <value nick="regular" value="0"/>
+    <value nick="clear" value="1"/>
+    <value nick="off" value="2"/>
+  </enum>
+
   <enum id="org.gnome.shell.extensions.atelier.IslandShape">
     <value nick="floating" value="0"/>
     <value nick="notch" value="1"/>
@@ -113,6 +119,17 @@
     <child name="dock" schema="org.gnome.shell.extensions.atelier.dock"/>
     <child name="windows" schema="org.gnome.shell.extensions.atelier.windows"/>
     <child name="lockscreen" schema="org.gnome.shell.extensions.atelier.lockscreen"/>
+    <key name="glass-variant" enum="org.gnome.shell.extensions.atelier.GlassVariant">
+      <default>'regular'</default>
+      <summary>Glass</summary>
+      <description>How Atelier's glass looks wherever it has glass (the island, the bar, the dock, the widgets, the lock screen's clock). “regular”: Liquid Glass – what is behind it bends at its edges as through a lens, richer and lighter, its edges catching the light (and leaning towards the pointer); “clear”: more see-through, with a little dimming under it; “off”: solid surfaces, no blur, no light. GNOME's high contrast always turns it off.</description>
+    </key>
+    <key name="glass-dim" type="d">
+      <range min="0" max="1"/>
+      <default>0</default>
+      <summary>Darkening of the glass</summary>
+      <description>How much darker all of Atelier's glass is (the island, the bar, the dock, the widgets, the drip sheets, the lock screen's island and password popup): 0 not at all, 1 black. The same on every surface, whatever is behind it; the type on the glass still turns darker or lighter to stay legible. More darkening keeps light type (GNOME's controls in the control centre, say) legible over bright wallpapers.</description>
+    </key>
     <key name="profiles" type="s">
       <default>'[]'</default>
       <summary>Saved profiles</summary>
@@ -408,7 +425,7 @@
     <key name="widgets" type="s">
       <default>'[]'</default>
       <summary>Widgets on the lock screen</summary>
-      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets.</description>
+      <description>Clocks, the date, the weather and the battery on the lock screen, as JSON: kind, size and cells on the grid over the main monitor, as the desktop's widgets. A glass clock's size may also be its own, so many columns by so many rows, e.g. “9x11”.</description>
     </key>
     <key name="style" type="s">
       <choices>

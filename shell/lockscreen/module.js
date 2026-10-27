@@ -19,7 +19,7 @@ import {Phase, initialState, look, reduce} from '../../lib/lockState.js';
 import {LockBoard} from './board.js';
 import {LockGlass} from './glass.js';
 import {
-    clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt, wallpaperBlursOf,
+    backgroundGroupOf, clockLabelsOf, dialogOf, placeOverBackground, promptProgressOf, showPrompt, wallpaperBlursOf,
 } from './gnome.js';
 import {LockIsland} from './island.js';
 import {AuthObserver} from './observer.js';
@@ -52,6 +52,7 @@ export class LockModule {
         this._settleId = 0;
         this._unlocking = false;
         this._room = 0;
+        this._popup = null;
         this._following = null;
         this._status = null;
         this._glass = null;
@@ -104,13 +105,16 @@ export class LockModule {
         this._lockSettings = this._settings.get_child('lockscreen');
         this._hideStatus();
         if (this._lockSettings.get_boolean('island')) {
-            this._island = new LockIsland(this._settings.get_child('bar'));
+            // (Its glass over the lock screen's wallpaper as it shows.)
+            this._island = new LockIsland(this._settings.get_child('bar'),
+                {settings: this._settings, source: backgroundGroupOf(this._dialog)});
             this._island.actor.connectObject('clicked', () => showPrompt(this._dialog), this);
-            // (It pops up right under the island.)
+            // (It pops up right under the island, of the same glass.)
             if (this._lockSettings.get_boolean('password-field'))
-                this._field = new PasswordField(this._island);
+                this._field = new PasswordField(this._island, {glass: () => this._popupGlass()});
         }
-        this._board = new LockBoard(this._lockSettings, {palette: this._settings.get_child('palette')});
+        this._board = new LockBoard(this._lockSettings,
+            {palette: this._settings.get_child('palette'), atelier: this._settings, ownPopup: Boolean(this._field)});
         if (!placeOverBackground(this._dialog, this._board.layer)) {
             this._board.destroy();
             this._board = null;
@@ -172,6 +176,20 @@ export class LockModule {
         });
     }
 
+    /**
+     * The popup's glass as it opens: the island's, over the lock screen's
+     * wallpaper; null with the glass off.
+     *
+     * @returns {object|null} {source, look, light}
+     */
+    _popupGlass() {
+        const glassLook = this._island?.glassLook;
+        const source = backgroundGroupOf(this._dialog);
+        if (!this._island?.glass || !glassLook?.look || !source)
+            return null;
+        return {source, look: glassLook.look, light: glassLook.light};
+    }
+
     /** @returns {number} GNOME's, from the clock (0) to the prompt (1) */
     _progress() {
         return Math.min(1, Math.max(0, promptProgressOf(this._dialog)?.value ?? 0));
@@ -229,7 +247,19 @@ export class LockModule {
         // (Over the main monitor's wallpaper, wherever that monitor is.)
         this._board.layer.set_position(monitor.x, monitor.y);
         const top = (island ? island.y + island.height - monitor.y : 0) + GAP * scale;
-        this._board.makeRoom(progress, this._field?.standing ? this._field.rect : null, top, GAP * scale, animate);
+        this._board.makeRoom(progress, this._popupRect(progress), top, GAP * scale, animate);
+    }
+
+    // Where the popup is, while it stands in for GNOME's prompt – and was,
+    // while the room made for it goes: GNOME drops its prompt once it is
+    // down, the room follows a moment later (a clock over the popup comes
+    // down as it went up). Null for GNOME's own prompt.
+    _popupRect(progress) {
+        if (this._field?.standing)
+            this._popup = this._field.rect;
+        else if (progress === 0 || this._progress() > 0)
+            this._popup = null;
+        return this._popup;
     }
 
     // GNOME's time and date (and the hint under them, which would be left
@@ -301,6 +331,7 @@ export class LockModule {
         this._observer?.destroy();
         this._observer = null;
         this._stopFollowing();
+        this._popup = null;
         // (Unlocked, GNOME's prompt goes as it is: hidden.)
         this._field?.destroy({restore: !this._unlocking});
         this._field = null;

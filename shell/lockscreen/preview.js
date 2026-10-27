@@ -17,7 +17,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DesktopEditor} from '../desktop/editor.js';
 import {LockBoard} from './board.js';
+import {GlassLook} from '../core/glassMaterial.js';
 import {GlassWarmUp} from './clock.js';
+import {warmUpLockGlass} from './popupGlass.js';
 
 const FADE_TIME = 300;
 
@@ -63,7 +65,8 @@ class LockPreview {
                 Math.round((monitor.width - clock.width) / 2), Math.round(monitor.height / 3)));
         }
 
-        this._board = new LockBoard(lockSettings, {interactive: true, palette: settings.get_child('palette')});
+        this._board = new LockBoard(lockSettings,
+            {interactive: true, palette: settings.get_child('palette'), atelier: settings});
         this._board.setHome(this.actor);
 
         this.actor.ease({opacity: 255, duration: FADE_TIME, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
@@ -119,7 +122,14 @@ export class LockPreviewModule {
     enable() {
         this._lockSettings = this._settings.get_child('lockscreen');
         this._lockSettings.connectObject('changed::edit-request', () => this.open(), this);
-        this._warmUp = new GlassWarmUp(this._lockSettings);
+        this._warmUp = new GlassWarmUp(this._lockSettings, this._settings);
+        // (The island's glass and the popup's, drawn once ahead of the lock
+        // screen: see warmUpLockGlass().)
+        if (this._lockSettings.get_boolean('enabled') && this._lockSettings.get_boolean('island')) {
+            const glassLook = new GlassLook(this._settings);
+            warmUpLockGlass(glassLook.look, glassLook.light);
+            glassLook.destroy();
+        }
     }
 
     /** Edit the lock screen's widgets. */

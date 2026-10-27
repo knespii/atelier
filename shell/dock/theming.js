@@ -10,7 +10,8 @@
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
-import {backgroundCss, dynamicAlpha, dynamicAlphas, windowNear} from '../../lib/dockTheme.js';
+import {DEFAULT_COLOR, backgroundCss, dynamicAlpha, dynamicAlphas, parseColor, windowNear} from '../../lib/dockTheme.js';
+import {rgbToHex} from '../../lib/palette.js';
 import {glassShare} from '../../lib/seeThrough.js';
 
 // How close a window counts as near the dock, logical pixels.
@@ -61,18 +62,8 @@ export class DockTheming {
         }
         const settings = this._settings;
         const mode = this._mode;
-        let alpha = 0;
-        if (mode === 'DYNAMIC') {
-            this.near = this._windowNear();
-            const {min, max} = dynamicAlphas({
-                customize: settings.get_boolean('customize-alphas'),
-                min: settings.get_double('min-alpha'),
-                max: settings.get_double('max-alpha'),
-            });
-            alpha = dynamicAlpha(this.near, min, max);
-        } else {
-            this.near = false;
-        }
+        this.near = mode === 'DYNAMIC' && this._windowNear();
+        const alpha = this._alphaFor(this.near);
         const opacity = settings.get_double('background-opacity');
         // (As the profile has it, the glass is all there.)
         const custom = mode === 'FIXED' || mode === 'DYNAMIC';
@@ -94,6 +85,42 @@ export class DockTheming {
             return;
         this._style = style;
         container.set_style(style || null);
+        this._dock.updateVibrancy?.();
+    }
+
+    // How opaque DYNAMIC has the background, near windows or away from them
+    // (0 in the other modes).
+    _alphaFor(near) {
+        if (this._mode !== 'DYNAMIC')
+            return 0;
+        const {min, max} = dynamicAlphas({
+            customize: this._settings.get_boolean('customize-alphas'),
+            min: this._settings.get_double('min-alpha'),
+            max: this._settings.get_double('max-alpha'),
+        });
+        return dynamicAlpha(near, min, max);
+    }
+
+    /**
+     * What lies over the dock's glass and how much of the glass shows, as
+     * sync() has them – near windows or away from them (for the type on
+     * it: shell/core/vibrancy.js).
+     *
+     * @param {boolean} [near] - a window near it (DYNAMIC); as it is now if
+     *   not said
+     * @returns {{layers: object[], strength: number}} the wash ({color,
+     *   alpha}, none in DEFAULT) and the glass's share, 0 … 1
+     */
+    washOf(near = this.near) {
+        const mode = this._mode;
+        if (mode !== 'FIXED' && mode !== 'DYNAMIC')
+            return {layers: [], strength: 1};
+        const wanted = mode === 'FIXED' ? this._settings.get_double('background-opacity') : this._alphaFor(near);
+        const share = this._glass ? glassShare(wanted) : {glass: 1, tint: wanted};
+        const chosen = this._settings.get_boolean('custom-background-color')
+            ? this._settings.get_string('background-color') : null;
+        const color = rgbToHex(parseColor(chosen) ?? parseColor(DEFAULT_COLOR));
+        return {layers: share.tint > 0 ? [{color, alpha: share.tint}] : [], strength: share.glass};
     }
 
     // Compact, square corners (panel mode has them anyway). Says whether

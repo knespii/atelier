@@ -16,7 +16,10 @@ import * as dockTheme from './dockTheme.test.js';
 import * as dockVisibility from './dockVisibility.test.js';
 import * as glassBackdrop from './glassBackdrop.test.js';
 import * as glassClock from './glassClock.test.js';
+import * as glassLook from './glassLook.test.js';
+import * as glyphAtlas from './glyphAtlas.test.js';
 import * as glyphOutlines from './glyphOutlines.test.js';
+import * as glyphSdf from './glyphSdf.test.js';
 import * as glyphStretch from './glyphStretch.test.js';
 import * as gtkCss from './gtkCss.test.js';
 import * as liquid from './liquid.test.js';
@@ -39,11 +42,12 @@ import * as slack from './slack.test.js';
 import * as steadyTime from './steadyTime.test.js';
 import * as themes from './themes.test.js';
 import * as thumbnails from './thumbnails.test.js';
+import * as vibrancy from './vibrancy.test.js';
 import * as widgets from './widgets.test.js';
 
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
-    apca, lockColor, lockType, glyphStretch, glyphOutlines, glassBackdrop, glassClock};
+    apca, lockColor, lockType, glyphStretch, glyphOutlines, glyphSdf, glyphAtlas, glassBackdrop, glassClock, glassLook, vibrancy};
 
 let total = 0;
 let failures = 0;

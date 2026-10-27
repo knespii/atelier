@@ -1,21 +1,20 @@
-import Cairo from 'cairo';
 import GdkPixbuf from 'gi://GdkPixbuf';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {placement} from '../lib/depth.js';
 import {
-    BACKDROP_VERSION, DIM, FROST, GLASS, TINT_GRADIENT, backdropKey, backdropSize, backdropTransform, backgroundPixels,
-    boxWidths, frost, frostSteps, glassColor, glassFor, glassTint, glyphCells, meanColor, parseColor, pictureArea,
-    tintShown,
+    BACKDROP_VERSION, FROST, GLASS, backdropKey, backdropSize, backgroundPixels, boxWidths, frost, frostOf, frostSteps,
+    glassColor, glassFor, meanColor, parseColor, pictureArea, tintShown,
 } from '../lib/glassBackdrop.js';
+import {LOOK, faceColor} from '../lib/glassLook.js';
 import {legibilityPlan} from '../lib/lockLook.js';
 import {hexToOklch, hexToRgb} from '../lib/palette.js';
-import {LiquidGlass, backdropDir, backdropSpec, loadBackdrop, makeBackdrop} from '../shell/lockscreen/liquidGlass.js';
+import {GlassVariant, backdropDir, backdropSpec, loadBackdrop, makeBackdrop} from '../shell/lockscreen/liquidGlass.js';
 import {assert, assertEqual, freshDir} from './util.js';
 
 const near = (a, b, tolerance, message) =>
     assert(Math.abs(a - b) <= tolerance, `${message}: ${a} is not within ${tolerance} of ${b}`);
-const hueDistance = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
 
 // An image of solid colours, RGB: (x, y) => [r, g, b].
 function image(width, height, colorAt, channels = 3) {
@@ -31,16 +30,16 @@ function image(width, height, colorAt, channels = 3) {
 const at = ({pixels, width}, x, y) => [...pixels.slice((y * width + x) * 3, (y * width + x) * 3 + 3)];
 
 export function testBackdropSize() {
-    const size = backdropSize([2560, 1440], 1);
-    near(size.sigma, 3, 0.05, 'blurred by about three of its pixels');
-    near(size.factor[0], 3 / FROST.sigma, 0.002, 'as small as that lets it be');
-    assertEqual([size.width, size.height], [Math.round(2560 * 3 / FROST.sigma), Math.round(1440 * 3 / FROST.sigma)]);
+    const size = backdropSize([2560, 1440], 1, 2);
+    near(size.factor[0], 3 / FROST.sample, 0.002, 'small: a fifth or so of the monitor');
+    assertEqual([size.width, size.height], [Math.round(2560 * 3 / FROST.sample), Math.round(1440 * 3 / FROST.sample)]);
     assertEqual(size.factor, [size.width / 2560, size.height / 1440], 'each side its own factor, whole pixels');
-    const hidpi = backdropSize([3840, 2160], 2);
-    near(hidpi.factor[0], 3 / (2 * FROST.sigma), 0.002, 'the sigma is logical: twice as many pixels at scale 2');
-    near(hidpi.sigma, 3, 0.05);
-    assertEqual(backdropSize([800, 600], 1, 1).factor, [1, 1], 'never larger than the monitor');
-    near(backdropSize([800, 600], 1, 1).sigma, 1, 1e-9, 'and then blurred as little as asked');
+    near(size.sigma, 2 * size.factor[0], 0.01, 'blurred as the glass blurs, in its pixels');
+    const hidpi = backdropSize([3840, 2160], 2, 2);
+    near(hidpi.factor[0], 3 / (2 * FROST.sample), 0.002, 'logical: twice as many pixels at scale 2');
+    near(hidpi.sigma, 2 * 2 * hidpi.factor[0], 0.01);
+    assertEqual(backdropSize([3840, 2160], 1).sigma, 0, 'clear glass: not blurred');
+    assertEqual(backdropSize([50, 40], 0.1).factor, [1, 1], 'never larger than the monitor');
 }
 
 export function testPictureArea() {
@@ -180,104 +179,56 @@ export function testBackdropKey() {
         ['another scale', picture, {...options, scale: 2}],
         ['placed otherwise', picture, {...options, style: 'scaled'}],
         ['another colour round it', picture, {...options, colors: {primary: '#ffffff'}}],
+        ['blurred for another look', picture, {...options, frost: frostOf(LOOK.regular)}],
     ])
         assert(backdropKey(p, o) !== key, `${what}: a name of its own`);
-    assert(BACKDROP_VERSION >= 1);
+    assertEqual(backdropKey(picture, {...options, frost: frostOf(LOOK.clear)}), key, 'clear glass: as the picture is');
+    assert(BACKDROP_VERSION >= 3, 'made anew since the glass is drawn on the GPU');
 }
 
-export function testBackdropTransform() {
-    // Where a point of the drawing takes the backdrop from: the inverse of
-    // translate() and scale().
-    const source = ({x, y, scaleX, scaleY}, [px, py]) => [(px - x) / scaleX, (py - y) / scaleY];
-    const plain = backdropTransform({at: [100, 50], factor: [0.25, 0.2]});
-    const [sx, sy] = source(plain, [8, 10]);
-    near(sx, (100 + 8) * 0.25, 1e-9, 'where it lies on the monitor, in the backdrop');
-    near(sy, (50 + 10) * 0.2, 1e-9);
-    const lens = backdropTransform({at: [100, 50], factor: [0.25, 0.25], center: [20, 30], lens: 0.8});
-    const middle = source(lens, [20, 30]);
-    near(middle[0], 120 * 0.25, 1e-9, 'the middle stays where it is');
-    near(middle[1], 80 * 0.25, 1e-9);
-    const edge = source(lens, [28, 30]);
-    near(edge[0] - middle[0], 8 / 0.8 * 0.25, 1e-9, 'further out, what lies further still (drawn smaller)');
-    const shifted = source(backdropTransform({at: [100, 50], factor: [0.25, 0.2], shift: [0.3, -0.4]}), [8, 10]);
-    near(shifted[0], (100 + 8) * 0.25 + 0.3, 1e-9, 'where its picture was moved to');
-    near(shifted[1], (50 + 10) * 0.2 - 0.4, 1e-9);
-}
-
-export function testGlyphCells() {
-    const bounds = {x: 10, y: 5, width: 100, height: 40};
-    const one = glyphCells(null, bounds);
-    assertEqual(one, [{x: 10, width: 100, center: [60, 25]}], 'without glyphs, one cell');
-    const cells = glyphCells([
-        {x: 70, y: 5, width: 40, height: 40},
-        {x: 10, y: 5, width: 30, height: 40},
-        {x: 36, y: 5, width: 30, height: 40}, // (overlapping the first)
-    ], bounds);
-    assertEqual(cells.map(c => c.x), [10, 38, 68], 'left to right, split halfway where they meet');
-    assertEqual(cells.map(c => c.x + c.width).at(-1), 110, 'to the bounds\' end');
-    for (let i = 1; i < cells.length; i++)
-        assertEqual(cells[i].x, cells[i - 1].x + cells[i - 1].width, 'side by side');
-    assertEqual(cells.map(c => c.center), [[25, 25], [51, 25], [90, 25]], 'about each one\'s middle');
-}
-
-export function testGlassTint() {
-    const light = {color: '#f4f4f4', dark: false};
-    assertEqual(glassTint(light, null), light.color, 'nothing known behind: the tone');
-    const [lightness] = hexToOklch(light.color);
-    for (const behind of ['#2050c0', '#c04020', '#30a040']) {
-        const tint = glassTint(light, behind);
-        const [l, c, h] = hexToOklch(tint);
-        near(l, lightness, 0.02, `${behind}: as light as the tone`);
-        assert(c > 0.01 && c < 0.045, `${behind}: a hint of colour (${c})`);
-        assert(hueDistance(h, hexToOklch(behind)[2]) < 12, `${behind}: its hue (${tint})`);
-    }
-    const toned = {color: '#d8e4ff', dark: false};
-    assert(hueDistance(hexToOklch(glassTint(toned, '#777777'))[2], hexToOklch(toned.color)[2]) < 15,
-        'grey behind: the tone\'s own hue');
-    const dark = glassTint({color: '#202020', dark: true}, '#e0c080');
-    assert(hexToOklch(dark)[0] < 0.3, `dark glass, a dark tint (${dark})`);
+export function testFrostOf() {
+    assertEqual(frostOf(LOOK.regular), {sigma: LOOK.regular.blur, saturation: 1, lift: 0},
+        'blurred as the glass blurs, its colours and light as they are (the face does the rest)');
+    assertEqual(frostOf(LOOK.clear), {sigma: 0, saturation: 1, lift: 0}, 'clear glass: sharp');
+    assertEqual(frostOf(null), {sigma: 0, saturation: 1, lift: 0}, 'no look: as the picture is');
 }
 
 export function testGlassColor() {
-    const frosted = '#406080';
-    const tint = '#f0f0f0';
-    assertEqual(glassColor({frosted, tint, tintAlpha: 0, opacity: 1}), frosted, 'no tint: the frost');
-    assertEqual(glassColor({frosted, tint, opacity: 0, behind: '#102030'}), '#102030', 'no membrane: what is behind');
-    assertEqual(glassColor({frosted, tint: '#000000', dark: true, tintAlpha: 0, opacity: 1}),
-        `#${hexToRgb(frosted).map(v => Math.round(v * DIM).toString(16).padStart(2, '0')).join('')}`,
-        'dark glass lets less through');
-    const [rest, more] = [GLASS.tintAlpha, GLASS.tintAlpha + 0.2].map(tintAlpha =>
-        hexToOklch(glassColor({frosted, tint, tintAlpha}))[0]);
-    assert(more > rest, 'more tint, lighter light glass');
-    const [less, opaque] = [0.5, 1].map(opacity => hexToOklch(glassColor({frosted, tint, opacity, behind: '#000000'}))[0]);
-    assert(opaque > less, 'more opaque, less of what is behind');
+    const behind = '#406080';
+    const light = '#f4f4f4';
+    const rgb = hex => hexToRgb(hex).map(v => v / 255);
+    const hex = c => `#${c.map(v => Math.round(255 * Math.min(1, Math.max(0, v))).toString(16).padStart(2, '0')).join('')}`;
+    assertEqual(glassColor({behind, tone: light, wash: 0, face: 'light'}), hex(faceColor(rgb(behind), 'light')),
+        'no wash: the glass\'s face, as the GPU makes it');
+    assertEqual(glassColor({behind, tone: light, wash: 1}), light, 'washed all the way: the tone');
+    const lightness = options => hexToOklch(glassColor({behind, tone: light, ...options}))[0];
+    assert(lightness({wash: 0.4}) > lightness({wash: GLASS.wash}), 'more wash, lighter light glass');
+    assert(lightness({face: 'light', wash: 0}) > hexToOklch(behind)[0], 'light glass: lighter than what is behind');
+    assert(lightness({face: 'dark', wash: 0}) < lightness({face: 'light', wash: 0}), 'dark glass: darker');
+    assert(lightness({face: 'clear', wash: 0}) < lightness({face: 'light', wash: 0}), 'clear glass: dimmer than light');
+    const [r, g, b] = hexToRgb(glassColor({behind: '#808080', tone: '#808080', wash: 0, face: 'light'}));
+    assert(r === g && g === b, `neutral: grey stays grey (${r}, ${g}, ${b})`);
 }
 
 export function testPlanBridge() {
-    // What a plan is told of the glass at rest: how much of its tint
-    // shows over what is behind it, at its feet, through its transparency.
-    near(tintShown(), GLASS.tintAlpha * TINT_GRADIENT[1] * GLASS.opacity, 1e-9, 'the glass at rest');
-    assertEqual(glassFor(null), GLASS, 'nothing asked: at rest');
-    assertEqual(glassFor(tintShown() / 2), GLASS, 'never less than at rest');
-    let before = {...GLASS};
-    for (const shown of [0.25, 0.27, 0.3, 0.45, 0.7, 0.92]) {
-        const material = glassFor(shown);
-        near(tintShown(material), shown, 1e-9, `${shown}: as much of the tint as asked`);
-        assert(material.opacity >= before.opacity && material.tintAlpha >= before.tintAlpha, `${shown}: more, not less`);
-        assert(material.tintAlpha === GLASS.tintAlpha || material.opacity === 1,
-            `${shown}: opaque first, then more tint (${JSON.stringify(material)})`);
-        before = material;
-    }
+    // What a plan is told of the glass at rest: how far it is washed
+    // towards the tone.
+    near(tintShown(), GLASS.wash, 1e-9, 'the glass at rest');
+    assertEqual(glassFor(null), {wash: GLASS.wash}, 'nothing asked: at rest');
+    assertEqual(glassFor(tintShown() / 2), {wash: GLASS.wash}, 'never less than at rest');
+    for (const shown of [0.2, 0.45, 0.7, 0.92])
+        near(tintShown(glassFor(shown)), shown, 1e-9, `${shown}: as much of the tone as asked`);
+    assertEqual(glassFor(1.4), {wash: 1}, 'all of it at most');
     // As the lock screen's plan has it: light glass digits over a light
-    // part of the wallpaper (small digits: large ones read with a shadow
-    // alone) ask for more opaque glass, which is that much more of the tint.
-    const stats = {tenths: {dark: '#a0b0c0', middle: '#a0b0c0', light: '#a0b0c0'}};
-    const tone = {color: '#f4f4f4', dark: false};
-    const plan = legibilityPlan({size: 60, weight: 600, tone, stats, glass: tintShown(), dim: 0.86});
-    assert(plan.glass > tintShown() && plan.shadow, `the plan wants more of the tint, and a shadow (${plan.glass})`);
-    const material = glassFor(plan.glass);
-    near(tintShown(material), plan.glass, 1e-9, 'and the glass shows it');
-    assert(material.opacity === 1, 'all of the membrane first');
+    // part of the wallpaper, no shadow to give them, ask for more of the
+    // tone.
+    const stats = {tenths: {dark: '#8090a0', middle: '#8090a0', light: '#8090a0'}};
+    const tone = {color: '#ffffff', dark: false};
+    const ink = glass => glassColor({behind: '#8090a0', tone: tone.color, ...glassFor(glass), face: 'light'});
+    const plan = legibilityPlan({size: 60, weight: 600, tone, stats, glass: tintShown(), ink, dim: 0.86,
+        reach: {bolder: 0, shadow: 0, glass: 0.92}});
+    assert(plan.glass > tintShown() && plan.glass <= 0.92, `the plan wants more of the tone (${JSON.stringify(plan)})`);
+    near(tintShown(glassFor(plan.glass)), plan.glass, 1e-9, 'and the glass shows it');
 }
 
 // A picture: its left half red, its right half blue (16:9).
@@ -306,7 +257,7 @@ export async function testBackdropMade() {
     assert(pixels && GLib.file_test(spec.file, GLib.FileTest.EXISTS), 'made, and kept');
     assertEqual(await makeBackdrop(spec), null, 'made once');
     const backdrop = await loadBackdrop(spec);
-    assertEqual([backdrop.surface.getWidth(), backdrop.surface.getHeight()], [spec.size.width, spec.size.height]);
+    assertEqual([backdrop.sample.width, backdrop.sample.height], [spec.size.width, spec.size.height]);
     assertEqual(backdrop.factor, spec.size.factor);
     // As GNOME draws it: red on the left of the monitor, blue on the right,
     // blurred where they meet.
@@ -382,64 +333,34 @@ export async function testBackdropAligned() {
         'scaled: where GNOME draws it');
 }
 
-// Pixels of a surface, as a pixbuf reads them from its PNG.
-function pixelsOf(surface, dir, name) {
-    const path = GLib.build_filenamev([dir, `${name}.png`]);
-    surface.writeToPNG(path);
-    const pixbuf = GdkPixbuf.Pixbuf.new_from_file(path);
-    const [pixels, stride, channels] = [pixbuf.get_pixels(), pixbuf.get_rowstride(), pixbuf.get_n_channels()];
-    return (x, y) => [...pixels.slice(y * stride + x * channels, y * stride + x * channels + 4)];
-}
-
-export async function testGlassPainted() {
-    const dir = freshDir('glass-paint');
-    const path = twoColourPicture(dir);
-    const spec = backdropSpec({path, style: 'zoom', monitor: [640, 360], scale: 1, dir});
-    await makeBackdrop(spec);
-    const backdrop = await loadBackdrop(spec);
-    // A bar of glass across the middle of a 200×100 drawing at (220, 130)
-    // on the monitor, over the red and the blue.
-    const shape = cr => cr.rectangle(40, 30, 120, 40);
-    const bounds = {x: 40, y: 30, width: 120, height: 40};
-    const draw = (options, name, withBackdrop = true, density = 1) => {
-        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, Math.ceil(200 * density), Math.ceil(100 * density));
-        surface.setDeviceScale(density, density);
-        const cr = new Cairo.Context(surface);
-        const glass = new LiquidGlass();
-        glass.backdrop = withBackdrop ? backdrop : null;
-        glass.paint(cr, shape, {bounds, tone: {color: '#f4f4f4', dark: false}, at: [220, 130], ...options});
-        cr.$dispose();
-        return pixelsOf(surface, dir, name);
+export function testGlassVariant() {
+    const settings = new Gio.Settings({schema_id: 'org.gnome.shell.extensions.atelier'});
+    const a11y = new Gio.Settings({schema_id: 'org.gnome.desktop.a11y.interface'});
+    // (The settings' signals come through the main loop.)
+    const settle = () => {
+        const context = GLib.MainContext.default();
+        while (context.pending())
+            context.iteration(false);
     };
-    const glass = draw({opacity: 1}, 'glass');
-    const [leftInside, rightInside] = [glass(60, 50), glass(140, 50)];
-    assert(leftInside[3] === 255 && rightInside[3] === 255, 'opaque inside');
-    assert(leftInside[0] > leftInside[2] && rightInside[2] > rightInside[0],
-        `red behind its left, blue behind its right (${leftInside} | ${rightInside})`);
-    assertEqual(glass(10, 10), [0, 0, 0, 0], 'nothing far from it');
-    assert(glass(100, 30)[1] > glass(100, 50)[1] + 40, `light caught along its top (${glass(100, 30)})`);
-
-    const clear = draw({opacity: 0.3}, 'clear');
-    assert(clear(60, 50)[3] < 140, `less opaque, as asked (${clear(60, 50)})`);
-    const shadow = draw({opacity: 1, shadow: 1}, 'shadow');
-    const [close, further] = [shadow(100, 72), shadow(100, 76)];
-    assert(close[3] > further[3] && further[3] > 0 && close[0] < 40,
-        `a dark shadow under it, fading (${close} | ${further})`);
-    assertEqual(glass(100, 72), [0, 0, 0, 0], 'none unless asked');
-    // As a plan gives it: CSS's blur, falling a few pixels down.
-    const planned = draw({opacity: 1, shadow: {alpha: 0.6, blur: 8, y: 3}}, 'planned');
-    assert(planned(100, 73)[3] > planned(100, 27)[3] + 10, `lower under it than over it (${planned(100, 73)} | ` +
-        `${planned(100, 27)})`);
-    assertEqual(draw({opacity: 1, shadow: null}, 'none')(100, 72), [0, 0, 0, 0], 'a plan without one: none');
-    const bare = draw({opacity: 1}, 'bare', false);
-    assert(bare(60, 50)[3] > 100, 'without a backdrop, the tint alone');
-
-    // At 150 % (the screen's pixels half again as many as the stage's), the
-    // same, in its pixels.
-    const dense = draw({opacity: 1}, 'dense', true, 1.5);
-    const [denseLeft, denseRight] = [dense(90, 75), dense(210, 75)];
-    assert(denseLeft[3] === 255 && denseRight[3] === 255 && denseLeft[0] > denseLeft[2] && denseRight[2] > denseRight[0],
-        `at 150 %: red behind its left, blue behind its right (${denseLeft} | ${denseRight})`);
-    assertEqual(dense(15, 15), [0, 0, 0, 0], 'at 150 %: nothing far from it');
-    assert(dense(150, 45)[1] > dense(150, 75)[1] + 40, `at 150 %: light along its top (${dense(150, 45)})`);
+    const told = [];
+    const variant = new GlassVariant(settings, v => told.push(v));
+    assertEqual(variant.variant, 'regular', 'regular glass at first');
+    settings.set_string('glass-variant', 'clear');
+    settle();
+    assertEqual([variant.variant, told], ['clear', ['clear']], 'clear, as chosen, and told so');
+    a11y.set_boolean('high-contrast', true);
+    settle();
+    assertEqual([variant.variant, told.at(-1)], ['off', 'off'], 'none with GNOME\'s high contrast');
+    settings.set_string('glass-variant', 'regular');
+    settle();
+    assertEqual([variant.variant, told.length], ['off', 2], 'whatever is chosen meanwhile');
+    a11y.reset('high-contrast');
+    settle();
+    assertEqual([variant.variant, told.at(-1)], ['regular', 'regular'], 'as chosen, without it');
+    variant.destroy();
+    settings.set_string('glass-variant', 'clear');
+    settle();
+    assertEqual(told.length, 3, 'gone: told nothing more');
+    settings.reset('glass-variant');
+    assertEqual(new GlassVariant(null).variant, 'regular', 'without Atelier\'s settings: regular glass');
 }

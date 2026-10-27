@@ -8,7 +8,7 @@ import GioUnix from 'gi://GioUnix';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 
-import {SIZES, pixelSize} from '../../lib/widgets.js';
+import {KINDS, SIZES, namedSize, pixelSize} from '../../lib/widgets.js';
 
 // What the card holds fills it; while editing, its buttons sit in the top
 // right corner and the handle to stretch it on the bottom right one, a
@@ -46,6 +46,12 @@ class AtelierWidgetCardLayout extends Clutter.LayoutManager {
 });
 
 export const DesktopWidget = GObject.registerClass({
+    Properties: {
+        // Its corner dragged in the editor (and easing to the size it takes
+        // once let go of): what it shows is cut off at its edges, and what
+        // is drawn of it may be drawn quickly meanwhile.
+        'stretching': GObject.ParamSpec.boolean('stretching', null, null, GObject.ParamFlags.READWRITE, false),
+    },
     Signals: {
         'menu-request': {},
         // (Filled anew: for a size, say.)
@@ -71,7 +77,7 @@ export const DesktopWidget = GObject.registerClass({
         this.resize(entry.size);
     }
 
-    /** @param {string} size - square, card, large or wide */
+    /** @param {string} size - square, card, large or wide (or one of its own, "9x11") */
     resize(size) {
         this.fill(size);
         this.fit();
@@ -79,15 +85,25 @@ export const DesktopWidget = GObject.registerClass({
 
     /**
      * Lay out what it shows for a size. The card keeps the size it has
-     * until fit() (while it is being stretched, say).
+     * until fit() (while it is being stretched, say). Of a size of its own,
+     * it is styled as the size it goes by: of its kind's, the nearest to it
+     * (in the context's catalog, the lock screen's say).
      *
      * @param {string} size
      */
     fill(size) {
-        for (const name of Object.keys(SIZES))
-            this.remove_style_class_name(`atelier-widget-${name}`);
-        this.add_style_class_name(`atelier-widget-${size}`);
+        // (Styled anew – once – only when it goes by another size.)
+        const named = namedSize(size, (this._context.catalog ?? KINDS)[this.entry.kind]?.sizes);
+        const sized = new Set(Object.keys(SIZES).map(name => `atelier-widget-${name}`));
+        const classes = (this.get_style_class_name() ?? '').split(' ').filter(name => name && !sized.has(name));
+        const style = [...classes, `atelier-widget-${named}`].join(' ');
+        if (style !== this.get_style_class_name())
+            this.set_style_class_name(style);
         this.entry = {...this.entry, size};
+        if (this._content && this.fitContent(size)) {
+            this.emit('filled');
+            return;
+        }
         this._content?.destroy();
         this._content = new St.BoxLayout({
             style_class: 'atelier-widget-content',
@@ -109,11 +125,20 @@ export const DesktopWidget = GObject.registerClass({
         this.set_size(width * scale, height * scale);
     }
 
+    /** @returns {boolean} whether it is being stretched */
+    get stretching() {
+        return this._stretching ?? false;
+    }
+
     /** @param {boolean} stretching - what it shows is cut off at its edges */
     set stretching(stretching) {
+        stretching = Boolean(stretching);
+        if (stretching === this.stretching)
+            return;
         this._stretching = stretching;
         if (this._content)
             this._content.clip_to_allocation = stretching;
+        this.notify('stretching');
     }
 
     /**
@@ -123,6 +148,18 @@ export const DesktopWidget = GObject.registerClass({
      * @param {string} _size
      */
     build(_box, _size) {}
+
+    /**
+     * Before it is filled anew for another size: whether what it shows
+     * serves as it is, told of the size (a kind's face that lays itself out
+     * for any size).
+     *
+     * @param {string} _size
+     * @returns {boolean} false: built anew
+     */
+    fitContent(_size) {
+        return false;
+    }
 
     /** What a click does (open the app that has more, say). */
     activate() {}

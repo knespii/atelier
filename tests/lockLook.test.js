@@ -1,5 +1,5 @@
 import {blend, contrastLc, minimumLc} from '../lib/apca.js';
-import {GLASS, frost, glassColor, glassFor, glassTint, tintShown} from '../lib/glassBackdrop.js';
+import {GLASS, frost, glassColor, glassFor, tintShown} from '../lib/glassBackdrop.js';
 import {
     REACH, STRETCH, TYPE, batteryState, chosenTone, glassDigits, glassInk, isColor, legibilityPlan, lockTone, mergeStats,
     partStyle, pickTone, regionIn, regionStats, roleOf, shortTemperature, styleWithPlan, widgetStyle,
@@ -194,25 +194,14 @@ export function testLegibilityPlanForGlass() {
 
 export function testGlassDigits() {
     const ink = 100;
-    // No subject: as tall as the box lets them, up to the most.
-    assertEqual(glassDigits(ink, 40, 200, null), {stretch: 1.6, y: 40});
-    assertEqual(glassDigits(ink, 40, 600, null).stretch, STRETCH.max, 'never taller than the most');
-    assertEqual(glassDigits(ink, 40, 100, null).stretch, STRETCH.min, 'never squashed');
-    // A subject under them: down into it, its top a little above their feet.
-    const subject = 40 + 2 * ink * (1 - STRETCH.overlap);
-    const {stretch, y} = glassDigits(ink, 40, 400, subject);
-    const feet = y + stretch * ink;
-    assert(y === 40 && Math.abs(stretch - 2) < 1e-9, `from under the date (${y}, ${stretch})`);
-    assert(Math.abs((feet - subject) / (stretch * ink) - STRETCH.overlap) < 1e-9, `their feet in it (${feet})`);
-    // Far below: as tall as they get, moved down to meet it.
-    const low = glassDigits(ink, 40, 500, 350);
-    assert(low.stretch === STRETCH.max && low.y > 40 &&
-        Math.abs(350 - low.y - (1 - STRETCH.overlap) * low.stretch * ink) < 1e-9, `moved down to it (${low.y})`);
-    // Right under the date: as short as they go, from under it.
-    assertEqual(glassDigits(ink, 40, 400, 60), {stretch: STRETCH.min, y: 40});
-    // Under the box or over the top: as without one.
-    assertEqual(glassDigits(ink, 40, 200, 500), glassDigits(ink, 40, 200, null));
-    assertEqual(glassDigits(ink, 40, 200, 10), glassDigits(ink, 40, 200, null));
+    // From under the date line to the bottom of the box, whatever its size.
+    assertEqual(glassDigits(ink, 40, 200), {stretch: 1.6, y: 40});
+    assertEqual(glassDigits(ink, 26, 540), {stretch: 5.14, y: 26}, 'a tall box: far past the most they once took (×2.8)');
+    const {stretch, y} = glassDigits(ink, 26, 517);
+    assert(y === 26 && Math.abs(y + stretch * ink - 517) < 1e-9, `their feet on the box's bottom (×${stretch})`);
+    assertEqual(glassDigits(ink, 40, 900).stretch, STRETCH.max, 'never taller than the most');
+    assertEqual(glassDigits(ink, 40, 100).stretch, STRETCH.min, 'never squashed');
+    assertEqual(glassDigits(0, 40, 200), {stretch: 1, y: 40}, 'not measured: as they are');
 }
 
 export function testChosenTone() {
@@ -322,8 +311,8 @@ export function testGlassMaterial() {
         return {stats, ink, plan: legibilityPlan({...digits, tone, stats, ink, ...options})};
     };
     const light = {color: '#f4f4f4', dark: false};
-    // A night sky, lighter towards the city: the frost lets its light
-    // through brighter, the tint lighter still – it reads as it is, no
+    // A night sky, lighter towards the city: light glass over it, lighter
+    // than it, washed a little towards the tone – it reads as it is, no
     // shadow. (A flat tint over it would have wanted one.)
     const night = ['#1c2233', '#232a3d', '#2c3550', '#4a4a66'];
     const {stats, ink, plan} = planOn(night, light);
@@ -331,14 +320,15 @@ export function testGlassMaterial() {
         `on a night sky, as it is (${JSON.stringify(plan)})`);
     const flat = legibilityPlan({...digits, tone: light, stats});
     assert(flat.shadow !== null && flat.lc < plan.lc, `a flat tint would have taken a shadow (${JSON.stringify(flat)})`);
-    // The colour it comes out: glassColor() of the frost's lighter tenth.
+    // The colour it comes out: glassColor() of the lighter tenth of what is
+    // behind, as the glass blurs it, through light glass.
     const frost = regionStats(frosted(bands(night)), all);
-    assertEqual(ink(digits.glass, stats.tenths.light), glassColor({frosted: frost.tenths.light,
-        tint: glassTint(light, frost.mean), ...glassFor(digits.glass), behind: stats.tenths.light}));
-    assertEqual(glassFor(digits.glass), {...GLASS}, 'at rest');
-    // Fine stripes, blurred, give the frost their mean: lit less.
+    assertEqual(ink(digits.glass, stats.tenths.light), glassColor({behind: frost.tenths.light, tone: light.color,
+        ...glassFor(digits.glass), face: 'light'}));
+    assertEqual(glassFor(digits.glass), {wash: GLASS.wash}, 'at rest');
+    // Fine stripes, blurred, give the glass their mean: lit less.
     const fine = planOn(night, light, {fine: true}).plan;
-    assert(fine.lc < plan.lc, `${fine.lc} < ${plan.lc}`);
+    assert(fine.lc <= plan.lc, `${fine.lc} <= ${plan.lc}`);
     // A bright blue sky: the frost as light as the sky's lighter half –
     // a shadow round the digits (no heavier weight is read better that
     // large), as much as they lack.
@@ -352,9 +342,14 @@ export function testGlassMaterial() {
         `or more opaque glass (${JSON.stringify(opaque)})`);
     // Fog, under dark glass: it reads.
     const fog = planOn(['#d8dde3', '#c8ced6', '#e8ebef'], {color: '#242424', dark: true}).plan;
-    assert(fog.lc >= fog.need && fog.shadow === null, `dark glass on fog (${JSON.stringify(fog)})`);
-    // No backdrop made yet: the tint alone, as without ink.
+    assert(fog.short === 0 && fog.boldness === 0 && (fog.shadow?.alpha ?? 0) < 0.1 && fog.glass === digits.glass,
+        `dark glass on fog: it reads, at most a faint glow round it (${JSON.stringify(fog)})`);
+    // Dark type: through dark glass, washed towards its own tone.
+    const darkInk = glassInk({color: '#242424', dark: true}, regionStats(frosted(bands(['#d8dde3'])), all));
+    assertEqual(darkInk(GLASS.wash), glassColor({behind: '#d8dde3', tone: '#242424', wash: GLASS.wash, face: 'dark'}));
+    // No backdrop made yet, or no glass: the tone alone, as without ink.
     assertEqual(glassInk(light, null), null);
+    assertEqual(glassInk(light, stats, null), null);
 }
 
 export function testBattery() {

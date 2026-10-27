@@ -5,9 +5,10 @@
 // The date over a clock stays in front of it all the same: the cutout has
 // a hole where the date is (under it is the same wallpaper, so the hole
 // shows the date over the subject, nothing else). Only a cutout that is
-// there shows: nothing here makes one, nor launches anything. It goes as
-// the prompt comes up and the wallpaper blurs, and stays off while it would
-// hide too much of a digit of a clock.
+// there shows: nothing here makes one, nor launches anything. It goes with
+// the clocks as the prompt comes up and the wallpaper blurs (the board
+// fades them as one), and stays off while it would hide too much of a digit
+// of a clock.
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -18,9 +19,7 @@ import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {
-    cutoutOpacity, cutoutPath, legibility, lockWallpaper, pictureState, placement, subjectTop,
-} from '../../lib/depth.js';
+import {cutoutPath, legibility, lockWallpaper, pictureState, placement} from '../../lib/depth.js';
 import {syncTextureFrame} from '../core/glass.js';
 
 Gio._promisify(Gio.File.prototype, 'read_async');
@@ -134,12 +133,11 @@ export class DepthCutout {
         this._shown = null;
         this._clocks = [];
         this._inFront = [];
-        this._progress = 0;
         /** Whether the subject would hide too much of a clock (and so stays off). */
         this.tooMuch = false;
         /** How legible each clock stays with it (lib/depth.js legibility()), as cover() was told of them. */
         this.legibility = [];
-        /** Called when the cutout comes, goes or moves (the glass clock follows it). */
+        /** Called when the cutout comes, goes or moves (how much of the clocks it covers is looked at anew). */
         this.onChanged = null;
         this.actor.connect('destroy', () => {
             this._cancellable?.cancel();
@@ -253,18 +251,6 @@ export class DepthCutout {
     }
 
     /**
-     * @param {object} strip - {x, width, from, to} on the monitor (see
-     *   lib/depth.js subjectTop())
-     * @param {number} [share] - of the strip's width the subject has to
-     *   stand across (see there)
-     * @returns {number|null} where what stands in front starts in it; null
-     *   without a cutout, or nothing there
-     */
-    subjectTop(strip, share = undefined) {
-        return this._shown && this._sample ? subjectTop(this._sample, this._shown, strip, share) : null;
-    }
-
-    /**
      * Where the clocks under it are: the effect is off while the subject
      * would hide too much of a digit of one, or of one as a whole (as an
      * iPhone gives it up: lib/depth.js legibility()), and without any.
@@ -332,12 +318,6 @@ export class DepthCutout {
         return rects;
     }
 
-    /** @param {number} progress - from the clock (0) to the prompt (1) */
-    follow(progress) {
-        this._progress = progress;
-        this._sync();
-    }
-
     /**
      * Darkened, as what is under it is (in the editor).
      *
@@ -357,11 +337,8 @@ export class DepthCutout {
     }
 
     _sync() {
-        if (!this.actor)
-            return;
-        const opacity = Math.round(255 * cutoutOpacity(this._progress));
-        this.actor.opacity = opacity;
-        this.actor.visible = Boolean(this._shown) && this._clocks.length > 0 && !this.tooMuch && opacity > 0;
+        if (this.actor)
+            this.actor.visible = Boolean(this._shown) && this._clocks.length > 0 && !this.tooMuch;
     }
 
     /**

@@ -47,6 +47,10 @@ export function testScreenLuminance() {
     // The screen's plain 2.4 exponent, not sRGB's piecewise curve.
     assert(near(apcaY('#808080'), (128 / 255) ** 2.4 * (APCA.sRco + APCA.sGco + APCA.sBco)));
     assertEqual(apcaY([255, 0, 0]), APCA.sRco, 'as an array too');
+    // (A picture's whole channel values from a table, the rest worked out: the same.)
+    const own = ([r, g, b]) => APCA.sRco * (r / 255) ** 2.4 + APCA.sGco * (g / 255) ** 2.4 + APCA.sBco * (b / 255) ** 2.4;
+    for (const rgb of [[1, 2, 3], [200, 100, 50], [127.5, 64, 0.25], [-1, 256, 30]])
+        assertEqual(apcaY(rgb), own(rgb), `${rgb}`);
     // Near black, dark text barely stands out: the soft clamp.
     assert(Math.abs(contrastLc('#000000', '#0a0a0a')) < 1, 'black on near-black: nothing');
 }

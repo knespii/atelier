@@ -21,6 +21,7 @@ import {ProfileStore} from './lib/profiles.js';
 import {registerFonts} from './shell/core/fonts.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {releaseKeptStyles} from './shell/core/theme.js';
+import {VibrancyModule, releaseKeptVibrancy} from './shell/core/vibrancy.js';
 import {BarModule} from './shell/bar/module.js';
 import {ClaudeModule} from './shell/claude/module.js';
 import {ControlCentreModule} from './shell/controlCentre/module.js';
@@ -55,6 +56,8 @@ export default class AtelierExtension extends Extension {
         this.modules = new ModuleManager(context);
         context.modules = this.modules;
         this.modules.register('palette', ctx => new PaletteModule(ctx));
+        // (Before the surfaces of glass, whose type it colours.)
+        this.modules.register('vibrancy', ctx => new VibrancyModule(ctx));
         this.modules.register('profiles', ctx => new ProfilesModule(ctx));
         this.modules.register('island', ctx => new IslandModule(ctx),
             {settings: this._settings.get_child('island'), key: 'enabled'});
@@ -115,6 +118,7 @@ export default class AtelierExtension extends Extension {
         this._afterglow = null;
         this.modules.disable();
         releaseKeptStyles();
+        releaseKeptVibrancy();
         this.modules = null;
         this.lockModules = null;
         this._settings = null;
