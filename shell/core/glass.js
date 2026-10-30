@@ -10,7 +10,6 @@
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
-import Graphene from 'gi://Graphene';
 import Mtk from 'gi://Mtk';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -356,37 +355,10 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
 // or any other actor that is as large as the stage. (The group says it has
 // no size, and a plain clone scales its source to its own size: by
 // infinity, to nothing.)
-// A clone is drawn anew whenever anything in what it clones is, and the
-// stage with it as far as the clone reaches: told the part of it that
-// shows, it has the stage drawn again only there. (Live glass showed all of
-// the windows' group: a window drawn anew anywhere had the whole stage
-// drawn again, every frame of a spinner far from the glass.)
 export const WindowsClone = GObject.registerClass(
 class AtelierWindowsClone extends Clutter.Clone {
     vfunc_allocate(box) {
         this.set_allocation(box);
-    }
-
-    /**
-     * @param {number[]|null} part - [x, y, width, height]: what shows of
-     *   it, in its own pixels; null for all of it
-     */
-    setShown(part) {
-        if (part?.join() === this._part?.join())
-            return;
-        this._part = part;
-        // (Its paint volume is worked out anew.)
-        this.queue_redraw();
-    }
-
-    vfunc_get_paint_volume(volume) {
-        if (!this._part)
-            return super.vfunc_get_paint_volume(volume);
-        const [x, y, width, height] = this._part;
-        volume.set_origin(new Graphene.Point3D({x, y, z: 0}));
-        volume.set_width(width);
-        volume.set_height(height);
-        return true;
     }
 });
 
@@ -713,12 +685,10 @@ class AtelierGlassSurface extends St.Widget {
             const windows = new WindowsClone({source: global.window_group});
             windows.set_size(global.stage.width, global.stage.height);
             this._live.add_child(windows);
-            // (Told what shows of it before it is on the stage: all of it,
-            // even once, is the whole stage drawn again.)
-            this._syncLive();
             this.insert_child_above(this._live, this._source ?? this._wallpaper);
             this._wallpaper.hide();
             this._source?.hide();
+            this._syncLive();
         } else {
             this._live.destroy();
             this._live = null;
@@ -758,14 +728,10 @@ class AtelierGlassSurface extends St.Widget {
         const y1 = Math.max(this.y, down(Math.min(...boxes.map(b => b[1])) - margin));
         const x2 = Math.min(this.x + this.width, up(Math.max(...boxes.map(b => b[2])) + margin));
         const y2 = Math.min(this.y + this.height, up(Math.max(...boxes.map(b => b[3])) + margin));
-        const [width, height] = [Math.max(1, x2 - x1), Math.max(1, y2 - y1)];
         this._live.set_position(x1 - this.x, y1 - this.y);
-        this._live.set_size(width, height);
-        // (What is at x1, y1 on the stage at its corner; only that much of
-        // the windows shows.)
-        const windows = this._live.get_first_child();
-        windows.set_position(-x1, -y1);
-        windows.setShown([x1, y1, width, height]);
+        this._live.set_size(Math.max(1, x2 - x1), Math.max(1, y2 - y1));
+        // (What is at x1, y1 on the stage at its corner.)
+        this._live.get_first_child().set_position(-x1, -y1);
         this._live.show();
     }
 
