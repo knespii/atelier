@@ -9,7 +9,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['transparency-mode', 'background-opacity', 'customize-alphas', 'min-alpha', 'max-alpha',
-    'custom-background-color', 'background-color', 'custom-theme-shrink', 'force-straight-corner', 'intellihide'];
+    'custom-background-color', 'background-color', 'custom-theme-shrink', 'force-straight-corner'];
 
 // The title of the window these checks open.
 const TITLE = 'atelier-dock-appearance';
@@ -24,45 +24,6 @@ window.connect('close-request', () => loop.quit());
 window.present();
 loop.run();
 `;
-
-// Another, all of one colour, with a spinner turning in its corner: for
-// the glass near it to show it, and for what it draws anew far from the
-// glass. (Blue or orange, whichever is the farther from what the glass
-// shows without it: one of them is far, whatever the wallpaper.)
-const LIVE_TITLE = 'atelier-dock-live-glass';
-const LIVE_COLORS = [[0, 77, 255], [255, 128, 0]];
-const liveScript = ([red, green, blue]) => `
-imports.gi.versions.Gtk = '4.0';
-imports.cairo;
-const {Gtk, GLib} = imports.gi;
-Gtk.init();
-const loop = new GLib.MainLoop(null, false);
-const window = new Gtk.Window({title: '${LIVE_TITLE}', default_width: 420, default_height: 240});
-const area = new Gtk.DrawingArea({hexpand: true, vexpand: true});
-area.set_draw_func((_, cr) => {
-    cr.setSourceRGB(${red / 255}, ${green / 255}, ${blue / 255});
-    cr.paint();
-});
-const overlay = new Gtk.Overlay({child: area});
-overlay.add_overlay(new Gtk.Spinner({spinning: true, width_request: 48, height_request: 48,
-    halign: Gtk.Align.START, valign: Gtk.Align.START}));
-window.set_child(overlay);
-window.connect('close-request', () => loop.quit());
-window.present();
-loop.run();
-`;
-
-// A small actor where nothing changes: painted only when the stage is
-// drawn again there too. (Made in the shell only: the preferences' checks
-// load this file too.)
-let PaintCounter = null;
-const paintCounter = t => (PaintCounter ??= t.GObject.registerClass(
-    class AtelierTestPaintCounter extends t.St.Widget {
-        vfunc_paint(paintContext) {
-            this.count = (this.count ?? 0) + 1;
-            super.vfunc_paint(paintContext);
-        }
-    }));
 
 // The opacity of the dock's background, 0–1.
 const alphaOf = dock => dock.container.get_theme_node().get_background_color().alpha / 255;
@@ -97,20 +58,18 @@ async function set(t, settings, values) {
 }
 
 /**
- * Open a test window.
+ * Open the test window.
  *
  * @param {object} t
- * @param {string} [title] - its title, as its script has it
- * @param {string} [script] - the GJS that shows it
- * @returns {Promise<object|null>} {window (a Meta.Window), process, title}
+ * @returns {Promise<object|null>} {window (a Meta.Window), process}
  */
-async function openWindow(t, title = TITLE, script = WINDOW_SCRIPT) {
+async function openWindow(t) {
     const {Gio} = t;
-    const process = Gio.Subprocess.new(['gjs', '-c', script], Gio.SubprocessFlags.NONE);
+    const process = Gio.Subprocess.new(['gjs', '-c', WINDOW_SCRIPT], Gio.SubprocessFlags.NONE);
     let window = null;
     await t.waitFor(() => {
         window = global.get_window_actors().map(actor => actor.meta_window)
-            .find(w => w.get_title() === title) ?? null;
+            .find(w => w.get_title() === TITLE) ?? null;
         return window !== null;
     }, 8000);
     if (!window) {
@@ -120,87 +79,14 @@ async function openWindow(t, title = TITLE, script = WINDOW_SCRIPT) {
     // (Shown, and placed by the shell: a move before then is undone.)
     await t.waitFor(() => window.get_compositor_private()?.mapped && window.get_frame_rect().width > 0, 3000);
     await t.sleep(500);
-    return {window, process, title};
+    return {window, process};
 }
 
 async function closeWindow(t, opened) {
     if (!opened)
         return;
-    const gone = () => !global.get_window_actors().some(actor => actor.meta_window.get_title() === opened.title);
-    // (Asked to close first: killed while it drew – a spinner turning – it
-    // once left the compositor damage on a buffer already gone.)
-    opened.window.delete(global.get_current_time());
-    if (!await t.waitFor(gone, 3000))
-        opened.process.force_exit();
-    await t.waitFor(gone, 3000);
-}
-
-/**
- * The dock's glass near a window, it showing (not out of its way): live, of
- * the window rather than of the wallpaper where it rests; what the window
- * draws anew far from it has the stage drawn again only there and round the
- * glass; in the overview none is near; away from it, of the wallpaper.
- *
- * @param {object} t
- * @param {Dock} dock - of glass, as the profile has it
- */
-async function liveGlass(t, dock) {
-    const {check, Main} = t;
-    const scope = near => dock._vibrant?.[near ? 1 : 0]?.scope ?? '-';
-    // (Beside the first icon, half way up: in the shape, not on an icon,
-    // in from its rim – where nothing is bent.)
-    const glassColor = async name => {
-        const [x, y] = dock.container.get_transformed_position();
-        await t.screenshot(name);
-        return t.averageColor(name, Math.round(x) + 6, Math.round(y + dock.container.height / 2) - 3, 3, 6);
-    };
-    const live = () => dock.theming.near && dock._glass._live !== null;
-    // (Summed over red, green and blue.)
-    const distance = (a, b) => a.reduce((sum, v, i) => sum + Math.abs(v - b[i]), 0);
-    await set(t, t.settings, {'intellihide': false});
-    const away = await glassColor('69a-dock-glass-away');
-    check(!live() && t.hasClass(dock.container, scope(false)), 'away from windows, its glass is of the wallpaper');
-    const color = LIVE_COLORS.reduce((a, b) => (distance(b, away) > distance(a, away) ? b : a));
-    const opened = await openWindow(t, LIVE_TITLE, liveScript(color));
-    if (!check(opened !== null, `a window all of one colour opens (${color})`))
-        return;
-    const counter = new (paintCounter(t))({style: 'background-color: rgba(255, 0, 255, 0.4);', width: 24, height: 24});
-    try {
-        const rect = dock.staticRect;
-        const frame = opened.window.get_frame_rect();
-        opened.window.move_frame(true, rect.x - 40, rect.y + rect.height - frame.height);
-        check(await t.waitFor(() => live() && t.hasClass(dock.container, scope(true)), 2000),
-            'a window behind it: its glass live, its type as over windows');
-        await t.sleep(400);
-        const over = await glassColor('69b-dock-glass-live');
-        check(distance(over, color) < distance(over, away),
-            `of the window behind it, not of the wallpaper (${over.map(Math.round)}: nearer the window's ${color} ` +
-            `than ${away.map(Math.round)}, away)`);
-        // (Far from the glass and the window's spinner, where nothing changes.)
-        Main.layoutManager.uiGroup.add_child(counter);
-        counter.set_position(global.stage.width - 100, Math.round(global.stage.height * 0.4));
-        await t.sleep(300);
-        let frames = 0;
-        const id = global.stage.connect('after-paint', () => frames++);
-        counter.count = 0;
-        await t.waitFor(() => frames >= 40, 6000);
-        global.stage.disconnect(id);
-        check(frames >= 4 && counter.count <= frames / 4,
-            'the window drawn anew far from it: the stage drawn again only there and round the glass ' +
-            `(the far corner ${counter.count} times in ${frames} frames)`);
-        Main.overview.show();
-        check(await t.waitFor(() => Main.overview.visible && !dock.theming.near && dock._glass._live === null, 3000),
-            'in the overview, of the wallpaper: no window is near there');
-        Main.overview.hide();
-        check(await t.waitFor(() => !Main.overview.visible && live(), 3000), 'back from it, live again');
-        opened.window.move_frame(true, rect.x, 100);
-        check(await t.waitFor(() => !live() && dock._glass._live === null && t.hasClass(dock.container, scope(false)),
-            2000), 'the window away from it: of the wallpaper again');
-    } finally {
-        counter.destroy();
-        await closeWindow(t, opened);
-        await set(t, t.settings, {'intellihide': null});
-    }
+    opened.process.force_exit();
+    await t.waitFor(() => !global.get_window_actors().some(actor => actor.meta_window.get_title() === TITLE), 3000);
 }
 
 export async function shell(t) {
@@ -283,7 +169,6 @@ export async function shell(t) {
         check(dock._glass && dock.container.has_style_class_name('atelier-dock-glassy') &&
             dock.container.get_style() === null && alphaOf(dock) === 0,
         'over glass, as the profile: clear, no style of its own');
-        await liveGlass(t, dock);
         await set(t, settings, {'transparency-mode': 'FIXED', 'background-opacity': 0.2});
         check(await t.waitFor(() => alphaOf(dock) === 0 && Math.abs(dock._glass.opacity - 128) <= 2, 2000),
             `over glass, fixed at 20%: no wash, half the glass (${dock._glass.opacity})`);

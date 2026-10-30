@@ -338,9 +338,7 @@ they turn dark, over a dark one they stay light, in the palette's hue,
 legible as APCA measures contrast. The type stays light in the dark style
 and dark in the light one unless the other reads clearly better there. The
 glass itself never darkens on its own: it is darkened as much as you choose,
-the same on every surface. What it shows is what is behind it: the
-wallpaper, and the windows too where they are – under the island while it
-is open, under the dock while a window is near it.
+the same on every surface.
 
 In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
 little darker under it to keep what is on it legible) or *Off* (solid

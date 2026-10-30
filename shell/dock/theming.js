@@ -6,15 +6,9 @@
 //
 // Over glass the opacity is shared: the glass itself fades below 40 %,
 // a wash of the colour comes in above (lib/seeThrough.js).
-//
-// Whether a window is near is looked at under DYNAMIC, and over glass,
-// which is live near windows (shell/dock/dock.js). In the overview none is,
-// as Dash to Dock has it: the dock is over the overview's wallpaper there.
 
 import Meta from 'gi://Meta';
 import St from 'gi://St';
-
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DEFAULT_COLOR, backgroundCss, dynamicAlpha, dynamicAlphas, parseColor, windowNear} from '../../lib/dockTheme.js';
 import {rgbToHex} from '../../lib/palette.js';
@@ -39,30 +33,20 @@ export class DockTheming {
         this._settings = settings;
         this._glass = glass;
         this._style = null; // the inline style put on last
-        this.near = false; // a window is near (only looked at under DYNAMIC and over glass)
+        this.near = false; // a window is near (only looked at under DYNAMIC)
 
         settings.connectObject(...KEYS.flatMap(key => [`changed::${key}`, () => this.sync()]), this);
-        // (Only DYNAMIC and glass look at the windows.)
+        // (Only DYNAMIC looks at the windows.)
         dock.services.windows.connectObject('changed', () => {
-            if (this._watchesWindows)
+            if (this._mode === 'DYNAMIC')
                 this.sync();
         }, this);
-        Main.overview.connectObject(
-            'showing', () => this._watchesWindows && this.sync(),
-            'hidden', () => this._watchesWindows && this.sync(),
-            this);
         // The classes are on before the dock is first measured.
         this._syncClasses();
     }
 
     get _mode() {
         return this._settings.get_string('transparency-mode');
-    }
-
-    // Whether windows near it matter: under DYNAMIC (more opaque near them)
-    // and over glass (live near them).
-    get _watchesWindows() {
-        return this._mode === 'DYNAMIC' || this._glass;
     }
 
     /** Put the look on the dock again (after it is placed, say). */
@@ -78,11 +62,7 @@ export class DockTheming {
         }
         const settings = this._settings;
         const mode = this._mode;
-        const near = this._watchesWindows && !Main.overview.visible && this._windowNear();
-        if (near !== this.near) {
-            this.near = near;
-            this._dock.syncNear?.();
-        }
+        this.near = mode === 'DYNAMIC' && this._windowNear();
         const alpha = this._alphaFor(this.near);
         const opacity = settings.get_double('background-opacity');
         // (As the profile has it, the glass is all there.)
@@ -182,6 +162,5 @@ export class DockTheming {
     destroy() {
         this._settings.disconnectObject(this);
         this._dock.services.windows.disconnectObject(this);
-        Main.overview.disconnectObject(this);
     }
 }
