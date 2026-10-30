@@ -4,7 +4,7 @@ import GLib from 'gi://GLib';
 
 import {
     CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
-    chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, legibility,
+    chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, depthNote, legibility,
     lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath,
 } from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
@@ -276,6 +276,21 @@ export function testLegibilityWhole() {
     const off = legibility(cutoutWhere(() => true), {x: 1000, y: 0, width: 800, height: 400}, {glyphs: DIGITS});
     assertEqual([off.stays, off.worst], [true, 0], 'the cutout elsewhere: on');
     assertEqual(legibility(around, MONITOR, {glyphs: []}).stays, true, 'no digits, no box: nothing to keep legible');
+}
+
+export function testDepthNote() {
+    const on = {stays: true, whole: 0.2, worst: 0.1, glyph: 0};
+    assertEqual(depthNote([on], {loaded: true, status: 'ready'}), '', 'on: nothing to say');
+    assertEqual(depthNote([], {loaded: false, status: 'working'}), 'Depth effect: preparing…');
+    assertEqual(depthNote([on], {loaded: true, status: 'working'}), 'Depth effect: preparing…',
+        'made anew: preparing, though the old one shows');
+    assertEqual(depthNote([], {loaded: false, status: ''}), '', 'no model: the settings say so');
+    assertEqual(depthNote([], {loaded: false, status: 'failed: no memory'}), 'Depth effect: the cutout could not be made');
+    const digit = depthNote([on, {stays: false, whole: 0.66, worst: 0.7707, glyph: 3}], {loaded: true, status: 'ready'});
+    assertEqual(digit, 'Depth effect off here: the subject would hide 77 % of a digit – move the clock or make it smaller');
+    assertEqual(depthNote([{stays: false, whole: 0.45, worst: 0.2, glyph: 1}], {loaded: true, status: 'ready'}),
+        'Depth effect off here: the subject would hide 45 % of the clock – move the clock or make it smaller',
+        'each digit legible, too much of the clock gone');
 }
 
 export function testCutoutOpacity() {

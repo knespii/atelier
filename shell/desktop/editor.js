@@ -660,6 +660,8 @@ export class DesktopEditor {
         widget.set_position(x, y);
         drag.target = this._desktop.spotFor(widget.entry.id, ...cellsAt(x / scale, y / scale, this._desktop.origin));
         this._showGhost({...widget.entry, ...drag.target});
+        // (The lock screen's board says how its depth effect is, there.)
+        this._desktop.dragAt?.(widget.entry.id, drag.target);
     }
 
     // Its corner with the pointer, within the sizes it comes in (and a
@@ -721,6 +723,7 @@ export class DesktopEditor {
         this._dragGrab?.dismiss();
         this._dragGrab = null;
         widget.remove_style_pseudo_class('dragged');
+        this._desktop.dragAt?.(null);
         // Back among the others as it was (under the notes on the desktop, say).
         if (above?.get_parent() === widget.get_parent())
             widget.get_parent().set_child_below_sibling(widget, above);

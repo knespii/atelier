@@ -73,6 +73,24 @@ class LockPreview {
         this._editor = new DesktopEditor(this._board);
         this._board.editor = this._editor;
         this._board.onStopEditing = () => this.close();
+        // What the depth effect is doing, while it is on: being made, or
+        // off where the clocks are (and why), at the top of the screen.
+        this._note = new St.Label({style_class: 'atelier-lock-depth-note', visible: false});
+        this._editor.actor.add_child(this._note);
+        this._note.connect('notify::width', () => this._note.set_position(
+            Math.round(monitor.x + (monitor.width - this._note.width) / 2),
+            Math.round(monitor.y + 24 * St.ThemeContext.get_for_stage(global.stage).scale_factor)));
+        const showNote = note => {
+            this._note.text = note;
+            this._note.visible = Boolean(note);
+        };
+        this._board.onDepthNote = note => this._note && showNote(note);
+        showNote(this._board.depthNote);
+    }
+
+    /** @returns {string} the note on the depth effect shown ('' for none) */
+    get depthNote() {
+        return this._note?.visible ? this._note.text : '';
     }
 
     close() {
@@ -94,6 +112,8 @@ class LockPreview {
         if (!this.actor)
             return;
         this._board.editor = null;
+        this._board.onDepthNote = null;
+        this._note = null;
         this._editor?.destroy();
         this._editor = null;
         this._board.destroy();

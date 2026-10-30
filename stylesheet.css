@@ -2333,6 +2333,16 @@
   icon-size: 13px;
 }
 
+/* The mock lock screen's note on the depth effect (preparing, or off where the clocks are). */
+.atelier-lock-depth-note {
+  padding: 8px 16px;
+  border-radius: 18px;
+  background-color: rgba(16, 16, 20, 0.88);
+  color: #ffffff;
+  font-size: 11pt;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
 .atelier-widget-gallery {
   padding: 10px;
   spacing: 4px;

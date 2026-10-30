@@ -27,7 +27,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {minimumLc} from '../../lib/apca.js';
-import {cutoutOpacity} from '../../lib/depth.js';
+import {cutoutOpacity, depthNote} from '../../lib/depth.js';
 import {lookOf} from '../../lib/glassLook.js';
 import {
     STRETCH, TYPE, glassInk, legibilityPlan, partStyle, regionStats, roleOf, styleWithPlan, widgetStyle,
@@ -101,6 +101,12 @@ export class LockBoard {
         this._depth = null;
         this._depthLater = 0;
         this._toneNow = null;
+        // (In the editor: what it says of the depth effect, and where a
+        // clock being dragged would land.)
+        this._depthNote = '';
+        this._dragSpot = null;
+        /** Called with the editor's note on the depth effect when it changes ('' for none). */
+        this.onDepthNote = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
         // The glass clocks' glass, as Atelier's glass looks (none, solid
@@ -164,6 +170,8 @@ export class LockBoard {
             'changed::style', () => this._syncLook(),
             'changed::depth-effect', () => this._syncDepth(),
             this);
+        if (interactive)
+            settings.connectObject('changed::depth-status', () => this._queueDepth(), this);
         Main.layoutManager.connectObject('monitors-changed', () => {
             this._syncArea();
             this._place();
@@ -231,6 +239,7 @@ export class LockBoard {
         } else {
             this._depth.destroy();
             this._depth = null;
+            this._setDepthNote('');
         }
         this._queueDepth();
     }
@@ -273,11 +282,16 @@ export class LockBoard {
             return;
         const clocks = [];
         const inFront = [];
+        // (In the editor, every clock where it is – one pointed at too, one
+        // being dragged where it would land – for its note.)
+        const noted = [];
         for (const widget of this.widgets) {
             const parent = widget.get_parent();
+            const dragged = widget.has_style_pseudo_class('dragged');
+            if (this._interactive && widget.entry.kind === 'clock' && !widget.stretching && parent)
+                noted.push(this._legible(widget, dragged ? this._landingBox(widget) : widget.get_allocation_box()));
             // (One being dragged in the editor is over everything until it lands.)
-            if (!parent || (parent !== this.layer && parent !== this._clockGroup) ||
-                widget.has_style_pseudo_class('dragged'))
+            if (!parent || (parent !== this.layer && parent !== this._clockGroup) || dragged)
                 continue;
             // (Under or over the cutout beside it; on the lock screen, what
             // is out of the group of the clocks, under or over that group.)
@@ -300,6 +314,47 @@ export class LockBoard {
         }
         depth.cover(clocks);
         depth.keepInFront(inFront);
+        // (A clock being stretched is weighed once it rests: till then the
+        // note stays as it was.)
+        if (this._interactive && !this.widgets.some(widget => widget.stretching)) {
+            this._setDepthNote(depthNote(depth.legibilityOf(noted),
+                {loaded: depth.loaded, status: this._settings.get_string('depth-status')}));
+        }
+    }
+
+    // Where a clock being dragged would land, in the layer: the cell the
+    // editor's shadow is on (where it was, till the shadow moves).
+    _landingBox(widget) {
+        const spot = this._dragSpot?.id === widget.entry.id ? this._dragSpot : widget.entry;
+        const [x, y] = cellOrigin(spot.x, spot.y, this._origin).map(v => v * scaleFactor());
+        return new Clutter.ActorBox({x1: x, y1: y, x2: x + widget.width, y2: y + widget.height});
+    }
+
+    _setDepthNote(note) {
+        if (note === this._depthNote)
+            return;
+        this._depthNote = note;
+        this.onDepthNote?.(note);
+    }
+
+    /** @returns {string} what the editor says of the depth effect ('' for nothing) */
+    get depthNote() {
+        return this._depthNote;
+    }
+
+    /**
+     * Where the widget being dragged in the editor would land, as its
+     * shadow moves from cell to cell: the note on the depth effect follows.
+     *
+     * @param {string|null} id - the widget; null once it is let go of
+     * @param {object} [spot] - {x, y} in cells
+     */
+    dragAt(id, spot = null) {
+        const next = id && spot ? {id, x: spot.x, y: spot.y} : null;
+        if (next?.id === this._dragSpot?.id && next?.x === this._dragSpot?.x && next?.y === this._dragSpot?.y)
+            return;
+        this._dragSpot = next;
+        this._queueDepth();
     }
 
     // A clock's date line, which stays in front of the subject: a glass
