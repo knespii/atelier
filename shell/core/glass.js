@@ -1,7 +1,9 @@
 // Atelier's glass: the wallpaper under a surface, drawn as Liquid Glass
 // (shell/core/glassMaterial.js) – lightly blurred, bending at its edges,
 // which catch the light. For a while, it may be live glass instead: of what
-// is under it now, the windows too. A surface is the wallpaper of the top
+// is under it now, the windows too. Or glass over a plain colour (a dock
+// near windows: no wallpaper shows through it there, and nothing of the
+// windows is read). A surface is the wallpaper of the top
 // of its monitor (or of another edge, for a dock), masked to a rounded
 // rectangle that can move and change size every frame (the island growing)
 // without anything but the shader's uniforms changing – and to a drop
@@ -22,8 +24,8 @@ import {
 } from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
-    GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    STYLE_TIME, setMaterialReach, textureDensity,
+    DIM_TIME, GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial,
+    setMaterialArea, STYLE_TIME, setMaterialReach, textureDensity,
 } from './glassMaterial.js';
 
 // Live glass shows the windows over the bounds of its shapes, in steps of
@@ -418,6 +420,10 @@ class AtelierGlassSurface extends St.Widget {
         this._partner = null;
         this._yields = yields;
         this._live = null;
+        // (Glass over a plain colour instead: its colour, and the actor
+        // that shows it, eased in and out.)
+        this._plainColor = null;
+        this._plain = null;
         this._light = REST_LIGHT;
         // GNOME's style and the glass's dim, eased.
         this._eased = new GlassEasing(this, () => this._showEased());
@@ -444,6 +450,8 @@ class AtelierGlassSurface extends St.Widget {
             this.connect('notify::mapped', () => glassLight.sync());
         }
         this.connect('destroy', () => {
+            // (Its colour's easing stops as it goes, after this.)
+            this._plain = null;
             glassLight.remove(this);
             this._eased.destroy();
             Main.layoutManager.disconnectObject(this);
@@ -480,7 +488,15 @@ class AtelierGlassSurface extends St.Widget {
             this._source = clone;
             this._syncSource();
         }
-        this._wallpaper.visible = !this._source && !this._live;
+        this._syncWallpaper();
+    }
+
+    // The wallpaper is drawn only where it shows: not under a source, live
+    // glass, nor a plain colour all there.
+    _syncWallpaper() {
+        const covered = this._plain && this._plainColor && !this._plain.get_transition('opacity') &&
+            this._plain.opacity === 255;
+        this._wallpaper.visible = !this._source && !this._live && !covered;
     }
 
     /** @returns {Clutter.Actor|null} what its glass shows instead of the wallpaper */
@@ -640,6 +656,7 @@ class AtelierGlassSurface extends St.Widget {
         this.set_position(x, y);
         this.set_size(width, height);
         this._fill?.set_size(width, height);
+        this._plain?.set_size(width, height);
         this._wallpaper.set_position(this._monitorAt[0] - x, this._monitorAt[1] - y);
         this._syncSource();
     }
@@ -686,15 +703,60 @@ class AtelierGlassSurface extends St.Widget {
             windows.set_size(global.stage.width, global.stage.height);
             this._live.add_child(windows);
             this.insert_child_above(this._live, this._source ?? this._wallpaper);
-            this._wallpaper.hide();
             this._source?.hide();
+            this._syncWallpaper();
             this._syncLive();
         } else {
             this._live.destroy();
             this._live = null;
             this._source?.show();
-            this._wallpaper.visible = !this._source;
+            this._syncWallpaper();
         }
+    }
+
+    /**
+     * Glass over a plain colour instead of what is behind (the wallpaper,
+     * a source, live glass): the same lens, face, edges and light, but no
+     * colour of anything under it – eased in and out over DIM_TIME (at
+     * once with GNOME's animations off). It costs a rectangle more while
+     * on; nothing is read from the screen.
+     *
+     * @param {string|null} color - '#rrggbb', null for none (what is
+     *   behind again)
+     */
+    setPlain(color) {
+        if (this._solid || color === this._plainColor)
+            return;
+        const was = this._plainColor;
+        this._plainColor = color;
+        if (color) {
+            if (!this._plain) {
+                this._plain = new Clutter.Actor({opacity: 0});
+                this._plain.set_size(this.width, this.height);
+                // (Over what is behind, under a solid surface's fill.)
+                this.insert_child_above(this._plain, this._live ?? this._source ?? this._wallpaper);
+            }
+            this._plain.background_color = Cogl.Color.from_string(color)[1];
+            if (was)
+                return;
+        } else if (!this._plain) {
+            return;
+        }
+        // (What is behind is drawn again before the colour eases out.)
+        this._syncWallpaper();
+        const plain = this._plain;
+        plain.remove_transition('opacity');
+        plain.ease({
+            opacity: color ? 255 : 0,
+            duration: DIM_TIME,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onStopped: () => plain === this._plain && this._syncWallpaper(),
+        });
+    }
+
+    /** @returns {string|null} the plain colour its glass is over (setPlain()), null for none */
+    get plain() {
+        return this._plainColor;
     }
 
     // The live glass where the shapes are, and as far around as the blur's

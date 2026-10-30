@@ -9,7 +9,7 @@
 
 // The settings these checks change, put back after them.
 const KEYS = ['transparency-mode', 'background-opacity', 'customize-alphas', 'min-alpha', 'max-alpha',
-    'custom-background-color', 'background-color', 'custom-theme-shrink', 'force-straight-corner'];
+    'custom-background-color', 'background-color', 'custom-theme-shrink', 'force-straight-corner', 'intellihide'];
 
 // The title of the window these checks open.
 const TITLE = 'atelier-dock-appearance';
@@ -20,6 +20,28 @@ const {Gtk, GLib} = imports.gi;
 Gtk.init();
 const loop = new GLib.MainLoop(null, false);
 const window = new Gtk.Window({title: '${TITLE}', default_width: 360, default_height: 240});
+window.connect('close-request', () => loop.quit());
+window.present();
+loop.run();
+`;
+
+// Another, all magenta: a colour the dock's glass would show at once if it
+// read the window (it never does).
+const MAGENTA_TITLE = 'atelier-dock-plain-glass';
+const MAGENTA = [255, 0, 255];
+const MAGENTA_SCRIPT = `
+imports.gi.versions.Gtk = '4.0';
+imports.cairo;
+const {Gtk, GLib} = imports.gi;
+Gtk.init();
+const loop = new GLib.MainLoop(null, false);
+const window = new Gtk.Window({title: '${MAGENTA_TITLE}', default_width: 420, default_height: 240});
+const area = new Gtk.DrawingArea({hexpand: true, vexpand: true});
+area.set_draw_func((_, cr) => {
+    cr.setSourceRGB(1, 0, 1);
+    cr.paint();
+});
+window.set_child(area);
 window.connect('close-request', () => loop.quit());
 window.present();
 loop.run();
@@ -58,18 +80,20 @@ async function set(t, settings, values) {
 }
 
 /**
- * Open the test window.
+ * Open a test window.
  *
  * @param {object} t
- * @returns {Promise<object|null>} {window (a Meta.Window), process}
+ * @param {string} [title] - its title, as its script has it
+ * @param {string} [script] - the GJS that shows it
+ * @returns {Promise<object|null>} {window (a Meta.Window), process, title}
  */
-async function openWindow(t) {
+async function openWindow(t, title = TITLE, script = WINDOW_SCRIPT) {
     const {Gio} = t;
-    const process = Gio.Subprocess.new(['gjs', '-c', WINDOW_SCRIPT], Gio.SubprocessFlags.NONE);
+    const process = Gio.Subprocess.new(['gjs', '-c', script], Gio.SubprocessFlags.NONE);
     let window = null;
     await t.waitFor(() => {
         window = global.get_window_actors().map(actor => actor.meta_window)
-            .find(w => w.get_title() === TITLE) ?? null;
+            .find(w => w.get_title() === title) ?? null;
         return window !== null;
     }, 8000);
     if (!window) {
@@ -79,14 +103,109 @@ async function openWindow(t) {
     // (Shown, and placed by the shell: a move before then is undone.)
     await t.waitFor(() => window.get_compositor_private()?.mapped && window.get_frame_rect().width > 0, 3000);
     await t.sleep(500);
-    return {window, process};
+    return {window, process, title};
 }
 
 async function closeWindow(t, opened) {
     if (!opened)
         return;
-    opened.process.force_exit();
-    await t.waitFor(() => !global.get_window_actors().some(actor => actor.meta_window.get_title() === TITLE), 3000);
+    const gone = () => !global.get_window_actors().some(actor => actor.meta_window.get_title() === opened.title);
+    // (Asked to close first; killed only if it doesn't.)
+    opened.window.delete(global.get_current_time());
+    if (!await t.waitFor(gone, 3000))
+        opened.process.force_exit();
+    await t.waitFor(gone, 3000);
+}
+
+/**
+ * The dock's glass near a window: over a neutral grey, not the wallpaper
+ * where it rests (which cast its colour on it over windows), eased in;
+ * nothing of the window in it (a magenta one); in the overview none is
+ * near; away from windows, the wallpaper's glass again. Over GNOME's amber,
+ * a wallpaper with colour in it.
+ *
+ * @param {object} t
+ * @param {Dock} dock - of glass, as the profile has it
+ */
+async function plainGlass(t, dock) {
+    const {check, Main} = t;
+    const glass = dock._glass;
+    const scope = isNear => dock._vibrant?.[isNear ? 1 : 0]?.scope ?? '-';
+    const background = new t.Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
+    const amber = t.Gio.File.new_for_path('/usr/share/backgrounds/gnome/amber-d.jxl').get_uri();
+    // (Beside the first icon, half way up: in the shape, not on an icon,
+    // in from its rim.)
+    const glassColor = async name => {
+        const [x, y] = dock.container.get_transformed_position();
+        await t.screenshot(name);
+        return t.averageColor(name, Math.round(x) + 6, Math.round(y + dock.container.height / 2) - 3, 3, 6);
+    };
+    const chroma = rgb => Math.max(...rgb) - Math.min(...rgb);
+    const shown = rgb => rgb.map(Math.round).join(', ');
+    const shot = name => {
+        const rect = dock.staticRect;
+        return t.screenshotArea(name, Math.max(0, rect.x - 80), Math.max(0, rect.y - 60),
+            Math.min(global.stage.width, rect.width + 160), Math.min(global.stage.height - rect.y + 60, rect.height + 120));
+    };
+    const plainAll = () => glass._plain?.opacity === 255 && !glass._plain.get_transition('opacity');
+    const grey = dock._nearColor();
+    let opened = null;
+    uris.forEach(([key]) => background.set_string(key, amber));
+    await set(t, t.settings, {'intellihide': false});
+    try {
+        await t.sleep(1500);
+        const away = await glassColor('69a-dock-glass-away');
+        check(!dock.theming.near && glass.plain === null && glass._wallpaper.visible &&
+            t.hasClass(dock.container, scope(false)) && chroma(away) > 6,
+        `away from windows, its glass is of the wallpaper (${shown(away)})`);
+        opened = await openWindow(t, MAGENTA_TITLE, MAGENTA_SCRIPT);
+        if (!check(opened !== null, 'a magenta window opens'))
+            return;
+        const rect = dock.staticRect;
+        const frame = opened.window.get_frame_rect();
+        opened.window.move_frame(true, rect.x - 40, rect.y + rect.height - frame.height);
+        check(await t.waitFor(() => dock.theming.near && glass.plain === grey &&
+            t.hasClass(dock.container, scope(true)), 2000),
+        `a window behind it: its glass over a neutral grey (${glass.plain}, of ${grey}), its type as over windows`);
+        check(/^#([0-9a-f]{2})\1\1$/.test(grey), `the grey is grey (${grey})`);
+        check(await t.waitFor(() => glass._plain && glass._plain.opacity > 0 && glass._plain.opacity < 255, 400),
+            `eased in, not at once (${glass._plain?.opacity})`);
+        check(await t.waitFor(plainAll, 1000) && !glass._wallpaper.visible,
+            'then all there, the wallpaper under it not drawn');
+        await t.sleep(200);
+        const over = await glassColor('69b-dock-glass-near');
+        await shot('69c-dock-over-window-after');
+        check(chroma(over) <= 6, `neutral over the window: no colour of the wallpaper nor of the window (${shown(over)})`);
+        // (What it was: the wallpaper's glass over the window.)
+        glass.setPlain(null);
+        await t.waitFor(() => glass._plain?.opacity === 0 && !glass._plain.get_transition('opacity'), 1000);
+        await t.sleep(200);
+        const before = await glassColor('69d-dock-glass-wallpaper-over-window');
+        await shot('69e-dock-over-window-before');
+        check(chroma(before) > 6, `the wallpaper's glass there would cast its colour (${shown(before)})`);
+        dock.syncNear();
+        check(await t.waitFor(() => glass.plain === grey && plainAll(), 1000), 'over the grey again');
+        Main.overview.show();
+        check(await t.waitFor(() => Main.overview.visible && !dock.theming.near && glass.plain === null, 3000),
+            'in the overview, the wallpaper\'s glass: no window is near there');
+        Main.overview.hide();
+        check(await t.waitFor(() => !Main.overview.visible && glass.plain === grey, 3000), 'back from it, the grey again');
+        opened.window.move_frame(true, rect.x, 100);
+        check(await t.waitFor(() => !dock.theming.near && glass.plain === null &&
+            t.hasClass(dock.container, scope(false)), 2000), 'the window away from it: of the wallpaper again');
+        check(await t.waitFor(() => glass._plain.opacity === 0 && glass._wallpaper.visible, 1000),
+            'the grey eased out, the wallpaper drawn again');
+        await t.sleep(200);
+        const back = await glassColor('69f-dock-glass-away-again');
+        check(chroma(back) > 6 && Math.abs(chroma(back) - chroma(away)) < 12,
+            `as it was away from windows (${shown(back)}; ${shown(away)} before)`);
+    } finally {
+        await closeWindow(t, opened);
+        await set(t, t.settings, {'intellihide': null});
+        uris.forEach(([key, uri]) => background.set_string(key, uri));
+        await t.sleep(500);
+    }
 }
 
 export async function shell(t) {
@@ -169,6 +288,7 @@ export async function shell(t) {
         check(dock._glass && dock.container.has_style_class_name('atelier-dock-glassy') &&
             dock.container.get_style() === null && alphaOf(dock) === 0,
         'over glass, as the profile: clear, no style of its own');
+        await plainGlass(t, dock);
         await set(t, settings, {'transparency-mode': 'FIXED', 'background-opacity': 0.2});
         check(await t.waitFor(() => alphaOf(dock) === 0 && Math.abs(dock._glass.opacity - 128) <= 2, 2000),
             `over glass, fixed at 20%: no wash, half the glass (${dock._glass.opacity})`);

@@ -1,6 +1,7 @@
 import {
-    DEFAULT_ALPHAS, backgroundCss, dynamicAlpha, dynamicAlphas, grownRect, parseColor, windowNear,
+    DEFAULT_ALPHAS, backgroundCss, dynamicAlpha, dynamicAlphas, grownRect, nearGlassColor, parseColor, windowNear,
 } from '../lib/dockTheme.js';
+import {luminance, rgbLuminance} from '../lib/palette.js';
 import {GLASS_FULL, glassShare} from '../lib/seeThrough.js';
 import {assert, assertEqual} from './util.js';
 
@@ -67,4 +68,17 @@ export function testGlassShare() {
     assertEqual(glassShare(GLASS_FULL), {glass: 1, tint: 0}, 'just glass');
     assertEqual(glassShare(0.2), {glass: 0.5, tint: 0}, 'the glass fading');
     assertEqual(glassShare(0), {glass: 0, tint: 0}, 'clear');
+}
+
+export function testNearGlassColorIsNeutral() {
+    for (const surface of ['#242424', '#fafafa', '#384d12', '#ff00ff', '#1e3a5f', '#fff']) {
+        const grey = nearGlassColor(surface);
+        const [r, g, b] = parseColor(grey);
+        assert(r === g && g === b, `${surface}: grey, no colour cast (${grey})`);
+        assert(Math.abs(luminance(grey) - rgbLuminance(parseColor(surface))) < 0.005,
+            `${surface}: as light as the surface (${grey})`);
+    }
+    assertEqual(nearGlassColor('#242424'), '#242424', 'a grey is itself');
+    assertEqual(nearGlassColor(null), '#242424', 'none: GNOME\'s dark surface');
+    assertEqual(nearGlassColor('olive'), '#242424', 'not a colour: GNOME\'s dark surface');
 }

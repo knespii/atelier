@@ -22,6 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {
     dockRect, dropIndex, fitIconSize, isHorizontal, maxLength, strutRect,
 } from '../../lib/dockGeometry.js';
+import {nearGlassColor} from '../../lib/dockTheme.js';
 import {edgeReach} from '../../lib/glassLook.js';
 import {GlassSurface} from '../core/glass.js';
 import {scrollDock} from './actions.js';
@@ -132,7 +133,8 @@ export class Dock extends EventEmitter {
             const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
             const reach = horizontal || !monitor ? 0.25
                 : Math.min(1, (SIDE_GLASS + edgeReach(true)) * scale / monitor.width);
-            // (Of the wallpaper's colours, as the island's glass.)
+            // (Of the wallpaper, as the island's glass – and over a neutral
+            // grey near windows: syncGlass().)
             this._glass = new GlassSurface({monitorIndex, side: this._side, reach, look, light});
             this._glass.add_style_class_name('atelier-dock-glass');
             Main.layoutManager.uiGroup.insert_child_below(this._glass, this.actor);
@@ -519,29 +521,36 @@ export class Dock extends EventEmitter {
      * Of glass, its marks, separators, highlights and Show Applications
      * icon follow what is behind the glass (shell/core/vibrancy.js), where
      * it rests shown, under its wash – placed anew, or its wash changed.
-     * More opaque near windows (DYNAMIC), it
-     * has its type for that in a class of its own, put on as windows come
-     * and go: no stylesheet is made anew for them.
+     * Near windows its glass is over a neutral grey (nearGlassColor()),
+     * under its wash there (more opaque, under DYNAMIC): it has its type
+     * for that in a class of its own, put on as windows come and go – no
+     * stylesheet is made anew for them.
      */
     updateVibrancy() {
         if (!this._vibrancy || !this._glass || !this.theming)
             return;
-        const states = this._settings.get_string('transparency-mode') === 'DYNAMIC' ? [false, true] : [undefined];
-        if (this._vibrant?.length === states.length) {
+        if (this._vibrant) {
             this._vibrant.forEach(surface => surface.update());
         } else {
-            this._dropVibrancy();
-            this._vibrant = states.map(near => this._vibrancy.surface({
+            this._vibrant = [false, true].map(near => this._vibrancy.surface({
                 id: `dock-${this._monitorIndex}${near ? '-near' : ''}`,
                 inks: 'dock',
                 roots: ['.atelier-dock'],
                 rect: () => this._rect,
+                ...near ? {behind: () => this._nearColor()} : {},
                 strength: () => this.theming?.washOf(near).strength ?? 1,
                 layers: () => this.theming?.washOf(near).layers ?? [],
             }));
         }
-        const now = this._vibrantNow();
-        for (const surface of this._vibrant) {
+        // (The grey follows the palette and GNOME's style, as the type.)
+        this._syncPlain();
+        this._syncVibrant();
+    }
+
+    // Its type now: near windows or away from them.
+    _syncVibrant() {
+        const now = this._vibrant?.[this.theming?.near ? 1 : 0] ?? null;
+        for (const surface of this._vibrant ?? []) {
             if (surface === now)
                 this._container.add_style_class_name(surface.scope);
             else
@@ -549,9 +558,16 @@ export class Dock extends EventEmitter {
         }
     }
 
-    // Its type now: near windows or away from them.
-    _vibrantNow() {
-        return this._vibrant?.[this._vibrant.length > 1 && this.theming?.near ? 1 : 0] ?? null;
+    // What its glass is over near windows: a grey as light as they most
+    // likely are.
+    _nearColor() {
+        return nearGlassColor(this._vibrancy?.windowSurface() ?? null);
+    }
+
+    /** A window came near it or went away (DockTheming): its glass and its type follow. */
+    syncNear() {
+        this._syncPlain();
+        this._syncVibrant();
     }
 
     _dropVibrancy() {
@@ -573,6 +589,16 @@ export class Dock extends EventEmitter {
             : Math.abs(this._container.translation_x) >= width;
         this._glass.visible = this.actor.visible && !away;
         this._glass.setShape(x, y, width, height, radius);
+        this._syncPlain();
+    }
+
+    _syncPlain() {
+        // Near windows, over a neutral grey rather than the wallpaper where
+        // it rests, which cast its colour on the dock over them (a dark
+        // olive one, a green dock). Nothing of the windows is read: live
+        // glass of them here (a clone of the windows' group sampled every
+        // frame) went with a GPU hang on opening a browser near the dock.
+        this._glass?.setPlain(this.theming?.near ? this._nearColor() : null);
     }
 
     // A wheel scrolls a row of icons that keep their size along it.
