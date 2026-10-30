@@ -548,6 +548,9 @@ export class LockBoard {
             if (!widget)
                 continue;
             widget.entry = {...widget.entry, x: entry.x, y: entry.y};
+            // (A size of its own too big for this screen: as big as it allows.)
+            if (entry.size !== widget.entry.size && !widget.stretching)
+                widget.resize(entry.size);
             const [x, y] = cellOrigin(entry.x, entry.y, this._origin).map(v => v * scale);
             widget.set_position(x, y);
         }
@@ -981,7 +984,10 @@ export class LockBoard {
         const entry = layout.find(e => e.id === id);
         if (!entry || !fits(layout, {...entry, x, y}, this._grid))
             return false;
-        this._keep({...entry, x, y});
+        // (Shown smaller than its own size on this screen, it keeps that
+        // size: for when the screen is big enough again.)
+        const stored = this._layout.find(e => e.id === id);
+        this._keep({...entry, x, y, size: stored?.size ?? entry.size});
         const widget = this._widgets.get(id);
         widget.entry = {...widget.entry, x, y};
         // (Over another part of the wallpaper.)
