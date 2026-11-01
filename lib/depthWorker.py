@@ -75,13 +75,21 @@ STEP = 1.5
 # half of the picture (at least as near as its median), the far trees
 # before the farthest stay behind.
 BEHIND_WINDOW = 0.12
+# Each such thing whole: where it is at least this sure, as long as it is
+# this sure somewhere (0 … 1, see standing_whole()).
+WHOLE_LOW = 0.35
+WHOLE_HIGH = 0.8
 # Fitting the edges to the picture (a guided filter, on a copy half as
 # big): its window, a share of the copy's longer side, and how closely it
-# follows the picture's colours.
-FIT_WINDOW = 1 / 200
-FIT_EPS = 1e-3
-# How sharp the fitted edge is made again: the slope of its last step.
-SHARPEN = 4
+# follows the picture's colours. (Wide and close: the depths are coarse,
+# a few pixels of the picture each, and fog between a fir's twigs is told
+# from the twigs by its colour over a band that wide; closer still, the
+# grain of a smooth fairing would make holes in it.)
+FIT_WINDOW = 1 / 100
+FIT_EPS = 3e-4
+# How sharp the fitted edge is made again: the slope of its last step (a
+# pixel or two of soft edge, no half see-through mush).
+SHARPEN = 6
 
 # The sky: looked for on a copy of the picture this wide, pixels.
 SKY_WIDTH = 640
@@ -303,6 +311,24 @@ def standing(np, near):
     ramp = lambda ratio: np.clip(np.log(np.maximum(ratio, 1e-6)) / np.log(STEP) + 0.5, 0, 1)
     nearer = ramp(near / (STEP * np.maximum(behind, 1e-2)))
     return nearer * ramp(near / max(float(np.median(near)), 1e-2))
+
+
+def standing_whole(np, Image, ImageDraw, near):
+    """What stands in front of what is just behind it, each thing whole or
+    not at all (1 or 0, as big as near): of standing(), what is at least
+    WHOLE_LOW of it, joined to where it is WHOLE_HIGH at least (hysteresis,
+    as edges are followed) – a trunk whole down to its foot, not fading
+    along it; and nothing smaller than PART_LEAST of the picture."""
+    sure = standing(np, near)
+    labels, count = parts(np, Image, ImageDraw, sure >= WHOLE_LOW)
+    if count == 0:
+        return np.zeros(near.shape, dtype=np.float32)
+    most = np.zeros(count + 1)
+    np.maximum.at(most, labels.ravel(), sure.ravel())
+    area = np.bincount(labels.ravel(), minlength=count + 1) / labels.size
+    kept = (most >= WHOLE_HIGH) & (area >= PART_LEAST)
+    kept[0] = False
+    return kept[labels].astype(np.float32)
 
 
 def box(np, a, r):
@@ -567,12 +593,12 @@ def front(found, picture, near, edge, chance, how=None):
     With whether there is a sky, and what of the subject was held (None
     without the subject model)."""
     np, Image = found['numpy'], found['PIL'].Image
-    from PIL import ImageFilter
+    from PIL import ImageDraw, ImageFilter
     size = picture.size
     above, airy = sky(found, picture)
     rough = np.zeros((size[1], size[0]), dtype=np.float32)
     if near is not None:
-        ahead = standing(np, near).astype(np.float32) if how == 'far' else None
+        ahead = standing_whole(np, Image, ImageDraw, near) if how == 'far' else None
         near = np.asarray(Image.fromarray(near, 'F').resize(size, Image.Resampling.BILINEAR))
         # In front: what is nearer than the far layer's edge, stepping up
         # over a ratio of STEP around it…

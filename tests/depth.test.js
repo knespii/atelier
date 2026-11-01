@@ -100,7 +100,7 @@ export function testCutoutModels() {
         'what the worker writes in a cutout of them');
     assertEqual(modelsTag({model: null, subject: lite}), '- birefnet-lite.onnx');
     assertEqual(modelsTag({model: base, subject: null}), 'depth-anything-v2-base.onnx -');
-    assert(CUTOUT_VERSION >= 6, 'cutouts from before the subject, or the trunks of a forest, made anew');
+    assert(CUTOUT_VERSION >= 7, 'cutouts from before the subject, or the trunks of a forest whole, made anew');
 }
 
 export function testPngText() {
@@ -476,6 +476,57 @@ export function testWorkerFindsTrunksInAForest() {
     assert(alpha(390, 60) === 0, `the far trunk too: farther than half the picture (${alpha(390, 60)})`);
     const edge = [140, 145, 148, 150, 152, 155, 160].map(x => alpha(x, 60));
     assert(edge[0] === 0 && edge.at(-1) === 255, `its edge on the trunk's own (${edge})`);
+    // Each trunk whole: opaque all along it, down to where the thicket
+    // behind it is nearly as near, not fading as it nears it.
+    const along = [20, 100, 160, 200].map(y => alpha(175, y));
+    assert(along.every(a => a === 255), `a trunk opaque all along it (${along})`);
+    const foot = [...Array(300).keys()].findLast(y => alpha(175, y) === 255);
+    const fading = [...Array(300).keys()].filter(y => alpha(175, y) > 0 && alpha(175, y) < 255).length;
+    assert(foot >= 200 && fading <= 3, `down near its foot, ending there, not fading along it (${foot}, ${fading})`);
+    let mush = 0;
+    for (let y = 0; y < 450; y += 2) {
+        for (let x = 0; x < 800; x += 2)
+            mush += alpha(x, y) > 0 && alpha(x, y) < 255 ? 1 : 0;
+    }
+    assert(mush / (400 * 225) < 0.01, `hardly anything half see-through (${(100 * mush / (400 * 225)).toFixed(2)} %)`);
+    // Crisp: no half see-through mush across its sides, a pixel or two of
+    // soft edge at most.
+    for (const y of [60, 150, 220]) {
+        const soft = [...Array(60).keys()].map(i => alpha(120 + i, y)).filter(a => a > 0 && a < 255).length;
+        const softRight = [...Array(60).keys()].map(i => alpha(170 + i, y)).filter(a => a > 0 && a < 255).length;
+        assert(soft <= 3 && softRight <= 3, `its sides sharp at ${y} (${soft}, ${softRight} pixels soft)`);
+    }
+}
+
+export function testWorkerKeepsAFlatSurfaceWhole() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const cutoutOf = cutoutsIn(freshDir('depth-flat'));
+    // A smooth, near, faintly shaded panel before a far wall, with a little
+    // grain in it (as a photo of a fairing has): the edges are fitted to the
+    // picture's colours, the panel itself stays whole – no holes where the
+    // filter would follow its grain.
+    let seed = 3;
+    const noise = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648 - 0.5;
+    };
+    const {alpha} = cutoutOf('panel', paint(800, 450, (x, y) => {
+        if (x >= 250 && x < 650 && y >= 80 && y < 400) {
+            const v = 0.85 + 0.04 * (x - 250) / 400 + 0.01 * noise();
+            return [v, v * 0.8, v * 0.2].map(c => Math.round(c * 255));
+        }
+        return [0.1, 0.1, 0.1].map(c => Math.round((c + 0.01 * noise()) * 255));
+    }));
+    let holes = 0;
+    for (let y = 100; y < 380; y += 4) {
+        for (let x = 270; x < 630; x += 4)
+            holes += alpha(x, y) < 255 ? 1 : 0;
+    }
+    assertEqual(holes, 0, 'the panel opaque all over');
+    assert(alpha(100, 200) === 0 && alpha(700, 200) === 0, 'the wall see-through');
 }
 
 export function testWorkerFindsTheSky() {
