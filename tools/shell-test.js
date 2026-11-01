@@ -8426,8 +8426,9 @@ async function testLockClockTooBig() {
 
 // The mock lock screen's note on the depth effect: a glass clock low over
 // a hill, most of its digits behind it – the note says how much; dragged up
-// into the sky, it goes as the shadow gets there, before it is let go of;
-// and while the cutout is made, it says so.
+// into the sky, it changes as the shadow gets there, before it is let go
+// of, to say nothing stands in front of it there; with its feet in the hill
+// it goes; and while the cutout is made, it says so.
 async function testLockDepthNote() {
     const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
     const lockSettings = atelier()._settings.get_child('lockscreen');
@@ -8480,11 +8481,25 @@ async function testLockDepthNote() {
     await pointerDown(cx, cy);
     await pointerAlong(cx, cy, cx, cy - (rows - 8) * PITCH * scale - 6);
     await Scripting.sleep(200);
-    check(await waitFor(() => note() === '', 2000), `dragged up into the sky, before it is let go of: no note ("${note()}")`);
+    // (Nothing of the hill over it there: on, showing nothing, which it says.)
+    const nothing = 'Depth effect: nothing in the wallpaper stands in front of the clock here';
+    check(await waitFor(() => note() === nothing, 2000),
+        `dragged up into the sky, before it is let go of: not off, nothing in front of it ("${note()}")`);
     await pointerUp();
     await restPointer();
     check(await waitFor(() => JSON.parse(lockSettings.get_string('widgets'))[0].y === 0 &&
-        board.depth.actor.visible, 2000) && note() === '', 'let go there: on, still no note');
+        board.depth.actor.visible, 2000) && note() === nothing, `let go there: on, nothing in front ("${note()}")`);
+    await screenshot('95i-lock-depth-note-nothing');
+    // Down again with its feet in the hill: on and showing, no note.
+    const [ux, uy] = centerOf(clock);
+    await pointerDown(ux, uy);
+    await pointerAlong(ux, uy, ux, uy + 2 * PITCH * scale + 6);
+    await Scripting.sleep(200);
+    await pointerUp();
+    await restPointer();
+    check(await waitFor(() => JSON.parse(lockSettings.get_string('widgets'))[0].y === 2 &&
+        board.depth.actor.visible && note() === '', 2000),
+    `its feet in the hill: on and showing, no note ("${note()}", ${JSON.stringify(board.depth.legibility[0])})`);
     // The cutout being made: it says so.
     lockSettings.set_string('depth-status', 'working');
     check(await waitFor(() => note() === 'Depth effect: preparing…', 2000), `being made: "${note()}"`);
@@ -8837,10 +8852,27 @@ async function testLockOnOwnWallpaper() {
                 await screenshot(name);
                 results.push(`INFO  ${name} (${GLib.path_get_basename(source)}): glass ×${glass.target.stretch.toFixed(2)}, ` +
                     `${GLib.path_get_basename(glass.fontFile ?? 'Pango')} ${glass.variations}, ` +
-                    `the cutout ${depth.actor.visible ? 'shown' : `off${depth.tooMuch ? ' (covers too much)' : ''}`}`);
+                    `the cutout ${depth.actor.visible ? 'shown' : `off${depth.tooMuch ? ' (covers too much)' : ''}`} ` +
+                    `${JSON.stringify(depth.legibility)}, of it in front ${answer.front}`);
             } finally {
                 backdrop?.destroy();
                 await locked.unlock();
+            }
+            // One's own layout on the mock lock screen too: what its note says.
+            if (own) {
+                const editor = atelier().modules.get('lockscreen-editor');
+                lockSettings.set_string('edit-request', `own-${n}`);
+                const ready = await waitFor(() => editor?.preview?._board.depth?.loaded &&
+                    editor.preview._board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 5000);
+                if (ready) {
+                    await restPointer();
+                    await Scripting.sleep(1200);
+                    const name = `95-lock-own-editor-${n}`;
+                    await screenshot(name);
+                    results.push(`INFO  ${name}: the note "${editor.preview.depthNote}"`);
+                    await pressKey(Clutter.KEY_Escape);
+                    await waitFor(() => !editor.preview, 3000);
+                }
             }
         }
     } finally {

@@ -100,7 +100,7 @@ export function testCutoutModels() {
         'what the worker writes in a cutout of them');
     assertEqual(modelsTag({model: null, subject: lite}), '- birefnet-lite.onnx');
     assertEqual(modelsTag({model: base, subject: null}), 'depth-anything-v2-base.onnx -');
-    assert(CUTOUT_VERSION >= 5, 'cutouts from before the subject made anew');
+    assert(CUTOUT_VERSION >= 6, 'cutouts from before the subject, or the trunks of a forest, made anew');
 }
 
 export function testPngText() {
@@ -276,6 +276,8 @@ export function testLegibilityWhole() {
     const off = legibility(cutoutWhere(() => true), {x: 1000, y: 0, width: 800, height: 400}, {glyphs: DIGITS});
     assertEqual([off.stays, off.worst], [true, 0], 'the cutout elsewhere: on');
     assertEqual(legibility(around, MONITOR, {glyphs: []}).stays, true, 'no digits, no box: nothing to keep legible');
+    assertEqual([legibility(around, MONITOR, {glyphs: []}).measured, legibility(around, MONITOR, {glyphs: DIGITS}).measured],
+        [false, true], 'and says whether there was anything of the clock to look at');
 }
 
 export function testDepthNote() {
@@ -291,6 +293,16 @@ export function testDepthNote() {
     assertEqual(depthNote([{stays: false, whole: 0.45, worst: 0.2, glyph: 1}], {loaded: true, status: 'ready'}),
         'Depth effect off here: the subject would hide 45 % of the clock – move the clock or make it smaller',
         'each digit legible, too much of the clock gone');
+    // On, but nothing of the subject over any clock: it shows nothing there
+    // (a forest's ground in the corners, the clock up among the trees).
+    const clear = {stays: true, whole: 0.004, worst: 0, glyph: -1, measured: true};
+    const nothing = 'Depth effect: nothing in the wallpaper stands in front of the clock here';
+    assertEqual(depthNote([clear], {loaded: true, status: 'ready'}), nothing, 'on and showing nothing: it says so');
+    assertEqual(depthNote([clear, {...on, measured: true}], {loaded: true, status: 'ready'}), '',
+        'one clock with the subject over it: it shows, nothing to say');
+    assertEqual(depthNote([{...clear, whole: 0, measured: false}], {loaded: true, status: 'ready'}), '',
+        'a clock not laid out yet: nothing said of it');
+    assertEqual(depthNote([], {loaded: true, status: 'ready'}), '', 'no clock: nothing to say');
 }
 
 export function testCutoutOpacity() {
@@ -433,6 +445,37 @@ export function testWorkerFindsTheFarLayer() {
     // (Nearer than the wall by NEARER, 1.6: from about 0.64 of the way, x 620.)
     const from = [...Array(300).keys()].map(x => 500 + x).find(x => alpha(x, 200) >= 128);
     assert(Math.abs(from - 620) < 30, `from where it is NEARER times as near as the wall (${from})`);
+}
+
+export function testWorkerFindsTrunksInAForest() {
+    if (!workerCanRun()) {
+        print('      (no python3-onnxruntime, numpy or PIL here: skipped)');
+        return;
+    }
+    const cutoutOf = cutoutsIn(freshDir('depth-forest'));
+    // A forest: the depths going on and on from the thicket far up to the
+    // ground at one's feet (no gap, what is most common half way), two near
+    // trunks before the thicket, and a far one, hardly nearer than what is
+    // round it. The trunks are no nearer than the ground half way down: by
+    // the far layer alone, none of them would stand in front (as on a
+    // wallpaper of a misty forest, where only the ground in the corners did).
+    const grey = v => [v, v, v].map(c => Math.round(c * 255));
+    const trunk = x => (x >= 150 && x < 200) || (x >= 560 && x < 610);
+    const {answer, alpha} = cutoutOf('forest', paint(800, 450, (x, y) => {
+        if (y < 300 && trunk(x))
+            return grey(0.5);
+        if (y < 300 && x >= 380 && x < 400)
+            return grey(0.14);
+        return grey(0.08 + 0.6 * y / 450);
+    }));
+    assertEqual([answer.split, answer.sky], ['far', false], `no gap in the depths (${JSON.stringify(answer)})`);
+    assert(alpha(175, 60) === 255 && alpha(585, 60) === 255 && alpha(175, 120) === 255,
+        `the near trunks in front of the thicket (${[alpha(175, 60), alpha(585, 60), alpha(175, 120)]})`);
+    assert(alpha(80, 60) === 0 && alpha(300, 60) === 0 && alpha(700, 120) === 0,
+        `the thicket see-through (${[alpha(80, 60), alpha(300, 60), alpha(700, 120)]})`);
+    assert(alpha(390, 60) === 0, `the far trunk too: farther than half the picture (${alpha(390, 60)})`);
+    const edge = [140, 145, 148, 150, 152, 155, 160].map(x => alpha(x, 60));
+    assert(edge[0] === 0 && edge.at(-1) === 255, `its edge on the trunk's own (${edge})`);
 }
 
 export function testWorkerFindsTheSky() {

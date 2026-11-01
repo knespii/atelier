@@ -4,11 +4,12 @@
 # mountains, the view out of a window – with the rest made see-through.
 # How near each pixel is comes from Depth Anything V2, a model that guesses
 # depth from a single picture; the sky, found by its colours, is never in
-# front however near the model makes it. Another model, BiRefNet, finds the
-# picture's subject – a person, an animal, a thing – as an iPhone does for
-# its own depth effect; where it is sure of one (whole, sharp, neither a
-# speck nor the landscape nor the sky, and not far off), the subject stands
-# in front too. The cutout's edges follow the picture's own outlines. The
+# front however near the model makes it; where the depths go on and on (a
+# forest), what stands well in front of what is just behind it (a trunk) is
+# in front too. Another model, BiRefNet, finds the picture's subject – a
+# person, an animal, a thing – as an iPhone does for its own depth effect;
+# where it is sure of one (whole, sharp, neither a speck nor the landscape
+# nor the sky, and not far off), the subject stands in front too. The cutout's edges follow the picture's own outlines. The
 # shell runs it in a process of its own, in the session (never on the lock
 # screen), at the lowest priority, one wallpaper at a time.
 #
@@ -65,6 +66,15 @@ NEARER = 1.6
 # The step from the far layer to what stands in front: over this ratio of
 # nearness, before the edges are fitted to the picture.
 STEP = 1.5
+# Without a gap the depths may go on and on (a forest, a street): what is
+# most common is then half way, and the far layer's edge near the nearest.
+# What stands in front there is also what is nearer than what is just
+# behind it by STEP: a trunk before the thicket. Just behind it: the depths
+# round it with what is narrower than this share of the picture's longer
+# side taken out (an opening, as morphology has it). Only of the nearer
+# half of the picture (at least as near as its median), the far trees
+# before the farthest stay behind.
+BEHIND_WINDOW = 0.12
 # Fitting the edges to the picture (a guided filter, on a copy half as
 # big): its window, a share of the copy's longer side, and how closely it
 # follows the picture's colours.
@@ -269,6 +279,30 @@ def split(np, near):
                 count >= counts[min(len(counts) - 1, i + 1)]):
             return float(np.exp((edges[i] + edges[i + 1]) / 2)) * NEARER, 'far'
     return 0.5, 'far'
+
+
+def extreme(np, a, side, pick):
+    """The least (pick np.min) or greatest (np.max) of each side × side
+    window of a, as a (its edges carried on): row by row, then column by
+    column."""
+    before, after = side // 2, side - 1 - side // 2
+    for axis in (0, 1):
+        pad = [(0, 0), (0, 0)]
+        pad[axis] = (before, after)
+        a = pick(np.lib.stride_tricks.sliding_window_view(np.pad(a, pad, mode='edge'), side, axis=axis), axis=-1)
+    return a
+
+
+def standing(np, near):
+    """What stands in front of what is just behind it (see BEHIND_WINDOW),
+    0 … 1, as big as near (from depths())."""
+    side = max(3, round(max(near.shape) * BEHIND_WINDOW) | 1)
+    behind = extreme(np, extreme(np, near, side, np.min), side, np.max)
+    # (Smoothed: the opening's own edges are square.)
+    behind = box(np, behind, side // 2)
+    ramp = lambda ratio: np.clip(np.log(np.maximum(ratio, 1e-6)) / np.log(STEP) + 0.5, 0, 1)
+    nearer = ramp(near / (STEP * np.maximum(behind, 1e-2)))
+    return nearer * ramp(near / max(float(np.median(near)), 1e-2))
 
 
 def box(np, a, r):
@@ -523,11 +557,13 @@ def hold(found, chance, size, airy, near, edge):
     return np.where(np.asarray(keep) > 127, whole, 0), answer
 
 
-def front(found, picture, near, edge, chance):
+def front(found, picture, near, edge, chance, how=None):
     """What stands in front, 0 … 1, as big as the picture: what is nearer
     than the far layer's edge (near: from depths(), or None without the
-    depth model) and the subject the subject model is sure of (chance: from
-    chances(), or None), edges fitted to the picture's own, the sky left out.
+    depth model) – and, without a gap above the far layer (how 'far', from
+    split()), what stands in front of what is just behind it – and the
+    subject the subject model is sure of (chance: from chances(), or None),
+    edges fitted to the picture's own, the sky left out.
     With whether there is a sky, and what of the subject was held (None
     without the subject model)."""
     np, Image = found['numpy'], found['PIL'].Image
@@ -536,10 +572,14 @@ def front(found, picture, near, edge, chance):
     above, airy = sky(found, picture)
     rough = np.zeros((size[1], size[0]), dtype=np.float32)
     if near is not None:
+        ahead = standing(np, near).astype(np.float32) if how == 'far' else None
         near = np.asarray(Image.fromarray(near, 'F').resize(size, Image.Resampling.BILINEAR))
         # In front: what is nearer than the far layer's edge, stepping up
         # over a ratio of STEP around it…
         rough = np.clip(np.log(np.maximum(near, 1e-4) / edge) / np.log(STEP) + 0.5, 0, 1)
+        # …or than what is just behind it, where the depths go on and on.
+        if ahead is not None:
+            rough = np.maximum(rough, np.asarray(Image.fromarray(ahead, 'F').resize(size, Image.Resampling.BILINEAR)))
     held, subject = (None, None) if chance is None else hold(found, chance, size, airy, near, edge)
     if held is not None:
         # …and the subject, as the subject model sees it.
@@ -598,7 +638,7 @@ def cutout(found, models, source, target, width, height):
         release()
         edge, how = split(np, near)
     picture = picture.resize(size, Image.Resampling.LANCZOS) if size != shown else picture
-    alpha, above, subject = front(found, picture, near, edge, chance)
+    alpha, above, subject = front(found, picture, near, edge, chance, how)
     alpha = Image.fromarray((alpha * 255).round().astype(np.uint8), 'L')
     picture.putalpha(alpha)
     # The picture's own size, as GNOME places it (see lib/depth.js
