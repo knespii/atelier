@@ -228,6 +228,7 @@ class Stylesheet {
 class VibrantSurface {
     constructor(vibrancy, {
         id, inks, roots, rect = () => null, behind = null, strength = () => 1, layers = () => [], oneWith = () => null,
+        worked = null,
     }) {
         this._vibrancy = vibrancy;
         this.id = id;
@@ -238,6 +239,7 @@ class VibrantSurface {
         this.strength = strength;
         this.layers = layers;
         this.oneWith = oneWith;
+        this.worked = worked;
         /** the class its type's colours are in */
         this.scope = scopeOf(id);
         /** 'light' or 'dark' type, as last worked out (null: as set) */
@@ -356,6 +358,9 @@ export class VibrancyModule {
      * @param {Function} [params.oneWith] - () => the id of the surface its
      *   glass is one with (the island at rest in the bar's one island), or
      *   null: one polarity for both, the one that reads on both best
+     * @param {Function} [params.worked] - () => called once its type is
+     *   worked out anew (the palette, GNOME's style… changed): what
+     *   follows them besides its type follows too
      * @returns {VibrantSurface} with its class (scope) and its type's
      *   polarity as last worked out, update() and destroy()
      */
@@ -566,5 +571,12 @@ export class VibrancyModule {
         }
         this._stylesheet.set(vibrancyStylesheet(rules))
             .catch(e => console.warn(`Atelier: the colours of the type on glass are not loaded: ${e.message}`));
+        for (const surface of [...this._surfaces.values()]) {
+            try {
+                surface.worked?.();
+            } catch (e) {
+                console.warn(`Atelier: the ${surface.id} doesn't follow its type: ${e.message}`);
+            }
+        }
     }
 }

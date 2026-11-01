@@ -537,12 +537,13 @@ export class Dock extends EventEmitter {
                 inks: 'dock',
                 roots: ['.atelier-dock'],
                 rect: () => this._rect,
-                ...near ? {behind: () => this._nearColor()} : {},
+                // (Its grey follows the palette and GNOME's style as its type
+                // does.)
+                ...near ? {behind: () => this._nearColor(), worked: () => this._syncPlain()} : {},
                 strength: () => this.theming?.washOf(near).strength ?? 1,
                 layers: () => this.theming?.washOf(near).layers ?? [],
             }));
         }
-        // (The grey follows the palette and GNOME's style, as the type.)
         this._syncPlain();
         this._syncVibrant();
     }

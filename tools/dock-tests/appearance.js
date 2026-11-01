@@ -149,7 +149,8 @@ async function plainGlass(t, dock) {
             Math.min(global.stage.width, rect.width + 160), Math.min(global.stage.height - rect.y + 60, rect.height + 120));
     };
     const plainAll = () => glass._plain?.opacity === 255 && !glass._plain.get_transition('opacity');
-    const grey = dock._nearColor();
+    // (As the palette has it now: it follows the wallpaper.)
+    const grey = () => dock._nearColor();
     let opened = null;
     uris.forEach(([key]) => background.set_string(key, amber));
     await set(t, t.settings, {'intellihide': false});
@@ -165,10 +166,10 @@ async function plainGlass(t, dock) {
         const rect = dock.staticRect;
         const frame = opened.window.get_frame_rect();
         opened.window.move_frame(true, rect.x - 40, rect.y + rect.height - frame.height);
-        check(await t.waitFor(() => dock.theming.near && glass.plain === grey &&
+        check(await t.waitFor(() => dock.theming.near && glass.plain === grey() &&
             t.hasClass(dock.container, scope(true)), 2000),
-        `a window behind it: its glass over a neutral grey (${glass.plain}, of ${grey}), its type as over windows`);
-        check(/^#([0-9a-f]{2})\1\1$/.test(grey), `the grey is grey (${grey})`);
+        `a window behind it: its glass over a neutral grey (${glass.plain}, of ${grey()}), its type as over windows`);
+        check(/^#([0-9a-f]{2})\1\1$/.test(glass.plain ?? ''), `the grey is grey (${glass.plain})`);
         check(await t.waitFor(() => glass._plain && glass._plain.opacity > 0 && glass._plain.opacity < 255, 400),
             `eased in, not at once (${glass._plain?.opacity})`);
         check(await t.waitFor(plainAll, 1000) && !glass._wallpaper.visible,
@@ -185,12 +186,12 @@ async function plainGlass(t, dock) {
         await shot('69e-dock-over-window-before');
         check(chroma(before) > 6, `the wallpaper's glass there would cast its colour (${shown(before)})`);
         dock.syncNear();
-        check(await t.waitFor(() => glass.plain === grey && plainAll(), 1000), 'over the grey again');
+        check(await t.waitFor(() => glass.plain === grey() && plainAll(), 1000), 'over the grey again');
         Main.overview.show();
         check(await t.waitFor(() => Main.overview.visible && !dock.theming.near && glass.plain === null, 3000),
             'in the overview, the wallpaper\'s glass: no window is near there');
         Main.overview.hide();
-        check(await t.waitFor(() => !Main.overview.visible && glass.plain === grey, 3000), 'back from it, the grey again');
+        check(await t.waitFor(() => !Main.overview.visible && glass.plain === grey(), 3000), 'back from it, the grey again');
         opened.window.move_frame(true, rect.x, 100);
         check(await t.waitFor(() => !dock.theming.near && glass.plain === null &&
             t.hasClass(dock.container, scope(false)), 2000), 'the window away from it: of the wallpaper again');
