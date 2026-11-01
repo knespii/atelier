@@ -275,11 +275,18 @@ async function checkDepth(window) {
         'one that failed says why, to try again');
     lock.set_string('depth-status', 'ready');
     check(setup.statusRow.subtitle.startsWith('The cutout of this wallpaper is made'), 'and one made');
+    // Kept on even where digits are hidden: under the switch, live, each profile its own.
+    check(setup.keepRow.sensitive && !setup.keepRow.active, 'the effect on: whether to keep it, off at first');
+    setup.keepRow.active = true;
+    check(lock.get_boolean('depth-keep'), 'kept on, in the settings at once');
     toBottom();
     await sleep(300);
     await render(window, 'lock-screen-depth-ready');
     lock.set_boolean('depth-effect', false);
     check(!setup.computeButton.visible && !setup.switchRow.active, 'switched off, nothing to compute');
+    check(!setup.keepRow.sensitive && setup.keepRow.active, 'the effect off: whether to keep it greyed out, as it was');
+    lock.reset('depth-keep');
+    check(!setup.keepRow.active, 'and as the settings have it');
     lock.set_boolean('enabled', false);
     check(!page._depthGroup.sensitive, 'without Atelier on the lock screen, greyed out');
     ['enabled', 'depth-status', 'depth-request', 'depth-model'].forEach(key => lock.reset(key));

@@ -483,6 +483,11 @@
       <summary>Depth effect</summary>
       <description>What stands nearer than the wallpaper's far layer (the sky, distant mountains, the view out of a window) stands over the lock screen's own clocks, as if they were behind it. A depth model (Depth Anything V2, downloaded in the settings when asked) sees how near each part is, in the session; the lock screen only shows the cutout made then. Off for a clock what stands in front would cover too much of.</description>
     </key>
+    <key name="depth-keep" type="b">
+      <default>false</default>
+      <summary>Keep the depth effect even if digits are hidden</summary>
+      <description>The depth effect stays on over a clock whatever the subject in front hides of its digits; off, it goes as soon as the subject would hide too much of a digit (a quarter) or of the clock.</description>
+    </key>
     <key name="depth-model" type="s">
       <choices>
         <choice value=''/>

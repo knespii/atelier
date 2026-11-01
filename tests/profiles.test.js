@@ -244,15 +244,17 @@ export function testLockscreenKeptValid() {
         ['bare', 'auto', 'inter', 1000, 0], 'what is not valid, as it comes');
     assertEqual([odd.gnomeClock, odd.depthEffect], [true, false]);
     assertEqual(Object.keys(odd),
-        ['widgets', 'style', 'clockColor', 'clockFont', 'clockWeight', 'clockWidth', 'gnomeClock', 'depthEffect'],
-        'nothing that holds for every profile');
+        ['widgets', 'style', 'clockColor', 'clockFont', 'clockWeight', 'clockWidth', 'gnomeClock', 'depthEffect',
+            'depthKeep'], 'nothing that holds for every profile');
+    assertEqual(odd.depthKeep, false, 'kept only when it says so');
     const fine = normalizeLockscreen({widgets: '[{"kind":"battery","x":1,"y":1}]', style: 'analogue',
         clockColor: '#FFcc00', clockFont: 'thin', clockWeight: 650, clockWidth: 120, gnomeClock: false,
-        depthEffect: true});
+        depthEffect: true, depthKeep: true});
     assertEqual(fine.widgets.map(e => [e.id, e.size, e.x]), [['battery', 'small', 2]],
         'the layout as the settings keep it, JSON, will do');
     assertEqual([fine.style, fine.clockColor, fine.clockFont, fine.clockWeight, fine.clockWidth, fine.gnomeClock,
-        fine.depthEffect], ['analogue', '#FFcc00', 'thin', 650, 120, false, true], 'valid values, as they are');
+        fine.depthEffect, fine.depthKeep], ['analogue', '#FFcc00', 'thin', 650, 120, false, true, true],
+        'valid values, as they are');
     assertEqual(normalizeLockscreen(fine), fine, 'the same, cleaned up again');
     assertEqual(normalizeProfile({id: 'p', lockscreen: fine}).lockscreen, fine, 'in a profile');
     assertEqual(normalizeProfile({id: 'p'}).lockscreen, null, 'none: the lock screen is left as it is');
@@ -289,6 +291,7 @@ export function testLockscreenAsTheSchemaHasIt() {
     assertEqual(range('style'), ['enum', LOCK_STYLES], 'the looks');
     assertEqual([range('clock-weight'), range('clock-width')], [['range', [0, 1000]], ['range', [0, 200]]]);
     assert(POSTER_KEYS.every(key => schema.has_key(key)), 'every key there');
+    assert(POSTER_KEYS.includes('depth-keep'), 'each profile keeps the depth effect on, or not, its own way');
     assertEqual(POSTER_KEYS.filter(key => ['enabled', 'island', 'password-field', 'depth-model', 'subject-model',
         'edit-request', 'depth-request', 'depth-status'].includes(key)), [], 'none of those for every profile');
     assertEqual(readLockscreen(lock), normalizeLockscreen({widgets: []}), 'as it comes, as a profile has it');
@@ -302,10 +305,10 @@ export function testLockscreenWrittenWhereItDiffers() {
     const changed = [];
     const id = lock.connect('changed', (_, key) => changed.push(key));
     const poster = normalizeLockscreen({widgets: [GLASS_CLOCK], clockFont: 'flex', clockWeight: 700,
-        gnomeClock: false, depthEffect: true});
+        gnomeClock: false, depthEffect: true, depthKeep: true});
     try {
         assertEqual(writeLockscreen(lock, poster), ['widgets', 'clock-font', 'clock-weight', 'gnome-clock',
-            'depth-effect'], 'only what differs');
+            'depth-effect', 'depth-keep'], 'only what differs');
         assertEqual(readLockscreen(lock), poster, 'read back as written');
         changed.length = 0;
         assertEqual(writeLockscreen(lock, poster), [], 'nothing again');
@@ -344,7 +347,9 @@ export function testProfilesKeepTheirLockScreen() {
         assert(!keepLockscreen(store, lock) && writes === 0, 'as the profile has it: not written again');
         lock.set_string('clock-font', 'serif');
         lock.set_boolean('depth-effect', true);
+        lock.set_boolean('depth-keep', true);
         assert(keepLockscreen(store, lock), 'edited: kept');
+        assertEqual(store.get(a.id).lockscreen.depthKeep, true, 'the depth effect kept on, its own too');
         assertEqual([store.get(a.id).lockscreen.clockFont, store.get(a.id).lockscreen.depthEffect], ['serif', true],
             'in the profile in use');
         assertEqual(store.get(b.id).lockscreen.clockFont, 'inter', 'and only there');
@@ -357,6 +362,8 @@ export function testProfilesKeepTheirLockScreen() {
         assertEqual(readLockscreen(lock), store.get(b.id).lockscreen, 'the other\'s lock screen shows');
         assert(!keepLockscreen(store, lock), 'which it has already');
         assertEqual(store.get(a.id).lockscreen.clockFont, 'serif', 'the first as it was');
+        assertEqual([lock.get_boolean('depth-keep'), store.get(a.id).lockscreen.depthKeep], [false, true],
+            'the other doesn\'t keep the depth effect on, the first still does');
 
         // A new profile of the setup there is now has it too.
         const c = store.add({name: 'C', lockscreen: readLockscreen(lock)});

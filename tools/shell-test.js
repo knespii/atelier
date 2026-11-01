@@ -8428,7 +8428,9 @@ async function testLockClockTooBig() {
 // a hill, most of its digits behind it – the note says how much; dragged up
 // into the sky, it changes as the shadow gets there, before it is let go
 // of, to say nothing stands in front of it there; with its feet in the hill
-// it goes; and while the cutout is made, it says so.
+// it goes; and while the cutout is made, it says so. Kept on (depth-keep),
+// the clock in the hill keeps the effect; and the depth mask shows the hill
+// tinted, the sky dimmed, till clicked away.
 async function testLockDepthNote() {
     const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
     const lockSettings = atelier()._settings.get_child('lockscreen');
@@ -8476,6 +8478,53 @@ async function testLockDepthNote() {
     await restPointer();
     await Scripting.sleep(400);
     await screenshot('95h-lock-depth-note');
+    // Kept on even where digits are hidden (depth-keep): the clock in the
+    // hill keeps the effect, at once, and the note only says how much it hides.
+    lockSettings.set_boolean('depth-keep', true);
+    check(await waitFor(() => board.depth.actor.visible && !board.depth.tooMuch &&
+        /^Depth effect kept on: the subject hides \d+ % of a digit$/.test(note()), 2000),
+    `kept on: the clock in the hill keeps the effect, the note a mild hint ("${note()}")`);
+    await Scripting.sleep(300);
+    await screenshot('95h-lock-depth-kept');
+    lockSettings.set_boolean('depth-keep', false);
+    check(await waitFor(() => !board.depth.actor.visible && /would hide \d+ % of a digit/.test(note()), 2000),
+        `not kept: off again, and why ("${note()}")`);
+
+    // The depth mask, to look at: the hill tinted, the sky dimmed, over the
+    // clock too; the cutout already loaded, shared.
+    const button = preview.maskButton;
+    check(button.visible && button.mapped && !preview.mask && button.label === 'Show the Depth Mask',
+        'a cutout there: the button to show the depth mask, none shown yet');
+    const [sx, sy] = [monitor.x + Math.round(monitor.width * 0.85 / scale) * scale,
+        monitor.y + Math.round(hill / 2)];
+    const [hx, hy] = [sx, monitor.y + hill + Math.round((monitor.height - hill) / 4)];
+    const before = pixelsOf('95h-lock-depth-note');
+    await clickAt(...centerOf(button));
+    await restPointer();
+    check(await waitFor(() => preview.mask?.mapped && button.checked, 2000) &&
+        preview.mask.get_last_child().content === board.depth.actor.content &&
+        preview.mask.get_last_child().x === board.depth.shown.x && button.label === 'Hide the Depth Mask',
+    'clicked: the mask shows, the same picture where the cutout is drawn');
+    check(preview.mask.get_parent() === board.layer.get_parent() &&
+        preview.mask.get_parent().get_children().indexOf(preview.mask) >
+            preview.mask.get_parent().get_children().indexOf(board.layer) && !preview.mask.reactive,
+    'over the widgets, letting the pointer through to them');
+    await Scripting.sleep(300);
+    await screenshot('95h-lock-depth-mask');
+    const masked = pixelsOf('95h-lock-depth-mask');
+    const [hr, hg, hb] = masked.at(hx, hy);
+    const [[r0, g0, b0], [r1, g1, b1]] = [before.at(sx, sy), masked.at(sx, sy)];
+    check(hr > hg + 60 && hr > hb, `the hill in front, tinted (${[hr, hg, hb]})`);
+    check(r1 + g1 + b1 < 0.6 * (r0 + g0 + b0), `the sky behind, dimmed (${[r0, g0, b0]} to ${[r1, g1, b1]})`);
+    // Live: the clock still moves under it; clicked again, it goes.
+    await clickAt(...centerOf(button));
+    await restPointer();
+    check(await waitFor(() => !preview.mask && !button.checked, 2000) && button.label === 'Show the Depth Mask',
+        'clicked again: the mask goes');
+    await Scripting.sleep(300);
+    await screenshot('95h-lock-depth-mask-gone');
+    const [gr, gg, gb] = pixelsOf('95h-lock-depth-mask-gone').at(hx, hy);
+    check(!(gr > gg + 60), `the hill as it is again (${[gr, gg, gb]})`);
     // Dragged up into the sky: the note goes as the shadow gets there.
     const [cx, cy] = centerOf(clock);
     await pointerDown(cx, cy);
@@ -8507,7 +8556,8 @@ async function testLockDepthNote() {
     check(await waitFor(() => note() === '', 2000), 'made: no note');
     await pressKey(Clutter.KEY_Escape);
     check(await waitFor(() => !editor.preview, 3000), 'Escape and the mock lock screen goes');
-    ['widgets', 'gnome-clock', 'password-field', 'depth-effect', 'depth-status'].forEach(key => lockSettings.reset(key));
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect', 'depth-status', 'depth-keep']
+        .forEach(key => lockSettings.reset(key));
     kept.forEach(([key, value]) => background.set_string(key, value));
 }
 

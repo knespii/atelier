@@ -8,7 +8,9 @@
 // there shows: nothing here makes one, nor launches anything. It goes with
 // the clocks as the prompt comes up and the wallpaper blurs (the board
 // fades them as one), and stays off while it would hide too much of a digit
-// of a clock.
+// of a clock (unless told to keep it on: the depth-keep setting). The
+// editor can show the cutout itself, tinted, over the wallpaper dimmed
+// (maskActor()): the same picture, nothing made anew.
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
@@ -56,6 +58,34 @@ for (int i = 0; i < ${MAX_HOLES}; i++) {
 }
 cogl_color_out *= keep;
 `;
+
+// The colour what stands in front shows in, at most (a warm pink, which no
+// sky or forest has), and how dark the rest goes, in the editor's look at
+// the mask.
+export const MASK_TINT = [1.0, 0.24, 0.56, 0.72];
+export const MASK_DIM = 0.6;
+
+// The cutout as one colour (premultiplied: its alpha keeps its edges), for
+// the editor's look at the mask.
+const TINT_DECLARATIONS = 'uniform vec4 tint;';
+const TINT_CODE = 'cogl_color_out = vec4(tint.rgb * tint.a, tint.a) * cogl_color_out.a;';
+
+const TintEffect = GObject.registerClass(
+class AtelierDepthTintEffect extends Shell.GLSLEffect {
+    _init(params) {
+        super._init(params);
+        this._tint = this.get_uniform_location('tint');
+    }
+
+    vfunc_build_pipeline() {
+        this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, TINT_DECLARATIONS, TINT_CODE, false);
+    }
+
+    vfunc_paint_target(node, paintContext) {
+        this.set_uniform_float(this._tint, 4, MASK_TINT);
+        super.vfunc_paint_target(node, paintContext);
+    }
+});
 
 // The cutout less the lines kept in front of it, wherever they are as it
 // is drawn: their places are asked for each time it is (a widget dragged,
@@ -133,6 +163,7 @@ export class DepthCutout {
         this._shown = null;
         this._clocks = [];
         this._inFront = [];
+        this._keep = false;
         /** Whether the subject would hide too much of a clock (and so stays off). */
         this.tooMuch = false;
         /** How legible each clock stays with it (lib/depth.js legibility()), as cover() was told of them. */
@@ -156,6 +187,37 @@ export class DepthCutout {
     /** @returns {object|null} {x, y, width, height} where it is drawn, on the monitor */
     get shown() {
         return this._shown;
+    }
+
+    /**
+     * Kept on whatever the subject hides of the clocks (the depth-keep
+     * setting): what legibility() says is still told, but the effect stays.
+     *
+     * @param {boolean} keep
+     */
+    setKeep(keep) {
+        if (keep === this._keep)
+            return;
+        this._keep = keep;
+        this.cover(this._clocks);
+    }
+
+    /**
+     * The cutout as the editor shows it to look at: in one colour where
+     * something stands in front, see-through elsewhere, laid where the
+     * cutout is drawn on the monitor – the same picture, shared, nothing
+     * read or made again. Null while there is none.
+     *
+     * @returns {Clutter.Actor|null} a new actor, the caller's to destroy
+     */
+    maskActor() {
+        const content = this.actor?.get_content();
+        if (!content || !this._shown)
+            return null;
+        const {x, y, width, height} = this._shown;
+        const mask = new Clutter.Actor({content, x, y, width, height, reactive: false});
+        mask.add_effect_with_name('tint', new TintEffect());
+        return mask;
     }
 
     /** @param {number[]} monitor - [width, height] of the main monitor, pixels */
@@ -262,7 +324,7 @@ export class DepthCutout {
         this._clocks = clocks;
         this.legibility = this._shown && this._sample
             ? clocks.map(clock => legibility(this._sample, this._shown, clock)) : [];
-        this.tooMuch = this.legibility.some(clock => !clock.stays);
+        this.tooMuch = !this._keep && this.legibility.some(clock => !clock.stays);
         this._sync();
     }
 

@@ -2343,6 +2343,25 @@
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
+.atelier-lock-depth-mask-button {
+  padding: 8px 16px;
+  border-radius: 18px;
+  background-color: rgba(16, 16, 20, 0.88);
+  color: #ffffff;
+  font-size: 11pt;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.atelier-lock-depth-mask-button:hover,
+.atelier-lock-depth-mask-button:focus {
+  background-color: rgba(48, 48, 56, 0.92);
+}
+
+.atelier-lock-depth-mask-button:checked {
+  background-color: -st-accent-color;
+  color: -st-accent-fg-color;
+}
+
 .atelier-widget-gallery {
   padding: 10px;
   spacing: 4px;

@@ -150,7 +150,7 @@ class AtelierLockScreenPage extends Adw.PreferencesPage {
             description: 'As on an iPhone: what stands near in the wallpaper (a hill, a town, a person) in front of ' +
                 'the lock screen\'s own clocks, the sky and the distance behind them. A depth model sees how near ' +
                 'each part is, on this computer, whenever the wallpaper changes; where what stands in front would ' +
-                'cover too much of a clock, the clock stays whole.',
+                'cover too much of a clock, the clock stays whole, unless you keep it on.',
         });
         this.add(depth);
         this._depthGroup = depth;

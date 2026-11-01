@@ -305,6 +305,21 @@ export function testDepthNote() {
     assertEqual(depthNote([], {loaded: true, status: 'ready'}), '', 'no clock: nothing to say');
 }
 
+export function testDepthNoteKept() {
+    const on = {stays: true, whole: 0.1, worst: 0.05, glyph: 0, measured: true};
+    const ready = {loaded: true, status: 'ready', keep: true};
+    assertEqual(depthNote([on, {stays: false, whole: 0.66, worst: 0.7707, glyph: 3}], ready),
+        'Depth effect kept on: the subject hides 77 % of a digit', 'kept on: a mild hint, no advice to move it');
+    assertEqual(depthNote([{stays: false, whole: 0.45, worst: 0.2, glyph: 1}], ready),
+        'Depth effect kept on: the subject hides 45 % of the clock', 'too much of the clock, kept on');
+    assertEqual(depthNote([on], ready), '', 'legible anyway: nothing to say');
+    assertEqual(depthNote([{...on, whole: 0}], ready),
+        'Depth effect: nothing in the wallpaper stands in front of the clock here', 'still says when it shows nothing');
+    assertEqual(depthNote([], {loaded: false, status: 'working', keep: true}), 'Depth effect: preparing…');
+    assertEqual(depthNote([], {loaded: false, status: 'failed: x', keep: true}),
+        'Depth effect: the cutout could not be made');
+}
+
 export function testCutoutOpacity() {
     assertEqual(cutoutOpacity(0), 1, 'all of it at rest');
     assert(cutoutOpacity(0.15) > 0.4 && cutoutOpacity(0.15) < 0.6, 'fading as the prompt comes up');

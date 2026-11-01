@@ -140,6 +140,15 @@ export class DepthSetup {
         settings.bind('depth-effect', this.switchRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         group.add(this.switchRow);
 
+        // Kept on whatever the subject hides of the digits (each profile its own).
+        this.keepRow = new Adw.SwitchRow({
+            title: 'Keep the depth effect even if digits are hidden',
+            subtitle: 'Otherwise it goes off while the subject would hide a quarter of a digit, or too much of the clock',
+        });
+        settings.bind('depth-keep', this.keepRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('depth-effect', this.keepRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        group.add(this.keepRow);
+
         // The model: its size, its licence and about how long it takes.
         this._ids = Object.keys(MODELS);
         this.modelRow = new Adw.ComboRow({

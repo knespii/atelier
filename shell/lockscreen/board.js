@@ -13,7 +13,8 @@
 // password is asked, they make room for the prompt: the clocks go, the
 // other widgets dim. With the depth effect, the wallpaper's subject stands
 // over the clocks (depth.js) – but not over the date over a clock – under
-// the other widgets, while it leaves each of their digits legible; on the
+// the other widgets, while it leaves each of their digits legible (or
+// whatever it hides of them, with depth-keep); on the
 // lock screen, the clocks and the subject are one picture, which goes as
 // the prompt comes up and comes back as one.
 
@@ -107,6 +108,8 @@ export class LockBoard {
         this._dragSpot = null;
         /** Called with the editor's note on the depth effect when it changes ('' for none). */
         this.onDepthNote = null;
+        /** Called when the depth effect's cutout comes, goes or moves (the editor's look at the mask follows). */
+        this.onDepthChanged = null;
         this._typography = new LockTypography(settings, palette);
         this._typography.connectObject('changed', () => this._tone(), this);
         // The glass clocks' glass, as Atelier's glass looks (none, solid
@@ -169,6 +172,10 @@ export class LockBoard {
             'changed::widgets', () => !this._saving && this._load(),
             'changed::style', () => this._syncLook(),
             'changed::depth-effect', () => this._syncDepth(),
+            'changed::depth-keep', () => {
+                this._depth?.setKeep(settings.get_boolean('depth-keep'));
+                this._queueDepth();
+            },
             this);
         if (interactive)
             settings.connectObject('changed::depth-status', () => this._queueDepth(), this);
@@ -231,7 +238,11 @@ export class LockBoard {
             return;
         if (wanted) {
             this._depth = new DepthCutout();
-            this._depth.onChanged = () => this._queueDepth();
+            this._depth.setKeep(this._settings.get_boolean('depth-keep'));
+            this._depth.onChanged = () => {
+                this._queueDepth();
+                this.onDepthChanged?.();
+            };
             (this._clockGroup ?? this.layer).add_child(this._depth.actor);
             this._syncDepthDim();
             if (this._area)
@@ -241,6 +252,7 @@ export class LockBoard {
             this._depth = null;
             this._setDepthNote('');
         }
+        this.onDepthChanged?.();
         this._queueDepth();
     }
 
@@ -318,7 +330,8 @@ export class LockBoard {
         // note stays as it was.)
         if (this._interactive && !this.widgets.some(widget => widget.stretching)) {
             this._setDepthNote(depthNote(depth.legibilityOf(noted),
-                {loaded: depth.loaded, status: this._settings.get_string('depth-status')}));
+                {loaded: depth.loaded, status: this._settings.get_string('depth-status'),
+                    keep: this._settings.get_boolean('depth-keep')}));
         }
     }
 
@@ -1061,6 +1074,7 @@ export class LockBoard {
         this._settings.disconnectObject(this);
         this._editor?.dim.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        this.onDepthChanged = null;
         this._cancelLaters();
         // (Its last backdrop stays drawn on the clocks sliding away.)
         this._backdrop.destroy();
