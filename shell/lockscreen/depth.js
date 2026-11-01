@@ -267,6 +267,15 @@ export class DepthCutout {
     }
 
     /**
+     * @param {object[]} clocks - as for cover()
+     * @returns {object[]} how legible each stays with the cutout (none
+     *   without one), looked at only: what shows is as cover() left it
+     */
+    legibilityOf(clocks) {
+        return this._shown && this._sample ? clocks.map(clock => legibility(this._sample, this._shown, clock)) : [];
+    }
+
+    /**
      * Lines of type that stay in front of the subject although their clock
      * is under it: the date over a clock, as on an iPhone.
      *

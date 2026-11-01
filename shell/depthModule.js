@@ -2,7 +2,8 @@
 // effect is on: of the wallpaper the lock screen shows, whenever it changes
 // (a profile applied, the style turned dark), for the main monitor, and
 // again when the preferences ask, or the models it is made with change
-// (another chosen, one downloaded or removed). The worker
+// (another chosen, one downloaded or removed). The latest few are kept, of
+// other wallpapers and monitors too. The worker
 // (lib/depthWorker.py) runs in a process of its own at the lowest priority,
 // one at a time, a moment after the change; a cutout made already, by the
 // models there are now, is used as it is. It stops with the session's
@@ -27,7 +28,12 @@ Gio._promisify(Gio.InputStream.prototype, 'read_bytes_async');
 Gio._promisify(Gio.InputStream.prototype, 'close_async');
 
 const DELAY = 3000; // after a change, before the worker starts, ms
-const KEPT = 1; // cutouts kept: the wallpaper's now (the one before goes)
+// Cutouts kept, the latest: of the wallpapers of a few profiles, each on
+// a monitor or two (the laptop's, an external one's) – a few megabytes
+// each. Going back to one of them, or to the other monitor, its cutout is
+// there at once, not made anew (half a minute, gigabytes of memory, and
+// none on a lock screen that comes sooner).
+const KEPT = 16;
 const HEAD = 64 * 1024; // of a cutout, read to see which models made it
 
 export class DepthModule {
@@ -212,8 +218,8 @@ export class DepthModule {
         }
     }
 
-    // Only the cutout just made kept: the one before (another wallpaper's)
-    // goes, to save the room.
+    // The latest cutouts kept (KEPT), the cutout just made among them: the
+    // older ones go, to save the room.
     async _prune(keep) {
         const dir = Gio.File.new_for_path(depthDir());
         const enumerator = await dir.enumerate_children_async('standard::name,time::modified',

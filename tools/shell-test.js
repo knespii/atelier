@@ -42,7 +42,7 @@ import {
 } from '../lib/depth.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GLASS_FULL} from '../lib/seeThrough.js';
-import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize} from '../lib/widgets.js';
+import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize, sizeOf} from '../lib/widgets.js';
 import {fakeDepthModel} from '../tests/fakeOnnx.js';
 
 const UUID = 'atelier@local';
@@ -8371,6 +8371,131 @@ async function pointerSweep(x1, y1, x2, y2, duration, every = 8) {
 // for the size it rests at, while the shell is idle, as a face made anew
 // has them, what it takes to read there and the subject in front of it
 // looked at once it rests. What each move costs where goes in the results.
+// A glass clock given a size of its own on a bigger monitor than this one
+// (wider than this grid: as someone's 36 × 11 cells, given on an external
+// monitor's grid of 40 × 22, on a laptop's of 34 × 20), in the mock lock
+// screen here: as big as the screen allows, and it moves – it fit nowhere,
+// so it stood where it was, past the grid's edge, and never moved.
+async function testLockClockTooBig() {
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const monitor = Main.layoutManager.primaryMonitor;
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const [columns, rows] = gridSize(monitor.width / scale, monitor.height / scale);
+    const px = n => (n * PITCH - GAP) * scale;
+    const saved = () => JSON.parse(lockSettings.get_string('widgets')).find(e => e.id === 'clock');
+    const own = `${columns + 2}x11`;
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'battery', kind: 'battery', size: 'small', x: 15, y: rows - 2, fine: true, grid: [columns, rows]},
+        {id: 'clock', kind: 'clock', size: own, x: 2, y: 0, face: 'glass', fine: true, grid: [columns + 6, rows + 2],
+            places: {[`${columns}x${rows}`]: [13, 2]}},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', false);
+    const editor = atelier().modules.get('lockscreen-editor');
+    lockSettings.set_string('edit-request', 'too-big');
+    check(await waitFor(() => editor?.preview?._board.widgets.find(w => w.entry.id === 'clock')?.glass?.target, 3000),
+        `the mock lock screen, a glass clock of ${own} cells on a grid of ${columns} × ${rows}`);
+    if (!editor?.preview)
+        return;
+    const board = editor.preview._board;
+    const clock = board.widgets.find(w => w.entry.id === 'clock');
+    await Scripting.sleep(600);
+    const [w, h] = sizeOf(clock.entry.size);
+    const {x, y} = clock.entry;
+    check(x + w <= columns && y + h <= rows && clock.width === px(w) && clock.height === px(h) &&
+        Math.abs(w / h / ((columns + 2) / 11) - 1) < 0.1,
+    `shown as big as the screen allows, as wide for its height (${clock.entry.size} at ${x}, ${y})`);
+    // Dragged three cells down: there, its own size kept for a bigger screen.
+    const [cx, cy] = centerOf(clock);
+    await pointerDown(cx, cy);
+    await pointerAlong(cx, cy, cx, cy + 3 * PITCH * scale + 6);
+    await Scripting.sleep(200);
+    await pointerUp();
+    await restPointer();
+    check(await waitFor(() => saved()?.y === y + 3 && saved().x === x && saved().size === own &&
+        clock.entry.y === y + 3, 2000),
+    `dragged three cells down, it moves there (${JSON.stringify(saved())})`);
+    await Scripting.sleep(300);
+    await screenshot('95g-lock-clock-too-big');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !editor.preview, 3000), 'Escape and the mock lock screen goes');
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
+}
+
+// The mock lock screen's note on the depth effect: a glass clock low over
+// a hill, most of its digits behind it – the note says how much; dragged up
+// into the sky, it goes as the shadow gets there, before it is let go of;
+// and while the cutout is made, it says so.
+async function testLockDepthNote() {
+    const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
+    const lockSettings = atelier()._settings.get_child('lockscreen');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const monitor = Main.layoutManager.primaryMonitor;
+    const size = [monitor.width, monitor.height];
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const [, rows] = gridSize(monitor.width / scale, monitor.height / scale);
+    const [, oy] = gridOrigin(monitor.width / scale, monitor.height / scale);
+    // (The sky down to the middle of the ninth row: a large clock in the
+    // first eight is clear of the hill; one in the last eight in it.)
+    const hill = Math.round((oy + 8.5 * PITCH) * scale);
+    const dir = `${OUTPUT}/note`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const wallpaper = `${dir}/hill.png`;
+    hillPicture(wallpaper, size, hill, 0x4a7fd4ff, 0x3f8a2aff);
+    const cutout = cutoutPath(pictureState(wallpaper), size);
+    GLib.mkdir_with_parents(GLib.path_get_dirname(cutout), 0o755);
+    hillPicture(cutout, size, hill, 0x00000000, 0x3f8a2aff,
+        {'atelier-width': `${size[0]}`, 'atelier-height': `${size[1]}`});
+    background.set_string('picture-uri', uriOf(wallpaper));
+    background.set_string('picture-uri-dark', uriOf(wallpaper));
+    background.set_string('picture-options', 'zoom');
+    lockSettings.set_string('widgets', JSON.stringify([
+        {id: 'clock', kind: 'clock', size: 'large', x: 2, y: rows - 8, fine: true, face: 'glass'},
+    ]));
+    lockSettings.set_boolean('gnome-clock', false);
+    lockSettings.set_boolean('password-field', false);
+    lockSettings.set_boolean('depth-effect', true);
+    await wallpapersSettled();
+    const editor = atelier().modules.get('lockscreen-editor');
+    lockSettings.set_string('edit-request', 'note');
+    check(await waitFor(() => editor?.preview?._board.depth?.loaded &&
+        editor.preview._board.widgets[0]?.glass?.target, 5000), 'the mock lock screen, a glass clock low over a hill');
+    if (!editor?.preview)
+        return;
+    const preview = editor.preview;
+    const board = preview._board;
+    const clock = board.widgets[0];
+    const note = () => preview.depthNote;
+    check(await waitFor(() => /hide \d+ % of a digit/.test(note()) && preview._note.mapped, 3000) &&
+        !board.depth.actor.visible,
+    `in the hill: off, and the note says how much it would hide ("${note()}")`);
+    await restPointer();
+    await Scripting.sleep(400);
+    await screenshot('95h-lock-depth-note');
+    // Dragged up into the sky: the note goes as the shadow gets there.
+    const [cx, cy] = centerOf(clock);
+    await pointerDown(cx, cy);
+    await pointerAlong(cx, cy, cx, cy - (rows - 8) * PITCH * scale - 6);
+    await Scripting.sleep(200);
+    check(await waitFor(() => note() === '', 2000), `dragged up into the sky, before it is let go of: no note ("${note()}")`);
+    await pointerUp();
+    await restPointer();
+    check(await waitFor(() => JSON.parse(lockSettings.get_string('widgets'))[0].y === 0 &&
+        board.depth.actor.visible, 2000) && note() === '', 'let go there: on, still no note');
+    // The cutout being made: it says so.
+    lockSettings.set_string('depth-status', 'working');
+    check(await waitFor(() => note() === 'Depth effect: preparing…', 2000), `being made: "${note()}"`);
+    lockSettings.set_string('depth-status', 'ready');
+    check(await waitFor(() => note() === '', 2000), 'made: no note');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !editor.preview, 3000), 'Escape and the mock lock screen goes');
+    ['widgets', 'gnome-clock', 'password-field', 'depth-effect', 'depth-status'].forEach(key => lockSettings.reset(key));
+    kept.forEach(([key, value]) => background.set_string(key, value));
+}
+
 async function testLockStretchSpeed() {
     const atelier = () => Main.extensionManager.lookup(UUID).stateObj;
     const lockSettings = atelier()._settings.get_child('lockscreen');
@@ -8724,6 +8849,7 @@ async function testLockOnOwnWallpaper() {
     ['widgets', 'style', 'gnome-clock', 'password-field', 'depth-effect'].forEach(key => lockSettings.reset(key));
     kept.forEach(([key, value]) => background.set_string(key, value));
 }
+
 
 async function testDisableCleansUp(atelier) {
     // (Grouped, with a black notch: the sides moved and the ears are up.)
@@ -9553,6 +9679,8 @@ export async function run() {
             await part(testLockClockFades);
             await part(testLockPromptPace);
             await part(testLockFreeStretch);
+            await part(testLockClockTooBig);
+            await part(testLockDepthNote);
             await part(testLockStretchSpeed);
             await part(testLockOnOwnWallpaper);
             await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));
@@ -9622,6 +9750,8 @@ export async function run() {
         await part(testLockClockFades);
         await part(testLockPromptPace);
         await part(testLockFreeStretch);
+        await part(testLockClockTooBig);
+        await part(testLockDepthNote);
         await part(testLockStretchSpeed);
         await part(testLockOnOwnWallpaper);
         await part(testLockPerProfile, ext.stateObj.modules.get('profiles'));

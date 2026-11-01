@@ -448,7 +448,7 @@ gnome-extensions enable atelier@local
 | Photos (the gallery's copies of them) | `~/.local/share/atelier/photos/` |
 | Thumbnails, smaller copies of the photos (for the grids, and as big as the widgets show them), generated shell styles | `~/.cache/atelier/` |
 | The depth effect's models (when downloaded) | `~/.local/share/atelier/models/depth-anything-v2-*.onnx`, `birefnet-lite.onnx` |
-| The depth effect's cutout of the wallpaper (the current one's) | `~/.cache/atelier/depth/` |
+| The depth effect's cutouts of the wallpaper (the latest 16: of a few profiles' wallpapers, on each monitor) | `~/.cache/atelier/depth/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |
 

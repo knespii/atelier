@@ -3,7 +3,7 @@ import {parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
     DEFAULT_LAYOUT, LOCK_KINDS, PITCH, UNIT, allowsSize, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits,
     freeLimits, freeSize, gridOrigin, gridSize, namedSize, nearestSize, nearestSpot, newId, nextSize, normalizeWidgets, parseLayout,
-    pixelSize, placeAt, serializeLayout, sizeName, sizeOf, splitClock,
+    pixelSize, placeAt, serializeLayout, shownSize, sizeName, sizeOf, splitClock,
 } from '../lib/widgets.js';
 import {assert, assertEqual} from './util.js';
 
@@ -104,6 +104,23 @@ export function testOtherScreens() {
     // Where others had them first, the free cells nearest to that.
     const crowded = [{id: 'k', kind: 'clock', size: 'square', x: 22, y: 0, grid: small}, ...layout];
     assertEqual(where(fitLayout(crowded, small)).github, [10, 0], 'taken: the free cells nearest to it');
+
+    // A size of its own bigger than the screen (given on a bigger one): as
+    // big as it allows, as wide for its height, and it moves; the layout
+    // keeps its own size.
+    assertEqual(shownSize('36x11', [34, 20]), '34x10', 'as big as the grid allows, its proportions kept');
+    assertEqual(shownSize('36x11', [40, 22]), '36x11');
+    assertEqual(shownSize('10x30', [34, 20]), '7x20');
+    assertEqual(shownSize('large', [6, 6]), 'large', 'a named size as it is');
+    const beach = [
+        {id: 'battery', kind: 'battery', size: 'small', x: 15, y: 18, grid: [34, 20]},
+        {id: 'clock', kind: 'clock', size: '36x11', x: 2, y: 0, face: 'glass', grid: [40, 22], places: {'34x20': [13, 2]}},
+    ];
+    const shownBeach = fitLayout(beach, [34, 20]);
+    assertEqual([shownBeach[1].size, shownBeach[1].x, shownBeach[1].y], ['34x10', 0, 2], 'on the grid, whole');
+    assertEqual(nearestSpot(shownBeach, shownBeach[1], [34, 20], 0, 5.2), {x: 0, y: 5}, 'and it moves');
+    assertEqual(beach[1].size, '36x11', 'the layout keeps its own size');
+    assertEqual(fitLayout(beach, [40, 22])[1], {...beach[1], x: 2, y: 0}, 'on the bigger screen, as it was');
 
     // A few other screens are remembered, the latest.
     let entry = {id: 'k', kind: 'clock', size: 'square', x: 0, y: 0, grid: [10, 5], fine: true};
