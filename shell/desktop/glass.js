@@ -22,7 +22,7 @@ import {syncTextureFrame} from '../core/glass.js';
 import {glassLight} from '../core/glassLight.js';
 import {
     GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    STYLE_TIME, setMaterialReach, textureDensity,
+    STYLE_TIME, setMaterialReach, filterBetweenTexels, textureDensity,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
@@ -112,6 +112,8 @@ class AtelierRectsMaskEffect extends Shell.GLSLEffect {
         const density = this.get_actor() ? textureDensity(this.get_actor()) : 1;
         if (look && density !== (options.density ?? 1))
             this.setMaterial(look, scale, {...options, density});
+        if (look)
+            filterBetweenTexels(this);
         super.vfunc_paint_target(node, paintContext);
     }
 

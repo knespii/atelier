@@ -29,7 +29,7 @@ import {FAR, SDF_GLSL} from '../../lib/glyphSdf.js';
 import {syncTextureFrame} from '../core/glass.js';
 import {
     MATERIAL_CODE, MATERIAL_DECLARATIONS, materialUniforms, setMaterial, setMaterialArea, setMaterialReach,
-    textureDensity,
+    filterBetweenTexels, textureDensity,
 } from '../core/glassMaterial.js';
 import {ShapeTexture} from '../core/glassShapeTexture.js';
 
@@ -183,6 +183,8 @@ class AtelierClockGlassEffect extends Shell.GLSLEffect {
         const density = textureDensity(actor);
         if (density !== (options.density ?? 1))
             this._setMaterial(look, scale, {...options, density});
+        if (look)
+            filterBetweenTexels(this);
         this._texture.bind(this);
         this.paints++;
         super.vfunc_paint_target(node, paintContext);

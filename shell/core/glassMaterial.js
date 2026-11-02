@@ -66,19 +66,21 @@ import St from 'gi://St';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {EDGE, LENS_SHARE, SMALL, dimmedLook, lookOf, materialValues, resolveVariant, sameNumbers} from '../../lib/glassLook.js';
+import {EDGE, LENS_SHARE, MAX_BLUR_TAPS, SMALL, dimmedLook, lookOf, materialValues, resolveVariant, sameNumbers} from '../../lib/glassLook.js';
 
 /** How long glass takes to darken as the glass-dim setting has it, ms. */
 export const DIM_TIME = 250;
 /** How long glass takes to turn from GNOME's dark style to its light one, ms. */
 export const STYLE_TIME = 700;
 
-const UNIFORMS = ['glassLens', 'glassBlur', 'glassFace', 'glassLightFace', 'glassSmall', 'glassGlint',
-    'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea', 'glassDim'];
+const UNIFORMS = ['glassLens', 'glassBlur', 'glassBlurOffsets', 'glassBlurWeights', 'glassFace', 'glassLightFace',
+    'glassSmall', 'glassGlint', 'glassEdge', 'glassStyle', 'glassShadow', 'glassReach', 'glassArea', 'glassDim'];
 
 export const MATERIAL_DECLARATIONS = `
 uniform vec4 glassLens;
 uniform vec4 glassBlur;
+uniform float glassBlurOffsets[${MAX_BLUR_TAPS}];
+uniform float glassBlurWeights[${MAX_BLUR_TAPS}];
 uniform vec4 glassFace;
 uniform vec4 glassLightFace;
 uniform vec2 glassStyle;
@@ -98,24 +100,27 @@ vec4 atelier_tap(vec2 p) {
     return texture2D(cogl_sampler0, atelier_lookup(p));
 }
 
-// What is behind at p, blurred: one tap, five or nine (lib/glassLook.js
-// blurTaps()), unpremultiplied.
+// What is behind at p, blurred (lib/glassLook.js blurTaps()): a square of
+// taps (a circle: past glassBlur.y, none) about the centre of the texel p
+// is in, each between texels, filtered; unpremultiplied.
 vec3 atelier_behind(vec2 p) {
-    float h = glassBlur.y;
-    float w = glassBlur.z;
     vec4 sum;
     if (glassBlur.x < 2.0) {
         sum = atelier_tap(p);
-    } else if (glassBlur.x < 6.0) {
-        sum = atelier_tap(p) * (1.0 - 4.0 * w) + (atelier_tap(p + vec2(h, h)) + atelier_tap(p + vec2(-h, h)) +
-            atelier_tap(p + vec2(h, -h)) + atelier_tap(p + vec2(-h, -h))) * w;
     } else {
+        float density = 1.0 / glassSmall.w;
+        vec2 middle = origin + (floor((p - origin) * density) + 0.5) / density;
+        float reach = glassBlur.y * glassBlur.y;
         sum = vec4(0.0);
-        for (int i = -1; i <= 1; i++) {
-            for (int j = -1; j <= 1; j++) {
-                float wx = i == 0 ? 1.0 - 2.0 * w : w;
-                float wy = j == 0 ? 1.0 - 2.0 * w : w;
-                sum += atelier_tap(p + vec2(float(i), float(j)) * h) * (wx * wy);
+        for (int j = 0; j < ${MAX_BLUR_TAPS}; j++) {
+            if (float(j) >= glassBlur.x)
+                break;
+            for (int i = 0; i < ${MAX_BLUR_TAPS}; i++) {
+                if (float(i) >= glassBlur.x)
+                    break;
+                vec2 offset = vec2(glassBlurOffsets[i], glassBlurOffsets[j]);
+                if (dot(offset, offset) <= reach)
+                    sum += atelier_tap(middle + offset) * (glassBlurWeights[i] * glassBlurWeights[j]);
             }
         }
     }
@@ -312,6 +317,8 @@ export function setMaterial(effect, uniforms, look, scale, options = {}) {
     const density = options.density ?? 1;
     effect.set_uniform_float(uniforms.glassLens, 4, values.lens);
     effect.set_uniform_float(uniforms.glassBlur, 4, values.blur);
+    effect.set_uniform_float(uniforms.glassBlurOffsets, 1, values.blurOffsets);
+    effect.set_uniform_float(uniforms.glassBlurWeights, 1, values.blurWeights);
     effect.set_uniform_float(uniforms.glassFace, 4, values.face);
     effect.set_uniform_float(uniforms.glassLightFace, 4, values.lightFace);
     effect.set_uniform_float(uniforms.glassStyle, 2, values.style);
@@ -320,6 +327,19 @@ export function setMaterial(effect, uniforms, look, scale, options = {}) {
     effect.set_uniform_float(uniforms.glassEdge, 4, values.edge);
     effect.set_uniform_float(uniforms.glassShadow, 4, values.shadow);
     effect.set_uniform_float(uniforms.glassDim, 1, [values.dim]);
+}
+
+/**
+ * Its texture looked up between texels, filtered, at every scale: from an
+ * effect's vfunc_paint_target(), with the material on, before it chains
+ * up. (Clutter has it take the nearest texel at whole scales – 100 %,
+ * 200 % – where its actor is drawn texel for pixel; the blur's taps, and
+ * the lens's, lie between texels: there, steps of whole texels.)
+ *
+ * @param {Clutter.OffscreenEffect} effect
+ */
+export function filterBetweenTexels(effect) {
+    effect.get_pipeline()?.set_layer_filters(0, Cogl.PipelineFilter.LINEAR, Cogl.PipelineFilter.LINEAR);
 }
 
 /**

@@ -1,5 +1,5 @@
 import {
-    EDGE, FACES, LOOK, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
+    EDGE, FACES, LOOK, MAX_BLUR_TAPS, REST_LIGHT, SMALL, VARIANTS, blurTaps, bodyRect, boundsOf, edgeReach,
     dimmedLook, faceColor, faceOf, lensDepth, lensOf, lightToward, lookOf, materialValues, resolveVariant, sameLight, sameNumbers,
     smallness, textureFrame,
 } from '../lib/glassLook.js';
@@ -105,11 +105,39 @@ export function testLens() {
 }
 
 export function testBlurTaps() {
-    assertEqual(blurTaps(0), {taps: 1, offset: 0, weight: 0}, 'clear glass: one tap');
-    const five = blurTaps(0.8);
-    assert(five.taps === 5 && near(4 * five.weight * five.offset ** 2, 0.64), `a light blur: five, its spread (${five.weight})`);
-    const nine = blurTaps(4);
-    assert(nine.taps === 9 && near(2 * nine.weight * nine.offset ** 2, 16), 'more: nine, the Gaussian\'s spread');
+    assertEqual(blurTaps(0), {taps: 1, offsets: [0], weights: [1]}, 'clear glass: one tap');
+    // What the taps add up to, each texel's weight: a tap between two
+    // texels gives each its share, as filtering between them does.
+    const texels = ({offsets, weights}) => {
+        const out = new Map();
+        offsets.forEach((o, k) => {
+            const below = Math.floor(o + 1e-9);
+            const t = o - below;
+            out.set(below, (out.get(below) ?? 0) + weights[k] * (1 - t));
+            if (t > 1e-9)
+                out.set(below + 1, (out.get(below + 1) ?? 0) + weights[k] * t);
+        });
+        return out;
+    };
+    for (const sigma of [0.8, 2, 4, 6]) {
+        const taps = blurTaps(sigma);
+        const radius = Math.min(MAX_BLUR_TAPS - 1, 2 * Math.ceil(0.75 * sigma));
+        assert(taps.taps === radius + 1 && taps.taps <= MAX_BLUR_TAPS && taps.taps % 2 === 1,
+            `σ ${sigma} texels: ${taps.taps} taps along each axis`);
+        assert(near(taps.weights.reduce((a, b) => a + b, 0), 1), `σ ${sigma}: their weights add up to 1`);
+        const each = texels(taps);
+        const gauss = i => Math.exp(-i * i / (2 * sigma * sigma));
+        let total = 0;
+        for (let i = -radius; i <= radius; i++)
+            total += gauss(i);
+        const off = [];
+        for (let i = -radius; i <= radius; i++) {
+            if (!near(each.get(i) ?? 0, gauss(i) / total))
+                off.push(i);
+        }
+        assert(off.length === 0 && each.size === 2 * radius + 1,
+            `σ ${sigma}: every texel within ${radius} as the Gaussian weighs it, none skipped (${off})`);
+    }
 }
 
 export function testMaterialValues() {
@@ -117,8 +145,11 @@ export function testMaterialValues() {
     const values = materialValues(look, 2, {light: false, shadow: true, density: 2});
     assertEqual(values.lens, [40, 120, 0, 1], 'lengths in the surface\'s pixels, the material on');
     const taps = blurTaps(look.blur * 2 * 2);
-    assertEqual(values.blur, [taps.taps, taps.offset / 2, taps.weight, look.grain],
-        'the blur\'s taps for its texels, apart in pixels; the grain');
+    assertEqual(values.blur, [taps.taps, (taps.taps - 0.5) / 2, 0, look.grain],
+        'the blur\'s taps for its texels, how far they reach in pixels; the grain');
+    const padded = values => [...values, ...new Array(MAX_BLUR_TAPS - values.length).fill(0)];
+    assertEqual(values.blurOffsets, padded(taps.offsets.map(o => o / 2)), 'where they are, in pixels');
+    assertEqual(values.blurWeights, padded(taps.weights), 'and their weights');
     const dark = FACES.dark;
     assertEqual(values.face, [dark.lift, dark.T, dark.lambda, dark.g], 'the dark style\'s face');
     assertEqual(values.small, [dark.small.T, dark.small.lambda, 2, 0], 'and its small controls\'');

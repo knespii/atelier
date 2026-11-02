@@ -26,7 +26,7 @@ import {REST_LIGHT, edgeReach} from '../../lib/glassLook.js';
 import {GlassSurface, WindowsClone, syncTextureFrame} from '../core/glass.js';
 import {
     MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial, setMaterialArea,
-    setMaterialReach, textureDensity,
+    setMaterialReach, filterBetweenTexels, textureDensity,
 } from '../core/glassMaterial.js';
 import {LIQUID_DECLARATIONS, liquidUniforms, setLiquid} from '../core/liquid.js';
 
@@ -83,6 +83,8 @@ class AtelierLockPopupGlassEffect extends Shell.GLSLEffect {
         const density = textureDensity(actor);
         if (look && density !== (options.density ?? 1))
             this.setMaterial(look, scale, {...options, density});
+        if (look)
+            filterBetweenTexels(this);
         super.vfunc_paint_target(node, paintContext);
     }
 

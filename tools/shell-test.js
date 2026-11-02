@@ -1987,6 +1987,161 @@ async function testGlassPaint(ext) {
     }
 }
 
+// How much of a picture is fine detail: of its values, the share of their
+// energy (about their mean) that a 3 × 3 box of device pixels takes away,
+// over the pixels whose box is all within a mask. A light Gaussian blur
+// leaves almost none; copies of what is behind a few pixels apart (taps
+// too far apart for their blur) or steps of whole texels leave nearly as
+// much as a sharp picture has.
+function fineShare(values, width, height, mask) {
+    const inside = (x, y) => {
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                if (!mask[(y + dy) * width + x + dx])
+                    return false;
+            }
+        }
+        return true;
+    };
+    const kept = [];
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            if (inside(x, y))
+                kept.push(y * width + x);
+        }
+    }
+    const mean = kept.reduce((sum, i) => sum + values[i], 0) / Math.max(1, kept.length);
+    let [fine, all] = [0, 0];
+    for (const i of kept) {
+        let box = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++)
+                box += values[i + dy * width + dx];
+        }
+        fine += (values[i] - box / 9) ** 2;
+        all += (values[i] - mean) ** 2;
+    }
+    return {share: all > 0 ? fine / all : 0, pixels: kept.length};
+}
+
+// The luma of a screenshot (device pixels), and its size.
+function lumaOf(name) {
+    const pixbuf = GdkPixbuf.Pixbuf.new_from_file(`${OUTPUT}/${name}.png`);
+    const [pixels, stride, channels] = [pixbuf.get_pixels(), pixbuf.get_rowstride(), pixbuf.get_n_channels()];
+    const [width, height] = [pixbuf.get_width(), pixbuf.get_height()];
+    const luma = new Float64Array(width * height);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = y * stride + x * channels;
+            luma[y * width + x] = 0.2126 * pixels[i] + 0.7152 * pixels[i + 1] + 0.0722 * pixels[i + 2];
+        }
+    }
+    return {luma, width, height, pixbuf};
+}
+
+// Glass over fine detail – lines of small type, as a terminal has them,
+// over the windows (the control centre's live glass): a smooth light blur
+// of it, with no copies of it a few pixels apart, nor steps of the
+// texture's texels, at any scale (ATELIER_TEST_SCALE). What the glass
+// shows of the type alone: the glass over the type, less the glass over
+// the same picture without it, for each pixel as much of it as the glass
+// lets through there (over a lighter picture, the difference); only where
+// it lets through most (not under the controls on it; the grain is the
+// same in all of them, and so is the controls' type). Its pictures,
+// zoomed, are kept (66-glass-smooth-*).
+async function testGlassSmooth(ext) {
+    const {default: PangoCairo} = await import('gi://PangoCairo');
+    const back = await useTestScale('The glass over fine detail');
+    const bar = ext.stateObj._settings.get_child('bar');
+    const island = ext.stateObj.modules.get('island').island;
+    let shown = 'type';
+    const area = new St.DrawingArea({x: 0, y: 0, width: global.stage.width, height: global.stage.height});
+    area.connect('repaint', () => {
+        const cr = area.get_context();
+        const [, height] = area.get_surface_size();
+        const grey = shown === 'light' ? 0.5 : 0.12;
+        cr.setSourceRGB(grey, grey, grey);
+        cr.paint();
+        if (shown === 'type') {
+            const layout = PangoCairo.create_layout(cr);
+            layout.set_font_description(Pango.FontDescription.from_string('Monospace 9'));
+            const line = 'depth effect even if digits are hidden – lock screen; glass ' +
+                'rozkostičkovaný 0123456789 ||| /// ### mmm iii ';
+            layout.set_text(line.repeat(3), -1);
+            cr.setSourceRGB(0.86, 0.86, 0.86);
+            for (let y = 0; y < height; y += 15) {
+                cr.moveTo(((y / 15) % 7) * -9, y);
+                PangoCairo.show_layout(cr, layout);
+            }
+        }
+        cr.$dispose();
+    });
+    global.window_group.add_child(area);
+    const scaleNow = () => global.display.get_monitor_scale(Main.layoutManager.primaryIndex);
+    const tag = `${Math.round(scaleNow() * 100)}`;
+    try {
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        bar.set_string('surface', 'glass');
+        bar.set_boolean('compact', true);
+        await restPointer();
+        await Scripting.sleep(1500);
+        await clickAt(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+        await Scripting.sleep(1500);
+        // (Inside its glass, past the bevel of its edges, which bends.)
+        const [x, y] = island.get_transformed_position();
+        const inset = 32;
+        const box = [Math.round(x + inset), Math.round(y + inset), Math.round(island.width - 2 * inset),
+            Math.round(island.height - 2 * inset)];
+        const shoot = async (name, what) => {
+            shown = what;
+            area.queue_repaint();
+            await framesDrawn(4);
+            await Scripting.sleep(300);
+            await screenshotArea(name, ...box);
+            return lumaOf(name);
+        };
+        const detailOf = async name => {
+            const [type, dark, light] = [
+                await shoot(`66-glass-smooth-${tag}-${name}`, 'type'),
+                await shoot(`66-glass-smooth-${tag}-${name}-dark`, 'dark'),
+                await shoot(`66-glass-smooth-${tag}-${name}-light`, 'light'),
+            ];
+            const through = light.luma.map((v, i) => v - dark.luma[i]);
+            const most = [...through].sort((p, q) => p - q)[Math.floor(0.9 * through.length)];
+            const mask = through.map(v => (v > 0.5 * most ? 1 : 0));
+            const detail = type.luma.map((v, i) => (mask[i] ? (v - dark.luma[i]) / through[i] : 0));
+            return {...fineShare(detail, type.width, type.height, mask), picture: type};
+        };
+        const glass = await detailOf('glass');
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => !island.page && !island.busy, 3000);
+        await restPointer();
+        await Scripting.sleep(600);
+        const bare = await detailOf('bare');
+        // (Nine taps 1.4 sigmas apart, as before, left 32 % of it at 125 %,
+        // 46 % at 100 %, the type alone 37 % and 54 %; these taps 1 % or less.)
+        check(glass.pixels > 1000 && glass.share < 0.02 && glass.share < bare.share / 10,
+            `at ${scaleNow().toFixed(2)}×, the glass over small type a smooth blur of it: ` +
+            `${(glass.share * 100).toFixed(2)} % of what it shows of it fine detail, over ${glass.pixels} ` +
+            `pixels (the type alone: ${(bare.share * 100).toFixed(1)} %)`);
+        // A corner of it, zoomed 4×, as it is drawn (each device pixel 4 × 4).
+        const crop = Math.min(glass.picture.width, glass.picture.height, 240);
+        glass.picture.pixbuf.new_subpixbuf(0, 0, crop, crop)
+            .scale_simple(crop * 4, crop * 4, GdkPixbuf.InterpType.NEAREST)
+            .savev(`${OUTPUT}/66-glass-smooth-${tag}-zoom.png`, 'png', [], []);
+    } finally {
+        area.destroy();
+        if (island.page) {
+            await pressKey(Clutter.KEY_Escape);
+            await waitFor(() => !island.page && !island.busy, 3000);
+        }
+        ['style', 'island-shape', 'surface', 'compact'].forEach(key => bar.reset(key));
+        await back?.();
+    }
+}
+
 // A ramp down a picture of the monitor's size: dark above top, light below
 // bottom, a grey for every row between.
 function rampPicture(path, [width, height], [top, bottom]) {
@@ -9795,6 +9950,7 @@ export async function run() {
         await part(testGlassEars, ext);
         await part(testGlassPictures, ext);
         await part(testGlassPaint, ext);
+        await part(testGlassSmooth, ext);
         await part(testVibrancy, ext);
         await part(testGlassLayerSpike);
         await part(testFullscreen, ext);

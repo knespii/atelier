@@ -25,7 +25,7 @@ import {
 import {glassLight} from './glassLight.js';
 import {
     DIM_TIME, GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial,
-    setMaterialArea, STYLE_TIME, setMaterialReach, textureDensity,
+    setMaterialArea, STYLE_TIME, setMaterialReach, filterBetweenTexels, textureDensity,
 } from './glassMaterial.js';
 
 // Live glass shows the windows over the bounds of its shapes, in steps of
@@ -269,6 +269,8 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         const density = this.get_actor() ? textureDensity(this.get_actor()) : 1;
         if (look && density !== (options.density ?? 1))
             this.setMaterial(look, scale, {...options, density});
+        if (look)
+            filterBetweenTexels(this);
         super.vfunc_paint_target(node, paintContext);
     }
 
