@@ -68,6 +68,8 @@ export class DepthModule {
             'changed::depth-request', () => this._queue(0, true),
             'changed::depth-model', () => this._queue(0),
             'changed::subject-model', () => this._queue(0),
+            'changed::depth-model-file', () => this._queue(0),
+            'changed::subject-model-file', () => this._queue(0),
             this);
         Main.layoutManager.connectObject('monitors-changed', () => this._queue(), this);
         // A model downloaded or removed, in the settings or by hand (its
@@ -160,7 +162,10 @@ export class DepthModule {
         this._anew = false;
         const python = GLib.find_program_in_path('python3');
         const models = cutoutModels(this._lockSettings.get_string('depth-model'),
-            this._lockSettings.get_string('subject-model'));
+            this._lockSettings.get_string('subject-model'), undefined, {
+                depth: this._lockSettings.get_string('depth-model-file'),
+                subject: this._lockSettings.get_string('subject-model-file'),
+            });
         const able = Boolean(python && (models.model || models.subject));
         // A cutout made already: used as it is if the models there are made
         // it (or none are there to make another).

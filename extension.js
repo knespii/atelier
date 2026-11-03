@@ -22,6 +22,8 @@ import {registerFonts} from './shell/core/fonts.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
 import {releaseKeptStyles} from './shell/core/theme.js';
 import {VibrancyModule, releaseKeptVibrancy} from './shell/core/vibrancy.js';
+import {glassLight} from './shell/core/glassLight.js';
+import {releaseClockGeometries} from './shell/lockscreen/clock.js';
 import {BarModule} from './shell/bar/module.js';
 import {ClaudeModule} from './shell/claude/module.js';
 import {ControlCentreModule} from './shell/controlCentre/module.js';
@@ -109,6 +111,12 @@ export default class AtelierExtension extends Extension {
             });
     }
 
+    // Called at logout, when the extension is turned off, and (as for every
+    // extension) when GNOME reloads extensions. Not on locking: Atelier keeps
+    // the 'unlock-dialog' session mode for its lock screen (the island with
+    // the padlock, clocks as widgets and the password popup, in
+    // shell/lockscreen). While locked only those run; the session's modules,
+    // with their keybindings, stop in _syncSession() and start again on unlock.
     disable() {
         Main.sessionMode.disconnectObject(this);
         this._cancelUnlockLater();
@@ -119,6 +127,8 @@ export default class AtelierExtension extends Extension {
         this.modules.disable();
         releaseKeptStyles();
         releaseKeptVibrancy();
+        glassLight.release();
+        releaseClockGeometries();
         this.modules = null;
         this.lockModules = null;
         this._settings = null;

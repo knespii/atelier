@@ -59,7 +59,7 @@ NO_X11=""
 if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
     NO_X11="--no-x11"
 fi
-UUID="atelier@local"
+UUID="atelier@knespii.github.io"
 BG=/usr/share/backgrounds/gnome
 
 rm -rf "$ROOT"
@@ -70,7 +70,19 @@ mkdir -p "$ROOT/config/glib-2.0/settings" "$ROOT/data/gnome-shell/extensions" "$
 # end and outlived the session.)
 RUNTIME=$(mktemp -d)
 CACHE=$(mktemp -d)
-ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
+# ATELIER_TEST_ZIP=path: the extension as a user installs it, from that ZIP
+# (make pack), instead of this checkout.
+if [ -n "${ATELIER_TEST_ZIP:-}" ]; then
+    mkdir -p "$ROOT/data/gnome-shell/extensions/$UUID"
+    unzip -q "$ATELIER_TEST_ZIP" -d "$ROOT/data/gnome-shell/extensions/$UUID"
+    # (The published ZIP has no BG Changer schema; the tests' fixtures take
+    # over BG Changer data, so they get it.)
+    cp "$REPO/schemas/org.gnome.shell.extensions.bg-changer.gschema.xml" \
+        "$ROOT/data/gnome-shell/extensions/$UUID/schemas/"
+    glib-compile-schemas "$ROOT/data/gnome-shell/extensions/$UUID/schemas"
+else
+    ln -s "$REPO" "$ROOT/data/gnome-shell/extensions/$UUID"
+fi
 
 # The helper services the session starts (calendar, accounts, files...)
 # could outlive it; they go with it, also when the test is stopped, and so
@@ -208,8 +220,38 @@ if [ -f "$ROOT/results.txt" ]; then
     fi
     # The main loop turns a while longer then: what waited for a frame or a
     # timeout must not run and touch the actors that are gone.
+    # GNOME's own battery tile (ui/status/system.js) is left out: it connects
+    # to UPower's 'g-properties-changed' and never disconnects, so a battery
+    # change while the shell quits reaches the tile GNOME destroyed. Only
+    # when its stack is all GNOME's and GJS's: anything of an extension's in
+    # it still fails.
     if [ -n "$exit_log" ]; then
-        if printf '%s\n' "$exit_log" | grep -m 5 -A 4 -E "already disposed|not in the stage"; then
+        touched=$(printf '%s\n' "$exit_log" | awk -v uuid="$UUID" -v own="$ROOT/gnome-own.txt" '
+            function flush() {
+                if (block == "")
+                    return
+                # (All of it GNOME'"'"'s and GJS'"'"'s: no frame from a file, as any of an
+                # extension'"'"'s would be.)
+                if (power && block ~ /ui\/status\/system\.js/ && block !~ /file:\/\// && index(block, uuid) == 0)
+                    gnome++
+                else
+                    printf "%s", block
+                block = ""; power = 0; left = 0
+            }
+            /already disposed|not in the stage/ {
+                flush(); block = $0 "\n"; power = /Gjs_status_system_PowerToggle/; left = 5; next
+            }
+            left > 0 {
+                block = block $0 "\n"
+                if (--left == 0)
+                    flush()
+                next
+            }
+            END { flush(); if (gnome) print gnome > own }')
+        if [ -s "$ROOT/gnome-own.txt" ]; then
+            echo "note: GNOME's own battery tile was touched after it was gone ($(cat "$ROOT/gnome-own.txt")×), not counted"
+        fi
+        if [ -n "$touched" ] && printf '%s\n' "$touched" | head -20; then
             echo "FAIL  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"
         else
             echo "PASS  nothing touches the UI once it is gone as the shell shuts down" >> "$ROOT/results.txt"

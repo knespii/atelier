@@ -1,4 +1,4 @@
-UUID := atelier@local
+UUID := atelier@knespii.github.io
 INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 JS_FILES = $(shell git ls-files --cached --others --exclude-standard '*.js')
 # GNOME Shell's private libraries (the Extensions app code imports Shew):
@@ -30,6 +30,9 @@ pack: schemas
 	@mkdir -p dist
 	gnome-extensions pack --force --out-dir=dist \
 		--extra-source=lib --extra-source=shell --extra-source=prefs --extra-source=icons --extra-source=fonts .
+	@# BG Changer's schema is only for taking over the author's own old data
+	@# (lib/migrate.js does without it): not in the published ZIP.
+	zip -qd dist/$(UUID).shell-extension.zip schemas/org.gnome.shell.extensions.bg-changer.gschema.xml
 
 # Syntax check every module (GJS modules are ES modules) and validate the schema.
 check:

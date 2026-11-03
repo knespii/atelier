@@ -83,6 +83,9 @@ class AtelierGlance extends IslandPage {
         weather?.connectObject('changed', () => this._syncWeather(), this);
         this.connect('destroy', () => {
             this._clock.disconnectObject(this);
+            // run_dispose(), as GNOME's unlockDialog.js does for its clock: the
+            // WallClock keeps ticking (its timeout and time-zone watch) until it is
+            // disposed, and dropping it would only free it at the next garbage collection.
             this._clock.run_dispose();
             this._events?.disconnectObject(this);
             this._weather?.disconnectObject(this);

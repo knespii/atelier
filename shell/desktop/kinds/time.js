@@ -323,6 +323,9 @@ class AtelierClockWidget extends DesktopWidget {
     cleanup() {
         this._stopSeconds();
         this._clock?.disconnectObject(this);
+        // run_dispose(), as GNOME's unlockDialog.js does for its clock: the
+        // WallClock keeps ticking (its timeout and time-zone watch) until it is
+        // disposed, and dropping it would only free it at the next garbage collection.
         this._clock?.run_dispose();
         this._clock = null;
     }
@@ -383,6 +386,9 @@ class AtelierDateWidget extends DesktopWidget {
 
     cleanup() {
         this._clock?.disconnectObject(this);
+        // run_dispose(), as GNOME's unlockDialog.js does for its clock: the
+        // WallClock keeps ticking (its timeout and time-zone watch) until it is
+        // disposed, and dropping it would only free it at the next garbage collection.
         this._clock?.run_dispose();
         this._clock = null;
     }

@@ -282,6 +282,28 @@ async function checkDepth(window) {
     toBottom();
     await sleep(300);
     await render(window, 'lock-screen-depth-ready');
+    // The user's own model file: chosen with a button, nothing to download.
+    const probed = [];
+    setup.probe = (model, subject) => {
+        probed.push(model);
+        return Promise.resolve(model ? {...missing, model: 'ok'} : missing);
+    };
+    setup.modelRow.selected = setup._ids.indexOf('custom');
+    await sleep(200);
+    check(lock.get_string('depth-model') === 'custom' && setup.fileButton.visible && !setup.downloadButton.visible &&
+        setup.statusRow.title === 'No model file is chosen' && setup.modelRow.subtitle.includes('Nothing is downloaded'),
+    `your own file: a button to choose it, no download (${setup.statusRow.title})`);
+    lock.set_string('depth-model-file', '/models/mine.onnx');
+    await sleep(200);
+    check(probed.at(-1) === '/models/mine.onnx' && setup.modelRow.subtitle === 'mine.onnx: it loads' &&
+        setup.statusRow.title === 'Ready' && !setup.downloadButton.visible,
+    `the file chosen is the one checked and used (${setup.modelRow.subtitle})`);
+    await render(window, 'lock-screen-depth-own-file');
+    setup.subjectRow.selected = setup._subjects.indexOf('custom');
+    await sleep(200);
+    check(lock.get_string('subject-model') === 'custom' && setup.subjectFileButton.visible &&
+        !setup.subjectButton.visible, 'an own subject model too, with no download button');
+    ['depth-model-file', 'subject-model', 'subject-model-file'].forEach(key => lock.reset(key));
     lock.set_boolean('depth-effect', false);
     check(!setup.computeButton.visible && !setup.switchRow.active, 'switched off, nothing to compute');
     check(!setup.keepRow.sensitive && setup.keepRow.active, 'the effect off: whether to keep it greyed out, as it was');

@@ -100,10 +100,14 @@ export class TasksSource extends EventEmitter {
             this._list = list?.id ?? null;
             this.tasks = list ? parseTasks(await this._request('GET', tasksUrl(list.id), token)) : [];
             this._set('ready');
+            this._lastError = null;
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
-            console.warn(`Atelier: Google Tasks could not be read: ${e.message}`);
+            // Once per kind of failure, not at every refresh while it lasts.
+            if (e.message !== this._lastError)
+                console.warn(`Atelier: Google Tasks could not be read: ${e.message}`);
+            this._lastError = e.message;
             this._set('error');
         }
     }

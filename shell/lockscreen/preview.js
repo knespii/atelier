@@ -63,6 +63,9 @@ class LockPreview {
                 x_align: Clutter.ActorAlign.CENTER}));
             clock.add_child(new St.Label({style_class: 'unlock-dialog-clock-date',
                 text: GLib.DateTime.new_now_local().format('%A %B %-d'), x_align: Clutter.ActorAlign.CENTER}));
+            // run_dispose(), as GNOME's unlockDialog.js does for its clock: the
+            // WallClock keeps ticking (its timeout and time-zone watch) until it is
+            // disposed, and dropping it would only free it at the next garbage collection.
             wallClock.run_dispose();
             this.actor.add_child(clock);
             clock.connect('notify::width', () => clock.set_position(

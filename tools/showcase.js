@@ -20,7 +20,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
-const UUID = 'atelier@local';
+const UUID = 'atelier@knespii.github.io';
 const OUTPUT = GLib.getenv('ATELIER_SHOWCASE_OUTPUT');
 const DOCS = GLib.getenv('ATELIER_SHOWCASE_DOCS');
 const FRAMES = GLib.getenv('ATELIER_SHOWCASE_FRAMES') || null;

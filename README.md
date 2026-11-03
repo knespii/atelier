@@ -371,14 +371,14 @@ the versions of GNOME they were made for). It needs `git`, `make`,
 ```sh
 git clone https://github.com/knespii/atelier.git
 cd atelier
-make install          # links this folder into ~/.local/share/gnome-shell/extensions/atelier@local
+make install          # links this folder into ~/.local/share/gnome-shell/extensions/atelier@knespii.github.io
 ```
 
 On Wayland GNOME Shell only notices new extensions after you log out and back
 in. Then enable it:
 
 ```sh
-gnome-extensions enable atelier@local
+gnome-extensions enable atelier@knespii.github.io
 ```
 
 Shell themes are applied through the **User Themes** extension, which has to
@@ -405,7 +405,7 @@ Then either install from git as above, or from a zip built with `make pack`
 (`gnome-extensions install` compiles the settings schema itself):
 
 ```sh
-gnome-extensions install --force atelier@local.shell-extension.zip
+gnome-extensions install --force atelier@knespii.github.io.shell-extension.zip
 ```
 
 Ubuntu brings two extensions of its own that do the same jobs as parts of
@@ -417,7 +417,7 @@ itself; while they are on, its settings show a notice on the Dock and Desktop
 pages. Then log out and back in, and enable Atelier:
 
 ```sh
-gnome-extensions enable atelier@local
+gnome-extensions enable atelier@knespii.github.io
 ```
 
 ## Themes: why they used to break the desktop
@@ -467,7 +467,7 @@ desktop is still showing them.
 | `make prefs` | Opens the preferences without the Extensions app (settings in memory) |
 | `make prefs-screenshots` | Renders every settings section headlessly and drives the main flows |
 | `make showcase` | Takes the pictures in `docs/screenshots` in a headless GNOME Shell on a 4K monitor at scale 2, with a few profiles of GNOME's own wallpapers (the settings pictures come from `make prefs-screenshots`); `ATELIER_SHOWCASE_FRAMES=<folder> tools/showcase.sh` also records a few moments in slow motion, frame by frame, for a video |
-| `make pack` | Builds `dist/atelier@local.shell-extension.zip` |
+| `make pack` | Builds `dist/atelier@knespii.github.io.shell-extension.zip` |
 
 The test sessions use their own settings, data, cache and runtime
 directories under `tests/output`, so they never touch the running desktop.
@@ -498,7 +498,7 @@ Layout:
 ## Uninstall
 
 ```sh
-gnome-extensions disable atelier@local
+gnome-extensions disable atelier@knespii.github.io
 make uninstall
 ```
 

@@ -45,7 +45,7 @@ import {GLASS_FULL} from '../lib/seeThrough.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize, sizeOf} from '../lib/widgets.js';
 import {fakeDepthModel} from '../tests/fakeOnnx.js';
 
-const UUID = 'atelier@local';
+const UUID = 'atelier@knespii.github.io';
 const OUTPUT = GLib.getenv('ATELIER_TEST_OUTPUT');
 // 'main', 'two-monitors' (the session on two monitors) or 'dock' (only
 // the dock's checks)
@@ -163,6 +163,13 @@ let virtualKeyboard = null;
 async function pointerTo(x, y) {
     virtualPointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(), x, y);
+    // (A virtual device's events go through GNOME's input thread: on a busy
+    // machine the move can come later than any fixed wait. The shell has it
+    // once its pointer is there.)
+    await waitFor(() => {
+        const [px, py] = global.get_pointer();
+        return Math.abs(px - Math.round(x)) <= 1 && Math.abs(py - Math.round(y)) <= 1;
+    }, 1000);
     await Scripting.sleep(80);
 }
 
@@ -178,6 +185,13 @@ async function pointerDown(x, y) {
     await pointerTo(x, y);
     virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
     await Scripting.sleep(60);
+}
+
+// Pressed there, and held until the editor has taken the press (its drag
+// begun): moving on before that, the drag would miss the first moves.
+async function pressFor(editor, x, y) {
+    await pointerDown(x, y);
+    return waitFor(() => Boolean(editor?._drag), 1500);
 }
 
 async function pointerUp() {
@@ -3979,7 +3993,7 @@ async function testDesktop(ext) {
     // nearest to how big it is; let go, it takes that size.
     const [square, card] = [4 * 48 - 12, 8 * 48 - 12];
     let [hx, hy] = centerOf(weather._editHandle);
-    await pointerDown(hx, hy);
+    await pressFor(desktop._editor, hx, hy);
     await pointerAlong(hx, hy, hx - 150, hy);
     await Scripting.sleep(300);
     check(Math.abs(weather.width - (card - 150)) <= 1 && ghost.width === square && weather.entry.size === 'square',
@@ -8040,7 +8054,7 @@ async function testLockFreeStretch() {
     });
     let [hx, hy] = centerOf(clock._editHandle);
     const [dx, dy] = [(PITCH + 10) * scale, (3 * PITCH + 10) * scale];
-    await pointerDown(hx, hy);
+    await pressFor(lockEditor, hx, hy);
     await pointerAlong(hx, hy, hx + dx, hy + dy);
     await Scripting.sleep(300);
     global.stage.disconnect(paintId);
@@ -8197,7 +8211,7 @@ async function testLockFreeStretch() {
             `${picked?.get_style_class_name?.() ?? ''}`.trim();
         // (Three cells and a bit wider, two and a bit taller – as tall as
         // a clock gets on the desktop, and a little past it: nearest a card.)
-        await pointerDown(cx, cy);
+        await pressFor(desktop._editor, cx, cy);
         const took = desktop._editor?._drag?.stretch ?? false;
         await pointerAlong(cx, cy, cx + (3 * PITCH + 10) * scale, cy + (2 * PITCH + 14) * scale);
         await Scripting.sleep(300);

@@ -24,7 +24,7 @@ NO_X11=""
 if gnome-shell --help 2>&1 | grep -q -- '--no-x11'; then
     NO_X11="--no-x11"
 fi
-UUID="atelier@local"
+UUID="atelier@knespii.github.io"
 BG=/usr/share/backgrounds/gnome
 FRAMES="${ATELIER_SHOWCASE_FRAMES:-}"
 if [ -n "$FRAMES" ]; then

@@ -177,6 +177,31 @@ function loadGeometries() {
 // Keyed by the clock, the monitor and the scale.
 const geometryKey = (id, monitor, scale) => `${id}@${monitor?.width}x${monitor?.height}@${scale}`;
 
+function saveGeometries() {
+    const path = GEOMETRY_FILE();
+    GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o755);
+    return new TextEncoder().encode(JSON.stringify(Object.fromEntries(geometries)));
+}
+
+/**
+ * For disable(): a save still waiting is done now, and what is kept in
+ * memory goes (the cache file has it for the next time).
+ */
+export function releaseClockGeometries() {
+    if (geometrySave) {
+        GLib.source_remove(geometrySave);
+        geometrySave = 0;
+        try {
+            GLib.file_set_contents(GEOMETRY_FILE(), saveGeometries());
+        } catch (e) {
+            console.warn(`Atelier: where the glass clocks are wasn't kept: ${e.message}`);
+        }
+    }
+    geometries.clear();
+    geometriesLoaded = false;
+    clockGeometries.disconnectAll();
+}
+
 function recordGeometry(id, geometry) {
     const key = geometryKey(id, Main.layoutManager.primaryMonitor, scaleFactor());
     if (!id || same(geometries.get(key), geometry))
@@ -188,10 +213,8 @@ function recordGeometry(id, geometry) {
         return;
     geometrySave = GLib.idle_add(GLib.PRIORITY_LOW, () => {
         geometrySave = 0;
-        const path = GEOMETRY_FILE();
-        GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o755);
-        const bytes = new TextEncoder().encode(JSON.stringify(Object.fromEntries(geometries)));
-        Gio.File.new_for_path(path).replace_contents_bytes_async(new GLib.Bytes(bytes), null, false,
+        const bytes = saveGeometries();
+        Gio.File.new_for_path(GEOMETRY_FILE()).replace_contents_bytes_async(new GLib.Bytes(bytes), null, false,
             Gio.FileCreateFlags.NONE, null, (file, res) => {
                 try {
                     file.replace_contents_finish(res);

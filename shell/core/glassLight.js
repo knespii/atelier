@@ -108,6 +108,15 @@ class GlassLight {
         this._light(surface, [x, y], glassScale());
     }
 
+    /** For disable(): no surfaces, settings or pointer watch are kept. */
+    release() {
+        this._surfaces.clear();
+        this._follow(false);
+        this._watch?.remove();
+        this._watch = null;
+        this._moving = false;
+    }
+
     _update(x, y) {
         const scale = glassScale();
         for (const surface of this._surfaces)

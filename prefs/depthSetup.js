@@ -1,6 +1,6 @@
 // The depth effect's rows on the Lock Screen page: the switch, the model to
-// use (three sizes of Depth Anything V2), the subject model (BiRefNet, or
-// none), and what they need, step by step – Python's packages (installed by
+// use (three sizes of Depth Anything V2, or the user's own ONNX file), the
+// subject model (BiRefNet, the user's own file, or none), and what they need, step by step – Python's packages (installed by
 // the user: the command to copy), then a model (downloaded here, only when
 // the user asks, and checked: its size and SHA-256, and that it loads),
 // then ready, with how the cutout of the wallpaper is coming on (the shell
@@ -14,8 +14,12 @@ import Gtk from 'gi://Gtk';
 import Soup from 'gi://Soup?version=3.0';
 
 import {
-    MODELS, SUBJECT_MODELS, chosenModel, chosenSubjectModel, modelPath, subjectModelPath, workerPath,
+    CUSTOM, MODELS, SUBJECT_MODELS, chosenModel, chosenSubjectModel, modelPath, subjectModelPath, workerPath,
 } from '../lib/depth.js';
+
+Gio._promisify(Gtk.FileDialog.prototype, 'open');
+
+const OWN_FILE = 'Your Own File';
 
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
 Gio._promisify(Soup.Session.prototype, 'send_async');
@@ -119,6 +123,21 @@ export async function downloadModel(model, target, {onProgress = () => {}, cance
 
 const install = missing => `sudo apt install ${missing.join(' ')}`;
 
+/**
+ * @param {string} path - the user's own model file, or ''
+ * @param {string} [state] - what the probe says of it: 'ok', 'missing', or why it doesn't load
+ * @param {string} what - what such a model is, for while none is chosen
+ * @returns {string} the subtitle of its row
+ */
+function ownFile(path, state, what) {
+    if (!path)
+        return `${what}. Nothing is downloaded`;
+    const name = GLib.path_get_basename(path);
+    if (state === 'ok')
+        return `${name}: it loads`;
+    return state && state !== 'missing' ? `${name}: it doesn't load: ${state}` : `${name}: not there`;
+}
+
 export class DepthSetup {
     /**
      * @param {Adw.PreferencesGroup} group - the rows go in it
@@ -150,10 +169,10 @@ export class DepthSetup {
         group.add(this.keepRow);
 
         // The model: its size, its licence and about how long it takes.
-        this._ids = Object.keys(MODELS);
+        this._ids = [...Object.keys(MODELS), CUSTOM];
         this.modelRow = new Adw.ComboRow({
             title: 'Depth Model',
-            model: Gtk.StringList.new(this._ids.map(id => MODELS[id].title)),
+            model: Gtk.StringList.new(this._ids.map(id => MODELS[id]?.title ?? OWN_FILE)),
             selected: this._ids.indexOf(this.model),
         });
         // (Chosen once, it stays chosen: no longer the biggest one there.)
@@ -162,13 +181,18 @@ export class DepthSetup {
             if (id && id !== this.model)
                 this._settings.set_string('depth-model', id);
         });
+        // (The user's own file instead of a download.)
+        this.fileButton = new Gtk.Button({label: 'Choose File…', valign: Gtk.Align.CENTER, visible: false});
+        this.fileButton.connect('clicked', () => this._choose('depth-model-file', 'Choose a Depth Model'));
+        this.modelRow.add_suffix(this.fileButton);
         group.add(this.modelRow);
 
         // The subject model, or none; downloaded here too, when asked.
-        this._subjects = ['none', ...Object.keys(SUBJECT_MODELS)];
+        this._subjects = ['none', ...Object.keys(SUBJECT_MODELS), CUSTOM];
         this.subjectRow = new Adw.ComboRow({
             title: 'Subject Model',
-            model: Gtk.StringList.new(this._subjects.map(id => SUBJECT_MODELS[id]?.title ?? 'None')),
+            model: Gtk.StringList.new(this._subjects.map(id =>
+                SUBJECT_MODELS[id]?.title ?? (id === CUSTOM ? OWN_FILE : 'None'))),
             selected: this._subjects.indexOf(this.subject),
         });
         this.subjectRow.connect('notify::selected', () => {
@@ -179,6 +203,9 @@ export class DepthSetup {
         this.subjectButton = new Gtk.Button({valign: Gtk.Align.CENTER, visible: false});
         this.subjectButton.connect('clicked', () => this._download('subject'));
         this.subjectRow.add_suffix(this.subjectButton);
+        this.subjectFileButton = new Gtk.Button({label: 'Choose File…', valign: Gtk.Align.CENTER, visible: false});
+        this.subjectFileButton.connect('clicked', () => this._choose('subject-model-file', 'Choose a Subject Model'));
+        this.subjectRow.add_suffix(this.subjectFileButton);
         group.add(this.subjectRow);
 
         this.statusRow = new Adw.ActionRow({title: 'Checking…', subtitle_selectable: true});
@@ -211,6 +238,10 @@ export class DepthSetup {
         this._effectId = settings.connect('changed::depth-effect', () => this._sync());
         this._modelId = settings.connect('changed::depth-model', () => this.refresh());
         this._subjectId = settings.connect('changed::subject-model', () => this.refresh());
+        this._filesId = [
+            settings.connect('changed::depth-model-file', () => this.refresh()),
+            settings.connect('changed::subject-model-file', () => this.refresh()),
+        ];
         this.refresh();
     }
 
@@ -232,14 +263,20 @@ export class DepthSetup {
 
     _showModel() {
         const id = this.model;
-        const {label, license, time} = MODELS[id];
         if (this.modelRow.selected !== this._ids.indexOf(id))
             this.modelRow.selected = this._ids.indexOf(id);
-        const use = license.includes('NC') ? `${license}, for non-commercial use` : license;
-        const kept = this.state?.model === 'ok' ? 'downloaded' : 'not downloaded';
-        this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time}; ${kept}`;
         this.modelRow.sensitive = !this._downloading;
-        this.downloadButton.label = `Download Model (${label})…`;
+        this.fileButton.visible = id === CUSTOM;
+        if (id === CUSTOM) {
+            this.modelRow.subtitle = ownFile(this._settings.get_string('depth-model-file'), this.state?.model,
+                'An ONNX depth model: one picture in, how near each pixel is out, as Depth Anything V2 has it');
+        } else {
+            const {label, license, time} = MODELS[id];
+            const use = license.includes('NC') ? `${license}, for non-commercial use` : license;
+            const kept = this.state?.model === 'ok' ? 'downloaded' : 'not downloaded';
+            this.modelRow.subtitle = `Depth Anything V2, ${label} (${use}): ${time}; ${kept}`;
+            this.downloadButton.label = `Download Model (${label})…`;
+        }
         this._showSubject();
     }
 
@@ -247,10 +284,18 @@ export class DepthSetup {
     // why the one there doesn't load.
     _showSubject() {
         const id = this._subjectShown;
-        const {title, label, license, time} = SUBJECT_MODELS[id];
         if (this.subjectRow.selected !== this._subjects.indexOf(this.subject))
             this.subjectRow.selected = this._subjects.indexOf(this.subject);
         const state = this.state?.subject ?? 'missing';
+        this.subjectRow.sensitive = !this._downloading;
+        this.subjectFileButton.visible = id === CUSTOM;
+        if (id === CUSTOM) {
+            this.subjectRow.subtitle = ownFile(this._settings.get_string('subject-model-file'), state,
+                'An ONNX subject model: one picture in, the mask of its subject out, as BiRefNet has it');
+            this.subjectButton.visible = false;
+            return;
+        }
+        const {title, label, license, time} = SUBJECT_MODELS[id];
         const kept = state === 'ok' ? 'downloaded' : state === 'missing' ? 'not downloaded' : `it doesn't load: ${state}`;
         this.subjectRow.subtitle = `${title}, ${label} (${license}), which finds the wallpaper's subject (a person, ` +
             `an animal, a thing) to stand in front too, where it is sure of one: ${time}; ${kept}`;
@@ -260,12 +305,42 @@ export class DepthSetup {
             this._settings.get_string('subject-model') !== 'none';
     }
 
+    // The files the effect would use: the downloaded ones, or the user's own.
+    _modelFile() {
+        return this.model === CUSTOM ? this._settings.get_string('depth-model-file') || null : modelPath(this.model);
+    }
+
+    _subjectFile() {
+        const id = this._subjectShown;
+        return id === CUSTOM ? this._settings.get_string('subject-model-file') || null : subjectModelPath(id);
+    }
+
+    // The user's own model file, from a file dialog: kept in that setting.
+    async _choose(key, title) {
+        const filter = new Gtk.FileFilter({name: 'ONNX models'});
+        filter.add_suffix('onnx');
+        const filters = new Gio.ListStore({item_type: Gtk.FileFilter});
+        filters.append(filter);
+        const dialog = new Gtk.FileDialog({title, modal: true, filters, default_filter: filter});
+        const chosen = this._settings.get_string(key);
+        if (chosen)
+            dialog.initial_file = Gio.File.new_for_path(chosen);
+        try {
+            const file = await dialog.open(this.modelRow.get_root(), null);
+            if (file?.get_path() && this._settings)
+                this._settings.set_string(key, file.get_path());
+        } catch (e) {
+            if (!e.matches?.(Gtk.DialogError, Gtk.DialogError.DISMISSED))
+                console.warn(`Atelier: no model file chosen: ${e.message}`);
+        }
+    }
+
     /** @returns {Promise} what is there, looked at again */
     async refresh() {
         const serial = ++this._serial;
         let state;
         try {
-            state = await this.probe(modelPath(this.model), subjectModelPath(this._subjectShown));
+            state = await this.probe(this._modelFile(), this._subjectFile());
         } catch (e) {
             const why = `can't be checked: ${e.message}`;
             state = {python: true, missing: [], model: why, subject: why};
@@ -307,6 +382,10 @@ export class DepthSetup {
             this._show({title: 'Python packages are missing',
                 subtitle: `It needs ${state.missing.join(', ')}: install them, then check again`,
                 icon: 'dialog-warning-symbolic', again: true, command: install(state.missing)});
+        } else if (state.model === 'missing' && !subject && this.model === CUSTOM) {
+            this._show({title: 'No model file is chosen',
+                subtitle: 'Choose your own ONNX depth model above, or one of the models to download',
+                icon: 'dialog-information-symbolic'});
         } else if (state.model === 'missing' && !subject) {
             this._show({title: 'The model isn\'t downloaded',
                 subtitle: `Depth Anything V2 ${MODELS[this.model].title}, which sees how near each part of the ` +
@@ -314,9 +393,9 @@ export class DepthSetup {
                 icon: 'folder-download-symbolic', download: true});
         } else if (state.model !== 'ok' && state.model !== 'missing') {
             this._show({title: 'The model doesn\'t load', subtitle: state.model,
-                icon: 'dialog-warning-symbolic', download: true});
+                icon: 'dialog-warning-symbolic', download: this.model !== CUSTOM});
         } else {
-            this._showReady(state.model === 'missing');
+            this._showReady(state.model === 'missing' && this.model !== CUSTOM);
         }
     }
 
@@ -346,6 +425,8 @@ export class DepthSetup {
             return;
         const subject = kind === 'subject';
         const id = subject ? this._subjectShown : this.model;
+        if (id === CUSTOM)
+            return;
         this._downloading = new Gio.Cancellable();
         this._fetching = kind;
         this._received = 'Starting…';
@@ -391,6 +472,7 @@ export class DepthSetup {
         this._settings.disconnect(this._effectId);
         this._settings.disconnect(this._modelId);
         this._settings.disconnect(this._subjectId);
+        this._filesId.forEach(id => this._settings.disconnect(id));
         this._settings = null;
     }
 }

@@ -494,15 +494,26 @@
         <choice value='small'/>
         <choice value='base'/>
         <choice value='large'/>
+        <choice value='custom'/>
       </choices>
       <default>''</default>
       <summary>The depth effect's model</summary>
-      <description>Which Depth Anything V2 the depth effect uses: “small”, “base” or “large”. Empty: none chosen yet, the biggest one downloaded (or Base, to download).</description>
+      <description>Which Depth Anything V2 the depth effect uses: “small”, “base” or “large”, or “custom”: the user's own ONNX file (depth-model-file). Empty: none chosen yet, the biggest one downloaded (or Base, to download).</description>
+    </key>
+    <key name="depth-model-file" type="s">
+      <default>''</default>
+      <summary>The user's own depth model</summary>
+      <description>The path of an ONNX depth model the user chose (one picture in, how near each pixel is out, as Depth Anything V2 has it), used while depth-model is “custom”.</description>
     </key>
     <key name="subject-model" type="s">
       <default>''</default>
       <summary>The depth effect's subject model</summary>
-      <description>Which model finds the wallpaper's subject (a person, an animal, a thing) for the depth effect, besides the depth model: “lite” (BiRefNet lite, downloaded in the settings when asked) or “none”. Empty: none chosen yet, the one downloaded if there is one.</description>
+      <description>Which model finds the wallpaper's subject (a person, an animal, a thing) for the depth effect, besides the depth model: “lite” (BiRefNet lite, downloaded in the settings when asked), “custom” (the user's own ONNX file, subject-model-file) or “none”. Empty: none chosen yet, the one downloaded if there is one.</description>
+    </key>
+    <key name="subject-model-file" type="s">
+      <default>''</default>
+      <summary>The user's own subject model</summary>
+      <description>The path of an ONNX subject model the user chose (one picture in, the subject's mask out, as BiRefNet has it), used while subject-model is “custom”.</description>
     </key>
     <key name="depth-request" type="s">
       <default>''</default>

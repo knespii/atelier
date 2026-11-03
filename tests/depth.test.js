@@ -3,7 +3,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import {
-    CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
+    CUSTOM, CUTOUT_VERSION, DEFAULT_MODEL, MAX_COVER, MAX_COVER_GLASS, MAX_GLYPH_COVER, MODELS, SUBJECT_MODELS, chosenModel,
     chosenSubjectModel, coverage, cutoutKey, cutoutModels, cutoutOpacity, cutoutPath, depthDir, depthNote, legibility,
     lockWallpaper, modelPath, modelsTag, pictureState, placement, pngText, subjectModelPath,
 } from '../lib/depth.js';
@@ -96,6 +96,16 @@ export function testCutoutModels() {
     assertEqual(cutoutModels('', '', having(['birefnet-lite.onnx'])), {model: null, subject: lite},
         'the subject model alone');
     assertEqual(cutoutModels('base', '', having(['depth-anything-v2-base.onnx'])), {model: base, subject: null});
+    // The user's own files, for 'custom': used where they are, none without one.
+    const own = {depth: '/models/mine-depth.onnx', subject: '/models/mine-subject.onnx'};
+    assertEqual(cutoutModels(CUSTOM, CUSTOM, having(['mine-depth.onnx', 'mine-subject.onnx']), own),
+        {model: own.depth, subject: own.subject}, 'the user\'s own files');
+    assertEqual(cutoutModels(CUSTOM, 'lite', having(['depth-anything-v2-large.onnx', 'birefnet-lite.onnx'])),
+        {model: null, subject: lite}, 'no depth model when the own one isn\'t chosen, not a downloaded one instead');
+    assertEqual(cutoutModels(CUSTOM, CUSTOM, having([]), own), {model: null, subject: null},
+        'none of them when the own files aren\'t there');
+    assertEqual(chosenModel(CUSTOM, () => true), CUSTOM, 'the own file stays chosen');
+    assertEqual(chosenSubjectModel(CUSTOM, () => true), CUSTOM);
     assertEqual(modelsTag({model: large, subject: lite}), 'depth-anything-v2-large.onnx birefnet-lite.onnx',
         'what the worker writes in a cutout of them');
     assertEqual(modelsTag({model: null, subject: lite}), '- birefnet-lite.onnx');
