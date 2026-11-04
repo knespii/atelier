@@ -43,7 +43,7 @@ const PAGE_REGION = [400, 300];
 
 // Whether a window shows anywhere in a rectangle of the stage (on the
 // workspace shown).
-function windowsUnder({x, y, width, height}) {
+export function windowsUnder({x, y, width, height}) {
     const workspace = global.workspace_manager.get_active_workspace();
     return global.get_window_actors().some(actor => {
         const window = actor.meta_window;
@@ -113,6 +113,11 @@ export class IslandModule {
     /** @returns {GlancePage} a glance, e.g. for the weather in the bar */
     createGlance() {
         return new GlancePage({events: this._calendar.events, weather: this._calendar.weather});
+    }
+
+    /** @returns {boolean} whether the island is of glass (its type follows what is behind it) */
+    get glassy() {
+        return Boolean(this._glass);
     }
 
     /** @returns {boolean} whether the island is on screen to show pages */
@@ -664,8 +669,9 @@ export class IslandModule {
     // the bar; open, the wallpaper under the page – or windows: its glass
     // is live then, and what they show isn't read back from the screen;
     // they are taken to be the palette's surface, in the style apps are in.
-    // (GNOME's own controls – the control centre – and a sheet's form are
-    // styled for a dark surface only: their light type stays as it is.)
+    // (The control centre's modules each follow what is behind them:
+    // shell/controlCentre/ink.js. A sheet's form is styled for a dark
+    // surface only: its light type stays as it is.)
     _syncVibrancy() {
         const vibrancy = this._glass ? this._modules?.get('vibrancy') : null;
         if (!vibrancy) {

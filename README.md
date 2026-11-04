@@ -341,15 +341,17 @@ glass itself never darkens on its own: it is darkened as much as you choose,
 the same on every surface. What it shows is the wallpaper behind it (and the
 windows under the island while it is open); while a window is near the dock,
 the dock's glass is neutral instead, as light as windows are, so the
-wallpaper's colour doesn't tint it over them.
+wallpaper's colour doesn't tint it over them. In the control centre each
+module goes its own way, by what is under it as it opens: the tiles over a
+light window turn dark while those beside them, over a dark wallpaper, stay
+light; a tile that is on keeps the accent.
 
 In Settings → Appearance, *Glass* is *Regular*, *Clear* (more see-through, a
 little darker under it to keep what is on it legible) or *Off* (solid
 surfaces). GNOME's high contrast keeps it off. *Darkening* (none by default)
 lays the same dark wash over all of the glass – the island, the bar, the
 dock, the widgets, the drip sheets and the lock screen's island and password
-popup; more of it keeps light type, GNOME's controls in the control centre
-among it, legible over bright wallpapers.
+popup; more of it keeps light type legible over bright wallpapers.
 
 ## Settings
 

@@ -964,7 +964,8 @@ async function testControlCentre(ext) {
 
 // A page of a browser, say, behind the island: mostly light, lines of small
 // dark type on it, a dark band with large light type, a bar of tabs.
-function busyWindowArea() {
+// (Plain: a page of small dark type only, no bar of tabs nor dark band.)
+function busyWindowArea({plain = false} = {}) {
     const area = new St.DrawingArea({x: 0, y: 0, width: global.stage.width, height: global.stage.height});
     area.connect('repaint', () => {
         const cr = area.get_context();
@@ -972,7 +973,8 @@ function busyWindowArea() {
         cr.setSourceRGB(0.96, 0.96, 0.95);
         cr.paint();
         cr.setSourceRGB(0.2, 0.22, 0.26);
-        cr.rectangle(0, 0, width, 40);
+        if (!plain)
+            cr.rectangle(0, 0, width, 40);
         cr.fill();
         const layout = PangoCairo.create_layout(cr);
         layout.set_font_description(Pango.FontDescription.from_string('Sans 10'));
@@ -981,7 +983,7 @@ function busyWindowArea() {
         cr.moveTo(8, 12);
         PangoCairo.show_layout(cr, layout);
         for (let y = 60; y < height; y += 18) {
-            const band = Math.floor(y / 180) % 3 === 1;
+            const band = !plain && Math.floor(y / 180) % 3 === 1;
             if (band) {
                 cr.setSourceRGB(0.08, 0.08, 0.1);
                 cr.rectangle(0, y - 2, width, 18);
@@ -1065,20 +1067,22 @@ async function testControlCentrePictures(ext) {
     }
 }
 
-// The control centre over a busy window (live glass) and over the
-// wallpaper, in the dark and the light style, with the glass regular, clear
-// and off, a tile's menu open in it (Wi-Fi's list of networks, say): its
-// glass is frosted – what is behind blurred much more, no second line of
-// type under the controls' (lib/glassLook.js FROST) – and darkened as
-// much as the dock's and no more (the glass-dim setting's, nothing of its
-// own: the menu a faint pill of the glass, as the tiles are). Its type and
-// icons (the tiles', the header's buttons', the tabs', the menu's) are
-// read off the screen as APCA has it, against what their size and weight
-// need (READ_LC at most; as much as on the island of black, the glass off,
-// at most): on the dark style's glass over the wallpaper, and over the
-// window darkened 30 %, they read; elsewhere (light glass, clear glass,
-// a light window not darkened) they are told as they come out, the
-// user's to darken. Not dimmed but an insensitive item. Pictures in
+// The control centre's type and icons, a module at a time
+// (shell/controlCentre/ink.js), with its glass regular and not darkened
+// (glass-dim 0): over a light window (live glass) and over a light
+// wallpaper, in the dark and the light style, its modules' type is dark;
+// over a dark wallpaper light; over a wallpaper light on its left and dark
+// on its right, the modules on the left dark, those on the right light.
+// Each label and icon (the tiles', the system buttons', the sliders', Now
+// Playing's, the tabs', a tile's menu's) is read off the screen as APCA has
+// it and reads as its size and weight need (READ_LC at most; as much as on
+// the island of black, the glass off, at most): no glass darkened for it.
+// A tile that is on keeps the accent and its own type on it. GNOME's style
+// switched while it is open turns its type over a middling grey; opened
+// again over the same, nothing of its type changes, not even for a frame.
+// Its glass is frosted – what is behind blurred much more (lib/glassLook.js
+// FROST) – and darkened as much as the dock's and no more (the glass-dim
+// setting's). Not dimmed but an insensitive item. Pictures in
 // control-centre-menus/.
 async function controlCentreReads(ext, toggle) {
     const {READ_LC, SLACK} = await import('../lib/vibrancy.js');
@@ -1086,6 +1090,8 @@ async function controlCentreReads(ext, toggle) {
     const modules = ext.stateObj.modules;
     const islandModule = modules.get('island');
     const island = islandModule.island;
+    const cc = modules.get('control-centre');
+    const vibrancy = modules.get('vibrancy');
     // (Made anew as the glass changes.)
     const dock = () => modules.get('dock')?.dock ?? null;
     const settings = ext.stateObj._settings;
@@ -1095,27 +1101,40 @@ async function controlCentreReads(ext, toggle) {
     const bar = settings.get_child('bar');
     const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
     const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
+    const checkedBefore = toggle.checked;
     GLib.mkdir_with_parents(`${OUTPUT}/control-centre-menus/type`, 0o755);
     // (The island of glass, as in the user's session.)
     bar.set_string('surface', 'glass');
     const off = new PopupMenu.PopupMenuItem('Not available now');
     off.setSensitive(false);
     toggle.menu.addMenuItem(off);
-    const area = busyWindowArea();
+    // (A tile that is on: on the accent.)
+    toggle.checked = true;
+    const area = busyWindowArea({plain: true});
     global.window_group.add_child(area);
+    const setWallpaper = async (name, left, right = left) => {
+        const path = makePicture(name, left, right);
+        ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(path)));
+        await wallpapersSettled();
+    };
     const close = async () => {
         toggle.menu.close(PopupAnimation.NONE);
         if (island.page)
             Main.panel.toggleQuickSettings();
         await waitFor(() => island.page === null && !island.busy, 2000);
     };
-    const open = async () => {
+    const open = async ({menu = false, watch = null} = {}) => {
         await restPointer();
         await Scripting.sleep(800);
         Main.panel.toggleQuickSettings();
-        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
-        toggle.menu.open(PopupAnimation.NONE);
-        await waitFor(() => toggle.menu.isOpen && toggle.menu.box.opacity === 255, 2000);
+        await waitFor(() => {
+            watch?.();
+            return hasClass(island.page, 'atelier-cc') && !island.busy;
+        }, 3000);
+        if (menu) {
+            toggle.menu.open(PopupAnimation.NONE);
+            await waitFor(() => toggle.menu.isOpen && toggle.menu.box.opacity === 255, 2000);
+        }
         await framesDrawn(4);
         await Scripting.sleep(800);
     };
@@ -1129,104 +1148,227 @@ async function controlCentreReads(ext, toggle) {
         const px = font.get_size() / Pango.SCALE * (font.get_size_is_absolute() ? 1 : 4 / 3);
         return Math.min(minimumLc(px, font.get_weight()), READ_LC);
     };
-    // Its type and icons as shown (not the insensitive item's).
+    // The modules shown, each with its surface.
+    const shown = () => (island.page?.moduleRects() ?? []).map(rect => ({...rect, surface: cc.ink?.surfaceOf(rect.id)}));
+    const polarities = () => Object.fromEntries(shown().map(m => [m.id, m.surface?.polarity ?? null]));
+    // The modules of GNOME's tiles (not the tabs' strip, over the top bar).
+    const grid = () => shown().filter(m => m.surface?.inks === 'ccModule' || m.surface?.inks === 'ccDetail');
+    // Its type and icons as shown (not the insensitive item's), each with
+    // its module, and a name of its own (the same in each picture).
     const inksOf = () => {
         const found = [];
+        const seen = new Map();
+        const rects = shown();
         const walk = actor => {
             if (!actor.visible || actor === off)
                 return;
             if ((actor instanceof St.Label && actor.text?.trim()) ||
-                (actor instanceof St.Icon && (actor.gicon || actor.icon_name)))
-                found.push(actor);
+                (actor instanceof St.Icon && (actor.gicon || actor.icon_name))) {
+                const module = rects.find(rect => rect.actor.contains(actor));
+                const name = actor instanceof St.Label ? `"${actor.text.slice(0, 24)}"`
+                    : `icon ${actor.icon_name ?? actor.gicon?.to_string?.()?.split('/').pop() ?? '?'}`;
+                const key = `${module?.id}:${name}`;
+                seen.set(key, (seen.get(key) ?? 0) + 1);
+                found.push({actor, module, name: `${key}#${seen.get(key)}`});
+            }
             actor.get_children().forEach(walk);
         };
         if (island.page)
             walk(island.page);
-        return found.filter(actor => actor.mapped && actor.width >= 4 && actor.height >= 4 &&
+        return found.filter(({actor}) => actor.mapped && actor.width >= 4 && actor.height >= 4 &&
             actor.get_paint_opacity() === 255);
     };
-    const nameOf = actor => (actor instanceof St.Label ? `"${actor.text.slice(0, 24)}"`
-        : `icon ${actor.icon_name ?? actor.gicon?.to_string?.()?.split('/').pop() ?? '?'}`);
     const short = [];
+    const wrong = [];
     const dimmed = [];
     const unfrosted = [];
+    const lcs = [];
     // Each ink's Lc on the island with the glass off (solid black, as it is
     // designed), by the style: what it is to read as at most on the glass.
     const designed = new Map();
-    try {
-        for (const [behind, styles, variants, dims] of [
-            ['window', ['prefer-dark', 'default'], ['off', 'regular', 'clear'], [0, 0.3]],
-            ['wallpaper', ['prefer-dark', 'default'], ['regular'], [0]],
-        ]) {
-            area.visible = behind === 'window';
-            for (const style of styles) {
-                for (const glass of variants) {
-                    for (const dim of dims) {
-                        // (The glass off has nothing to darken.)
-                        if (glass === 'off' && dim > 0)
-                            continue;
-                        const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}-${glass}-dim${dim * 100}`;
-                        desktopInterface.set_string('color-scheme', style);
-                        settings.set_string('glass-variant', glass);
-                        settings.set_double('glass-dim', dim);
-                        await open();
-                        await screenshotIsland(`control-centre-menus/${tag}`, 900);
-                        const surface = islandModule._glass;
-                        const frost = surface?.get_effect('atelier-glass-frost');
-                        if (glass !== 'off' &&
-                            !(surface?.frosted && Math.abs((frost?.radius ?? 0) - 2 * FROST.sigma * scale) < 0.5))
-                            unfrosted.push(`${tag} ${frost?.radius}`);
-                        // (Read where its glass is dark, as it is for GNOME's
-                        // dark controls: the dark style's regular glass
-                        // over the wallpaper, and over the window darkened.
-                        // Elsewhere – light glass, clear glass, over a light
-                        // window not darkened – told, the user's to darken.)
-                        const binding = style === 'prefer-dark' && glass === 'regular' &&
-                            (behind === 'wallpaper' || dim > 0);
-                        const inks = inksOf();
-                        const solid = designed.get(style) ?? [];
-                        if (glass === 'off')
-                            designed.set(style, solid);
-                        let index = 0;
-                        let least = null;
-                        let below = 0;
-                        for (const ink of inks) {
-                            const at = index++;
-                            const drawn = await drawnContrast(`control-centre-menus/type/${tag}-${at}`, ink);
-                            if (glass === 'off')
-                                solid[at] = drawn ? [nameOf(ink), drawn.lc] : null;
-                            const [solidName, solidLc] = solid[at] ?? [];
-                            const need = Math.min(needOf(ink), solidName === nameOf(ink) ? solidLc : Infinity);
-                            if (!drawn || !Number.isFinite(need))
-                                continue;
-                            if (!least || drawn.lc - need < least.lc - least.need)
-                                least = {name: nameOf(ink), lc: drawn.lc, need, drawn};
-                            if (drawn.lc < need - SLACK) {
-                                below++;
-                                if (binding)
-                                    short.push(`${tag} ${nameOf(ink)} ${drawn.lc.toFixed(0)} of ${need.toFixed(0)}`);
-                            }
-                        }
-                        results.push(`INFO  ${tag}: ${inks.length} inks, ${below} short; the least ${least?.name} Lc ` +
-                            `${least?.lc.toFixed(0)} of ${least?.need.toFixed(0)} (${least?.drawn.type} on ` +
-                            `${least?.drawn.glass})`);
-                        const labels = [modules.get('control-centre').controls._headerTitle,
-                            ...toggle.menu.box.get_children()
-                                .filter(c => c instanceof PopupMenu.PopupBaseMenuItem && c !== off && c.visible)
-                                .map(item => item.label)];
-                        for (const label of labels) {
-                            const ink = label.get_theme_node().get_foreground_color();
-                            if (ink.alpha < 255 || luminance(hexOf(ink)) < 0.8 || label.get_paint_opacity() < 255)
-                                dimmed.push(`${tag} "${label.text}" ${hexOf(ink)} α ${ink.alpha}`);
-                        }
-                        const offInk = off.label.get_theme_node().get_foreground_color();
-                        if (!(offInk.alpha < 200))
-                            dimmed.push(`${tag} the insensitive item not dimmed (${hexOf(offInk)} α ${offInk.alpha})`);
-                        await close();
-                    }
-                }
+    // (Its round icon, on the accent.)
+    const findIcon = actor => (hasClass(actor, 'quick-toggle-icon') ? actor
+        : actor.get_children().map(findIcon).find(Boolean) ?? null);
+    const onIcon = findIcon(toggle);
+    const accentOf = icon => hexOf(icon.get_theme_node().get_foreground_color()) +
+        hexOf(icon.get_theme_node().get_background_color());
+    const accents = new Map();
+    // A scene: its type as it comes out, read off the screen. Where its
+    // glass is as light or as dark as what is behind it lets it be (light
+    // glass over light, dark over dark: binding 'full'), each ink reads as
+    // it needs; where the glass is a middling grey for all that (dark
+    // glass over a light backdrop, light over a dark one: 'best') as far as
+    // type of its polarity can there at all – black or white as it is.
+    const measure = async (tag, {style, glass = 'regular', menu = false, expect = null, binding = 'full'}) => {
+        desktopInterface.set_string('color-scheme', style);
+        settings.set_string('glass-variant', glass);
+        settings.set_double('glass-dim', 0);
+        await open({menu});
+        await screenshotIsland(`control-centre-menus/${tag}`, menu ? 700 : 620);
+        const picture = cc.ink?.picture;
+        if (picture && glass !== 'off') {
+            GdkPixbuf.Pixbuf.new_from_bytes(new GLib.Bytes(picture.pixels), GdkPixbuf.Colorspace.RGB,
+                picture.channels === 4, 8, picture.width, picture.height, picture.rowstride)
+                .savev(`${OUTPUT}/control-centre-menus/${tag}-behind.png`, 'png', [], []);
+        }
+        const surface = islandModule._glass;
+        const frost = surface?.get_effect('atelier-glass-frost');
+        if (glass !== 'off' &&
+            !(surface?.frosted && Math.abs((frost?.radius ?? 0) - 2 * FROST.sigma * scale) < 0.5))
+            unfrosted.push(`${tag} ${frost?.radius}`);
+        if (glass === 'off')
+            accents.set(style, accentOf(onIcon));
+        else if (!menu && accents.has(style) && accentOf(onIcon) !== accents.get(style))
+            wrong.push(`${tag}: the tile that is on ${accentOf(onIcon)}, not the accent's ${accents.get(style)}`);
+        for (const module of expect ? grid() : []) {
+            const want = expect(module);
+            if (want && module.surface?.polarity !== want)
+                wrong.push(`${tag} ${module.id}: ${module.surface?.polarity ?? 'no'} type, not ${want}`);
+        }
+        const solid = designed.get(style) ?? new Map();
+        designed.set(style, solid);
+        let least = null;
+        let below = 0;
+        const inks = inksOf();
+        for (const [index, {actor, name, module}] of inks.entries()) {
+            const drawn = await drawnContrast(`control-centre-menus/type/${tag}-${index}`, actor);
+            if (!drawn)
+                continue;
+            if (glass === 'off') {
+                solid.set(name, drawn.lc);
+                continue;
+            }
+            // (On the accent: as it is, not the type round it.)
+            if (actor === onIcon)
+                continue;
+            let need = Math.min(needOf(actor), solid.get(name) ?? Infinity);
+            if (!Number.isFinite(need))
+                continue;
+            const best = Math.abs(contrastLc(drawn.light ? [255, 255, 255] : [0, 0, 0], hexToRgb(drawn.glass)));
+            if (binding === 'best')
+                need = Math.min(need, best);
+            // (The tabs, over the top bar and the glass's rim, where it bends
+            // what is behind: bound only where the glass is as light or as
+            // dark as what is behind, as far as black or white can there.)
+            const bound = binding === 'full' || (binding === 'best' && module?.id !== 'tabs');
+            if (module?.id === 'tabs')
+                need = Math.min(need, best);
+            if (!least || drawn.lc - need < least.lc - least.need)
+                least = {name, lc: drawn.lc, need, best, drawn, polarity: module?.surface?.polarity};
+            if (binding)
+                lcs.push({tag, name, lc: drawn.lc, need, polarity: module?.surface?.polarity});
+            if (drawn.lc < need - SLACK) {
+                below++;
+                if (bound)
+                    short.push(`${tag} ${name} ${drawn.lc.toFixed(0)} of ${need.toFixed(0)} (${drawn.type} on ${drawn.glass})`);
             }
         }
+        const backdrops = Object.fromEntries(shown().map(m => [m.id,
+            `${m.surface?.polarity ?? '–'} ${m.surface?.backdrop?.dark ?? ''}/${m.surface?.backdrop?.light ?? ''}`]));
+        results.push(`INFO  ${tag}: ${inks.length} inks, ${below} short; types ${JSON.stringify(backdrops)}; ` +
+            `the least ${least?.name} Lc ${least?.lc.toFixed(0)} of ${least?.need.toFixed(0)} ` +
+            `(${least?.polarity} type, ${least?.drawn.type} on ${least?.drawn.glass}; black or white ` +
+            `${least?.best.toFixed(0)} there)`);
+        const offInk = off.label.get_theme_node().get_foreground_color();
+        if (menu && !(offInk.alpha < 200))
+            dimmed.push(`${tag} the insensitive item not dimmed (${hexOf(offInk)} α ${offInk.alpha})`);
+        await close();
+    };
+    const monitor = Main.layoutManager.primaryMonitor;
+    const middle = monitor.x + monitor.width / 2;
+    try {
+        // As designed: the glass off, the island black.
+        for (const style of ['prefer-dark', 'default']) {
+            await measure(`solid-${style === 'default' ? 'light' : 'dark'}`, {style, glass: 'off'});
+            await measure(`solid-${style === 'default' ? 'light' : 'dark'}-menu`, {style, glass: 'off', menu: true});
+        }
+        const dark = () => 'dark';
+        const light = () => 'light';
+        // Over a light window (a page of small dark type), and over light
+        // and dark wallpapers: in the style that has the glass as light
+        // (dark) as what is behind it, its type dark (light) and reading
+        // fully; in the other, as well as either can.
+        area.visible = true;
+        await measure('window-light', {style: 'default', expect: dark});
+        await measure('window-light-menu', {style: 'default', menu: true, expect: dark});
+        await measure('window-dark', {style: 'prefer-dark', binding: 'best'});
+        await measure('window-dark-menu', {style: 'prefer-dark', menu: true, binding: 'best'});
+        area.visible = false;
+        await setWallpaper('control-centre-light', '#ece6d8');
+        await measure('wallpaper-light-light', {style: 'default', expect: dark});
+        await measure('wallpaper-light-dark', {style: 'prefer-dark', binding: 'best'});
+        await setWallpaper('control-centre-dark', '#141a24');
+        await measure('wallpaper-dark-dark', {style: 'prefer-dark', expect: light});
+        await measure('wallpaper-dark-light', {style: 'default', expect: light, binding: 'best'});
+        // Half and half: each module as what is behind it (in the light
+        // style, whose glass is as light as a light backdrop).
+        await setWallpaper('control-centre-split', '#ece6d8', '#141a24');
+        for (const style of ['default', 'prefer-dark']) {
+            const tag = `split-${style === 'default' ? 'light' : 'dark'}`;
+            const sides = {dark: [], light: []};
+            const binding = style === 'default';
+            await measure(tag, {
+                style, binding: false,
+                expect: module => {
+                    const [x] = module.actor.get_transformed_position();
+                    const side = x + module.width <= middle + 4 ? 'dark' : x >= middle - 4 ? 'light' : null;
+                    if (side)
+                        sides[side].push(`${module.id} ${module.surface?.polarity}`);
+                    return binding ? side : null;
+                },
+            });
+            if (binding) {
+                check(sides.dark.length > 0 && sides.light.length > 0,
+                    `${tag}: modules over the light half dark, over the dark half light (${JSON.stringify(sides)})`);
+            }
+        }
+        // GNOME's style switched while it is open, over a middling grey:
+        // light type in the dark style, dark in the light one.
+        await setWallpaper('control-centre-grey', '#a0a0a0');
+        settings.set_string('glass-variant', 'regular');
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        await open();
+        const all = want => () => grid().length > 0 && grid().every(m => m.surface?.polarity === want);
+        const first = all('light')();
+        desktopInterface.set_string('color-scheme', 'default');
+        const flipped = await waitFor(all('dark'), 3000);
+        await Scripting.sleep(600);
+        await screenshotIsland('control-centre-menus/grey-switched', 620);
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        const back = await waitFor(all('light'), 3000);
+        check(first && flipped && back && hasClass(island.page, 'atelier-cc'),
+            `GNOME's style switched while it is open: its type turns, light → dark → light (${first}, ${flipped}, ` +
+            `${back}; ${JSON.stringify(polarities())})`);
+        await close();
+        // Opened again over what it was opened over: nothing of its type
+        // changes, from the click on (no stylesheet loaded, no module turned).
+        area.visible = true;
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        await open();
+        await close();
+        const sheet = vibrancy.stylesheet;
+        const seen = new Set();
+        const turned = new Set();
+        const before = {};
+        await open({
+            watch: () => {
+                seen.add(vibrancy.stylesheet);
+                for (const [id, polarity] of Object.entries(polarities())) {
+                    if (polarity && before[id] && before[id] !== polarity)
+                        turned.add(id);
+                    before[id] = polarity ?? before[id];
+                }
+            },
+        });
+        for (let i = 0; i < 15; i++) {
+            seen.add(vibrancy.stylesheet);
+            await Scripting.sleep(100);
+        }
+        check(seen.size === 1 && seen.has(sheet) && turned.size === 0,
+            `opened again over the same window, nothing of its type changes (${[...seen].join(', ')}; ` +
+            `${[...turned].join(', ') || 'none turned'})`);
+        await close();
+        area.visible = false;
         const rest = islandModule._glass;
         check(await waitFor(() => !rest?.frosted && !rest?.get_effect('atelier-glass-frost'), 2000),
             `closed, the island's glass is clear again, no blur of GNOME's left on it (${rest?.frosted})`);
@@ -1235,12 +1377,9 @@ async function controlCentreReads(ext, toggle) {
         // glass (open, frosted, above its bottom edge, below its controls)
         // and the dock's (round its Show Applications icon), not darkened
         // and darkened 30 %.
-        area.visible = false;
         desktopInterface.set_string('color-scheme', 'prefer-dark');
         settings.set_string('glass-variant', 'regular');
-        const sky = makePicture('control-centre-sky', '#8fb0d8');
-        ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(sky)));
-        await wallpapersSettled();
+        await setWallpaper('control-centre-sky', '#8fb0d8');
         // (Rows of glass past the glint, which is not darkened: within 4
         // pixels of its edge.)
         const patchOf = async (name, x, y, rows) => {
@@ -1292,6 +1431,7 @@ async function controlCentreReads(ext, toggle) {
         await close();
         area.destroy();
         off.destroy();
+        toggle.checked = checkedBefore;
         desktopInterface.set_string('color-scheme', scheme);
         settings.set_string('glass-variant', variant);
         settings.reset('glass-dim');
@@ -1299,11 +1439,27 @@ async function controlCentreReads(ext, toggle) {
         bar.reset('surface');
         await Scripting.sleep(500);
     }
+    // The Lc table, for the eye: the least of each scene's, by polarity.
+    const table = new Map();
+    for (const {tag, lc, need, polarity} of lcs) {
+        const row = table.get(tag) ?? {dark: null, light: null, count: 0};
+        const key = polarity === 'dark' ? 'dark' : 'light';
+        if (!row[key] || lc - need < row[key].lc - row[key].need)
+            row[key] = {lc, need};
+        row.count++;
+        table.set(tag, row);
+    }
+    for (const [tag, row] of table) {
+        const of = part => (part ? `${part.lc.toFixed(0)} of ${part.need.toFixed(0)}` : '–');
+        results.push(`INFO  Lc ${tag}: ${row.count} inks; the least on dark type ${of(row.dark)}, on light ${of(row.light)}`);
+    }
     check(unfrosted.length === 0, `open, the island's glass is frosted, GNOME's blur of ${2 * FROST.sigma} ` +
         `logical pixels under it (${unfrosted.join(', ') || 'in each'})`);
-    check(short.length === 0, 'on the dark style\'s glass, over the wallpaper and over a busy window darkened 30 %, ' +
-        'its type and icons read as their size needs, as on the island of black at most ' +
-        `(${short.join('; ') || 'all of them'})`);
+    check(wrong.length === 0, 'each module\'s type as what is behind it has it: dark over a light window and a light ' +
+        'wallpaper, light over a dark one, each half its own; the tile that is on on the accent ' +
+        `(${wrong.join('; ') || 'so'})`);
+    check(short.length === 0, 'with the glass not darkened, its type and icons read as their size needs, as on the ' +
+        `island of black at most (${short.join('; ') || 'all of them'})`);
     check(dimmed.length === 0, `its menu's type is not dimmed, an insensitive item's only (${dimmed.join('; ') || 'so'})`);
 }
 

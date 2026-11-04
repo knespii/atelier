@@ -10,6 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {whenSystemItem} from '../core/systemItem.js';
 import {DateMenuHost} from './dateMenuHost.js';
 import {QuickSettingsHost} from './host.js';
+import {ControlCentreInk} from './ink.js';
 import {NowPlayingModule} from './media.js';
 import {ControlCentrePage} from './page.js';
 import {ExtensionTray} from './tray.js';
@@ -31,6 +32,12 @@ export class ControlCentreModule {
         this._stopWaiting = null;
         this._mediaActor = null;
         this._nowPlaying = null;
+        this._ink = null;
+    }
+
+    /** @returns {ControlCentreInk|null} what colours its modules' type, while adopted */
+    get ink() {
+        return this._ink;
     }
 
     /** @returns {ControlCentrePage|null} the control centre, while it is open */
@@ -178,11 +185,15 @@ export class ControlCentreModule {
             this._page = null;
             this._quickSettingsHost?.closeMenus();
         });
+        // (What is behind it seen first, the island still at rest.)
+        island.adopt(page);
+        this._ink?.capture(page);
         if (!island.open(page, {modal: true})) {
             page.destroy();
             return;
         }
         this._page = page;
+        this._ink?.attach(page);
     }
 
     close() {
@@ -255,6 +266,7 @@ export class ControlCentreModule {
         if (this._quickSettingsHost)
             return;
         this._quickSettingsHost = new QuickSettingsHost(this._quickSettings);
+        this._ink = new ControlCentreInk({modules: this._modules});
         // Now Playing (MPRIS), unless another actor was given for its place.
         this._nowPlaying = new NowPlayingModule();
         this._quickSettingsHost.setMediaModule(this._mediaActor ?? this._nowPlaying.actor);
@@ -276,6 +288,8 @@ export class ControlCentreModule {
     _release() {
         Main.layoutManager.uiGroup.disconnectObject(this);
         this.close();
+        this._ink?.destroy();
+        this._ink = null;
         this._quickSettingsHost?.disconnectObject(this);
         this._quickSettingsHost?.release();
         this._quickSettingsHost = null;
