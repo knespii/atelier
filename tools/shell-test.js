@@ -11,6 +11,7 @@ import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
 import Pango from 'gi://Pango';
+import PangoCairo from 'gi://PangoCairo';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -19,6 +20,7 @@ import * as AuthPromptModule from 'resource:///org/gnome/shell/gdm/authPrompt.js
 import {ExtensionState} from 'resource:///org/gnome/shell/misc/extensionUtils.js';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
+import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -892,12 +894,151 @@ async function testControlCentre(ext) {
     Main.panel.toggleQuickSettings();
     await waitFor(() => island.page === null && !island.busy, 1000);
 
+    await controlCentreMenuReads(ext, toggle);
+
     button.destroy();
     await Scripting.sleep(100);
     check(!modules.get('control-centre').tray.tiles.some(t => t.indicator === button),
         'a removed extension\'s tile goes away');
     indicator.quickSettingsItems.forEach(item => item.destroy());
     indicator.destroy();
+}
+
+// A page of a browser, say, behind the island: mostly light, lines of small
+// dark type on it, a dark band with large light type, a bar of tabs.
+function busyWindowArea() {
+    const area = new St.DrawingArea({x: 0, y: 0, width: global.stage.width, height: global.stage.height});
+    area.connect('repaint', () => {
+        const cr = area.get_context();
+        const [width, height] = area.get_surface_size();
+        cr.setSourceRGB(0.96, 0.96, 0.95);
+        cr.paint();
+        cr.setSourceRGB(0.2, 0.22, 0.26);
+        cr.rectangle(0, 0, width, 40);
+        cr.fill();
+        const layout = PangoCairo.create_layout(cr);
+        layout.set_font_description(Pango.FontDescription.from_string('Sans 10'));
+        layout.set_text('how to program a quick settings menu – Search · Kotlík | Kumla · Press space to play ', -1);
+        cr.setSourceRGB(0.9, 0.9, 0.9);
+        cr.moveTo(8, 12);
+        PangoCairo.show_layout(cr, layout);
+        for (let y = 60; y < height; y += 18) {
+            const band = Math.floor(y / 180) % 3 === 1;
+            if (band) {
+                cr.setSourceRGB(0.08, 0.08, 0.1);
+                cr.rectangle(0, y - 2, width, 18);
+                cr.fill();
+            }
+            layout.set_font_description(Pango.FontDescription.from_string(band ? 'Sans Bold 12' : 'Sans 9'));
+            layout.set_text('Try checking the network cables, modem and router; reconnecting to Wi-Fi. '.repeat(4), -1);
+            cr.setSourceRGB(...band ? [1, 1, 1] : [0.1, 0.1, 0.12]);
+            cr.moveTo(((y / 18) % 5) * -11, y);
+            PangoCairo.show_layout(cr, layout);
+        }
+        cr.$dispose();
+    });
+    return area;
+}
+
+// A tile's menu open in the control centre – Wi-Fi's list of networks,
+// say – has a surface of its own, a rounded dark one, as GNOME's has, under
+// its header and items: not the island's clear glass, through which the
+// windows behind would show, a little blurred, under the type. Over a busy
+// window (live glass) and over the wallpaper, in the dark and the light
+// style, with the glass regular, clear and off, its type reads off the
+// screen as APCA has it (what its size and weight need, READ_LC at most,
+// as Atelier's type on glass), and it is not dimmed – an insensitive item
+// only. Pictures in control-centre-menus/.
+async function controlCentreMenuReads(ext, toggle) {
+    const {READ_LC} = await import('../lib/vibrancy.js');
+    const island = ext.stateObj.modules.get('island').island;
+    const settings = ext.stateObj._settings;
+    const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = desktopInterface.get_string('color-scheme');
+    const variant = settings.get_string('glass-variant');
+    const bar = settings.get_child('bar');
+    GLib.mkdir_with_parents(`${OUTPUT}/control-centre-menus/type`, 0o755);
+    // (The island of glass, as in the user's session.)
+    bar.set_string('surface', 'glass');
+    const off = new PopupMenu.PopupMenuItem('Not available now');
+    off.setSensitive(false);
+    toggle.menu.addMenuItem(off);
+    const area = busyWindowArea();
+    global.window_group.add_child(area);
+    const close = async () => {
+        toggle.menu.close(PopupAnimation.NONE);
+        if (island.page)
+            Main.panel.toggleQuickSettings();
+        await waitFor(() => island.page === null && !island.busy, 2000);
+    };
+    // What a label needs, |Lc|: its size and weight's (CSS pixels).
+    const needOfLabel = label => {
+        const font = label.get_theme_node().get_font();
+        const px = font.get_size() / Pango.SCALE * (font.get_size_is_absolute() ? 1 : 4 / 3);
+        return Math.min(minimumLc(px, font.get_weight()), READ_LC);
+    };
+    const short = [];
+    const dimmed = [];
+    const clear = [];
+    try {
+        for (const [behind, styles, variants] of [
+            ['window', ['prefer-dark', 'default'], ['regular', 'clear', 'off']],
+            ['wallpaper', ['prefer-dark', 'default'], ['regular']],
+        ]) {
+            area.visible = behind === 'window';
+            for (const style of styles) {
+                for (const glass of variants) {
+                    const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}-${glass}`;
+                    desktopInterface.set_string('color-scheme', style);
+                    settings.set_string('glass-variant', glass);
+                    await restPointer();
+                    await Scripting.sleep(800);
+                    Main.panel.toggleQuickSettings();
+                    await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+                    toggle.menu.open(PopupAnimation.NONE);
+                    await waitFor(() => toggle.menu.isOpen && toggle.menu.box.opacity === 255, 2000);
+                    await framesDrawn(4);
+                    await Scripting.sleep(800);
+                    await screenshotIsland(`control-centre-menus/${tag}`, 900);
+                    const {box} = toggle.menu;
+                    const fill = box.get_theme_node().get_background_color();
+                    if (fill.alpha < 0.85 * 255)
+                        clear.push(`${tag} ${hexOf(fill)} α ${fill.alpha}`);
+                    const labels = [toggle.menu._headerTitle,
+                        ...box.get_children().filter(c => c instanceof PopupMenu.PopupBaseMenuItem && c !== off && c.visible)
+                            .map(item => item.label)];
+                    let index = 0;
+                    for (const label of labels) {
+                        const drawn = await drawnContrast(`control-centre-menus/type/${tag}-${index++}`, label);
+                        const need = needOfLabel(label);
+                        results.push(`INFO  ${tag}: "${label.text}" Lc ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)} ` +
+                            `(${drawn?.type} on ${drawn?.glass})`);
+                        if (!drawn || drawn.lc < need)
+                            short.push(`${tag} "${label.text}" ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)}`);
+                        const ink = label.get_theme_node().get_foreground_color();
+                        if (ink.alpha < 255 || luminance(hexOf(ink)) < 0.8 || label.get_paint_opacity() < 255)
+                            dimmed.push(`${tag} "${label.text}" ${hexOf(ink)} α ${ink.alpha}`);
+                    }
+                    const offInk = off.label.get_theme_node().get_foreground_color();
+                    if (!(offInk.alpha < 200))
+                        dimmed.push(`${tag} the insensitive item not dimmed (${hexOf(offInk)} α ${offInk.alpha})`);
+                    await close();
+                }
+            }
+        }
+    } finally {
+        await close();
+        area.destroy();
+        off.destroy();
+        desktopInterface.set_string('color-scheme', scheme);
+        settings.set_string('glass-variant', variant);
+        bar.reset('surface');
+        await Scripting.sleep(500);
+    }
+    check(clear.length === 0, `an open tile's menu has a surface of its own (${clear.join(', ') || 'in each'})`);
+    check(short.length === 0, 'its header and items read over a busy window and the wallpaper, dark and light ' +
+        `style, glass regular, clear and off (${short.join('; ') || 'all of them'})`);
+    check(dimmed.length === 0, `its type is not dimmed, an insensitive item's only (${dimmed.join('; ') || 'so'})`);
 }
 
 const dbusCall = (connection, ...args) => new Promise((resolve, reject) => {
@@ -2064,7 +2205,6 @@ function lumaOf(name) {
 // same in all of them, and so is the controls' type). Its pictures,
 // zoomed, are kept (66-glass-smooth-*).
 async function testGlassSmooth(ext) {
-    const {default: PangoCairo} = await import('gi://PangoCairo');
     const back = await useTestScale('The glass over fine detail');
     const bar = ext.stateObj._settings.get_child('bar');
     const island = ext.stateObj.modules.get('island').island;
@@ -9566,7 +9706,6 @@ async function testLockPerProfile(atelier) {
 // is installed too (lib/lockType.js labelFont()). And the digits' outlines
 // through HarfBuzz in the shell, stretched (lib/glyphOutlines.js).
 async function testLockFonts() {
-    const {default: PangoCairo} = await import('gi://PangoCairo');
     const {holdLabelFont, registerFonts} = await import('../shell/core/fonts.js');
     const {bundledFile, fontAt, traceOutline} = await import('../lib/glyphOutlines.js');
     const {labelFont, styleFor, typefaceFor} = await import('../lib/lockType.js');

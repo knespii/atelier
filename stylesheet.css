@@ -761,10 +761,20 @@
   background-color: rgba(255, 255, 255, 0.18);
 }
 
-.atelier-cc .quick-toggle-menu {
+/* A tile's open menu (Wi-Fi's networks, Bluetooth's devices, Power Mode,
+   an extension's) has its own surface, as GNOME's does: dark, nearly
+   opaque, rounded. The island's glass is almost clear, and over windows it
+   is live glass, so a menu without its own surface showed the windows'
+   type, a little blurred, under its items. Over white, this fill leaves
+   about #2e2e32 behind white type (APCA Lc about 100 as drawn). On solid black
+   glass it is a lifted panel, like the tiles. (!important: Blur my
+   Shell's popup blur makes GNOME's menus see-through with it.) */
+.atelier-island .atelier-cc .quick-toggle-menu {
   margin: 10px 0 0;
   border-radius: 22px;
-  background-color: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: rgba(28, 28, 32, 0.92) !important;
+  box-shadow: none !important;
   color: #ffffff;
 }
 
@@ -785,18 +795,90 @@
   color: -st-accent-fg-color;
 }
 
-.atelier-cc .popup-menu-item {
+/* The items: white type in both styles (GNOME's light style turns hovered
+   and checked items, and those in a sub-menu, dark). Only an insensitive
+   item is dimmed, as GNOME dims it. A note that can't be clicked (Bluetooth's
+   "Turn on Bluetooth to connect to devices") is :insensitive in St too, but
+   it is text to read, so it stays white. */
+.atelier-cc .popup-menu-item,
+.atelier-cc .popup-sub-menu .popup-menu-item {
   color: #ffffff;
 }
 
 .atelier-cc .popup-menu-item:hover,
 .atelier-cc .popup-menu-item:focus,
-.atelier-cc .popup-menu-item:selected {
+.atelier-cc .popup-menu-item:selected,
+.atelier-cc .popup-menu-item:checked,
+.atelier-cc .popup-sub-menu .popup-menu-item:hover,
+.atelier-cc .popup-sub-menu .popup-menu-item:focus,
+.atelier-cc .popup-sub-menu .popup-menu-item:selected,
+.atelier-cc .popup-sub-menu .popup-menu-item:checked {
+  color: #ffffff;
   background-color: rgba(255, 255, 255, 0.1);
 }
 
-.atelier-cc .popup-menu-item:active {
+.atelier-cc .popup-menu-item:active,
+.atelier-cc .popup-sub-menu .popup-menu-item:active {
+  color: #ffffff;
   background-color: rgba(255, 255, 255, 0.16);
+}
+
+.atelier-cc .popup-menu-item:insensitive,
+.atelier-cc .popup-sub-menu .popup-menu-item:insensitive {
+  color: rgba(255, 255, 255, 0.5);
+  background-color: transparent;
+}
+
+.atelier-cc .popup-inactive-menu-item,
+.atelier-cc .popup-inactive-menu-item:insensitive {
+  color: #ffffff;
+}
+
+/* A sub-menu in a tile's menu (an extension's): one step lighter. */
+.atelier-cc .popup-sub-menu {
+  border-color: transparent;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.atelier-cc .device-subtitle {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.atelier-cc .toggle-switch {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.atelier-cc .toggle-switch:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.atelier-cc .toggle-switch:checked {
+  color: -st-accent-fg-color;
+  background: -st-accent-color;
+}
+
+/* Buttons in the menus (Keyboard's brightness levels, a background app's
+   stop button): GNOME's light style makes them light grey with dark type. */
+.atelier-cc .quick-toggle-menu .button,
+.atelier-cc .quick-toggle-menu .icon-button {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-cc .quick-toggle-menu .button:hover,
+.atelier-cc .quick-toggle-menu .icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.atelier-cc .quick-toggle-menu .button:active,
+.atelier-cc .quick-toggle-menu .icon-button:active {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.atelier-cc .quick-toggle-menu .button:checked {
+  color: -st-accent-fg-color;
+  background-color: -st-accent-color;
 }
 
 .atelier-cc .popup-separator-menu-item .popup-separator-menu-item-separator {

@@ -64,7 +64,9 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-cc .quick-toggle:checked:focus,
 .atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked,
 .atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked:hover,
-.atelier-island .atelier-cc .quick-toggle-menu .header .icon.active { background-color: ${d.primary}; color: ${d.onPrimary}; }
+.atelier-island .atelier-cc .quick-toggle-menu .header .icon.active,
+.atelier-island .atelier-cc .quick-toggle-menu .button:checked,
+.atelier-island .atelier-cc .toggle-switch:checked { background-color: ${d.primary}; color: ${d.onPrimary}; }
 .atelier-island .atelier-cc .quick-toggle-has-menu:checked .quick-toggle-separator { background-color: st-transparentize(${d.onPrimary}, 0.7); }
 .atelier-island .atelier-cc .quick-toggle:focus,
 .atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
