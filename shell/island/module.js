@@ -215,6 +215,8 @@ export class IslandModule {
             'notify::visible', () => this._syncShape(),
             'notify::opacity', () => this._syncShape(),
             'style-changed', () => this._syncShape(),
+            'page-opened', () => this._syncShape(),
+            'page-closed', () => this._syncShape(),
             this);
         this._syncLook();
 
@@ -640,6 +642,11 @@ export class IslandModule {
             this._glass.visible = shown && !this._liquid;
             this._glass.setShape(...shape);
             this._glass.setLive(live && island.has_style_pseudo_class('expanded'));
+            // Under GNOME's controls (the control centre, a tile's menu open
+            // in it), frosted: the windows' type behind them is a soft wash
+            // there, no second line of type under theirs – the same glass,
+            // darkened as every other (lib/glassLook.js FROST).
+            this._glass.setFrost(island.page?.has_style_class_name('atelier-cc') ?? false);
         }
         if (this._liquid) {
             this._liquid.visible = shown;

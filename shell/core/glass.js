@@ -20,7 +20,7 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
-    REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
+    FROST, REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
 } from '../../lib/glassLook.js';
 import {glassLight} from './glassLight.js';
 import {
@@ -463,6 +463,7 @@ class AtelierGlassSurface extends St.Widget {
         });
         this._eased.set('style', {light: light ? 1 : 0});
         this._eased.set('dim', {dim: this._look?.dim ?? 0});
+        this._eased.set('frost', {frost: 0});
         this._syncMaterial();
         this._build();
         if (source && !solid)
@@ -533,6 +534,9 @@ class AtelierGlassSurface extends St.Widget {
         this._lightStyle = light;
         this._eased.set('style', {light: light ? 1 : 0}, STYLE_TIME);
         this._eased.set('dim', {dim: look?.dim ?? 0});
+        if (!look)
+            this._eased.set('frost', {frost: 0});
+        this._syncFrost();
         this._syncMaterial();
         this._shapesChanged();
         glassLight.sync();
@@ -543,8 +547,55 @@ class AtelierGlassSurface extends St.Widget {
         return this._eased.wanted('dim').dim ?? 0;
     }
 
+    /**
+     * Frosted (lib/glassLook.js FROST): what is behind it blurred much more
+     * first – the same glass otherwise, darkened as every other – eased in
+     * and out. (GNOME's blur, on all it draws, downscaled: only while it is
+     * frosted, and it is drawn again only when what is behind changes.)
+     *
+     * @param {boolean} frosted
+     */
+    setFrost(frosted) {
+        if (this._solid)
+            return;
+        this._eased.set('frost', {frost: frosted && this._look ? 1 : 0}, FROST.time);
+        this._syncFrost();
+    }
+
+    /** @returns {boolean} whether it is to be frosted (setFrost()) */
+    get frosted() {
+        return (this._eased.wanted('frost').frost ?? 0) > 0;
+    }
+
+    // GNOME's blur as frosted now: none at all once it is not.
+    _syncFrost() {
+        const {frost = 0} = this._eased.shown('frost');
+        const radius = Math.round(2 * FROST.sigma * frost * glassScale() * 10) / 10;
+        let blur = this.get_effect('atelier-glass-frost');
+        if (radius < 1) {
+            if (blur)
+                this.remove_effect(blur);
+            return;
+        }
+        if (!blur) {
+            // (After the mask: inside it, so the glass is of what it blurs.)
+            blur = new Shell.BlurEffect({mode: Shell.BlurMode.ACTOR, brightness: 1, radius});
+            this.add_effect_with_name('atelier-glass-frost', blur);
+            this._shapesChanged();
+        } else if (blur.radius !== radius) {
+            blur.radius = radius;
+        }
+    }
+
+    // How far round its shapes what is behind is drawn, for its blur's
+    // taps (and its frost's), logical pixels.
+    _blurReach() {
+        return 3 * ((this._look?.blur ?? 0) + (this.frosted ? FROST.sigma : 0)) + 2;
+    }
+
     // As eased now, drawn again where its shapes are.
     _showEased() {
+        this._syncFrost();
         this._syncMaterial();
         const bounds = this._bounds();
         if (bounds)
@@ -633,7 +684,7 @@ class AtelierGlassSurface extends St.Widget {
         let need;
         if (bounds) {
             const scale = glassScale();
-            const margin = Math.ceil((edgeReach(true) + 3 * (this._look?.blur ?? 0) + 2) * scale) + 2;
+            const margin = Math.ceil((edgeReach(true) + this._blurReach()) * scale) + 2;
             const step = FIT_STEP * scale;
             const [bx, by, bw, bh] = band;
             const down = (v, from) => from + Math.floor((v - from) / step) * step;
@@ -784,7 +835,7 @@ class AtelierGlassSurface extends St.Widget {
             return;
         }
         const scale = glassScale();
-        const margin = (3 * (this._look?.blur ?? 0) + 2) * scale;
+        const margin = this._blurReach() * scale;
         const step = LIVE_STEP * scale;
         const down = v => Math.floor(v / step) * step;
         const up = v => Math.ceil(v / step) * step;

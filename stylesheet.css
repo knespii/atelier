@@ -762,18 +762,17 @@
 }
 
 /* A tile's open menu (Wi-Fi's networks, Bluetooth's devices, Power Mode,
-   an extension's) has its own surface, as GNOME's does: dark, nearly
-   opaque, rounded. The island's glass is almost clear, and over windows it
-   is live glass, so a menu without its own surface showed the windows'
-   type, a little blurred, under its items. Over white, this fill leaves
-   about #2e2e32 behind white type (APCA Lc about 100 as drawn). On solid black
-   glass it is a lifted panel, like the tiles. (!important: Blur my
-   Shell's popup blur makes GNOME's menus see-through with it.) */
+   an extension's): a faint pill of the glass, as the tiles are – no darker
+   than any other glass (only the glass-dim setting darkens it, as it does
+   the dock and the bar). Under the control centre the island's glass is
+   frosted (lib/glassLook.js FROST): the windows' type behind is a soft
+   wash, no second line of type under the items'. (!important: Blur my
+   Shell's popup blur restyles GNOME's menus.) */
 .atelier-island .atelier-cc .quick-toggle-menu {
   margin: 10px 0 0;
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background-color: rgba(28, 28, 32, 0.92) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
   box-shadow: none !important;
   color: #ffffff;
 }

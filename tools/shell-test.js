@@ -894,7 +894,7 @@ async function testControlCentre(ext) {
     Main.panel.toggleQuickSettings();
     await waitFor(() => island.page === null && !island.busy, 1000);
 
-    await controlCentreMenuReads(ext, toggle);
+    await controlCentreReads(ext, toggle);
 
     button.destroy();
     await Scripting.sleep(100);
@@ -940,23 +940,36 @@ function busyWindowArea() {
     return area;
 }
 
-// A tile's menu open in the control centre – Wi-Fi's list of networks,
-// say – has a surface of its own, a rounded dark one, as GNOME's has, under
-// its header and items: not the island's clear glass, through which the
-// windows behind would show, a little blurred, under the type. Over a busy
-// window (live glass) and over the wallpaper, in the dark and the light
-// style, with the glass regular, clear and off, its type reads off the
-// screen as APCA has it (what its size and weight need, READ_LC at most,
-// as Atelier's type on glass), and it is not dimmed – an insensitive item
-// only. Pictures in control-centre-menus/.
-async function controlCentreMenuReads(ext, toggle) {
-    const {READ_LC} = await import('../lib/vibrancy.js');
-    const island = ext.stateObj.modules.get('island').island;
+// The control centre over a busy window (live glass) and over the
+// wallpaper, in the dark and the light style, with the glass regular, clear
+// and off, a tile's menu open in it (Wi-Fi's list of networks, say): its
+// glass is frosted – what is behind blurred much more, no second line of
+// type under the controls' (lib/glassLook.js FROST) – and darkened as
+// much as the dock's and no more (the glass-dim setting's, nothing of its
+// own: the menu a faint pill of the glass, as the tiles are). Its type and
+// icons (the tiles', the header's buttons', the tabs', the menu's) are
+// read off the screen as APCA has it, against what their size and weight
+// need (READ_LC at most; as much as on the island of black, the glass off,
+// at most): on the dark style's glass over the wallpaper, and over the
+// window darkened 30 %, they read; elsewhere (light glass, clear glass,
+// a light window not darkened) they are told as they come out, the
+// user's to darken. Not dimmed but an insensitive item. Pictures in
+// control-centre-menus/.
+async function controlCentreReads(ext, toggle) {
+    const {READ_LC, SLACK} = await import('../lib/vibrancy.js');
+    const {FROST} = await import('../lib/glassLook.js');
+    const modules = ext.stateObj.modules;
+    const islandModule = modules.get('island');
+    const island = islandModule.island;
+    // (Made anew as the glass changes.)
+    const dock = () => modules.get('dock')?.dock ?? null;
     const settings = ext.stateObj._settings;
     const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     const scheme = desktopInterface.get_string('color-scheme');
     const variant = settings.get_string('glass-variant');
     const bar = settings.get_child('bar');
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const uris = ['picture-uri', 'picture-uri-dark'].map(key => [key, background.get_string(key)]);
     GLib.mkdir_with_parents(`${OUTPUT}/control-centre-menus/type`, 0o755);
     // (The island of glass, as in the user's session.)
     bar.set_string('surface', 'glass');
@@ -971,60 +984,184 @@ async function controlCentreMenuReads(ext, toggle) {
             Main.panel.toggleQuickSettings();
         await waitFor(() => island.page === null && !island.busy, 2000);
     };
-    // What a label needs, |Lc|: its size and weight's (CSS pixels).
-    const needOfLabel = label => {
-        const font = label.get_theme_node().get_font();
+    const open = async () => {
+        await restPointer();
+        await Scripting.sleep(800);
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+        toggle.menu.open(PopupAnimation.NONE);
+        await waitFor(() => toggle.menu.isOpen && toggle.menu.box.opacity === 255, 2000);
+        await framesDrawn(4);
+        await Scripting.sleep(800);
+    };
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    // What an ink needs, |Lc|: a label its size and weight's (CSS pixels),
+    // a symbolic icon as bold type of its size.
+    const needOf = actor => {
+        if (actor instanceof St.Icon)
+            return Math.min(minimumLc(actor.width / scale, 700), READ_LC);
+        const font = actor.get_theme_node().get_font();
         const px = font.get_size() / Pango.SCALE * (font.get_size_is_absolute() ? 1 : 4 / 3);
         return Math.min(minimumLc(px, font.get_weight()), READ_LC);
     };
+    // Its type and icons as shown (not the insensitive item's).
+    const inksOf = () => {
+        const found = [];
+        const walk = actor => {
+            if (!actor.visible || actor === off)
+                return;
+            if ((actor instanceof St.Label && actor.text?.trim()) ||
+                (actor instanceof St.Icon && (actor.gicon || actor.icon_name)))
+                found.push(actor);
+            actor.get_children().forEach(walk);
+        };
+        if (island.page)
+            walk(island.page);
+        return found.filter(actor => actor.mapped && actor.width >= 4 && actor.height >= 4 &&
+            actor.get_paint_opacity() === 255);
+    };
+    const nameOf = actor => (actor instanceof St.Label ? `"${actor.text.slice(0, 24)}"`
+        : `icon ${actor.icon_name ?? actor.gicon?.to_string?.()?.split('/').pop() ?? '?'}`);
     const short = [];
     const dimmed = [];
-    const clear = [];
+    const unfrosted = [];
+    // Each ink's Lc on the island with the glass off (solid black, as it is
+    // designed), by the style: what it is to read as at most on the glass.
+    const designed = new Map();
     try {
-        for (const [behind, styles, variants] of [
-            ['window', ['prefer-dark', 'default'], ['regular', 'clear', 'off']],
-            ['wallpaper', ['prefer-dark', 'default'], ['regular']],
+        for (const [behind, styles, variants, dims] of [
+            ['window', ['prefer-dark', 'default'], ['off', 'regular', 'clear'], [0, 0.3]],
+            ['wallpaper', ['prefer-dark', 'default'], ['regular'], [0]],
         ]) {
             area.visible = behind === 'window';
             for (const style of styles) {
                 for (const glass of variants) {
-                    const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}-${glass}`;
-                    desktopInterface.set_string('color-scheme', style);
-                    settings.set_string('glass-variant', glass);
-                    await restPointer();
-                    await Scripting.sleep(800);
-                    Main.panel.toggleQuickSettings();
-                    await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
-                    toggle.menu.open(PopupAnimation.NONE);
-                    await waitFor(() => toggle.menu.isOpen && toggle.menu.box.opacity === 255, 2000);
-                    await framesDrawn(4);
-                    await Scripting.sleep(800);
-                    await screenshotIsland(`control-centre-menus/${tag}`, 900);
-                    const {box} = toggle.menu;
-                    const fill = box.get_theme_node().get_background_color();
-                    if (fill.alpha < 0.85 * 255)
-                        clear.push(`${tag} ${hexOf(fill)} α ${fill.alpha}`);
-                    const labels = [toggle.menu._headerTitle,
-                        ...box.get_children().filter(c => c instanceof PopupMenu.PopupBaseMenuItem && c !== off && c.visible)
-                            .map(item => item.label)];
-                    let index = 0;
-                    for (const label of labels) {
-                        const drawn = await drawnContrast(`control-centre-menus/type/${tag}-${index++}`, label);
-                        const need = needOfLabel(label);
-                        results.push(`INFO  ${tag}: "${label.text}" Lc ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)} ` +
-                            `(${drawn?.type} on ${drawn?.glass})`);
-                        if (!drawn || drawn.lc < need)
-                            short.push(`${tag} "${label.text}" ${drawn?.lc.toFixed(0)} of ${need.toFixed(0)}`);
-                        const ink = label.get_theme_node().get_foreground_color();
-                        if (ink.alpha < 255 || luminance(hexOf(ink)) < 0.8 || label.get_paint_opacity() < 255)
-                            dimmed.push(`${tag} "${label.text}" ${hexOf(ink)} α ${ink.alpha}`);
+                    for (const dim of dims) {
+                        // (The glass off has nothing to darken.)
+                        if (glass === 'off' && dim > 0)
+                            continue;
+                        const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}-${glass}-dim${dim * 100}`;
+                        desktopInterface.set_string('color-scheme', style);
+                        settings.set_string('glass-variant', glass);
+                        settings.set_double('glass-dim', dim);
+                        await open();
+                        await screenshotIsland(`control-centre-menus/${tag}`, 900);
+                        const surface = islandModule._glass;
+                        const frost = surface?.get_effect('atelier-glass-frost');
+                        if (glass !== 'off' &&
+                            !(surface?.frosted && Math.abs((frost?.radius ?? 0) - 2 * FROST.sigma * scale) < 0.5))
+                            unfrosted.push(`${tag} ${frost?.radius}`);
+                        // (Read where its glass is dark, as it is for GNOME's
+                        // dark controls: the dark style's regular glass
+                        // over the wallpaper, and over the window darkened.
+                        // Elsewhere – light glass, clear glass, over a light
+                        // window not darkened – told, the user's to darken.)
+                        const binding = style === 'prefer-dark' && glass === 'regular' &&
+                            (behind === 'wallpaper' || dim > 0);
+                        const inks = inksOf();
+                        const solid = designed.get(style) ?? [];
+                        if (glass === 'off')
+                            designed.set(style, solid);
+                        let index = 0;
+                        let least = null;
+                        let below = 0;
+                        for (const ink of inks) {
+                            const at = index++;
+                            const drawn = await drawnContrast(`control-centre-menus/type/${tag}-${at}`, ink);
+                            if (glass === 'off')
+                                solid[at] = drawn ? [nameOf(ink), drawn.lc] : null;
+                            const [solidName, solidLc] = solid[at] ?? [];
+                            const need = Math.min(needOf(ink), solidName === nameOf(ink) ? solidLc : Infinity);
+                            if (!drawn || !Number.isFinite(need))
+                                continue;
+                            if (!least || drawn.lc - need < least.lc - least.need)
+                                least = {name: nameOf(ink), lc: drawn.lc, need, drawn};
+                            if (drawn.lc < need - SLACK) {
+                                below++;
+                                if (binding)
+                                    short.push(`${tag} ${nameOf(ink)} ${drawn.lc.toFixed(0)} of ${need.toFixed(0)}`);
+                            }
+                        }
+                        results.push(`INFO  ${tag}: ${inks.length} inks, ${below} short; the least ${least?.name} Lc ` +
+                            `${least?.lc.toFixed(0)} of ${least?.need.toFixed(0)} (${least?.drawn.type} on ` +
+                            `${least?.drawn.glass})`);
+                        const labels = [toggle.menu._headerTitle,
+                            ...toggle.menu.box.get_children()
+                                .filter(c => c instanceof PopupMenu.PopupBaseMenuItem && c !== off && c.visible)
+                                .map(item => item.label)];
+                        for (const label of labels) {
+                            const ink = label.get_theme_node().get_foreground_color();
+                            if (ink.alpha < 255 || luminance(hexOf(ink)) < 0.8 || label.get_paint_opacity() < 255)
+                                dimmed.push(`${tag} "${label.text}" ${hexOf(ink)} α ${ink.alpha}`);
+                        }
+                        const offInk = off.label.get_theme_node().get_foreground_color();
+                        if (!(offInk.alpha < 200))
+                            dimmed.push(`${tag} the insensitive item not dimmed (${hexOf(offInk)} α ${offInk.alpha})`);
+                        await close();
                     }
-                    const offInk = off.label.get_theme_node().get_foreground_color();
-                    if (!(offInk.alpha < 200))
-                        dimmed.push(`${tag} the insensitive item not dimmed (${hexOf(offInk)} α ${offInk.alpha})`);
-                    await close();
                 }
             }
+        }
+        const rest = islandModule._glass;
+        check(await waitFor(() => !rest?.frosted && !rest?.get_effect('atelier-glass-frost'), 2000),
+            `closed, the island's glass is clear again, no blur of GNOME's left on it (${rest?.frosted})`);
+
+        // Darkened as the dock: over one wallpaper, a sky, the island's
+        // glass (open, frosted, above its bottom edge, below its controls)
+        // and the dock's (round its Show Applications icon), not darkened
+        // and darkened 30 %.
+        area.visible = false;
+        desktopInterface.set_string('color-scheme', 'prefer-dark');
+        settings.set_string('glass-variant', 'regular');
+        const sky = makePicture('control-centre-sky', '#8fb0d8');
+        ['picture-uri', 'picture-uri-dark'].forEach(key => background.set_string(key, uriOf(sky)));
+        await wallpapersSettled();
+        // (Rows of glass past the glint, which is not darkened: within 4
+        // pixels of its edge.)
+        const patchOf = async (name, x, y, rows) => {
+            const [px, py] = [Math.round(x - 20), Math.round(y)];
+            await screenshotArea(name, px, py, 40, rows);
+            const pixels = pixelsOf(name, [px, py]);
+            return [0, 1, 2].map(c => {
+                let sum = 0;
+                for (let row = py; row < py + rows; row++) {
+                    for (let col = px; col < px + 40; col++)
+                        sum += pixels.at(col, row)[c];
+                }
+                return sum / (40 * rows);
+            });
+        };
+        const glassOf = async name => {
+            await open();
+            const [x, y] = island.get_transformed_position();
+            const islandPatch = await patchOf(`control-centre-menus/${name}-island`, x + island.width / 2,
+                y + island.height - 11, 4);
+            const frostedThen = islandModule._glass?.frosted;
+            await close();
+            await Scripting.sleep(400);
+            // (The dock's glass above its icons.)
+            const [dx, dy, dw] = dock()?._glass?.shape ?? [];
+            const dockPatch = dw ? await patchOf(`control-centre-menus/${name}-dock`, dx + dw / 2, dy + 5, 2) : null;
+            return {island: islandPatch, dock: dockPatch, frosted: frostedThen};
+        };
+        const mean = rgb => (rgb[0] + rgb[1] + rgb[2]) / 3;
+        settings.set_double('glass-dim', 0);
+        const clear = await glassOf('sky');
+        settings.set_double('glass-dim', 0.3);
+        await Scripting.sleep(400);
+        const darker = await glassOf('sky-darkened');
+        const dims = `island ${islandModule._glass?.dim}, dock ${dock()?._glass?.dim}`;
+        if (dock()?._glass && clear.dock && darker.dock) {
+            const islandRatio = mean(darker.island) / mean(clear.island);
+            const dockRatio = mean(darker.dock) / mean(clear.dock);
+            check(clear.frosted && islandModule._glass?.dim === 0.3 && dock()._glass.dim === 0.3 &&
+                Math.abs(islandRatio - dockRatio) <= 0.03 && Math.abs(islandRatio - 0.7) <= 0.03,
+            'the control centre\'s glass, frosted, darkened as the dock\'s: 30 % darker each (the island\'s ' +
+                `${islandRatio.toFixed(3)}, ${clear.island.map(Math.round)} → ${darker.island.map(Math.round)}; ` +
+                `the dock's ${dockRatio.toFixed(3)}, ${clear.dock.map(Math.round)} → ` +
+                `${darker.dock.map(Math.round)}; ${dims})`);
+        } else {
+            check(false, `the dock's glass to measure against (${dims})`);
         }
     } finally {
         await close();
@@ -1032,13 +1169,17 @@ async function controlCentreMenuReads(ext, toggle) {
         off.destroy();
         desktopInterface.set_string('color-scheme', scheme);
         settings.set_string('glass-variant', variant);
+        settings.reset('glass-dim');
+        uris.forEach(([key, value]) => background.set_string(key, value));
         bar.reset('surface');
         await Scripting.sleep(500);
     }
-    check(clear.length === 0, `an open tile's menu has a surface of its own (${clear.join(', ') || 'in each'})`);
-    check(short.length === 0, 'its header and items read over a busy window and the wallpaper, dark and light ' +
-        `style, glass regular, clear and off (${short.join('; ') || 'all of them'})`);
-    check(dimmed.length === 0, `its type is not dimmed, an insensitive item's only (${dimmed.join('; ') || 'so'})`);
+    check(unfrosted.length === 0, `open, the island's glass is frosted, GNOME's blur of ${2 * FROST.sigma} ` +
+        `logical pixels under it (${unfrosted.join(', ') || 'in each'})`);
+    check(short.length === 0, 'on the dark style\'s glass, over the wallpaper and over a busy window darkened 30 %, ' +
+        'its type and icons read as their size needs, as on the island of black at most ' +
+        `(${short.join('; ') || 'all of them'})`);
+    check(dimmed.length === 0, `its menu's type is not dimmed, an insensitive item's only (${dimmed.join('; ') || 'so'})`);
 }
 
 const dbusCall = (connection, ...args) => new Promise((resolve, reject) => {
@@ -2176,7 +2317,7 @@ function fineShare(values, width, height, mask) {
         fine += (values[i] - box / 9) ** 2;
         all += (values[i] - mean) ** 2;
     }
-    return {share: all > 0 ? fine / all : 0, pixels: kept.length};
+    return {share: all > 0 ? fine / all : 0, pixels: kept.length, spread: Math.sqrt(all / Math.max(1, kept.length))};
 }
 
 // The luma of a screenshot (device pixels), and its size.
@@ -2195,9 +2336,9 @@ function lumaOf(name) {
 }
 
 // Glass over fine detail – lines of small type, as a terminal has them,
-// over the windows (the control centre's live glass): a smooth light blur
-// of it, with no copies of it a few pixels apart, nor steps of the
-// texture's texels, at any scale (ATELIER_TEST_SCALE). What the glass
+// over the windows (the control centre's live glass, frosted): a smooth
+// blur of it, a soft wash, with no copies of it a few pixels apart, nor
+// steps of the texture's texels, at any scale (ATELIER_TEST_SCALE). What the glass
 // shows of the type alone: the glass over the type, less the glass over
 // the same picture without it, for each pixel as much of it as the glass
 // lets through there (over a lighter picture, the difference); only where
@@ -2275,11 +2416,22 @@ async function testGlassSmooth(ext) {
         await Scripting.sleep(600);
         const bare = await detailOf('bare');
         // (Nine taps 1.4 sigmas apart, as before, left 32 % of it at 125 %,
-        // 46 % at 100 %, the type alone 37 % and 54 %; these taps 1 % or less.)
-        check(glass.pixels > 1000 && glass.share < 0.02 && glass.share < bare.share / 10,
-            `at ${scaleNow().toFixed(2)}×, the glass over small type a smooth blur of it: ` +
-            `${(glass.share * 100).toFixed(2)} % of what it shows of it fine detail, over ${glass.pixels} ` +
-            `pixels (the type alone: ${(bare.share * 100).toFixed(1)} %)`);
+        // 46 % at 100 %, the type alone 37 % and 54 %; these taps 1 % or less.
+        // Frosted, what it shows of the type hardly varies at all: of that
+        // little, a share is the screenshots' own steps of 1/255 – how much
+        // of it is fine detail, as a share of the type's own spread, then.)
+        const fineOf = ({share, spread}) => Math.sqrt(share) * spread;
+        check(glass.pixels > 1000 && fineOf(glass) < 0.02 * bare.spread && fineOf(glass) < fineOf(bare) / 20,
+            `at ${scaleNow().toFixed(2)}×, the glass over small type a smooth blur of it: fine detail ` +
+            `${(fineOf(glass) * 100).toFixed(2)} % of the type's contrast (${(glass.share * 100).toFixed(1)} % of ` +
+            `what little it shows of it), over ${glass.pixels} pixels (the type alone: ` +
+            `${(fineOf(bare) * 100).toFixed(1)} %, ${(bare.share * 100).toFixed(1)} %)`);
+        // Frosted under the control centre: of the type behind, only a soft
+        // wash – how much it varies over the glass (its spread, as a share
+        // of all the type would show), not lines of it to read.
+        check(glass.spread < bare.spread / 8,
+            `frosted, the type behind no more than a soft wash: it varies ${(glass.spread * 100).toFixed(1)} % ` +
+            `over the glass (the type alone ${(bare.spread * 100).toFixed(1)} %)`);
         // A corner of it, zoomed 4×, as it is drawn (each device pixel 4 × 4).
         const crop = Math.min(glass.picture.width, glass.picture.height, 240);
         glass.picture.pixbuf.new_subpixbuf(0, 0, crop, crop)
