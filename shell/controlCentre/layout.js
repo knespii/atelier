@@ -48,8 +48,11 @@ class AtelierControlModule extends St.BoxLayout {
      * @param {boolean} [spec.horizontal] - its tiles side by side
      * @param {boolean} [spec.always] - shown with nothing in it
      * @param {boolean} [spec.rowPerSlot] - a row of cells for each tile shown
+     * @param {boolean} [spec.fixed] - exactly so many rows (its tiles fit
+     *   at their least height)
      */
-    _init(id, {cols, rows = 1, pane = 'any', title = null, horizontal = false, always = false, rowPerSlot = false}) {
+    _init(id, {cols, rows = 1, pane = 'any', title = null, horizontal = false, always = false, rowPerSlot = false,
+        fixed = false}) {
         super._init({
             style_class: `atelier-cc-module atelier-cc-module-${id}`,
             orientation: Clutter.Orientation.VERTICAL,
@@ -59,6 +62,7 @@ class AtelierControlModule extends St.BoxLayout {
         this.cols = cols;
         this._minRows = rows;
         this._rowPerSlot = rowPerSlot;
+        this.fixedRows = fixed;
         this.pane = pane;
         this._always = always;
         if (title) {
@@ -146,7 +150,8 @@ class AtelierModuleGridLayout extends Clutter.LayoutManager {
         const requests = modules.map(module => {
             const width = module.cols * (size.cell + size.gap) - size.gap;
             const [, height] = module.get_preferred_height(width);
-            return {id: module, cols: module.cols, rows: rowsFor(height, module.minRows, size), pane: module.pane};
+            const rows = module.fixedRows ? module.minRows : rowsFor(height, module.minRows, size);
+            return {id: module, cols: module.cols, rows, pane: module.pane};
         });
         return {...packModules(requests), size};
     }

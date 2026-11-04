@@ -26,7 +26,7 @@ import {ControlModule, moduleGrid, rectIn} from './layout.js';
 // the system buttons; extensions' tiles where there is room.
 const MODULES = [
     ['connectivity', {cols: 2, pane: 0, rowPerSlot: true}],
-    ['media', {cols: 2, rows: 2, pane: 0, always: true}],
+    ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true}],
     ['dark', {cols: 1, pane: 0}],
     ['night', {cols: 1, pane: 0}],
     ['focus', {cols: 2, pane: 0}],
