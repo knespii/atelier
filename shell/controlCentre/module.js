@@ -28,11 +28,31 @@ export class ControlCentreModule {
         this._tray = null;
         this._page = null;
         this._stopWaiting = null;
+        this._mediaActor = null;
     }
 
     /** @returns {ControlCentrePage|null} the control centre, while it is open */
     get page() {
         return this._page;
+    }
+
+    /** @returns {QuickSettingsHost|null} GNOME's tiles in their modules, while adopted */
+    get controls() {
+        return this._quickSettingsHost;
+    }
+
+    /**
+     * Put an actor in the Controls tab's Now Playing module (top right of
+     * the first pane, 2 × 2 cells), in place of its "Not Playing"
+     * placeholder; null puts the placeholder back. Kept while the control
+     * centre is turned off and on; the actor stays the caller's (taken out,
+     * never destroyed).
+     *
+     * @param {Clutter.Actor|null} actor
+     */
+    setMediaModule(actor) {
+        this._mediaActor = actor;
+        this._quickSettingsHost?.setMediaModule(actor);
     }
 
     /** @returns {ExtensionTray|null} */
@@ -143,6 +163,8 @@ export class ControlCentreModule {
             return;
         }
         const page = new ControlCentrePage(this._tabs(), tab);
+        // (A menu's page in place of the modules: the island eases to it.)
+        this._quickSettingsHost.connectObject('detail-changed', () => page.resized(), page);
         page.connect('destroy', () => {
             if (this._page !== page)
                 return;
@@ -180,6 +202,7 @@ export class ControlCentreModule {
             id: 'controls', label: 'Controls', icon: 'preferences-system-symbolic',
             actor: this._quickSettingsHost.actor,
             onShow: () => this._quickSettingsHost?.closeMenus(),
+            moduleRects: page => this._quickSettingsHost?.moduleRects(page) ?? [],
         }];
         if (this._dateMenuHost) {
             tabs.push({
@@ -225,6 +248,8 @@ export class ControlCentreModule {
         if (this._quickSettingsHost)
             return;
         this._quickSettingsHost = new QuickSettingsHost(this._quickSettings);
+        if (this._mediaActor)
+            this._quickSettingsHost.setMediaModule(this._mediaActor);
         if (this._dateMenu?._messageList && this._dateMenu._calendar)
             this._dateMenuHost = new DateMenuHost(this._dateMenu);
         this._quickSettings.can_focus = false;
@@ -243,6 +268,7 @@ export class ControlCentreModule {
     _release() {
         Main.layoutManager.uiGroup.disconnectObject(this);
         this.close();
+        this._quickSettingsHost?.disconnectObject(this);
         this._quickSettingsHost?.release();
         this._quickSettingsHost = null;
         this._dateMenuHost?.release();

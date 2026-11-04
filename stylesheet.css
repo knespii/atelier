@@ -716,65 +716,287 @@
   margin: 0;
 }
 
-.atelier-cc .quick-settings-grid {
-  spacing-rows: 10px;
-  spacing-columns: 10px;
+/* The Controls tab as macOS lays out its Control Center: rounded modules
+   (shell/controlCentre/layout.js) in a grid of 80 px cells, GNOME's tiles in
+   them as a round icon – the accent's when on – with their name beside it,
+   or only the icon in a square. (In the island, over another extension's
+   styles even when they are !important: Blur my Shell's popup blur restyles
+   GNOME's tiles, calendar and entries with !important from a class on the
+   whole UI, and wins ties as its stylesheet loads first.) */
+
+.atelier-cc-modules-box {
+  spacing: 10px;
 }
 
-/* (In the island, over another extension's styles even when they are
-   !important: Blur my Shell's popup blur restyles GNOME's tiles, calendar
-   and entries with !important from a class on the whole UI, and wins ties
-   as its stylesheet loads first.) */
-.atelier-island .atelier-cc .quick-toggle,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button,
-.atelier-island .atelier-cc .quick-settings-system-item .icon-button {
-  background-color: rgba(255, 255, 255, 0.09) !important;
+.atelier-cc-module {
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.07);
+  padding: 6px;
+  spacing: 2px;
   color: #ffffff;
+}
+
+.atelier-cc-module-body {
+  spacing: 2px;
+}
+
+.atelier-cc-module-title {
+  padding: 2px 8px 0;
+  font-size: 10pt;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+/* Round: the squares, the focus row, the system buttons, Background Apps. */
+.atelier-cc-module-dark,
+.atelier-cc-module-night,
+.atelier-cc-module-power-mode,
+.atelier-cc-module-extra,
+.atelier-cc-module-focus,
+.atelier-cc-module-system,
+.atelier-cc-module-footer {
+  border-radius: 999px;
+  padding: 0;
+}
+
+.atelier-cc-module-system {
+  padding: 0 14px;
+}
+
+.atelier-cc-module-footer {
+  padding: 0 8px;
+}
+
+.atelier-cc-module-display,
+.atelier-cc-module-sound {
+  padding: 8px 10px;
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle,
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu {
+  min-width: 0;
+  max-width: 10000px;
+  min-height: 0;
+  border-radius: 16px;
+  border: none;
+  background-color: transparent !important;
   box-shadow: none !important;
+  color: #ffffff;
 }
 
-.atelier-island .atelier-cc .quick-toggle:hover,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:hover,
-.atelier-island .atelier-cc .quick-settings-system-item .icon-button:hover {
-  background-color: rgba(255, 255, 255, 0.16) !important;
+.atelier-island .atelier-cc-mac .quick-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.07) !important;
 }
 
-.atelier-island .atelier-cc .quick-toggle:active,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:active,
-.atelier-island .atelier-cc .quick-settings-system-item .icon-button:active {
-  background-color: rgba(255, 255, 255, 0.22) !important;
+.atelier-island .atelier-cc-mac .quick-toggle:active {
+  background-color: rgba(255, 255, 255, 0.12) !important;
 }
 
-.atelier-island .atelier-cc .quick-toggle:focus,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
-.atelier-island .atelier-cc .quick-settings-system-item .icon-button:focus {
+.atelier-island .atelier-cc-mac .quick-toggle:focus,
+.atelier-island .atelier-cc-mac .quick-toggle-menu-button:focus,
+.atelier-island .atelier-cc-mac .quick-settings-system-item .icon-button:focus {
   box-shadow: inset 0 0 0 2px -st-accent-color !important;
 }
 
-.atelier-island .atelier-cc .quick-toggle:checked,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked {
-  background-color: -st-accent-color !important;
+.atelier-island .atelier-cc-mac .quick-toggle > StBoxLayout,
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu .quick-toggle > StBoxLayout {
+  padding: 6px 6px 6px 8px;
+  spacing: 10px;
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle .quick-toggle-icon {
+  icon-size: 16px;
+  padding: 10px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle:checked .quick-toggle-icon {
+  background-color: -st-accent-color;
   color: -st-accent-fg-color;
 }
 
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-separator {
-  background-color: rgba(255, 255, 255, 0.18);
+.atelier-cc-mac .quick-toggle .quick-toggle-title {
+  font-size: 10pt;
+  font-weight: bold;
+  color: #ffffff;
 }
 
-/* A tile's open menu (Wi-Fi's networks, Bluetooth's devices, Power Mode,
-   an extension's): a faint pill of the glass, as the tiles are – no darker
-   than any other glass (only the glass-dim setting darkens it, as it does
-   the dock and the bar). Under the control centre the island's glass is
-   frosted (lib/glassLook.js FROST): the windows' type behind is a soft
-   wash, no second line of type under the items'. (!important: Blur my
-   Shell's popup blur restyles GNOME's menus.) */
-.atelier-island .atelier-cc .quick-toggle-menu {
-  margin: 10px 0 0;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background-color: rgba(255, 255, 255, 0.07) !important;
+.atelier-cc-mac .quick-toggle .quick-toggle-subtitle {
+  font-size: 9pt;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu .quick-toggle-separator {
+  width: 0;
+  background-color: transparent;
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu .quick-toggle-menu-button,
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu .quick-toggle-menu-button:checked {
+  padding: 0 10px;
+  margin: 4px 0;
+  border-radius: 12px;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.atelier-island .atelier-cc-mac .quick-toggle-has-menu .quick-toggle-menu-button:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff;
+}
+
+.atelier-cc-mac .quick-toggle-menu-button StIcon {
+  icon-size: 14px;
+}
+
+/* A square: a circle, its icon only (and its menu's arrow). */
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle,
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle-has-menu {
+  border-radius: 999px;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle-has-menu .quick-toggle,
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle-has-menu .quick-toggle:hover {
+  background-color: transparent !important;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle > StBoxLayout,
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle-has-menu .quick-toggle > StBoxLayout {
+  padding: 0;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle .quick-toggle-icon {
+  icon-size: 18px;
+  padding: 11px;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-square .quick-toggle-has-menu .quick-toggle-menu-button {
+  padding: 0 3px;
+  margin: 0;
+}
+
+/* Display: the brightness slider, the keyboard's backlight beside it. */
+.atelier-island .atelier-cc-mac .atelier-cc-compact .quick-toggle-has-menu {
+  border-radius: 999px;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-compact .quick-toggle > StBoxLayout {
+  padding: 2px;
+}
+
+/* The system buttons and the battery. */
+.atelier-cc-mac .quick-settings-system-item > StBoxLayout {
+  spacing: 8px;
+}
+
+.atelier-island .atelier-cc-mac .quick-settings-system-item .icon-button {
+  padding: 10px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
   color: #ffffff;
+}
+
+.atelier-island .atelier-cc-mac .quick-settings-system-item .icon-button:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.atelier-island .atelier-cc-mac .quick-settings-system-item .icon-button:active {
+  background-color: rgba(255, 255, 255, 0.26) !important;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-system .quick-toggle .quick-toggle-icon,
+.atelier-island .atelier-cc-mac .atelier-cc-wide .quick-toggle .quick-toggle-icon {
+  padding: 0 4px;
+  background-color: transparent;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-system .quick-toggle,
+.atelier-island .atelier-cc-mac .atelier-cc-wide .quick-toggle {
+  border-radius: 999px;
+}
+
+/* Now Playing, until something plays (shell/controlCentre/media.js). */
+.atelier-cc-media-placeholder {
+  padding: 8px;
+  spacing: 8px;
+}
+
+.atelier-cc-media-art {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc-media-title {
+  font-size: 10pt;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* A tile's menu as a page of its own, in place of the modules: back, its
+   name and its switch on top, then GNOME's menu (Wi-Fi's networks,
+   Bluetooth's devices, Power Mode, an extension's). A pane wide. Its glass
+   is the island's, frosted (lib/glassLook.js FROST): the windows' type
+   behind is a soft wash. (!important: Blur my Shell's popup blur restyles
+   GNOME's menus.) */
+.atelier-cc-detail {
+  width: 350px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.07);
+  padding: 8px 6px;
+}
+
+.atelier-island .atelier-cc .quick-toggle-menu {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: #ffffff;
+}
+
+.atelier-cc-detail-header {
+  spacing: 8px;
+  padding: 0 6px 8px 0;
+}
+
+.atelier-cc-detail-back {
+  padding: 8px;
+  border-radius: 999px;
+  color: #ffffff;
+  background-color: transparent;
+}
+
+.atelier-cc-detail-back:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.atelier-cc-detail-back:focus,
+.atelier-cc-detail-switch:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-cc-detail-back StIcon {
+  icon-size: 16px;
+}
+
+.atelier-cc-detail-title {
+  font-size: 11pt;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.atelier-cc-detail-switch {
+  padding: 2px;
+  border-radius: 999px;
 }
 
 .atelier-cc .quick-toggle-menu .header .title,
@@ -958,6 +1180,7 @@
 /* Tabs of the control centre: icons, the current one with its name */
 
 .atelier-cc-tabs {
+  border-radius: 999px;
   spacing: 6px;
   padding: 0 0 2px;
   margin: 0;

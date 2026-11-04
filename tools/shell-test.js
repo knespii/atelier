@@ -762,8 +762,14 @@ async function testControlCentre(ext) {
         return;
     const quickSettings = Main.panel.statusArea.quickSettings;
     const island = modules.get('island').island;
-    check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles'),
-        'GNOME\'s tiles moved into the control centre');
+    const host = () => modules.get('control-centre').controls;
+    const systemTile = quickSettings._system._systemItem;
+    const gnomeTiles = () => quickSettings.menu._grid.get_children().filter(c => c instanceof St.Widget);
+    check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box && gnomeTiles().length === 0 &&
+        host()?.moduleOf(systemTile)?.moduleId === 'system' &&
+        host()?.moduleOf(quickSettings._volumeOutput._output)?.moduleId === 'sound' &&
+        host()?.moduleOf(quickSettings._darkMode.quickSettingsItems[0])?.moduleId === 'dark',
+    'GNOME\'s tiles moved into the control centre\'s modules (the system buttons, Sound, Dark Style…)');
     check(Main.panel.has_style_class_name('atelier-bar-clean'), 'the top bar has no background');
 
     const {indicator, toggle} = addTestTile();
@@ -783,29 +789,63 @@ async function testControlCentre(ext) {
         'the island opens the control centre');
     check(!quickSettings.menu.isOpen, 'GNOME\'s menu stays closed');
     const page = island.page;
-    const grid = modules.get('control-centre')._quickSettingsHost.grid;
-    check(grid.contains(toggle) && page.contains(grid), 'an extension\'s tile is there too');
+    const grid = host().grid;
+    const square = host().moduleOf(toggle);
+    check(page.contains(toggle) && grid.contains(square) && square?.moduleId.startsWith('extra-') &&
+        Math.abs(square.width - square.height) < 1 && square.width < 100,
+    `an extension's tile is there too, a square of its own (${square?.width} × ${square?.height})`);
     await restPointer();
     await Scripting.sleep(500);
+    check(island.height <= island.width && grid.width > 600,
+        `the control centre is wider than tall (${island.width} × ${island.height})`);
+    // Its modules, where they are in the page (for their glass).
+    const rects = page.moduleRects();
+    const overlapping = rects.filter((a, i) => rects.some((b, j) => j > i &&
+        a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5));
+    check(rects[0]?.id === 'tabs' && rects.some(r => r.actor === square) && rects.some(r => r.id === 'system') &&
+        rects.every(r => r.x >= 0 && r.y >= 0 && r.x + r.width <= page.width + 0.5 && r.y + r.height <= page.height + 0.5 &&
+            r.radius > 0) && overlapping.length === 0,
+    `the page tells where its modules are: ${rects.map(r => `${r.id} ${Math.round(r.x)},${Math.round(r.y)} ` +
+        `${Math.round(r.width)}×${Math.round(r.height)} r${Math.round(r.radius)}`).join('; ')}`);
     await screenshotIsland('21-control-centre', 700);
 
+    // A tile's menu: a page of its own, in place of the modules.
+    let changes = 0;
+    const changesId = page.connect('modules-changed', () => changes++);
+    const [gridWidth, gridHeight] = [island.width, island.height];
     toggle.menu.open(true);
     await Scripting.sleep(700);
-    const [, tileY] = toggle.get_transformed_position();
-    const [, menuY] = toggle.menu.actor.get_transformed_position();
-    check(toggle.menu.isOpen && menuY >= tileY + toggle.height - 1, 'a tile\'s menu opens under it');
-    check(island.height > grid.get_preferred_height(-1)[1] - 1, 'and the island makes room');
-    // Its wrapped text included: the next row (or the end) comes after it.
-    const [, gridY] = grid.get_transformed_position();
-    const below = grid.get_children()
-        .filter(c => c.visible && c.width > 0 && c.get_transformed_position()[1] > tileY + toggle.height)
-        .map(c => c.get_transformed_position()[1]);
-    const next = Math.min(gridY + grid.height, ...below);
-    const menuBottom = menuY + toggle.menu.actor.height;
-    check(menuBottom <= next + 1, `nothing under the menu (${menuBottom} vs ${next})`);
+    const detail = host().detail;
+    check(toggle.menu.isOpen && host().detailItem === toggle && detail.mapped && !grid.mapped &&
+        detail.contains(toggle.menu.actor) && toggle.menu.box.contains(host().header),
+    'a tile\'s menu opens as a page in place of the modules, with a header');
+    check(island.width < gridWidth && Math.abs(island.height - gridHeight) > 1 && changes > 0 &&
+        page.moduleRects().some(r => r.id === 'detail'),
+    `and the island eases to its size (${gridWidth} × ${gridHeight} → ${island.width} × ${island.height})`);
+    const [, menuY] = toggle.menu.box.get_transformed_position();
+    const [, detailY] = detail.get_transformed_position();
+    const [, detailH] = detail.get_transformed_size();
+    check(menuY + toggle.menu.box.height <= detailY + detailH + 1,
+        `its wrapped text included (${menuY + toggle.menu.box.height} vs ${detailY + detailH})`);
     await screenshotIsland('22-control-centre-menu', 800);
-    toggle.menu.close(true);
+    // Its switch in the header turns the tile on and off; the page stays.
+    const wasChecked = toggle.checked;
+    await clickAt(...centerOf(host().header.get_last_child()));
+    await Scripting.sleep(300);
+    check(toggle.checked !== wasChecked && toggle.menu.isOpen, 'the header\'s switch turns the tile on, the page stays');
+    toggle.checked = wasChecked;
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !toggle.menu.isOpen && grid.mapped && !detail.mapped, 1000) && island.page === page,
+        'Esc goes back to the modules');
     await Scripting.sleep(500);
+    toggle.menu.open(PopupAnimation.NONE);
+    await waitFor(() => detail.mapped, 1000);
+    await Scripting.sleep(400);
+    await clickAt(...centerOf(host().header.get_first_child()));
+    check(await waitFor(() => !toggle.menu.isOpen && grid.mapped, 1000) && island.page === page &&
+        await waitFor(() => Math.abs(island.width - gridWidth) < 1 && Math.abs(island.height - gridHeight) < 1, 1500),
+    `and so does its back button, the island as it was (${island.width} × ${island.height})`);
+    page.disconnect(changesId);
 
     // The second tab: extension icons as tiles.
     page.setTab('extensions');
@@ -860,12 +900,28 @@ async function testControlCentre(ext) {
     await restPointer();
     await waitFor(() => island.page === null && !island.busy, 1000);
 
+    // Hidden tiles (Wi-Fi without Wi-Fi, say) stay hidden in their modules.
+    const shown = new Map([...host().grid.get_children()].flatMap(m => m.slots ?? [])
+        .map(slot => [slot.get_child(), slot.get_child()?.visible]));
+    check([...shown.keys()].every(item => host().moduleOf(item) === null || host().moduleOf(item).slots
+        .every(slot => slot.visible === Boolean(slot.get_child()?.visible))) &&
+        [...shown.values()].some(visible => !visible),
+    `hidden tiles stay hidden in their modules (${[...shown.values()].filter(v => !v).length} hidden)`);
+
     // Turned off: GNOME's menu and the icons in the bar come back.
     const settings = ext.stateObj._settings.get_child('control-centre');
     settings.set_boolean('enabled', false);
     await Scripting.sleep(300);
     const dateMenu = Main.panel.statusArea.dateMenu;
+    const tiles = gnomeTiles();
+    const unchanged = [...shown].filter(([item]) => item && tiles.includes(item));
+    check(unchanged.length > 3 && unchanged.every(([item, visible]) => item.visible === visible),
+        'given back, each tile shows or not as it did');
     check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box &&
+        tiles.includes(toggle) && tiles.includes(systemTile) && tiles.at(-1) === quickSettings._backgroundApps.quickSettingsItems[0] &&
+        tiles.indexOf(systemTile) === 0 && !tiles.some(t => hasClass(t, 'atelier-cc-dnd')) &&
+        quickSettings.menu._grid.layout_manager.get_child_meta(quickSettings.menu._grid, systemTile).column_span === 2 &&
+        toggle.menu.actor.get_parent() === quickSettings.menu._overlay && toggle.menu.actor.get_constraints().every(c => c.enabled) &&
         dateMenu._messageList.get_parent()?.name === 'calendarArea' &&
         dateMenu._eventsItem.get_parent() === dateMenu._clocksItem.get_parent() &&
         Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menus and the icons are back');
@@ -876,20 +932,19 @@ async function testControlCentre(ext) {
     await waitFor(() => !quickSettings.menu.isOpen, 1000);
     settings.set_boolean('enabled', true);
     await Scripting.sleep(400);
-    check(hasClass(quickSettings.menu._grid.get_parent(), 'atelier-cc-tiles') &&
-        !Main.panel._rightBox.contains(button), 'and on again');
-    // Laid out in the control centre (anew: GNOME's menu had it meanwhile),
-    // GNOME's grid doesn't tell of its moves: GNOME's menu follows each with
-    // an update in the next frame, which reads the grid and the menu, and
-    // when the shell quit before that frame came, it ran on them gone
-    // (tools/shell-test.sh checks how the shell quits).
+    check(gnomeTiles().length === 0 && host()?.moduleOf(toggle) && !Main.panel._rightBox.contains(button), 'and on again');
+    // GNOME's grid stays in GNOME's menu, not laid out in the control
+    // centre: it doesn't tell of moves (GNOME's menu follows each with an
+    // update in the next frame, which reads the grid and the menu, and when
+    // the shell quit before that frame came, it ran on them gone:
+    // tools/shell-test.sh checks how the shell quits).
     const gnomeGrid = quickSettings.menu._grid;
-    const heard = {allocation: 0, x: 0, y: 0};
+    const heard = {x: 0, y: 0};
     const heardIds = Object.keys(heard).map(name => gnomeGrid.connect(`notify::${name}`, () => heard[name]++));
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => hasClass(island.page, 'atelier-cc'), 1000) && await framesDrawn(3) &&
-        heard.allocation > 0 && heard.x + heard.y === 0,
-    `laid out in the control centre, GNOME's grid doesn't tell of its moves (${JSON.stringify(heard)})`);
+        heard.x + heard.y === 0 && island.page.contains(toggle),
+    `in the control centre, GNOME's grid doesn't move (${JSON.stringify(heard)})`);
     heardIds.forEach(id => gnomeGrid.disconnect(id));
     Main.panel.toggleQuickSettings();
     await waitFor(() => island.page === null && !island.busy, 1000);
@@ -938,6 +993,73 @@ function busyWindowArea() {
         cr.$dispose();
     });
     return area;
+}
+
+// Pictures of the control centre's modules for the eye (only when asked
+// for by name: ATELIER_TEST_ONLY=testControlCentrePictures): over the
+// wallpaper and over a window, in the dark and the light style, and a
+// tile's menu open as its page. In control-centre-mac/.
+async function testControlCentrePictures(ext) {
+    if (!ONLY?.includes('testControlCentrePictures'))
+        return;
+    const modules = ext.stateObj.modules;
+    const island = modules.get('island').island;
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const desktopInterface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = desktopInterface.get_string('color-scheme');
+    GLib.mkdir_with_parents(`${OUTPUT}/control-centre-mac`, 0o755);
+    bar.set_string('surface', 'glass');
+    const {indicator, toggle} = addTestTile();
+    const area = busyWindowArea();
+    global.window_group.add_child(area);
+    const host = modules.get('control-centre').controls;
+    const wifi = Main.panel.statusArea.quickSettings._network?._wirelessToggle;
+    try {
+        for (const behind of ['wallpaper', 'window']) {
+            area.visible = behind === 'window';
+            for (const style of ['prefer-dark', 'default']) {
+                const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}`;
+                desktopInterface.set_string('color-scheme', style);
+                await restPointer();
+                await Scripting.sleep(800);
+                Main.panel.toggleQuickSettings();
+                await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+                await framesDrawn(4);
+                await Scripting.sleep(900);
+                await screenshotIsland(`control-centre-mac/${tag}`, 560);
+                if (tag === 'wallpaper-dark') {
+                    const dump = (actor, depth) => {
+                        if (!actor.visible || depth > 7)
+                            return;
+                        const b = actor.get_allocation_box();
+                        results.push(`INFO  ${' '.repeat(depth)}${actor.constructor.name} ` +
+                            `${actor.get_style_class_name?.() ?? ''} ${Math.round(b.x1)},${Math.round(b.y1)} ` +
+                            `${Math.round(b.get_width())}×${Math.round(b.get_height())}`);
+                        actor.get_children().forEach(c => dump(c, depth + 1));
+                    };
+                    ['display', 'system'].forEach(id => dump(host.module(id), 0));
+                }
+                const menu = wifi?.visible ? wifi.menu : toggle.menu;
+                menu.open(PopupAnimation.NONE);
+                await waitFor(() => host.detailOpen && !island.busy, 2000);
+                await framesDrawn(4);
+                await Scripting.sleep(900);
+                await screenshotIsland(`control-centre-mac/${tag}-detail`, 700);
+                menu.close(PopupAnimation.NONE);
+                await Scripting.sleep(300);
+                Main.panel.toggleQuickSettings();
+                await waitFor(() => island.page === null && !island.busy, 2000);
+            }
+        }
+        results.push(`INFO  pictures of the control centre's modules in ${OUTPUT}/control-centre-mac`);
+    } finally {
+        area.destroy();
+        desktopInterface.set_string('color-scheme', scheme);
+        bar.reset('surface');
+        indicator.quickSettingsItems.forEach(item => item.destroy());
+        indicator.destroy();
+    }
 }
 
 // The control centre over a busy window (live glass) and over the
@@ -1085,7 +1207,7 @@ async function controlCentreReads(ext, toggle) {
                         results.push(`INFO  ${tag}: ${inks.length} inks, ${below} short; the least ${least?.name} Lc ` +
                             `${least?.lc.toFixed(0)} of ${least?.need.toFixed(0)} (${least?.drawn.type} on ` +
                             `${least?.drawn.glass})`);
-                        const labels = [toggle.menu._headerTitle,
+                        const labels = [modules.get('control-centre').controls._headerTitle,
                             ...toggle.menu.box.get_children()
                                 .filter(c => c instanceof PopupMenu.PopupBaseMenuItem && c !== off && c.visible)
                                 .map(item => item.label)];
@@ -10280,6 +10402,7 @@ export async function run() {
         await part(testSystemItemLater);
         // (Only by name.)
         await part(testGlassComparePictures, ext);
+        await part(testControlCentrePictures, ext);
         await part(testDarkeningPictures, ext);
         // (After the parts that keep the modules they started with: this
         // turns Atelier off and on.)

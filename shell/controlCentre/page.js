@@ -6,6 +6,7 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import {IslandPage} from '../island/page.js';
+import {rectIn} from './layout.js';
 
 /**
  * @typedef {object} Tab
@@ -15,10 +16,30 @@ import {IslandPage} from '../island/page.js';
  * @property {Clutter.Actor} actor - the content; it outlives the page
  * @property {Function} [available] - () => boolean, whether the tab shows
  * @property {Function} [onShow] - called when the tab comes up
+ * @property {Function} [moduleRects] - (page) => its modules' rects in the
+ *   page (see ControlCentrePage.moduleRects); without, the tab is one
  */
 
-export const ControlCentrePage = GObject.registerClass(
-class AtelierControlCentrePage extends IslandPage {
+/**
+ * @typedef {object} ModuleRect
+ * @property {string} id - 'tabs', a module's ('connectivity', 'media',
+ *   'sound', 'detail' for an open menu's page…) or a tab's
+ * @property {number} x - in the page, logical pixels
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {number} radius - of its corners
+ * @property {Clutter.Actor} actor - the module
+ */
+
+export const ControlCentrePage = GObject.registerClass({
+    Signals: {
+        // The modules moved, came or went, a menu's page opened or closed,
+        // the tab changed: moduleRects() has changed. (Emitted as the page
+        // is laid out: a handler must not change any actor's layout.)
+        'modules-changed': {},
+    },
+}, class AtelierControlCentrePage extends IslandPage {
     /**
      * @param {Tab[]} tabs
      * @param {string} tab - the tab to start with
@@ -64,6 +85,7 @@ class AtelierControlCentrePage extends IslandPage {
         // Each tab as wide as it needs, the island changing shape between
         // them; as wide as the island, when it is wider (one island).
         this.fillsWidth = true;
+        this._rectsKey = '';
         this._tab = null;
         this.setTab(this._shows(tab) ? tab : tabs[0].id);
     }
@@ -101,6 +123,41 @@ class AtelierControlCentrePage extends IslandPage {
                 tab.actor.visible = current;
         }
         this.resized();
+    }
+
+    /**
+     * Every module shown, where it is in the page: the tabs' bar, then the
+     * Controls tab's modules (or the open menu's page), or the other tab's
+     * content as one.
+     *
+     * @returns {ModuleRect[]}
+     */
+    moduleRects() {
+        const rects = [];
+        const tabs = rectIn(this._bar, this);
+        if (tabs)
+            rects.push({id: 'tabs', ...tabs, actor: this._bar});
+        const tab = this._tabs.find(t => t.id === this._tab);
+        if (!tab || !this.get_children().includes(tab.actor))
+            return rects;
+        if (tab.moduleRects) {
+            rects.push(...tab.moduleRects(this));
+        } else {
+            const rect = rectIn(tab.actor, this);
+            if (rect)
+                rects.push({id: tab.id, ...rect, actor: tab.actor});
+        }
+        return rects;
+    }
+
+    vfunc_allocate(box) {
+        super.vfunc_allocate(box);
+        const key = this.moduleRects()
+            .map(r => `${r.id}:${r.x},${r.y},${r.width},${r.height},${r.radius}`).join(' ');
+        if (key !== this._rectsKey) {
+            this._rectsKey = key;
+            this.emit('modules-changed');
+        }
     }
 
     _shows(id) {
