@@ -30,6 +30,10 @@
 //   ATELIER_WASH: vec4 atelier_wash – a colour [r, g, b] the glass is
 //     washed towards after its dim, as much as a (the clock's tone, as
 //     its legibility plan has it);
+//   ATELIER_SMALL_SHARE: float atelier_small_share – how much of a small
+//     control's lighter face the part atelier_part() was last asked for
+//     has, 0 … 1 (set by it: the control centre's modules have the face
+//     every large glass has, however small they are);
 //   ATELIER_OWN_BODY: float atelier_own_body(vec2 p) – its body without
 //     the other surfaces' glass (atelier_others): its contour and shadow
 //     are kept from past the screen's edge by it, from the others' glass
@@ -248,6 +252,9 @@ if (glassLens.w < 0.5) {
             c = atelier_behind(p);
         }
         float small = 1.0 - smoothstep(${SMALL[0]}.0 * glassSmall.z, ${SMALL[1]}.0 * glassSmall.z, thick);
+#ifdef ATELIER_SMALL_SHARE
+        small *= atelier_small_share;
+#endif
         // (GNOME's style's face: the dark one, the light one, or on its
         // way from one to the other.)
         vec3 f = mix(atelier_face(c, vec4(glassFace.x, mix(glassFace.y, glassSmall.x, small),

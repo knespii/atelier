@@ -1065,6 +1065,262 @@ async function testControlCentrePictures(ext) {
     }
 }
 
+// The control centre's glass, a piece for each module (shell/island/module.js
+// _syncModules()): over a flat wallpaper, the page's type hidden, each
+// module's middle is glass (not the wallpaper), the gaps between them are
+// the wallpaper as it is, each module's edges have their contour and glint;
+// the capsule splits into the modules as it opens and they flow back into
+// it as it closes; a tile's detail page is one piece (the tabs another).
+// Pictures (and one halfway through opening) in control-centre-glass/.
+async function testControlCentreGlass(ext) {
+    const modules = ext.stateObj.modules;
+    const islandModule = modules.get('island');
+    const island = islandModule.island;
+    const settings = ext.stateObj._settings;
+    const bar = settings.get_child('bar');
+    const host = () => modules.get('control-centre').controls;
+    const background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
+    const kept = ['picture-uri', 'picture-uri-dark', 'picture-options'].map(key => [key, background.get_string(key)]);
+    const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+    const scheme = iface.get_string('color-scheme');
+    const dir = `${OUTPUT}/control-centre-glass`;
+    GLib.mkdir_with_parents(dir, 0o755);
+    const back = await useTestScale('The control centre\'s glass');
+    const {indicator, toggle} = addTestTile();
+    const area = busyWindowArea();
+    const slow = St.Settings.get().slow_down_factor;
+    const median = (pixels, x, y, size = 3) => {
+        const values = [[], [], []];
+        for (let dy = -size; dy <= size; dy++) {
+            for (let dx = -size; dx <= size; dx++)
+                pixels.at(x + dx / pixels.density, y + dy / pixels.density).forEach((v, c) => values[c].push(v));
+        }
+        return values.map(v => v.sort((a, b) => a - b)[Math.floor(v.length / 2)]);
+    };
+    const off = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+    const open = async () => {
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+        await framesDrawn(4);
+        await Scripting.sleep(900);
+    };
+    const close = async () => {
+        if (island.page)
+            Main.panel.toggleQuickSettings();
+        await waitFor(() => island.page === null && !island.busy, 3000);
+        await Scripting.sleep(700);
+    };
+    // Every frame drawn while something happens: the island's glass's
+    // modules and its own shape then.
+    const watch = async action => {
+        const frames = [];
+        const id = global.stage.connect('after-paint', () => {
+            const glass = islandModule._glass;
+            frames.push({modules: glass?.modules?.map(m => [...m]) ?? null, shape: glass?.shape ? [...glass.shape] : null});
+        });
+        try {
+            await action();
+        } finally {
+            global.stage.disconnect(id);
+        }
+        return frames;
+    };
+    const stageRects = page => {
+        const box = page.get_allocation_box();
+        const [x, y] = [island.x + box.x1, island.y + island.translation_y + box.y1];
+        return page.moduleRects().map(r => ({...r, x: x + r.x, y: y + r.y}));
+    };
+    try {
+        const flat = `${dir}/flat.png`;
+        const pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 64, 64);
+        pixbuf.fill(0x3c78b4ff);
+        pixbuf.savev(flat, 'png', [], []);
+        background.set_string('picture-uri', uriOf(flat));
+        background.set_string('picture-uri-dark', uriOf(flat));
+        background.set_string('picture-options', 'zoom');
+        await wallpapersSettled();
+        bar.set_string('surface', 'glass');
+        iface.set_string('color-scheme', 'prefer-dark');
+        await restPointer();
+        await Scripting.sleep(1000);
+        const rest = islandModule._glass?.shape;
+        check(rest && !islandModule._glass.modules, 'at rest, the island\'s glass is its capsule');
+
+        // Open: the capsule splits into the modules.
+        const opening = await watch(open);
+        const page = island.page;
+        const glass = islandModule._glass;
+        const rects = stageRects(page);
+        const final = glass.modules ?? [];
+        results.push(`INFO  the control centre's modules: ${rects.map(r => `${r.id} ${Math.round(r.x)},` +
+            `${Math.round(r.y)} ${Math.round(r.width)}×${Math.round(r.height)} r${Math.round(r.radius)}`).join('; ')}`);
+        check(rects.length > 3 && final.length === rects.length - 1 && glass.shape &&
+            Math.abs(glass.shape[0] - rects[0].x) < 1 && Math.abs(glass.shape[2] - rects[0].width) < 1 &&
+            glass.shape[6] === 0,
+        `open, the island's glass is a piece for each module (${final.length} and the tabs, ${rects.length} shown), ` +
+            'no ears');
+        check(final.every((m, i) => Math.abs(m[0] - rects[i + 1].x) < 1 && Math.abs(m[1] - rects[i + 1].y) < 1 &&
+            Math.abs(m[2] - rects[i + 1].width) < 1 && Math.abs(m[3] - rects[i + 1].height) < 1),
+        'each where its module is');
+        const between = opening.filter(f => f.modules && f.modules.length === final.length &&
+            f.modules.some((m, i) => Math.abs(m[2] - final[i][2]) > 4 || Math.abs(m[1] - final[i][1]) > 4));
+        const fromCapsule = between.length > 0 && rest && between[0].modules.every(m =>
+            m[0] >= Math.min(rest[0], ...final.map(f => f[0])) - 1 && m[1] >= rest[1] - 1);
+        check(between.length >= 2 && fromCapsule,
+            `opening, the capsule splits into the modules: ${between.length} of ${opening.length} frames on their way`);
+
+        // Pictures, the type hidden: glass inside each module, the
+        // wallpaper as it is in the gaps, a contour at each edge.
+        page.opacity = 0;
+        await framesDrawn(3);
+        await Scripting.sleep(300);
+        const left = Math.min(...rects.map(r => r.x)) - 20;
+        const top = 0;
+        const width = Math.max(...rects.map(r => r.x + r.width)) + 20 - left;
+        const height = Math.max(...rects.map(r => r.y + r.height)) + 30;
+        await screenshotArea('control-centre-glass/glass-only', left, top, width, height);
+        const pixels = pixelsOf('control-centre-glass/glass-only', [left, top]);
+        // (The wallpaper as it is: its one colour. Not read off the screen
+        // beside the modules – the desktop's widgets may be there.)
+        const wallpaper = [0x3c, 0x78, 0xb4];
+        const inside = rects.map(r => median(pixels, r.x + r.width / 2, r.y + r.height / 2));
+        const glassy = inside.map(c => off(c, wallpaper));
+        check(glassy.every(v => v >= 12), `each module's middle is glass, not the wallpaper ${wallpaper} ` +
+            `(off it by ${glassy.join(', ')})`);
+        // Gaps: between modules side by side in a row, and one above another.
+        const gaps = [];
+        for (const a of rects) {
+            for (const b of rects) {
+                const overlapY = [Math.max(a.y, b.y), Math.min(a.y + a.height, b.y + b.height)];
+                const overlapX = [Math.max(a.x, b.x), Math.min(a.x + a.width, b.x + b.width)];
+                if (b.x > a.x + a.width && b.x - (a.x + a.width) < 40 && overlapY[1] - overlapY[0] > 20 &&
+                    !rects.some(c => c !== a && c !== b && c.x < b.x && c.x + c.width > a.x + a.width &&
+                        c.y < overlapY[1] && c.y + c.height > overlapY[0]))
+                    gaps.push([`${a.id}|${b.id}`, (a.x + a.width + b.x) / 2, (overlapY[0] + overlapY[1]) / 2]);
+                if (b.y > a.y + a.height && b.y - (a.y + a.height) < 40 && overlapX[1] - overlapX[0] > 20 &&
+                    !rects.some(c => c !== a && c !== b && c.y < b.y && c.y + c.height > a.y + a.height &&
+                        c.x < overlapX[1] && c.x + c.width > overlapX[0]))
+                    gaps.push([`${a.id}/${b.id}`, (overlapX[0] + overlapX[1]) / 2, (a.y + a.height + b.y) / 2]);
+            }
+        }
+        const gapOff = gaps.map(([name, x, y]) => [name, off(median(pixels, x, y, 1), wallpaper)]);
+        check(gaps.length >= 3 && gapOff.every(([, v]) => v <= 10),
+            `the gaps between them are the wallpaper, unglassed (${gapOff.map(([n, v]) => `${n} ${v}`).join(', ')})`);
+        // (Each module's left edge, across: the contour and the glint
+        // there, unlike both the wallpaper beside it and its glass.)
+        const edges = rects.map((r, i) => {
+            let most = 0;
+            for (let dx = -2; dx <= 2; dx += 0.5) {
+                const c = pixels.at(r.x + dx, r.y + r.height / 2);
+                most = Math.max(most, Math.min(off(c, wallpaper), off(c, inside[i])));
+            }
+            return most;
+        });
+        check(edges.every(v => v >= 6), `each module has its edge, its contour and glint (${edges.join(', ')})`);
+        page.opacity = 255;
+        await framesDrawn(2);
+        await screenshotArea('control-centre-glass/flat-dark', left, top, width, height);
+
+        // A tile's detail page: one piece of glass, the tabs another.
+        const menu = toggle.menu;
+        const detailing = await watch(async () => {
+            menu.open(PopupAnimation.NONE);
+            await waitFor(() => host().detailOpen && !island.busy, 2000);
+            await framesDrawn(4);
+            await Scripting.sleep(700);
+        });
+        const detail = stageRects(page);
+        check(detail.length === 2 && detail[1].id === 'detail' && glass.modules?.length === 1 &&
+            Math.abs(glass.modules[0][3] - detail[1].height) < 1,
+        `a tile's detail open, its page is one piece of glass (${glass.modules?.length} besides the tabs)`);
+        check(detailing.some(f => f.modules && f.modules.length > 1 && f.modules.length < final.length + 1 &&
+            f.modules.some(m => Math.abs(m[2] - detail[1].width) > 4)),
+        'the modules flow into the detail\'s page');
+        menu.close(PopupAnimation.NONE);
+        await waitFor(() => !host().detailOpen, 2000);
+        await framesDrawn(4);
+        await Scripting.sleep(600);
+        check(glass.modules?.length === final.length, 'back from it, the modules again');
+
+        // Closing: back into the capsule, its ears and all.
+        const closing = await watch(close);
+        const shrinking = closing.filter(f => f.modules?.length > 0);
+        check(shrinking.length >= 2 && !glass.modules && JSON.stringify(glass.shape.map(Math.round)) ===
+            JSON.stringify(rest.map(Math.round)),
+        `closing, they flow back into the capsule (${shrinking.length} of ${closing.length} frames on their way), ` +
+            `the capsule as it was at the end (${glass.shape?.map(Math.round)}, was ${rest.map(Math.round)})`);
+
+        // Pictures: over the wallpaper and a window, dark and light, a
+        // detail open, and halfway through opening.
+        for (const [key, value] of kept)
+            background.set_string(key, value);
+        await wallpapersSettled();
+        global.window_group.add_child(area);
+        for (const behind of ['wallpaper', 'window']) {
+            area.visible = behind === 'window';
+            for (const style of ['prefer-dark', 'default']) {
+                const tag = `${behind}-${style === 'default' ? 'light' : 'dark'}`;
+                iface.set_string('color-scheme', style);
+                await restPointer();
+                await Scripting.sleep(900);
+                await open();
+                await screenshotIsland(`control-centre-glass/${tag}`, 460);
+                if (behind === 'wallpaper' && style === 'prefer-dark') {
+                    menu.open(PopupAnimation.NONE);
+                    await waitFor(() => host().detailOpen && !island.busy, 2000);
+                    await framesDrawn(4);
+                    await Scripting.sleep(800);
+                    await screenshotIsland(`control-centre-glass/${tag}-detail`, 560);
+                    menu.close(PopupAnimation.NONE);
+                    await Scripting.sleep(500);
+                }
+                await close();
+            }
+        }
+        area.visible = false;
+        iface.set_string('color-scheme', 'prefer-dark');
+        await Scripting.sleep(900);
+        St.Settings.get().slow_down_factor = 12;
+        Main.panel.toggleQuickSettings();
+        await Scripting.sleep(260);
+        await screenshotIsland('control-centre-glass/mid-morph', 460);
+        await waitFor(() => !island.busy && !islandModule._morph?.timeline.is_playing(), 8000);
+        St.Settings.get().slow_down_factor = slow;
+        await close();
+        // In the bar's one island with a notch: its tabs float in it, one
+        // glass with it; closed, the notch's ears again.
+        bar.set_string('style', 'island');
+        bar.set_string('island-shape', 'notch');
+        await Scripting.sleep(1200);
+        await open();
+        await screenshotIsland('control-centre-glass/one-island-notch', 460);
+        await close();
+        await screenshotIsland('control-centre-glass/one-island-notch-closed', 80);
+        const ear = islandModule._glass?.shape?.[6] ?? 0;
+        bar.set_string('style', 'spread');
+        await Scripting.sleep(1200);
+        await open();
+        await close();
+        check(islandModule._glass && !islandModule._glass.modules && islandModule._glass.shape[6] > 0,
+            `the notch's own ears again once it has closed (${islandModule._glass?.shape?.[6]}; in the one island ${ear})`);
+        results.push(`INFO  pictures of the control centre's glass in ${dir}`);
+    } finally {
+        ['style', 'island-shape'].forEach(key => bar.reset(key));
+        St.Settings.get().slow_down_factor = slow;
+        if (island.page)
+            island.page.opacity = 255;
+        await close();
+        area.destroy();
+        for (const [key, value] of kept)
+            background.set_string(key, value);
+        iface.set_string('color-scheme', scheme);
+        bar.reset('surface');
+        indicator.quickSettingsItems.forEach(item => item.destroy());
+        indicator.destroy();
+        await back?.();
+    }
+}
+
 // The control centre over a busy window (live glass) and over the
 // wallpaper, in the dark and the light style, with the glass regular, clear
 // and off, a tile's menu open in it (Wi-Fi's list of networks, say): its
@@ -1258,9 +1514,12 @@ async function controlCentreReads(ext, toggle) {
         };
         const glassOf = async name => {
             await open();
-            const [x, y] = island.get_transformed_position();
-            const islandPatch = await patchOf(`control-centre-menus/${name}-island`, x + island.width / 2,
-                y + island.height - 11, 4);
+            // (Its largest module's glass: each is a piece of its own.)
+            const [x, y, width, height] = [...islandModule._glass?.modules ?? []]
+                .sort((p, q) => q[2] * q[3] - p[2] * p[3])[0] ?? [...island.get_transformed_position(), island.width,
+                island.height];
+            const islandPatch = await patchOf(`control-centre-menus/${name}-island`, x + width / 2,
+                y + height - 11, 4);
             const frostedThen = islandModule._glass?.frosted;
             await close();
             await Scripting.sleep(400);
@@ -2717,11 +2976,15 @@ async function testGlassSmooth(ext) {
         await clickAt(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
         await Scripting.sleep(1500);
-        // (Inside its glass, past the bevel of its edges, which bends.)
-        const [x, y] = island.get_transformed_position();
+        // (Inside its glass, past the bevel of its edges, which bends: the
+        // largest of its modules, each a piece of glass with the windows
+        // sharp between them.)
+        const [mx, my, mw, mh] = [...ext.stateObj.modules.get('island')._glass?.modules ?? []]
+            .sort((p, q) => q[2] * q[3] - p[2] * p[3])[0] ?? [...island.get_transformed_position(), island.width,
+            island.height];
         const inset = 32;
-        const box = [Math.round(x + inset), Math.round(y + inset), Math.round(island.width - 2 * inset),
-            Math.round(island.height - 2 * inset)];
+        const box = [Math.round(mx + inset), Math.round(my + inset), Math.round(mw - 2 * inset),
+            Math.round(mh - 2 * inset)];
         const shoot = async (name, what) => {
             shown = what;
             area.queue_repaint();
@@ -10578,6 +10841,7 @@ export async function run() {
         await part(testNotifications, ext, atelier);
         await part(testControlCentre, ext);
         await part(testControlCentrePace, ext);
+        await part(testControlCentreGlass, ext);
         await part(testNowPlaying, ext);
         await part(testStackStaysOpaque, ext);
         await part(testOtherExtensions, ext);

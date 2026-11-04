@@ -1435,6 +1435,19 @@
   background-color: transparent;
 }
 
+/* Of glass, each of the control centre's modules is a piece of the island's
+   glass (shell/island/module.js): no card of its own over it. */
+.atelier-island-glass .atelier-cc-module,
+.atelier-island-glass .atelier-cc-detail {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+/* (The tabs a pill of glass, with room round them.) */
+.atelier-island-glass .atelier-cc-tabs {
+  padding: 4px;
+}
+
 /* A sheet dripping from the island: what it is made of is drawn under it,
    the island's glass or black; the sheet is only its form */
 
