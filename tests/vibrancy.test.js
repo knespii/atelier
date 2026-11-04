@@ -5,8 +5,8 @@ import {dimmedLook, faceColor, lookOf} from '../lib/glassLook.js';
 import {buildPalette, hexToOklch, hexToRgb, luminance} from '../lib/palette.js';
 import {
     COLOURED, INKS, MARK_LC, POLARITY, READ_LC, REFERENCE, SLACK, backdropOf, designedOf, glassOver, inkOn, lcOf,
-    needOf, pictureRegion, polarityOf, readingNeed, scopeOf, shortfallOf, steadied, surfaceRules, vibrancyStylesheet,
-    withBackground,
+    needOf, pictureRegion, polarityOf, readingNeed, scopeOf, shortfallOf, steadied, surfaceRules, underOf,
+    vibrancyStylesheet, withBackground,
 } from '../lib/vibrancy.js';
 import {assert, assertEqual} from './util.js';
 
@@ -206,7 +206,8 @@ export function testNeeds() {
             const designed = designedOf(ink, palette);
             const need = needOf(ink, designed);
             const own = ink.kind === 'text' ? minimumLc(ink.pt * 4 / 3, ink.weight) : minimumLc(ink.px, 700);
-            const set = lcOf(designed, REFERENCE, 'light');
+            // (On its faint pills, as they are on Atelier's dark.)
+            const set = lcOf(designed, underOf(ink, REFERENCE, 'light'), 'light');
             assert(need <= own + 1e-9 && need <= set + 1e-9 && need === Math.min(own, set),
                 `${surface} ${ink.selector}: as much as its size and weight need, no more than it is set to (${need})`);
             assertEqual(needOf(ink, designed, 'dark'), set, `${ink.selector}: as dark type, as emphatic as it is set`);
@@ -240,7 +241,9 @@ export function testStaysOnDark() {
             // of the palette's or the microphone's orange may go lighter.)
             assertEqual([polarity, rules.filter(rule => rule.includes('255, 255, 255'))],
                 ['light', []], `${wallpaper}, ${surface}: white type as it is set`);
-            assert(rules.length <= 2, `${wallpaper}, ${surface}: a colour or two at most (${rules})`);
+            // (Besides what is on the accent, as the stylesheet writes it.)
+            const colours = rules.filter(rule => rule.includes('rgba('));
+            assert(colours.length <= 2, `${wallpaper}, ${surface}: a colour or two at most (${colours})`);
         }
     }
     // Glass a little lighter than Atelier's dark (a deep green wallpaper):
@@ -254,7 +257,8 @@ export function testStaysOnDark() {
         for (const ink of INKS[surface]) {
             const shown = inkOn(ink, green, 'light', palette);
             const designed = designedOf(ink, palette);
-            if (!shown)
+            // (One written as it is set, while another changes: as it is.)
+            if (!shown || shown.value || (ink.always && shown.color === designed.color && shown.alpha === designed.alpha))
                 continue;
             const [l, c, h] = hexToOklch(designed.color);
             const [l2, , h2] = hexToOklch(shown.color);
@@ -268,14 +272,16 @@ export function testStaysOnDark() {
 }
 
 export function testDarkOnLight() {
-    for (const surface of ['island', 'pages', 'bar', 'dock']) {
+    for (const surface of ['island', 'pages', 'ccTabs', 'ccModule', 'ccDetail', 'ccPane', 'bar', 'dock']) {
         const backdrop = on(LIGHT, REGULAR, LIGHT_STYLE);
         assertEqual(polarityFor(LIGHT, {prefer: 'dark'}, surface), 'dark', `${surface}: dark type`);
         for (const ink of INKS[surface].filter(i => ['text', 'icon', 'mark'].includes(i.kind))) {
             const shown = inkOn(ink, backdrop, 'dark', palette);
             const designed = designedOf(ink, palette);
             const need = needOf(ink, designed, 'dark');
-            const lc = shown ? lcOf(shown, backdrop.dark, 'dark') : lcOf(designed, backdrop.dark, 'dark');
+            // (On its faint pills, dark under dark type.)
+            const under = underOf(ink, backdrop.dark, 'dark');
+            const lc = shown ? lcOf(shown, under, 'dark') : lcOf(designed, under, 'dark');
             const asFarAsItGoes = shown && shown.alpha === 1 &&
                 (luminance(shown.color) < 0.001 || hexToOklch(shown.color)[0] <= COLOURED.deepest + 0.01);
             assert(lc >= need - 1 || asFarAsItGoes,
@@ -397,8 +403,10 @@ function stylesheetRules() {
     }));
 }
 
-// A colour as the stylesheet writes it: {color, alpha}.
+// A colour as the stylesheet writes it: {color, alpha}. (Over other
+// rules' !important, as important.)
 function parsed(value) {
+    value = value.replace(/\s*!important$/, '');
     const rgba = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(value);
     if (rgba) {
         const hex = rgba.slice(1, 4).map(v => Number(v).toString(16).padStart(2, '0')).join('');
@@ -430,4 +438,94 @@ export function testInksAsTheStylesheetSetsThem() {
         }
     }
     assert(checked > 40, `checked ${checked}`);
+}
+
+// The control centre, a module at a time (shell/controlCentre/ink.js):
+// GNOME's controls as stylesheet.css restyles them for the island's glass.
+// Over a light window: dark type, every ink reading on its faint pill –
+// which turns dark, as faint, to show – the slider's trough still seen,
+// and what is on the accent as GNOME has it, its own type the accent's
+// (onPrimary), in either polarity. Over a dark one, as it is set. Half
+// over each: a module over each half its own polarity.
+export function testControlCentre() {
+    const CC = ['ccTabs', 'ccModule', 'ccDetail', 'ccPane'];
+    const window = '#f6f6f4';
+    const backdrop = on(window, REGULAR, LIGHT_STYLE);
+    for (const inks of CC) {
+        assertEqual(polarityFor(window, {prefer: 'dark'}, inks), 'dark', `${inks}: over a light window, dark type`);
+        assertEqual(polarityFor(window, {prefer: 'light'}, inks), 'dark', `${inks}: and in the dark style`);
+        assertEqual(polarityFor('#1e1e22', {prefer: 'dark'}, inks, LIGHT_STYLE), 'light',
+            `${inks}: over a dark one, light type (in either style)`);
+        assertEqual(polarityFor('#1e1e22', {prefer: 'light'}, inks), 'light', `${inks}: and in the dark style`);
+    }
+    const root = '.atelier-island .atelier-cc .atelier-cc-ink';
+    const rulesOf = (inks, polarity, over = backdrop) =>
+        surfaceRules({roots: [root], scope: 's', inks, backdrop: over, polarity}, palette);
+    const ruleOf = (rules, selector, property = 'color') => rules.find(rule =>
+        rule.split(' {')[0].split(',\n').includes(`${root}.s ${selector}`) && rule.includes(`{ ${property}:`));
+    const module = rulesOf('ccModule', 'dark');
+    assert(ruleOf(module, '.quick-toggle .quick-toggle-title')?.includes('rgba(0, 0, 0, 1)'),
+        `a tile's name black (${ruleOf(module, '.quick-toggle .quick-toggle-title')})`);
+    const subtitle = ruleOf(module, '.quick-toggle .quick-toggle-subtitle');
+    assert(subtitle && !subtitle.includes('rgba(0, 0, 0, 1)') && !subtitle.includes('255, 255, 255'),
+        `its state dark, quieter (${subtitle})`);
+    assertEqual(ruleOf(module, '.quick-toggle .quick-toggle-icon', 'background-color')?.split('{ ')[1],
+        'background-color: rgba(0, 0, 0, 0.16); }', 'the round icon\'s white pill a faint dark one');
+    assertEqual(ruleOf(module, '.quick-settings-system-item .icon-button', 'background-color')?.split('{ ')[1],
+        'background-color: rgba(0, 0, 0, 0.12) !important; }', 'the system buttons\' pills too, over GNOME\'s own');
+    const checked = ruleOf(module, '.quick-toggle:checked .quick-toggle-icon');
+    const accent = ruleOf(module, '.quick-toggle:checked .quick-toggle-icon', 'background-color');
+    assert(checked?.includes('color: -st-accent-fg-color;') && accent?.includes('-st-accent-color;'),
+        `a tile that is on: the accent, and its own type on it (${checked}; ${accent})`);
+    assert(module.indexOf(checked) > module.indexOf(ruleOf(module, '.quick-toggle .quick-toggle-icon')),
+        'after the rest, as specific');
+    // The slider: its icon dark, its trough dark and as seen as on
+    // Atelier's dark.
+    assert(ruleOf(module, '.quick-slider .icon-button')?.includes('rgba(0, 0, 0'), 'the slider\'s icon dark');
+    assertEqual(ruleOf(module, '.slider', '-barlevel-background-color')?.split('{ ')[1],
+        '-barlevel-background-color: rgba(0, 0, 0, 0.14); }', 'the slider\'s trough dark, as faint');
+    const fill = {color: '#000000', alpha: 0.14};
+    assert(lcOf(fill, backdrop.dark, 'dark') >= lcOf({color: '#ffffff', alpha: 0.14}, REFERENCE, 'light'),
+        `as seen as on Atelier's dark (Lc ${lcOf(fill, backdrop.dark, 'dark').toFixed(0)})`);
+    // Now Playing, the tabs, a menu's page, another tab.
+    for (const [inks, selector] of [['ccModule', '.atelier-cc-media-title'], ['ccModule', '.atelier-cc-media-artist'],
+        ['ccModule', '.atelier-cc-media-button'], ['ccTabs', '.atelier-cc-tab:checked'],
+        ['ccDetail', '.atelier-cc-detail-title'], ['ccDetail', '.popup-menu-item'],
+        ['ccPane', '.calendar .calendar-day']]) {
+        const rule = ruleOf(rulesOf(inks, 'dark'), selector);
+        assert(/color: rgba\((\d{1,2}), \1, \1/.test(rule ?? ''), `${inks} ${selector}: dark (${rule})`);
+    }
+    // Each ink of each module reads on its pill, dark under dark type.
+    for (const inks of CC) {
+        for (const ink of INKS[inks].filter(i => ['text', 'icon', 'mark'].includes(i.kind))) {
+            const shown = inkOn(ink, backdrop, 'dark', palette) ?? designedOf(ink, palette);
+            const lc = lcOf(shown, underOf(ink, backdrop.dark, 'dark'), 'dark');
+            assert(lc >= Math.min(needOf(ink, designedOf(ink, palette), 'dark'), READ_LC) - 1 || shown.alpha === 1,
+                `${inks} ${ink.selector}: reads on its pill (Lc ${lc.toFixed(0)})`);
+        }
+    }
+    // Over the dark glass it is set for: as it is, but what is on the
+    // accent (or on nothing), written as the stylesheet writes it.
+    for (const inks of CC) {
+        const dark = rulesOf(inks, 'light', on('#141a24'));
+        assertEqual(dark.filter(rule => rule.includes('rgba(')), [], `${inks}: over the dark glass, as set`);
+        assert(dark.every(rule => /accent|transparent/.test(rule)), `${inks}: only the accent's (${dark})`);
+    }
+    // A note in a menu (insensitive too) stays as it is set where the
+    // insensitive items' colour changes: over the middling grey of dark
+    // glass over a light window.
+    const grey = rulesOf('ccDetail', 'light', on(window));
+    assert(ruleOf(grey, '.popup-menu-item:insensitive') &&
+        ruleOf(grey, '.popup-inactive-menu-item:insensitive')?.includes('rgba(255, 255, 255, 1)') &&
+        grey.indexOf(ruleOf(grey, '.popup-inactive-menu-item:insensitive')) >
+            grey.indexOf(ruleOf(grey, '.popup-menu-item:insensitive')),
+    `a note white, after the insensitive items' colour (${grey.filter(rule => rule.includes('insensitive'))})`);
+    // A module over a light window, the one beside it over a dark
+    // wallpaper: each its own polarity, in either style.
+    for (const options of [{}, LIGHT_STYLE]) {
+        const prefer = options.light ? 'dark' : 'light';
+        const short = wallpaper => shortOn(wallpaper, 'ccModule', REGULAR, options);
+        assertEqual([polarityOf(short(window), {prefer}), polarityOf(short(DARK), {prefer})], ['dark', 'light'],
+            `half over a light window, half over a dark wallpaper (${prefer} preferred): dark type on one, light on the other`);
+    }
 }
