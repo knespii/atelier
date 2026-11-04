@@ -770,6 +770,9 @@ async function testControlCentre(ext) {
         host()?.moduleOf(quickSettings._volumeOutput._output)?.moduleId === 'sound' &&
         host()?.moduleOf(quickSettings._darkMode.quickSettingsItems[0])?.moduleId === 'dark',
     'GNOME\'s tiles moved into the control centre\'s modules (the system buttons, Sound, Dark Style…)');
+    const nowPlaying = modules.get('control-centre').nowPlaying;
+    check(nowPlaying && host().module('media')?.contains(nowPlaying.actor),
+        'Now Playing in its module, top right of the first pane');
     check(Main.panel.has_style_class_name('atelier-bar-clean'), 'the top bar has no background');
 
     const {indicator, toggle} = addTestTile();
@@ -1626,8 +1629,10 @@ async function testOtherExtensions(ext) {
     const name = new St.Entry({style_class: 'atelier-profile-sheet-entry'});
     const password = new St.PasswordEntry({style_class: 'atelier-lock-entry'});
     const trees = [
-        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}), toggle),
         nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}),
+            new St.Widget({style_class: 'atelier-cc-tiles atelier-cc-mac'}), toggle),
+        nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}),
+            new St.Widget({style_class: 'atelier-cc-tiles atelier-cc-mac'}),
             new St.Widget({style_class: 'quick-toggle-has-menu'}), arrow),
         nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}), today),
         nest(new St.Widget({style_class: 'atelier-island'}), new St.Widget({style_class: 'atelier-cc'}),
@@ -1655,8 +1660,9 @@ async function testOtherExtensions(ext) {
             name: rgba(node(name).get_foreground_color()),
             password: [...rgba(node(password).get_background_color()), ...rgba(node(password).get_foreground_color())],
         };
-        check(near(seen.toggle, [255, 255, 255, 23]) && near(seen.arrow, [255, 255, 255, 23]),
-            `the control centre's tiles, one shade over another extension's styles (${seen.toggle} | ${seen.arrow})`);
+        // (Clear on their module, its card the shade.)
+        check(seen.toggle[3] === 0 && seen.arrow[3] === 0,
+            `the control centre's tiles, clear on their modules over another extension's styles (${seen.toggle} | ${seen.arrow})`);
         check(near(seen.today, [255, 255, 255, 18]) && near(seen.day, [255, 255, 255, 89]),
             `its calendar keeps its cards and dim days (${seen.today} | ${seen.day})`);
         check(near(seen.title, [0, 0, 0, 0]) && near(seen.hint, [0, 0, 0, 102]) && near(seen.time, [224, 27, 36, 89]),

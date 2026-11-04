@@ -768,6 +768,11 @@
   padding: 0 8px;
 }
 
+/* (Now Playing has its own padding: shell/controlCentre/media.js.) */
+.atelier-cc-module-media {
+  padding: 0;
+}
+
 .atelier-cc-module-display,
 .atelier-cc-module-sound {
   padding: 8px 10px;
@@ -926,14 +931,14 @@
   spacing: 8px;
 }
 
-.atelier-cc-media-art {
+.atelier-cc-media-placeholder-art {
   width: 52px;
   height: 52px;
   border-radius: 12px;
   background-color: rgba(255, 255, 255, 0.12);
 }
 
-.atelier-cc-media-title {
+.atelier-cc-media-placeholder-title {
   font-size: 10pt;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.7);

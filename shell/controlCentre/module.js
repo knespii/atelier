@@ -10,6 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {whenSystemItem} from '../core/systemItem.js';
 import {DateMenuHost} from './dateMenuHost.js';
 import {QuickSettingsHost} from './host.js';
+import {NowPlayingModule} from './media.js';
 import {ControlCentrePage} from './page.js';
 import {ExtensionTray} from './tray.js';
 
@@ -29,6 +30,7 @@ export class ControlCentreModule {
         this._page = null;
         this._stopWaiting = null;
         this._mediaActor = null;
+        this._nowPlaying = null;
     }
 
     /** @returns {ControlCentrePage|null} the control centre, while it is open */
@@ -52,7 +54,12 @@ export class ControlCentreModule {
      */
     setMediaModule(actor) {
         this._mediaActor = actor;
-        this._quickSettingsHost?.setMediaModule(actor);
+        this._quickSettingsHost?.setMediaModule(actor ?? this._nowPlaying?.actor ?? null);
+    }
+
+    /** @returns {NowPlayingModule|null} the Now Playing module, while adopted */
+    get nowPlaying() {
+        return this._nowPlaying ?? null;
     }
 
     /** @returns {ExtensionTray|null} */
@@ -248,8 +255,9 @@ export class ControlCentreModule {
         if (this._quickSettingsHost)
             return;
         this._quickSettingsHost = new QuickSettingsHost(this._quickSettings);
-        if (this._mediaActor)
-            this._quickSettingsHost.setMediaModule(this._mediaActor);
+        // Now Playing (MPRIS), unless another actor was given for its place.
+        this._nowPlaying = new NowPlayingModule();
+        this._quickSettingsHost.setMediaModule(this._mediaActor ?? this._nowPlaying.actor);
         if (this._dateMenu?._messageList && this._dateMenu._calendar)
             this._dateMenuHost = new DateMenuHost(this._dateMenu);
         this._quickSettings.can_focus = false;
@@ -271,6 +279,8 @@ export class ControlCentreModule {
         this._quickSettingsHost?.disconnectObject(this);
         this._quickSettingsHost?.release();
         this._quickSettingsHost = null;
+        this._nowPlaying?.destroy();
+        this._nowPlaying = null;
         this._dateMenuHost?.release();
         this._dateMenuHost = null;
         this._tray?.restore();

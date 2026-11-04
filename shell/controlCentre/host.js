@@ -581,8 +581,8 @@ export const QuickSettingsHost = GObject.registerClass({
             x_expand: true,
             y_expand: true,
         });
-        box.add_child(new St.Widget({style_class: 'atelier-cc-media-art', x_align: Clutter.ActorAlign.START}));
-        box.add_child(new St.Label({style_class: 'atelier-cc-media-title', text: 'Not Playing', y_expand: true,
+        box.add_child(new St.Widget({style_class: 'atelier-cc-media-placeholder-art', x_align: Clutter.ActorAlign.START}));
+        box.add_child(new St.Label({style_class: 'atelier-cc-media-placeholder-title', text: 'Not Playing', y_expand: true,
             y_align: Clutter.ActorAlign.END}));
         this._placeholderActor = box;
         this._modules.get('media').addSlot(box, 'media');
