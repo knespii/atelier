@@ -3011,3 +3011,96 @@
 }
 
 /* ── end B5 ── */
+
+/* ── Now Playing (shell/controlCentre/media.js): a 2×2 module of the
+   control centre. Its card (the glass) is the slot's; this is what is on
+   it. ── */
+.atelier-cc-media {
+  min-width: 134px;
+  min-height: 134px;
+  padding: 14px 14px 10px;
+  spacing: 6px;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.atelier-cc-media-art {
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.14);
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-cc-media-art:art {
+  background-color: transparent;
+}
+
+.atelier-cc-media-art-icon {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.atelier-cc-media-labels {
+  spacing: 1px;
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-cc-media-title {
+  font-weight: bold;
+  font-size: 10.5pt;
+  color: #ffffff;
+}
+
+.atelier-cc-media:idle .atelier-cc-media-title {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.atelier-cc-media-artist {
+  font-size: 9.5pt;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.atelier-cc-media-controls {
+  spacing: 0;
+  background-color: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.atelier-cc-media-button {
+  min-height: 30px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 15px;
+  background-color: transparent;
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.atelier-cc-media-button:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc-media-button:active {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.atelier-cc-media-button:focus {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.atelier-cc-media-button:insensitive {
+  color: rgba(255, 255, 255, 0.3);
+  background-color: transparent;
+}
+
+.atelier-cc-media-button-icon {
+  icon-size: 18px;
+}
+/* ── end Now Playing ── */

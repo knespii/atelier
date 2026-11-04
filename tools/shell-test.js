@@ -1192,6 +1192,211 @@ const dbusCall = (connection, ...args) => new Promise((resolve, reject) => {
     });
 });
 
+// A media player of its own on the test session bus (MPRIS), on a
+// connection of its own: its name goes when it stops.
+const FAKE_MPRIS_ROOT = `<node><interface name="org.mpris.MediaPlayer2">
+  <method name="Raise"/><method name="Quit"/>
+  <property name="Identity" type="s" access="read"/>
+  <property name="DesktopEntry" type="s" access="read"/>
+  <property name="CanQuit" type="b" access="read"/>
+  <property name="CanRaise" type="b" access="read"/>
+</interface></node>`;
+const FAKE_MPRIS_PLAYER = `<node><interface name="org.mpris.MediaPlayer2.Player">
+  <method name="PlayPause"/><method name="Play"/><method name="Pause"/><method name="Stop"/>
+  <method name="Next"/><method name="Previous"/>
+  <property name="PlaybackStatus" type="s" access="read"/>
+  <property name="Metadata" type="a{sv}" access="read"/>
+  <property name="CanGoNext" type="b" access="read"/>
+  <property name="CanGoPrevious" type="b" access="read"/>
+  <property name="CanPlay" type="b" access="read"/>
+  <property name="CanPause" type="b" access="read"/>
+  <property name="CanControl" type="b" access="read"/>
+</interface></node>`;
+
+class FakeMediaPlayer {
+    constructor(suffix, {identity, desktopEntry = '', status = 'Paused', track = {}, canGoNext = true,
+        canGoPrevious = true, tracks = []}) {
+        this.name = `org.mpris.MediaPlayer2.${suffix}`;
+        this.calls = [];
+        this._tracks = tracks;
+        this.Identity = identity;
+        this.DesktopEntry = desktopEntry;
+        this.CanQuit = false;
+        this.CanRaise = false;
+        this.PlaybackStatus = status;
+        this._track = track;
+        this.CanGoNext = canGoNext;
+        this.CanGoPrevious = canGoPrevious;
+        this.CanPlay = true;
+        this.CanPause = true;
+        this.CanControl = true;
+        const method = name => () => {
+            this.calls.push(name);
+            if (name === 'PlayPause')
+                this.set({PlaybackStatus: this.PlaybackStatus === 'Playing' ? 'Paused' : 'Playing'});
+            else if (name === 'Next' && this._tracks.length)
+                this.setTrack(this._tracks.shift());
+        };
+        for (const name of ['Raise', 'Quit', 'PlayPause', 'Play', 'Pause', 'Stop', 'Next', 'Previous'])
+            this[name] = method(name);
+        const address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, null);
+        this._bus = Gio.DBusConnection.new_for_address_sync(address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            null, null);
+        this._root = Gio.DBusExportedObject.wrapJSObject(FAKE_MPRIS_ROOT, this);
+        this._player = Gio.DBusExportedObject.wrapJSObject(FAKE_MPRIS_PLAYER, this);
+        this._root.export(this._bus, '/org/mpris/MediaPlayer2');
+        this._player.export(this._bus, '/org/mpris/MediaPlayer2');
+        // (4: DBUS_NAME_FLAG_DO_NOT_QUEUE)
+        this._bus.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'RequestName',
+            new GLib.Variant('(su)', [this.name, 4]), null, Gio.DBusCallFlags.NONE, -1, null);
+    }
+
+    get Metadata() {
+        const {title, artists, artUrl} = this._track;
+        const data = {'mpris:trackid': new GLib.Variant('o', '/org/atelier/Track/1')};
+        if (title)
+            data['xesam:title'] = new GLib.Variant('s', title);
+        if (artists)
+            data['xesam:artist'] = new GLib.Variant('as', artists);
+        if (artUrl)
+            data['mpris:artUrl'] = new GLib.Variant('s', artUrl);
+        data['mpris:length'] = new GLib.Variant('x', 180000000);
+        return data;
+    }
+
+    setTrack(track) {
+        this._track = track;
+        this._player.emit_property_changed('Metadata', new GLib.Variant('a{sv}', this.Metadata));
+    }
+
+    set(props) {
+        for (const [name, value] of Object.entries(props)) {
+            this[name] = value;
+            this._player.emit_property_changed(name,
+                new GLib.Variant(typeof value === 'string' ? 's' : 'b', value));
+        }
+    }
+
+    stop() {
+        if (!this._bus)
+            return;
+        this._player.unexport();
+        this._root.unexport();
+        this._bus.close_sync(null);
+        this._bus = null;
+    }
+}
+
+// The control centre's Now Playing module, on its own: what it shows of
+// the players on the bus, and what its buttons tell them.
+async function testNowPlaying(ext) {
+    const {NowPlayingModule} = await import(`file://${ext.path}/shell/controlCentre/media.js`);
+    const artPath = `${OUTPUT}/now-playing-art.png`;
+    {
+        const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, 240, 240);
+        const cr = new Cairo.Context(surface);
+        const gradient = new Cairo.LinearGradient(0, 0, 240, 240);
+        gradient.addColorStopRGB(0, 0.95, 0.45, 0.25);
+        gradient.addColorStopRGB(1, 0.35, 0.2, 0.75);
+        cr.setSource(gradient);
+        cr.paint();
+        cr.setSourceRGBA(1, 1, 1, 0.85);
+        cr.arc(120, 120, 60, 0, 2 * Math.PI);
+        cr.fill();
+        cr.$dispose();
+        surface.writeToPNG(artPath);
+    }
+    const artUrl = GLib.filename_to_uri(artPath, null);
+    GLib.mkdir_with_parents(`${OUTPUT}/now-playing`, 0o755);
+    const players = [];
+    const container = new St.Bin({
+        style: 'background-color: rgba(34, 34, 40, 0.97); border-radius: 26px;',
+        x: 120, y: 640, width: 162, height: 162,
+    });
+    let module = null;
+    const shot = async name => {
+        await restPointer();
+        await Scripting.sleep(400);
+        await screenshotArea(name, 100, 620, 202, 202);
+    };
+    const count = (player, call) => player.calls.filter(c => c === call).length;
+    try {
+        const first = new FakeMediaPlayer('atelierTestA', {
+            identity: 'Atelier Test Player', status: 'Playing', canGoPrevious: false,
+            track: {title: 'Clair de Lune', artists: ['Claude Debussy'], artUrl},
+            tracks: [{title: 'Rêverie', artists: ['Claude Debussy'], artUrl}],
+        });
+        players.push(first);
+        module = new NowPlayingModule();
+        container.set_child(module.actor);
+        Main.layoutManager.addTopChrome(container);
+        check(await waitFor(() => module.state.state === 'playing' && module.titleText === 'Clair de Lune', 3000),
+            `a player playing shows (${module.state.state}, "${module.titleText}")`);
+        check(module.artistText === 'Claude Debussy', `its artist (${module.artistText})`);
+        check(module.artUri === artUrl && module._art.visible, `its picture (${module.artUri})`);
+        check(module.playPauseButton.child.icon_name === 'media-playback-pause-symbolic', 'a pause button while it plays');
+        check(!module.previousButton.reactive && module.nextButton.reactive && module.playPauseButton.reactive,
+            'previous insensitive when the player can\'t go back; next and pause not');
+        await shot('now-playing/playing');
+
+        await clickAt(...centerOf(module.playPauseButton));
+        check(await waitFor(() => first.calls.includes('PlayPause'), 2000), 'play-pause reaches the player');
+        check(await waitFor(() => module.state.state === 'paused' &&
+            module.playPauseButton.child.icon_name === 'media-playback-start-symbolic', 2000), 'and it shows paused');
+        await clickAt(...centerOf(module.nextButton));
+        check(await waitFor(() => first.calls.includes('Next'), 2000), 'next reaches the player');
+        check(await waitFor(() => module.titleText === 'Rêverie', 2000), `its next track shows (${module.titleText})`);
+        await clickAt(...centerOf(module.previousButton));
+        await Scripting.sleep(300);
+        check(!first.calls.includes('Previous'), 'an insensitive button tells it nothing');
+        await shot('now-playing/paused');
+
+        // A second player: the one playing goes first, the last to start
+        // among several playing.
+        await clickAt(...centerOf(module.playPauseButton));
+        check(await waitFor(() => module.state.state === 'playing', 2000), 'playing again');
+        const second = new FakeMediaPlayer('atelierTestB', {
+            identity: 'Second Player', desktopEntry: 'org.gnome.Music', status: 'Paused',
+            track: {title: 'Second Song', artists: ['Somebody', 'Somebody Else']},
+        });
+        players.push(second);
+        const secondSeen = await waitFor(() => module.watcher.playerNames.includes(second.name), 2000);
+        await Scripting.sleep(300);
+        check(secondSeen && module.watcher.current?.name === first.name && module.titleText === 'Rêverie',
+            'a second player, paused, doesn\'t take over one playing');
+        second.set({PlaybackStatus: 'Playing'});
+        check(await waitFor(() => module.titleText === 'Second Song', 2000),
+            `the second player shows once it plays (${module.titleText})`);
+        check(module.artistText === 'Somebody, Somebody Else', `its artists (${module.artistText})`);
+        check(module.artUri === '' && !module._art.visible && module._artIcon.visible,
+            'without a picture, its app\'s icon in the square');
+        await shot('now-playing/no-art');
+        await clickAt(...centerOf(module.nextButton));
+        check(await waitFor(() => second.calls.includes('Next'), 2000) && count(first, 'Next') === 1,
+            'the buttons go to the player shown');
+
+        second.stop();
+        check(await waitFor(() => module.titleText === 'Rêverie', 2000), 'when it goes, the first shows again');
+        first.stop();
+        check(await waitFor(() => module.state.state === 'idle' && module.titleText === 'Not Playing', 2000),
+            `no player: Not Playing (${module.titleText})`);
+        check(!module.playPauseButton.reactive && !module.nextButton.reactive && !module.previousButton.reactive &&
+            !module._art.visible && module.artistText === '', 'with its buttons insensitive and an empty square');
+        await shot('now-playing/not-playing');
+
+        const watcher = module.watcher;
+        module.destroy();
+        module = null;
+        check(!watcher.watching && container.get_child() === null, 'destroyed, it watches the bus no more');
+    } finally {
+        players.forEach(p => p.stop());
+        module?.destroy();
+        Main.layoutManager.removeChrome(container);
+        container.destroy();
+    }
+}
+
 /**
  * A made-up app with a tray icon, on a D-Bus connection of its own, as the
  * AppIndicator extension sees apps: an icon, a menu of one item, and a name
@@ -10245,6 +10450,7 @@ export async function run() {
         await part(testNotifications, ext, atelier);
         await part(testControlCentre, ext);
         await part(testControlCentrePace, ext);
+        await part(testNowPlaying, ext);
         await part(testStackStaysOpaque, ext);
         await part(testOtherExtensions, ext);
         await part(testOtherExtensionSettings, ext);
