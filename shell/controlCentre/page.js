@@ -134,6 +134,20 @@ export const ControlCentrePage = GObject.registerClass({
         this.setTab(this._shows(id) ? id : this._tabs.find(tab => this._shows(tab.id))?.id ?? this._tabs[0].id);
     }
 
+    /**
+     * Resting in the island, kept since it closed (see-through, still
+     * mapped): another tab than the Controls shown hides, so that what
+     * reads on only while it shows (Claude Code's usage, say) stops.
+     * (Cheap to style again as it opens: not GNOME's tiles, which stay.)
+     */
+    rest() {
+        const children = this.get_children();
+        for (const tab of this._tabs) {
+            if (tab.id !== 'controls' && children.includes(tab.actor))
+                tab.actor.visible = false;
+        }
+    }
+
     /** Update the tabs, e.g. when one has become (un)available. */
     sync() {
         if (!this._shows(this._tab))
@@ -148,7 +162,7 @@ export const ControlCentrePage = GObject.registerClass({
             else
                 button.remove_style_pseudo_class('checked');
             if (this.get_children().includes(tab.actor))
-                tab.actor.visible = current;
+                tab.actor.visible = current && (tab.id === 'controls' || !this._atelierResting);
         }
         this.resized();
     }

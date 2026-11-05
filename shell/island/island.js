@@ -399,6 +399,7 @@ export const Island = GObject.registerClass({
     _rest(page) {
         page.opacity = 0;
         page._atelierResting = true;
+        page.rest?.();
         Shell.util_set_hidden_from_pick(page, true);
         this.layout_manager.layout_changed();
     }
