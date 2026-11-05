@@ -487,7 +487,8 @@ export class GlassEasing {
     /**
      * @param {*} key
      * @param {object} values - the numbers it is to have
-     * @param {number} [duration] - how long it takes to get there, ms
+     * @param {number} [duration] - how long it takes to get there, ms (0:
+     *   there at once, and the others with it)
      */
     set(key, values, duration = DIM_TIME) {
         if (sameNumbers(values, this.wanted(key)))
@@ -501,7 +502,7 @@ export class GlassEasing {
         this._interface ??= new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         const animated = this._actor.mapped && St.Settings.get().enable_animations &&
             this._interface.get_boolean('enable-animations');
-        if (!animated) {
+        if (!animated || duration <= 0) {
             this._settle();
             return;
         }

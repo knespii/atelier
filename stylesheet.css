@@ -221,6 +221,13 @@
   border-radius: 26px;
 }
 
+/* Of glass, the island's corners grown out (shell/island/island.js
+   cornerRadii()): on a hidden part of it, not as a pseudo-class of the
+   island, which would restyle all that is in it. */
+.atelier-island-corners {
+  border-radius: 26px;
+}
+
 .atelier-island-idle,
 .atelier-island-switcher,
 .atelier-notification,
@@ -1825,6 +1832,10 @@
 }
 
 .atelier-island.atelier-island-notch:expanded {
+  border-radius: 0 0 26px 26px;
+}
+
+.atelier-island.atelier-island-notch .atelier-island-corners {
   border-radius: 0 0 26px 26px;
 }
 

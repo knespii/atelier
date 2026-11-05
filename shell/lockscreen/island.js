@@ -188,9 +188,8 @@ export class LockIsland {
             glass.visible = shown;
             glass.opacity = actor.opacity;
             if (shown) {
-                const node = actor.get_theme_node();
-                glass.setShape(actor.x, y, actor.width, actor.height, node.get_border_radius(St.Corner.TOPLEFT),
-                    node.get_border_radius(St.Corner.BOTTOMLEFT), this._ear * scale);
+                const [radius, bottomRadius] = actor.cornerRadii();
+                glass.setShape(actor.x, y, actor.width, actor.height, radius, bottomRadius, this._ear * scale);
             }
         }
     }

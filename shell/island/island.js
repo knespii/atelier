@@ -7,7 +7,13 @@
 // in it, say); a page may also emit 'resized' to have the change animated.
 // It may implement handleKeyPress(event), handleKeyRelease(event) and
 // handleScroll(event), which return whether they handled the event, and
-// focus(), called when it opens with the keyboard.
+// focus(), called when it opens with the keyboard. A page with keepAlive
+// set rests in the island once it has faded out, not destroyed: it may open
+// again as it is, laid out and styled (the control centre, whose GNOME
+// tiles took a frame of their own to be taken in and styled anew each time
+// it opened). Resting, it is see-through, out of reach of the pointer and
+// takes no room – but on the stage still: St drops the styles of what is
+// hidden, and works them out anew, every widget of it, as it shows again.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -63,7 +69,8 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
 
     vfunc_get_preferred_width(container, _forHeight) {
         let [min, nat] = [0, 0];
-        for (const child of container.get_children()) {
+        // (A page kept hidden for later takes no room.)
+        for (const child of container.get_children().filter(c => c.visible && !c._atelierResting)) {
             const [childMin, childNat] = child.get_preferred_width(-1);
             min = Math.max(min, childMin);
             nat = Math.max(nat, childNat);
@@ -73,7 +80,7 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
 
     vfunc_get_preferred_height(container, _forWidth) {
         let [min, nat] = [0, 0];
-        for (const child of container.get_children()) {
+        for (const child of container.get_children().filter(c => c.visible && !c._atelierResting)) {
             const [, width] = child.get_preferred_width(-1);
             const [childMin, childNat] = child.get_preferred_height(width);
             min = Math.max(min, childMin);
@@ -84,7 +91,7 @@ class AtelierIslandLayout extends Clutter.LayoutManager {
 
     vfunc_allocate(container, box) {
         const available = box.get_width();
-        for (const child of container.get_children()) {
+        for (const child of container.get_children().filter(c => c.visible)) {
             // (A page without a size is on its way out; see Island.open.)
             const [width, height] = measure(child, this.minPageWidth) ?? [0, 0];
             const x = box.x1 + Math.round((available - width) / 2);
@@ -111,7 +118,11 @@ export const Island = GObject.registerClass({
         super._init({
             style_class: 'atelier-island',
             reactive: true,
-            track_hover: true,
+            // (Its hover, and its corners as it grows, are kept off its
+            // style: a pseudo-class of its own restyles all that is in it,
+            // the control centre's tiles each time the pointer came or went
+            // and as it opened – a frame of its own.)
+            track_hover: false,
             clip_to_allocation: true,
             opacity: 0, // until it knows where it belongs
             layout_manager: new IslandLayout(),
@@ -121,6 +132,13 @@ export const Island = GObject.registerClass({
         this._shown = idle;
         this._grab = null;
         this._anchor = null;
+        this._pointerIn = false;
+        this._expanded = false;
+        // (Its corners as it grows, of glass: as the stylesheet has them,
+        // .atelier-island-corners, its own style as it is.)
+        this._corners = new St.Widget({style_class: 'atelier-island-corners', visible: false});
+        this.add_child(this._corners);
+        this.connect('notify::style-class', () => this._syncExpandedStyle());
 
         this.add_child(idle);
         idle.connectObject('changed', () => {
@@ -129,6 +147,73 @@ export const Island = GObject.registerClass({
             this.emit('idle-resized');
         }, this);
         this.connect('destroy', () => this._onDestroy());
+    }
+
+    /**
+     * @returns {boolean} whether the pointer is over it or what is in it (as
+     *   St's hover, but without the pseudo-class)
+     */
+    get hover() {
+        return this._pointerIn;
+    }
+
+    _setPointerIn(inside) {
+        if (inside === this._pointerIn)
+            return;
+        this._pointerIn = inside;
+        this.notify('hover');
+    }
+
+    vfunc_enter_event(event) {
+        const target = global.stage.get_event_actor(event);
+        this._setPointerIn(Boolean(target && this.contains(target)));
+        return super.vfunc_enter_event(event);
+    }
+
+    vfunc_leave_event(event) {
+        const related = event.get_related?.() ?? null;
+        if (!related || !this.contains(related))
+            this._setPointerIn(false);
+        return super.vfunc_leave_event(event);
+    }
+
+    // Given the keyboard as a page opens with it (Main.pushModal() gives
+    // it to the island first), no :focus of St's: it would restyle all
+    // that is in it, twice, as the control centre opens.
+    vfunc_key_focus_in() {}
+
+    vfunc_key_focus_out() {}
+
+        /** @returns {boolean} whether it is grown out (into a page, or on its way back) */
+    get expanded() {
+        return this._expanded;
+    }
+
+    /**
+     * @returns {number[]} [top, bottom] radius of its corners as it is now:
+     *   at rest, or grown out
+     */
+    cornerRadii() {
+        const styled = !this._expanded || this.has_style_pseudo_class('expanded');
+        const node = (styled ? this : this._corners).get_theme_node();
+        return [node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT)];
+    }
+
+    _setExpanded(expanded) {
+        if (expanded === this._expanded)
+            return;
+        this._expanded = expanded;
+        this._syncExpandedStyle();
+    }
+
+    // Black, it draws its corners itself: grown out, rounder by its
+    // pseudo-class. (Of glass, it draws nothing: its glass takes its corners
+    // from cornerRadii().)
+    _syncExpandedStyle() {
+        if (this._expanded && !this.has_style_class_name('atelier-island-glass'))
+            this.add_style_pseudo_class('expanded');
+        else
+            this.remove_style_pseudo_class('expanded');
     }
 
     /** @returns {St.Widget|null} the page shown instead of the idle view */
@@ -208,10 +293,25 @@ export const Island = GObject.registerClass({
      * @param {St.Widget} page
      */
     adopt(page) {
-        if (page.get_parent() === this)
+        if (page.get_parent() === this) {
+            // (A page kept since it closed: within reach again.)
+            if (page._atelierResting) {
+                page._atelierResting = false;
+                Shell.util_set_hidden_from_pick(page, false);
+                this.layout_manager.layout_changed();
+            }
+            page.show();
             return;
+        }
         page.opacity = 0;
-        this.add_child(page);
+        // (One kept for later goes under the idle view, after its corners:
+        // never the first of its children nor the last, whatever comes and
+        // goes after it – a glance, a toast. St's :first-child and
+        // :last-child of its own would restyle all that is in it.)
+        if (page.keepAlive)
+            this.insert_child_above(page, this._corners);
+        else
+            this.add_child(page);
     }
 
     /**
@@ -286,6 +386,15 @@ export const Island = GObject.registerClass({
         this.emit('page-closed');
     }
 
+    // A page kept for later, resting: as it faded out (see-through), out of
+    // reach of the pointer, taking no room.
+    _rest(page) {
+        page.opacity = 0;
+        page._atelierResting = true;
+        Shell.util_set_hidden_from_pick(page, true);
+        this.layout_manager.layout_changed();
+    }
+
     _releaseGrab() {
         if (!this._grab)
             return;
@@ -311,7 +420,12 @@ export const Island = GObject.registerClass({
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onStopped: () => {
                     // the idle view stays; a page that came back stays too
-                    if (!this._destroyed && old !== this._idle && old !== this._shown)
+                    // (and one kept for later, hidden)
+                    if (this._destroyed || old === this._idle || old === this._shown)
+                        return;
+                    if (old.keepAlive)
+                        this._rest(old);
+                    else
                         old.destroy();
                 },
             });
@@ -349,7 +463,7 @@ export const Island = GObject.registerClass({
         // The capsule's radius would turn into a stadium as it grows; pages
         // get a fixed radius. Shrinking keeps it until the capsule is small.
         if (target !== this._idle)
-            this.add_style_pseudo_class('expanded');
+            this._setExpanded(true);
 
         this.ease({
             x: Math.round(this._anchor.centerX - width / 2),
@@ -359,7 +473,7 @@ export const Island = GObject.registerClass({
             mode: Clutter.AnimationMode.EASE_OUT_EXPO,
             onStopped: () => {
                 if (!this._destroyed && this._shown === this._idle)
-                    this.remove_style_pseudo_class('expanded');
+                    this._setExpanded(false);
             },
         });
     }

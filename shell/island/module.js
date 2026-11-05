@@ -15,6 +15,7 @@ import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.j
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
+import {boundsOf} from '../../lib/glassLook.js';
 import {fullRect, morphRects} from '../../lib/moduleMorph.js';
 import {effectiveWallpaper} from '../../lib/profiles.js';
 import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
@@ -45,6 +46,9 @@ const PAGE_REGION = [400, 300];
 // The corners of a module of the control centre that has none of its own
 // (another tab's content), logical pixels: as its modules'.
 const MODULE_RADIUS = 22;
+// The pages open in the island, whose type follows what is behind them.
+const PAGE_CLASS = 'atelier-island-paged';
+const PAGE_ROOT = `.atelier-island .${PAGE_CLASS}`;
 
 // Whether a window shows anywhere in a rectangle of the stage (on the
 // workspace shown).
@@ -101,6 +105,8 @@ export class IslandModule {
         this._liquid = null;
         this._partner = null;
         this._vibrant = null;
+        this._shapeWatchers = new Set();
+        this._watchedShape = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
         this.systemActions = null;
     }
@@ -216,15 +222,18 @@ export class IslandModule {
             this);
         this._glassLook = new GlassLook(this._settings);
         this._glassLook.connectObject('changed', () => this._syncLook(), this);
+        // (Once a frame, before it is drawn – or as soon as its shape is
+        // asked for: not at each of the half a dozen properties that
+        // change in a frame as it grows.)
         this._island.connectObject(
-            'notify::x', () => this._syncShape(),
-            'notify::y', () => this._syncShape(),
-            'notify::translation-y', () => this._syncShape(),
-            'notify::width', () => this._syncShape(),
-            'notify::height', () => this._syncShape(),
-            'notify::visible', () => this._syncShape(),
-            'notify::opacity', () => this._syncShape(),
-            'style-changed', () => this._syncShape(),
+            'notify::x', () => this._queueShape(),
+            'notify::y', () => this._queueShape(),
+            'notify::translation-y', () => this._queueShape(),
+            'notify::width', () => this._queueShape(),
+            'notify::height', () => this._queueShape(),
+            'notify::visible', () => this._queueShape(),
+            'notify::opacity', () => this._queueShape(),
+            'style-changed', () => this._queueShape(),
             'page-opened', () => this._followModules(),
             'page-closed', () => this._followModules(),
             this);
@@ -236,6 +245,7 @@ export class IslandModule {
 
     disable() {
         Main.wm.removeKeybinding('atelier-power-menu');
+        this._shapeWatchers.clear();
         this._barSettings?.disconnectObject(this);
         this._barSettings = null;
         this._glassLook?.disconnectObject(this);
@@ -544,6 +554,14 @@ export class IslandModule {
         const [slotWidth] = this._slot.get_transformed_size();
         const [, panelY] = Main.panel.get_transformed_position();
         this._island.setAnchor(Math.round(x + slotWidth / 2), Math.round(panelY + (panelHeight - height) / 2));
+        // (Elsewhere, or another size, at rest: the room its glass kept is
+        // not where the control centre opens any more.)
+        const at = this._island.restRect();
+        const rest = at ? [Math.round(at[0] + at[2] / 2), at[1], at[3]].join() : '';
+        if (rest !== this._restKey) {
+            this._restKey = rest;
+            this._room = null;
+        }
         if (restyled)
             this._island.relayout();
         // (Where it rests may have moved: its type follows.)
@@ -574,6 +592,18 @@ export class IslandModule {
     }
 
     /**
+     * Follow glassShape: called whenever it changes, once the island's
+     * glass has (before the frame is drawn).
+     *
+     * @param {Function} callback
+     * @returns {Function} what stops it
+     */
+    watchGlassShape(callback) {
+        this._shapeWatchers.add(callback);
+        return () => this._shapeWatchers.delete(callback);
+    }
+
+    /**
      * @returns {number[]|null} the island's shape on the stage, as its glass
      *   has it ([x, y, width, height, radius, bottomRadius, ear]); null
      *   while it isn't shown
@@ -593,14 +623,14 @@ export class IslandModule {
     _islandShape() {
         const island = this._island;
         const ear = this._ear * St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const node = island.get_theme_node();
+        const [radius, bottomRadius] = island.cornerRadii();
         // (Moved by its translation as it comes out.)
-        return [island.x, island.y + island.translation_y, island.width, island.height,
-            node.get_border_radius(St.Corner.TOPLEFT), node.get_border_radius(St.Corner.BOTTOMLEFT), ear];
+        return [island.x, island.y + island.translation_y, island.width, island.height, radius, bottomRadius, ear];
     }
 
     _syncLook() {
         const island = this._island;
+        this._room = null;
         const notch = this._barSettings.get_string('island-shape') === 'notch';
         const glass = this._glassy();
         const style = this._barSettings.get_string('style');
@@ -642,10 +672,24 @@ export class IslandModule {
         this._queueLayout(true);
     }
 
+    // Its shape changed: its glass follows before the frame is drawn, once.
+    _queueShape() {
+        this._shapeQueued = true;
+        if (this._shapeLater || this._stopped)
+            return;
+        this._shapeLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
+            this._shapeLater = 0;
+            if (this._shapeQueued && !this._stopped && this._island)
+                this._syncShape();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     // The glass under the island and the ears take its shape, and so does
     // the liquid of a sheet dripping from it.
     _syncShape() {
         const island = this._island;
+        this._shapeQueued = false;
         if (this._stopped || (!this._glass && !this._ears && !this._liquid))
             return;
         const shown = island.visible && island.opacity > 0;
@@ -661,6 +705,22 @@ export class IslandModule {
             // modules, nothing between them.
             const modules = this._liquid ? null : this._syncModules(shape);
             this._moduleShape = modules?.[0].slice(0, 7) ?? null;
+            // Under GNOME's controls (the control centre, a tile's menu open
+            // in it), frosted: the windows' type behind them is a soft wash
+            // there, no second line of type under theirs – the same glass,
+            // darkened as every other (lib/glassLook.js FROST). At once as it
+            // opens, still as it closes, and eased back once it is at rest:
+            // GNOME's blur eased is all of what it blurs worked out anew
+            // every frame. (First: its frame is fitted round its shapes as
+            // far as the frost blurs.)
+            const frosted = (island.page?.has_style_class_name('atelier-cc') ?? false) ||
+                Boolean(this._morph?.closing);
+            this._glass.setFrost(frosted, {instant: frosted});
+            // (Room for all the modules go through as they move, while the
+            // control centre is open or closing: its texture made once, not
+            // anew at each step it grows, its live glass not moved – the
+            // whole stage drawn again.)
+            this._glass.reserve(this._morph?.room ?? this._room ?? null);
             if (modules) {
                 this._glass.setModules(modules.slice(1).map(([x, y, w, h, radius, , , small]) =>
                     [x, y, w, h, radius, small]), modules[0][7]);
@@ -669,12 +729,7 @@ export class IslandModule {
                 this._glass.setModules(null);
                 this._glass.setShape(...shape);
             }
-            this._glass.setLive(live && island.has_style_pseudo_class('expanded'));
-            // Under GNOME's controls (the control centre, a tile's menu open
-            // in it), frosted: the windows' type behind them is a soft wash
-            // there, no second line of type under theirs – the same glass,
-            // darkened as every other (lib/glassLook.js FROST).
-            this._glass.setFrost(island.page?.has_style_class_name('atelier-cc') ?? false);
+            this._glass.setLive(live && island.expanded);
         }
         if (this._liquid) {
             this._liquid.visible = shown;
@@ -684,6 +739,12 @@ export class IslandModule {
         if (this._ears) {
             this._ears.show(shown, island.opacity);
             this._ears.setShape(island.x, y, island.width, ear);
+        }
+        // (Whoever is one glass with it follows.)
+        const glassShape = JSON.stringify(this.glassShape);
+        if (glassShape !== this._watchedShape) {
+            this._watchedShape = glassShape;
+            [...this._shapeWatchers].forEach(callback => callback());
         }
     }
 
@@ -719,6 +780,10 @@ export class IslandModule {
         if (this._modulesLater)
             global.compositor.get_laters().remove(this._modulesLater);
         this._modulesLater = 0;
+        if (this._shapeLater)
+            global.compositor.get_laters().remove(this._shapeLater);
+        this._shapeLater = 0;
+        this._shapeQueued = false;
         this._modulesPage?.disconnectObject(this);
         this._modulesPage = null;
         this._morph?.timeline.stop();
@@ -748,6 +813,26 @@ export class IslandModule {
         return {rects, key};
     }
 
+    // Where the control centre's modules will be, about, before they are
+    // laid out: its page's content, centred under the island at rest.
+    _pageRoom() {
+        const page = this._island.page;
+        const rest = this._island.restRect();
+        if (!page || page !== this._modulesPage || !rest)
+            return null;
+        let [, width] = page.get_preferred_width(-1);
+        if (page.fillsWidth)
+            width = Math.max(width, this._island.layout_manager.minPageWidth ?? 0);
+        const [, height] = page.get_preferred_height(width);
+        if (!(width > 0 && height > 0))
+            return null;
+        const node = page.get_theme_node();
+        const [left, right, top, bottom] = [St.Side.LEFT, St.Side.RIGHT, St.Side.TOP, St.Side.BOTTOM]
+            .map(side => node.get_padding(side));
+        return [Math.round(rest[0] + rest[2] / 2 - width / 2) + left, rest[1] + this._island.translation_y + top,
+            width - left - right, height - top - bottom];
+    }
+
     /**
      * The island's glass while it is (or was, a moment ago) the control
      * centre: each module a piece of its own, from the capsule as it
@@ -771,7 +856,7 @@ export class IslandModule {
         if (!targets) {
             if (!morph) {
                 // (At rest: the capsule's corners, for its way back to it.)
-                if (!this._island.has_style_pseudo_class('expanded'))
+                if (!this._island.expanded)
                     this._restShape = shape;
                 return null;
             }
@@ -792,8 +877,18 @@ export class IslandModule {
             const duration = adjustAnimationTime(MORPH_TIME);
             const timeline = new Clutter.Timeline({actor: this._island, duration: Math.max(1, duration),
                 progress_mode: Clutter.AnimationMode.EASE_OUT_EXPO});
-            const next = {from, to: targets, key, shown: from, timeline, closing: !open, done: duration <= 0};
-            timeline.connect('new-frame', () => this._syncShape());
+            // (All they go through: from where they are to where they go,
+            // and what it had room for already.)
+            // (And where the modules will be, before they are laid out.)
+            // Kept once it is back at rest, for the next time: its glass not
+            // made smaller and larger again – each time, what is under it all
+            // drawn again.
+            const room = boundsOf([...from, ...targets].map(r => [r.x - (r.ear ?? 0), r.y,
+                r.width + 2 * (r.ear ?? 0), r.height]).concat([morph?.room, this._room, this._pageRoom()]
+                .filter(Boolean)));
+            this._room = room;
+            const next = {from, to: targets, key, shown: from, timeline, closing: !open, done: duration <= 0, room};
+            timeline.connect('new-frame', () => this._queueShape());
             // (Its time back at 0 once it is over.)
             timeline.connect('completed', () => {
                 next.done = true;
@@ -804,6 +899,11 @@ export class IslandModule {
                 timeline.start();
         }
         const current = this._morph;
+        if (current.to !== targets) {
+            current.room = boundsOf([current.room, ...targets.map(r => [r.x - (r.ear ?? 0), r.y,
+                r.width + 2 * (r.ear ?? 0), r.height])].filter(Boolean));
+            this._room = current.room;
+        }
         current.to = targets;
         const t = current.done ? 1 : current.timeline.get_progress();
         current.shown = morphRects(current.from, current.to, t);
@@ -846,8 +946,13 @@ export class IslandModule {
             // (At rest in the bar's one island, one glass with it.)
             rest: vibrancy.surface({...glass, id: 'island', inks: 'island', rect: rest,
                 oneWith: () => (this._partner ? 'bar' : null)}),
-            open: vibrancy.surface({...glass, id: 'island-pages', inks: 'pages', rect: () => this._pageRegion()}),
-            windows: vibrancy.surface({...glass, id: 'island-windows', inks: 'pages',
+            // (On the page open, not on the island: a class of the island's
+            // own restyles all that is in it – the control centre's tiles,
+            // kept in it – each time a glance opens over the wallpaper and
+            // the control centre over a window.)
+            open: vibrancy.surface({...glass, roots: [PAGE_ROOT], id: 'island-pages', inks: 'pages',
+                rect: () => this._pageRegion()}),
+            windows: vibrancy.surface({...glass, roots: [PAGE_ROOT], id: 'island-windows', inks: 'pages',
                 behind: () => vibrancy.windowSurface()}),
         };
         this._vibrant = {...surfaces, all: Object.values(surfaces)};
@@ -882,8 +987,12 @@ export class IslandModule {
         if (!vibrant || !island || this._stopped)
             return;
         const page = island.page;
+        // (The control centre's modules each have their own:
+        // shell/controlCentre/ink.js.)
+        if (!page || typeof page.moduleRects === 'function')
+            return;
         let overWindows = false;
-        if (page && !Main.overview.visible) {
+        if (!Main.overview.visible) {
             const [, width] = page.get_preferred_width(-1);
             const [, height] = page.get_preferred_height(width);
             const rect = island.restRect();
@@ -892,8 +1001,9 @@ export class IslandModule {
             });
         }
         const [on, off] = overWindows ? [vibrant.windows, vibrant.open] : [vibrant.open, vibrant.windows];
-        island.remove_style_class_name(off.scope);
-        island.add_style_class_name(on.scope);
+        page.add_style_class_name(PAGE_CLASS);
+        page.remove_style_class_name(off.scope);
+        page.add_style_class_name(on.scope);
     }
 
     _dropVibrancy() {
@@ -903,8 +1013,10 @@ export class IslandModule {
         this._vibrant = null;
         this._island?.disconnectObject(vibrant);
         Main.overview.disconnectObject(vibrant);
+        const page = this._island?.page;
         for (const surface of vibrant.all) {
             this._island?.remove_style_class_name(surface.scope);
+            page?.remove_style_class_name?.(surface.scope);
             surface.destroy();
         }
     }

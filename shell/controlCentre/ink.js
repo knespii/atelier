@@ -6,22 +6,29 @@
 // over a dark wallpaper light), each with its own hysteresis. Its glass is
 // as it is, darkened only as the glass-dim setting has it.
 //
-// What is behind is seen once, as the control centre opens: a small
-// picture of that part of the screen, taken before the island grows over
-// it (sampleStage()), the island at rest in it filled from what is just
-// under it. Each module's part of it, blurred as its frosted glass blurs it,
-// is what its type is to read on. Where a module lies outside it (a wider
+// What is behind is seen before the control centre opens: a small
+// picture of that part of the screen, taken while the island is at rest
+// (sampleStage()) – as the pointer comes onto it, and once it is back at
+// rest after closing – the island at rest in it filled from what is just
+// under it. As it opens, that picture is what is behind while it is
+// recent and the windows there are where they were; else one is taken
+// then. (Taking it costs a frame's worth of time: not in the frame the
+// control centre opens in, nor while it grows.) Each module's part of it,
+// blurred as its frosted glass blurs it, is what its type is to read on. Where a module lies outside it (a wider
 // tab), or once the wallpaper or GNOME's style changed, what is behind is
 // told as for the island's pages: the palette's surface where a window is
 // under it, else the wallpaper there. Nothing of it is worked out while
 // the island moves, nor per frame: as it opens, as its modules move, come
-// or go, and as the wallpaper, the palette or the style change. A module
-// whose type turns light or dark while it shows fades out first and back
-// in after.
+// or go, and as the wallpaper, the palette or the style change – and
+// never while the island moves: once it has stopped (a stylesheet made
+// anew restyles the whole shell). A module whose type turns light or dark
+// while it shows fades out first and back in after.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {layersOf, sampleStage} from '../core/vibrancy.js';
 import {windowsUnder} from '../island/module.js';
@@ -38,6 +45,13 @@ const COVERED = 0.9;
 // Its type turning: out, then in (ms).
 const VEIL_OUT = 120;
 const VEIL_IN = 180;
+// How long a picture of what is behind is taken to show it still (ms),
+// the windows there where they were.
+const FRESH = 3000;
+// How often whether the island has stopped moving is looked at (ms), and
+// for how long at most after it closed.
+const SETTLE_POLL = 50;
+const SETTLE_MAX = 2000;
 
 /**
  * @param {string} id - a module's (page.js ModuleRect)
@@ -73,6 +87,19 @@ function withHoleFilled(picture, hole) {
     return {...picture, pixels};
 }
 
+// The windows over a rectangle of the stage (on the workspace shown),
+// where they are, in the order they are stacked: a picture of what is
+// behind it shows them as long as this is the same.
+function windowsKey({x, y, width, height}) {
+    const workspace = global.workspace_manager.get_active_workspace();
+    const windows = global.display.sort_windows_by_stacking(global.get_window_actors()
+        .map(actor => actor.meta_window).filter(Boolean));
+    return windows.filter(window => !window.minimized && window.showing_on_its_workspace() &&
+        window.located_on_workspace(workspace)).map(window => [window, window.get_frame_rect()])
+        .filter(([, f]) => f.x < x + width && f.x + f.width > x && f.y < y + height && f.y + f.height > y)
+        .map(([window, f]) => `${window.get_id()}:${f.x},${f.y},${f.width},${f.height}`).join(';');
+}
+
 export class ControlCentreInk {
     /**
      * @param {object} params
@@ -86,14 +113,26 @@ export class ControlCentreInk {
         this._vibrancy = null;
         this._page = null;
         this._picture = null;
+        // (The one being taken or taken last: {key, time}; and the page's
+        // size as it opened last, for a picture taken before it opens.)
+        this._shot = null;
+        this._size = null;
         this._serial = 0;
         this._stale = 0;
         this._idleId = 0;
+        this._settleId = 0;
+        this._prefetchId = 0;
         this._background = new Gio.Settings({schema_id: 'org.gnome.desktop.background'});
         this._interface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         // (What the picture shows is not what is behind any more.)
         this._background.connectObject('changed', () => this._stale++, this);
         this._interface.connectObject('changed::color-scheme', () => this._stale++, this);
+        // (Ahead of an open: the pointer on the island at rest, or the
+        // island back at rest.)
+        this._island()?.connectObject(
+            'notify::hover', () => this._island()?.hover && this._queuePrefetch(0),
+            'page-closed', () => this._queuePrefetch(SETTLE_POLL),
+            this);
     }
 
     /**
@@ -116,10 +155,8 @@ export class ControlCentreInk {
      * @param {ControlCentrePage} page - in the island already (adopted), not shown yet
      */
     capture(page) {
-        const vibrancy = this._vibrancyNow();
         const island = this._island();
-        const rest = island?.restRect();
-        if (!vibrancy || !rest)
+        if (!this._vibrancyNow() || !island?.restRect())
             return;
         let [, width] = page.get_preferred_width(-1);
         if (page.fillsWidth)
@@ -127,19 +164,87 @@ export class ControlCentreInk {
         const [, height] = page.get_preferred_height(width);
         if (!(width > 0 && height > 0))
             return;
+        this._size = [width, height];
+        this._take();
+    }
+
+    // A picture of what is behind where the page opens, unless the one
+    // there is (or is being taken) still shows it.
+    _take() {
+        const vibrancy = this._vibrancyNow();
+        const island = this._island();
+        const rest = island?.restRect();
+        if (!vibrancy || !rest || !this._size)
+            return;
+        const [width, height] = this._size;
+        const region = {x: rest[0] + rest[2] / 2 - width / 2, y: rest[1], width, height};
+        const key = [this._stale, ...[region.x, region.y, width, height].map(Math.round),
+            Main.overview.visible, windowsKey(region)].join(' ');
+        const time = GLib.get_monotonic_time() / 1000;
+        if (this._shot?.key === key && time - this._shot.time < FRESH)
+            return;
+        this._shot = {key, time};
         const [hx, hy] = island.get_transformed_position();
         const [hw, hh] = island.get_transformed_size();
         const hole = {x: hx, y: hy, width: hw, height: hh};
         const serial = ++this._serial;
         const stale = this._stale;
-        sampleStage({x: rest[0] + rest[2] / 2 - width / 2, y: rest[1], width, height}).then(picture => {
+        sampleStage(region).then(picture => {
             if (serial !== this._serial || !this._vibrancy)
                 return;
             this._picture = picture ? {picture: withHoleFilled(picture, hole), stale} : null;
-            this._vibrancy.refresh();
+            this._refresh();
         }).catch(e => {
+            this._shot = null;
             console.warn(`Atelier: what is behind the control centre can't be seen: ${e.message}`);
         });
+    }
+
+    // Seen ahead, while the island is at rest without a page (and the
+    // control centre has opened before: its size known), once it is.
+    _queuePrefetch(delay) {
+        if (this._prefetchId || !this._size)
+            return;
+        const start = GLib.get_monotonic_time() / 1000;
+        this._prefetchId = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, delay, () => {
+            const island = this._island();
+            if (!island || island.page)
+                return this._endPrefetch();
+            if (this._moving(island)) {
+                if (GLib.get_monotonic_time() / 1000 - start > SETTLE_MAX)
+                    return this._endPrefetch();
+                return GLib.SOURCE_CONTINUE;
+            }
+            this._take();
+            return this._endPrefetch();
+        });
+    }
+
+    _endPrefetch() {
+        this._prefetchId = 0;
+        return GLib.SOURCE_REMOVE;
+    }
+
+    _moving(island) {
+        return ['x', 'width', 'height'].some(name => island.get_transition(name));
+    }
+
+    // What is behind worked out anew – once the island has stopped moving.
+    _refresh() {
+        if (this._settleId)
+            return;
+        const run = () => {
+            const island = this._island();
+            if (island && this._moving(island))
+                return false;
+            this._settleId = 0;
+            this._vibrancy?.refresh();
+            return true;
+        };
+        if (run())
+            return;
+        this._settleId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SETTLE_POLL,
+            () => (run() ? GLib.SOURCE_REMOVE : GLib.SOURCE_CONTINUE));
     }
 
     /**
@@ -163,9 +268,12 @@ export class ControlCentreInk {
 
     destroy() {
         this._serial++;
-        if (this._idleId)
-            GLib.source_remove(this._idleId);
-        this._idleId = 0;
+        for (const id of [this._idleId, this._settleId, this._prefetchId]) {
+            if (id)
+                GLib.source_remove(id);
+        }
+        this._idleId = this._settleId = this._prefetchId = 0;
+        this._island()?.disconnectObject(this);
         this._page?.disconnectObject(this);
         this._page = null;
         this._background.disconnectObject(this);
@@ -198,6 +306,7 @@ export class ControlCentreInk {
         }
         this._states.clear();
         this._picture = null;
+        this._shot = null;
     }
 
     // (Not as the page is laid out: its handlers may not restyle it.)
@@ -261,7 +370,7 @@ export class ControlCentreInk {
             }
         }
         if (changed)
-            vibrancy.refresh();
+            this._refresh();
     }
 
     _surface(rect, state, vibrancy) {

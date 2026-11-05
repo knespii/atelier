@@ -150,6 +150,9 @@ export function testMaterialValues() {
     const padded = values => [...values, ...new Array(MAX_BLUR_TAPS - values.length).fill(0)];
     assertEqual(values.blurOffsets, padded(taps.offsets.map(o => o / 2)), 'where they are, in pixels');
     assertEqual(values.blurWeights, padded(taps.weights), 'and their weights');
+    const frosted = materialValues(look, 2, {density: 2, frosted: true});
+    assertEqual(frosted.blur.slice(0, 1), [1], 'frosted already: one tap, none of its own blur');
+    assertEqual(frosted.lens, values.lens, 'the same lens');
     const dark = FACES.dark;
     assertEqual(values.face, [dark.lift, dark.T, dark.lambda, dark.g], 'the dark style\'s face');
     assertEqual(values.small, [dark.small.T, dark.small.lambda, 2, 0], 'and its small controls\'');

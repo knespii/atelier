@@ -4,6 +4,8 @@
 // and the icons extensions put into the bar; its power button opens
 // Atelier's power menu. Without the island, GNOME's menus work as usual.
 
+import St from 'gi://St';
+
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -29,6 +31,10 @@ export class ControlCentreModule {
         this._dateMenuHost = null;
         this._tray = null;
         this._page = null;
+        // (The page kept, hidden in the island, since it closed: it opens
+        // again as it is, not GNOME's tiles taken in and styled anew.)
+        this._kept = null;
+        this._watched = null;
         this._stopWaiting = null;
         this._mediaActor = null;
         this._nowPlaying = null;
@@ -176,15 +182,29 @@ export class ControlCentreModule {
             this._page.setTab(tab);
             return;
         }
-        const page = new ControlCentrePage(this._tabs(), tab);
-        // (A menu's page in place of the modules: the island eases to it.)
-        this._quickSettingsHost.connectObject('detail-changed', () => page.resized(), page);
-        page.connect('destroy', () => {
-            if (this._page !== page)
-                return;
-            this._page = null;
-            this._quickSettingsHost?.closeMenus();
-        });
+        // (Closed by the island itself – Escape, a click outside – as well.)
+        if (this._watched !== island) {
+            this._watched?.disconnectObject(this);
+            this._watched = island;
+            island.connectObject('page-closed', () => {
+                if (this._page && island.page !== this._page) {
+                    this._page = null;
+                    this._quickSettingsHost?.closeMenus();
+                }
+            }, 'destroy', () => (this._watched = null), this);
+        }
+        const tabs = this._tabs();
+        let page = this._kept;
+        if (page && (page.get_parent() !== island || !page.hasTabs(tabs))) {
+            page.destroy();
+            page = null;
+        }
+        if (page) {
+            page.reopen(tab);
+        } else {
+            page = this._newPage(tabs, tab);
+            this._kept = page;
+        }
         // (What is behind it seen first, the island still at rest.)
         island.adopt(page);
         this._ink?.capture(page);
@@ -194,6 +214,22 @@ export class ControlCentreModule {
         }
         this._page = page;
         this._ink?.attach(page);
+    }
+
+    _newPage(tabs, tab) {
+        const page = new ControlCentrePage(tabs, tab);
+        page.keepAlive = true;
+        // (A menu's page in place of the modules: the island eases to it.)
+        this._quickSettingsHost.connectObject('detail-changed', () => page.resized(), page);
+        page.connect('destroy', () => {
+            if (this._kept === page)
+                this._kept = null;
+            if (this._page !== page)
+                return;
+            this._page = null;
+            this._quickSettingsHost?.closeMenus();
+        });
+        return page;
     }
 
     close() {
@@ -282,12 +318,28 @@ export class ControlCentreModule {
         // would be swept up by the garbage collector instead, which can't
         // run their handlers and says so in the journal.
         Main.layoutManager.uiGroup.connectObject('destroy', () => this._release(), this);
+        // (Its page, kept since it closed, made anew at another scale or on
+        // other monitors: laid out and drawn for those it was made on, it
+        // was slower to draw as it opened.)
+        const drop = () => {
+            if (this._kept && this._kept !== this._page)
+                this._kept.destroy();
+        };
+        Main.layoutManager.connectObject('monitors-changed', drop, this);
+        St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', drop, this);
     }
 
     // Give everything back to GNOME.
     _release() {
         Main.layoutManager.uiGroup.disconnectObject(this);
+        Main.layoutManager.disconnectObject(this);
+        St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
         this.close();
+        this._watched?.disconnectObject(this);
+        this._watched = null;
+        // (GNOME's tiles, list and icons go back from it.)
+        this._kept?.destroy();
+        this._kept = null;
         this._ink?.destroy();
         this._ink = null;
         this._quickSettingsHost?.disconnectObject(this);

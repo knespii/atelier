@@ -12,6 +12,7 @@
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
+import Graphene from 'gi://Graphene';
 import Mtk from 'gi://Mtk';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -464,10 +465,60 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
 // or any other actor that is as large as the stage. (The group says it has
 // no size, and a plain clone scales its source to its own size: by
 // infinity, to nothing.)
+//
+// A clone is drawn anew whenever anything in what it clones is, and the
+// stage with it as far as the clone reaches – as it comes onto the stage
+// or goes too: told the part of it that shows (setShown()), it has the
+// stage drawn again only there. (Live glass, shown as the control centre
+// opened and hidden as it closed, had all of the stage drawn again each
+// time, the desktop's widgets of glass with it: 12–15 ms.)
 export const WindowsClone = GObject.registerClass(
 class AtelierWindowsClone extends Clutter.Clone {
     vfunc_allocate(box) {
         this.set_allocation(box);
+    }
+
+    /**
+     * @param {number[]|null} part - [x, y, width, height]: what shows of it,
+     *   in its own pixels; null for all of it
+     */
+    setShown(part) {
+        this._part = part;
+    }
+
+    vfunc_get_paint_volume(volume) {
+        if (!this._part || !this.has_allocation())
+            return super.vfunc_get_paint_volume(volume);
+        const [x, y, width, height] = this._part;
+        volume.set_origin(new Graphene.Point3D({x, y, z: 0}));
+        volume.set_width(width);
+        volume.set_height(height);
+        return true;
+    }
+});
+
+// The wallpaper in a surface, as large as its monitor, moved whenever the
+// surface is (its frame fitted round its shapes anew): told the part of it
+// the surface shows, it has only that drawn again as it moves. (Moved, all
+// of its monitor was drawn again – the whole stage, the desktop's widgets
+// of glass with it: 20 ms a frame at 125 %, twice as the control centre
+// opened and once as it closed.) Painted into the surface's own texture,
+// it is drawn whole there all the same.
+const ShownPart = GObject.registerClass(
+class AtelierShownPart extends Clutter.Actor {
+    /** @param {number[]|null} part - [x, y, width, height] in its own pixels; null for all of it */
+    setShown(part) {
+        this._part = part;
+    }
+
+    vfunc_get_paint_volume(volume) {
+        if (!this._part || !this.has_allocation())
+            return super.vfunc_get_paint_volume(volume);
+        const [x, y, width, height] = this._part;
+        volume.set_origin(new Graphene.Point3D({x, y, z: 0}));
+        volume.set_width(width);
+        volume.set_height(height);
+        return true;
     }
 });
 
@@ -530,6 +581,10 @@ class AtelierGlassSurface extends St.Widget {
         this._moduleLights = [];
         this._yields = yields;
         this._live = null;
+        this._liveOn = false;
+        // (Bounds on the stage its frame and its live glass keep room for
+        // meanwhile: all the island's modules go through as they move.)
+        this._reserved = null;
         // (Glass over a plain colour instead: its colour, and the actor
         // that shows it, eased in and out.)
         this._plainColor = null;
@@ -538,7 +593,7 @@ class AtelierGlassSurface extends St.Widget {
         // GNOME's style and the glass's dim, eased.
         this._eased = new GlassEasing(this, () => this._showEased());
 
-        this._wallpaper = new Clutter.Actor();
+        this._wallpaper = new ShownPart();
         this.add_child(this._wallpaper);
         // (Solid: black over it. Glass is neutral, its face as GNOME's style
         // has it, no tint of its own.)
@@ -560,6 +615,8 @@ class AtelierGlassSurface extends St.Widget {
             this.connect('notify::mapped', () => glassLight.sync());
         }
         this.connect('destroy', () => {
+            this._damage?.destroy();
+            this._damage = null;
             // (Its colour's easing stops as it goes, after this.)
             this._plain = null;
             glassLight.remove(this);
@@ -602,12 +659,14 @@ class AtelierGlassSurface extends St.Widget {
         this._syncWallpaper();
     }
 
-    // The wallpaper is drawn only where it shows: not under a source, live
-    // glass, nor a plain colour all there.
+    // The wallpaper is drawn only where it shows: not under a source, nor a
+    // plain colour all there. (Under live glass, it stays: shown again, as
+    // large as its monitor, all of the stage was drawn again – as the
+    // control centre closed, every time.)
     _syncWallpaper() {
         const covered = this._plain && this._plainColor && !this._plain.get_transition('opacity') &&
             this._plain.opacity === 255;
-        this._wallpaper.visible = !this._source && !this._live && !covered;
+        this._wallpaper.visible = !this._source && !covered;
     }
 
     /** @returns {Clutter.Actor|null} what its glass shows instead of the wallpaper */
@@ -625,7 +684,10 @@ class AtelierGlassSurface extends St.Widget {
     _syncMaterial() {
         const {light = 0} = this._eased.shown('style');
         const {dim = 0} = this._eased.shown('dim');
-        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true, dim});
+        // (Frosted all the way, what is behind is blurred so much already
+        // that the glass's own blur, dozens of taps a pixel, adds nothing.)
+        const {frost = 0} = this._eased.shown('frost');
+        this._mask.setMaterial(this._look, glassScale(), {light, shadow: true, dim, frosted: frost >= 1});
     }
 
     /**
@@ -662,11 +724,14 @@ class AtelierGlassSurface extends St.Widget {
      * frosted, and it is drawn again only when what is behind changes.)
      *
      * @param {boolean} frosted
+     * @param {object} [options]
+     * @param {boolean} [options.instant] - at once, not eased: GNOME's
+     *   blur is worked out anew every frame it eases, all of what it blurs
      */
-    setFrost(frosted) {
+    setFrost(frosted, {instant = false} = {}) {
         if (this._solid)
             return;
-        this._eased.set('frost', {frost: frosted && this._look ? 1 : 0}, FROST.time);
+        this._eased.set('frost', {frost: frosted && this._look ? 1 : 0}, instant ? 0 : FROST.time);
         this._syncFrost();
     }
 
@@ -696,9 +761,12 @@ class AtelierGlassSurface extends St.Widget {
     }
 
     // How far round its shapes what is behind is drawn, for its blur's
-    // taps (and its frost's), logical pixels.
+    // taps (and its frost's, once it has been frosted: its frame and its
+    // live glass not made larger and smaller again each time), logical
+    // pixels.
     _blurReach() {
-        return 3 * ((this._look?.blur ?? 0) + (this.frosted ? FROST.sigma : 0)) + 2;
+        this._frostable ||= this.frosted;
+        return 3 * ((this._look?.blur ?? 0) + (this._frostable ? FROST.sigma : 0)) + 2;
     }
 
     // As eased now, drawn again where its shapes are.
@@ -711,18 +779,34 @@ class AtelierGlassSurface extends St.Widget {
     }
 
     // Drawn again only within these bounds on the stage (and as far round
-    // them as its contour and shadow go).
+    // them as its contour and shadow go), with its uniforms as they are
+    // now, from the picture of what is behind it painted last. (Asked of the
+    // actor itself, even clipped to its shapes, all of what is behind was
+    // painted anew into its texture – the windows' clone too – and GNOME's
+    // frost blur all of it again, every frame the island grew: 6 ms a frame
+    // at 125 %. Asked of its effect, all of the surface was drawn again,
+    // and all under it: the desktop's widgets of glass. So the stage is
+    // asked to draw that part again, by an actor of no size of its own,
+    // not in the surface: the surface is drawn there as it was, but for
+    // its uniforms. What is behind changing has it painted anew of itself.)
     _redrawWithin([x, y, width, height]) {
+        if (!(width > 0 && height > 0) || !this.mapped)
+            return;
         const margin = Math.ceil(edgeReach(true) * glassScale()) + 2;
         // (Within the surface: past it there is nothing of it to draw – an
         // empty or upside-down rectangle is no clip to give Clutter.)
-        const x1 = Math.max(0, Math.floor(x - this.x) - margin);
-        const y1 = Math.max(0, Math.floor(y - this.y) - margin);
-        const x2 = Math.min(Math.ceil(this.width), Math.ceil(x + width - this.x) + margin);
-        const y2 = Math.min(Math.ceil(this.height), Math.ceil(y + height - this.y) + margin);
+        const [sx, sy] = this.get_transformed_position();
+        const x1 = Math.max(sx, Math.floor(x - this.x + sx) - margin);
+        const y1 = Math.max(sy, Math.floor(y - this.y + sy) - margin);
+        const x2 = Math.min(sx + Math.ceil(this.width), Math.ceil(x + width - this.x + sx) + margin);
+        const y2 = Math.min(sy + Math.ceil(this.height), Math.ceil(y + height - this.y + sy) + margin);
         if (!(x2 > x1 && y2 > y1))
             return;
-        this.queue_redraw_with_clip(new Mtk.Rectangle({x: x1, y: y1, width: x2 - x1, height: y2 - y1}));
+        if (!this._damage) {
+            this._damage = new Clutter.Actor({reactive: false});
+            global.stage.add_child(this._damage);
+        }
+        this._damage.queue_redraw_with_clip(new Mtk.Rectangle({x: x1, y: y1, width: x2 - x1, height: y2 - y1}));
     }
 
     // What the shader draws within: its shapes, their contour and shadow.
@@ -751,6 +835,16 @@ class AtelierGlassSurface extends St.Widget {
     _build() {
         this._bgManager?.destroy();
         this._bgManager = null;
+        // (Its live glass made anew, as large as the stage is now.)
+        if (this._live) {
+            const live = this._liveOn;
+            this._live.destroy();
+            this._live = null;
+            this._livePlace = null;
+            this._liveOn = false;
+            if (live)
+                this.setLive(true);
+        }
         const monitor = Main.layoutManager.monitors[this._monitorIndex];
         if (!monitor)
             return;
@@ -788,7 +882,7 @@ class AtelierGlassSurface extends St.Widget {
         const band = this._band;
         if (!band)
             return;
-        const bounds = this._bounds();
+        const bounds = this._roomBounds();
         let need;
         if (bounds) {
             const scale = glassScale();
@@ -818,6 +912,9 @@ class AtelierGlassSurface extends St.Widget {
         this.set_size(width, height);
         this._fill?.set_size(width, height);
         this._plain?.set_size(width, height);
+        // (What of the wallpaper shows: told first, so that only that is
+        // drawn again as it moves.)
+        this._wallpaper.setShown([x - this._monitorAt[0], y - this._monitorAt[1], width, height]);
         this._wallpaper.set_position(this._monitorAt[0] - x, this._monitorAt[1] - y);
         this._syncSource();
     }
@@ -885,6 +982,28 @@ class AtelierGlassSurface extends St.Widget {
         return this._modules;
     }
 
+    /**
+     * Keep room for its shapes within these bounds, in stage coordinates,
+     * while they move through them: its texture is made once that large
+     * (not anew at each step it grows), and its live glass shows all of
+     * it (not moved and resized, the whole stage drawn again, every step).
+     *
+     * @param {number[]|null} bounds - [x, y, width, height]; null for none
+     */
+    reserve(bounds) {
+        bounds = bounds && bounds[2] > 0 && bounds[3] > 0 ? bounds.map(v => Math.round(v)) : null;
+        if (bounds?.join() === this._reserved?.join())
+            return;
+        this._reserved = bounds;
+        this._shapesChanged();
+    }
+
+    // Its shapes' bounds, and the room kept for them.
+    _roomBounds() {
+        const bounds = this._bounds();
+        return this._reserved && bounds ? boundsOf([bounds, this._reserved]) : bounds;
+    }
+
     _applyModules() {
         const modules = (this._modules ?? []).map(([x, y, width, height, radius, small]) =>
             [x - this.x, y - this.y, width, height, radius, small]);
@@ -899,23 +1018,33 @@ class AtelierGlassSurface extends St.Widget {
      * @param {boolean} live
      */
     setLive(live) {
-        if (this._solid || live === (this._live !== null))
+        if (this._solid || live === this._liveOn)
             return;
+        this._liveOn = live;
         if (live) {
-            this._live = new St.Widget({clip_to_allocation: true});
-            const windows = new WindowsClone({source: global.window_group});
-            windows.set_size(global.stage.width, global.stage.height);
-            this._live.add_child(windows);
-            this.insert_child_above(this._live, this._source ?? this._wallpaper);
+            // (Kept, hidden, once it was live: the windows' clone is as
+            // large as the stage, and the whole stage is drawn again as it
+            // goes onto it or off.)
+            if (!this._live) {
+                this._live = new St.Widget({clip_to_allocation: true, visible: false});
+                const windows = new WindowsClone({source: global.window_group});
+                windows.set_size(global.stage.width, global.stage.height);
+                this._live.add_child(windows);
+                this.insert_child_above(this._live, this._source ?? this._wallpaper);
+            }
             this._source?.hide();
             this._syncWallpaper();
             this._syncLive();
         } else {
-            this._live.destroy();
-            this._live = null;
+            this._live.hide();
             this._source?.show();
             this._syncWallpaper();
         }
+    }
+
+    /** @returns {boolean} whether it is live glass now (setLive()) */
+    get live() {
+        return this._liveOn;
     }
 
     /**
@@ -966,9 +1095,13 @@ class AtelierGlassSurface extends St.Widget {
     // The live glass where the shapes are, and as far around as the blur's
     // taps reach, so its edges are blurred like the rest.
     _syncLive() {
-        if (!this._live)
+        if (!this._live || !this._liveOn)
             return;
         const boxes = [];
+        if (this._reserved) {
+            const [x, y, width, height] = this._reserved;
+            boxes.push([x, y, x + width, y + height]);
+        }
         if (this._shape) {
             const [x, y, width, height, , , ear] = this._shape;
             boxes.push([x - ear, y, x + width + ear, y + height]);
@@ -996,10 +1129,20 @@ class AtelierGlassSurface extends St.Widget {
         const y1 = Math.max(this.y, down(Math.min(...boxes.map(b => b[1])) - margin));
         const x2 = Math.min(this.x + this.width, up(Math.max(...boxes.map(b => b[2])) + margin));
         const y2 = Math.min(this.y + this.height, up(Math.max(...boxes.map(b => b[3])) + margin));
-        this._live.set_position(x1 - this.x, y1 - this.y);
-        this._live.set_size(Math.max(1, x2 - x1), Math.max(1, y2 - y1));
-        // (What is at x1, y1 on the stage at its corner.)
-        this._live.get_first_child().set_position(-x1, -y1);
+        // (Only when it changes: the windows' clone moved is the whole
+        // stage drawn again.)
+        const place = [x1 - this.x, y1 - this.y, Math.max(1, x2 - x1), Math.max(1, y2 - y1)];
+        if (place.join() !== this._livePlace?.join()) {
+            this._livePlace = place;
+            // (What shows of the windows, told first: then the clone is
+            // moved and drawn again only there.)
+            const windows = this._live.get_first_child();
+            windows.setShown([x1, y1, place[2], place[3]]);
+            this._live.set_position(place[0], place[1]);
+            this._live.set_size(place[2], place[3]);
+            // (What is at x1, y1 on the stage at its corner.)
+            windows.set_position(-x1, -y1);
+        }
         this._live.show();
     }
 

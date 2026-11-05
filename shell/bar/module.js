@@ -202,6 +202,8 @@ export class BarModule {
         this._island?.setMinPageWidth(0);
         this._island?.disconnectObject(this);
         this._island = null;
+        this._unwatchShape?.();
+        this._unwatchShape = null;
         this._modules.get('island')?.setGlassPartner(null);
         this._glassLook?.disconnectObject(this);
         this._glassLook?.destroy();
@@ -314,6 +316,10 @@ export class BarModule {
     _followIsland() {
         this._island?.disconnectObject(this);
         this._island = this._modules.get('island')?.island ?? null;
+        // (The island's glass, as it changes shape: the control centre's
+        // modules moving, which its own properties don't say.)
+        this._unwatchShape?.();
+        this._unwatchShape = this._modules.get('island')?.watchGlassShape?.(() => this._syncPartners()) ?? null;
         this._island?.connectObject(
             'notify::x', () => this._place(),
             'notify::width', () => this._place(),

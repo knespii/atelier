@@ -82,6 +82,12 @@ export const ControlCentrePage = GObject.registerClass({
         });
 
         global.focus_manager.add_group(this);
+        // What has the keyboard as it opens: not the page itself, whose
+        // :focus would restyle all that is in it as it opens and closes
+        // (GNOME's tiles: a frame of its own). A plain actor, never shown,
+        // takes no room and no pseudo-class.
+        this._focusSink = new Clutter.Actor({visible: false});
+        this.insert_child_at_index(this._focusSink, 0);
         // Each tab as wide as it needs, the island changing shape between
         // them; as wide as the island, when it is wider (one island).
         this.fillsWidth = true;
@@ -104,6 +110,28 @@ export const ControlCentrePage = GObject.registerClass({
         this.sync();
         if (changed)
             this._tabs.find(tab => tab.id === id).onShow?.();
+    }
+
+    /**
+     * @param {Tab[]} tabs
+     * @returns {boolean} whether it has these tabs, their contents in it
+     *   still (kept since it closed, it may open again as it is)
+     */
+    hasTabs(tabs) {
+        const children = this.get_children();
+        return tabs.length === this._tabs.length && tabs.every((tab, i) => tab.id === this._tabs[i].id &&
+            tab.actor === this._tabs[i].actor && children.includes(tab.actor));
+    }
+
+    /**
+     * Opening again (kept since it closed): on this tab, which comes up as
+     * when the page was new.
+     *
+     * @param {string} id - a tab's id
+     */
+    reopen(id) {
+        this._tab = null;
+        this.setTab(this._shows(id) ? id : this._tabs.find(tab => this._shows(tab.id))?.id ?? this._tabs[0].id);
     }
 
     /** Update the tabs, e.g. when one has become (un)available. */
@@ -168,7 +196,7 @@ export const ControlCentrePage = GObject.registerClass({
     // Keys work from here (Tab and arrows move into the controls) without a
     // focus ring on the first one when it was opened with the mouse.
     focus() {
-        this.grab_key_focus();
+        this._focusSink.grab_key_focus();
     }
 
     handleKeyPress(event) {
