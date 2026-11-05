@@ -2,6 +2,7 @@
 // run() once startup is complete and exits when it returns.
 
 import Cairo from 'cairo';
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GdkPixbuf from 'gi://GdkPixbuf';
@@ -756,6 +757,154 @@ function addTestButton() {
     return button;
 }
 
+// GNOME's brightness and volume sliders, shown as they would be on a laptop
+// with sound (headless, there is neither: GNOME hides them), at some level:
+// the control centre's capsules show for them; Bluetooth and Airplane Mode
+// too, as on the user's laptop. (fake.restore() puts them back as they
+// were.)
+function fakeLevelSliders() {
+    const quickSettings = Main.panel.statusArea.quickSettings;
+    const brightness = quickSettings._brightness?.quickSettingsItems[0] ?? null;
+    const output = quickSettings._volumeOutput?._output ?? null;
+    const was = [brightness, output].filter(Boolean).map(item => ({
+        item, visible: item.visible, value: item.slider.value, menuEnabled: item.menuEnabled, gicon: item.gicon,
+    }));
+    const rows = [quickSettings._bluetooth?.quickSettingsItems[0], quickSettings._rfkill?.quickSettingsItems[0]]
+        .filter(Boolean).map(item => [item, item.visible]);
+    rows.forEach(([item]) => (item.visible = true));
+    if (brightness) {
+        brightness.visible = true;
+        brightness.slider.value = 0.7;
+    }
+    if (output) {
+        output.visible = true;
+        output.gicon = new Gio.ThemedIcon({name: 'audio-volume-medium-symbolic'});
+        output.slider.value = 0.4;
+        // (A second output to choose: GNOME's menu then.)
+        output.menuEnabled = true;
+    }
+    return {
+        brightness, output,
+        restore() {
+            for (const {item, visible, value, menuEnabled, gicon} of was) {
+                item.slider.value = value;
+                item.menuEnabled = menuEnabled;
+                item.gicon = gicon;
+                item.visible = visible;
+            }
+            rows.forEach(([item, visible]) => (item.visible = visible));
+        },
+    };
+}
+
+// The labels in the control centre's modules cut short ("Airplane M…").
+function cutShort(root) {
+    const cut = [];
+    const walk = actor => {
+        if (!actor.visible)
+            return;
+        if (actor instanceof St.Label && actor.text?.trim() && actor.mapped &&
+            actor.clutter_text.get_layout().is_ellipsized())
+            cut.push(`"${actor.text}" (${Math.round(actor.width)} px)`);
+        actor.get_children().forEach(walk);
+    };
+    walk(root);
+    return cut;
+}
+
+// Brightness and volume as capsules (shell/controlCentre/capsule.js), the
+// control centre open: tall, filled as far as GNOME's sliders go and the
+// other way round – dragged, clicked, scrolled, stepped with the keys –
+// GNOME's mute from a click on the volume's icon, its outputs' menu from
+// the chevron; no name cut short.
+async function controlCentreCapsules(ext, fake) {
+    const host = ext.stateObj.modules.get('control-centre').controls;
+    const island = ext.stateObj.modules.get('island').island;
+    const capsuleOf = id => host.module(id)?.slots[0]?.get_child() ?? null;
+    const brightness = capsuleOf('brightness');
+    const volume = capsuleOf('volume');
+    if (!check(brightness?.mapped && volume?.mapped && brightness.item === fake.brightness &&
+        volume.item === fake.output && !fake.output.get_parent() && !fake.brightness.get_parent(),
+    'brightness and volume as capsules of their own, GNOME\'s sliders kept off the stage'))
+        return;
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const [bx] = brightness.get_transformed_position();
+    const [vx] = volume.get_transformed_position();
+    check(volume.height > 1.8 * volume.width && Math.abs(brightness.height - volume.height) < 1 &&
+        vx > bx && Math.abs(vx - bx - brightness.width - 10 * scale) < 4,
+    `tall, side by side (${Math.round(brightness.width)} × ${Math.round(brightness.height)}, ` +
+        `${Math.round(volume.width)} × ${Math.round(volume.height)})`);
+    const near = (a, b, by = 0.03) => Math.abs(a - b) <= by;
+    check(near(brightness.level, 0.7) && near(volume.level, 0.4),
+        `filled as far as GNOME's sliders go (${brightness.level.toFixed(2)}, ${volume.level.toFixed(2)})`);
+    check(brightness.accessible_role === Atk.Role.SLIDER && volume.accessible_name === 'Volume' &&
+        brightness.accessible_name === 'Brightness',
+    `sliders to a screen reader, named (${brightness.accessible_name}, ${volume.accessible_name})`);
+
+    // GNOME's slider moved: the capsule follows, eased.
+    fake.brightness.slider.value = 0.3;
+    check(await waitFor(() => near(brightness.level, 0.3, 0.005), 1000),
+        `GNOME's brightness at 30 %: the capsule a third full (${brightness.level.toFixed(2)})`);
+
+    // Dragged up a quarter of its height: a quarter more.
+    const [x, y] = volume.get_transformed_position();
+    const [width, height] = volume.get_transformed_size();
+    const middle = x + width / 2;
+    await pointerDown(middle, y + height * 0.5);
+    await pointerAlong(middle, y + height * 0.5, middle, y + height * 0.25);
+    await pointerUp();
+    check(near(fake.output.slider.value, 0.65) && near(volume.level, 0.65),
+        `dragged up a quarter, GNOME's volume a quarter more (${fake.output.slider.value.toFixed(2)})`);
+    // Clicked high up the brightness: there.
+    const [bX, bY] = brightness.get_transformed_position();
+    const [bW, bH] = brightness.get_transformed_size();
+    await clickAt(bX + bW / 2, bY + bH * 0.2);
+    check(near(fake.brightness.slider.value, 0.8),
+        `clicked high up, the brightness there (${fake.brightness.slider.value.toFixed(2)})`);
+    // Scrolled: as GNOME's slider scrolls.
+    const before = fake.brightness.slider.value;
+    await pointerTo(bX + bW / 2, bY + bH * 0.5);
+    virtualPointer.notify_discrete_scroll(GLib.get_monotonic_time(), Clutter.ScrollDirection.UP,
+        Clutter.ScrollSource.WHEEL);
+    check(await waitFor(() => fake.brightness.slider.value > before + 0.01, 1000),
+        `scrolled up, brighter (${before.toFixed(2)} → ${fake.brightness.slider.value.toFixed(2)})`);
+    // Keys: Up a step, Page Down a page (onto the pages' grid).
+    fake.brightness.slider.value = 0.5;
+    brightness.grab_key_focus();
+    await pressKey(Clutter.KEY_Up);
+    const up = fake.brightness.slider.value;
+    await pressKey(Clutter.KEY_Page_Down);
+    const down = fake.brightness.slider.value;
+    check(near(up, 0.55, 0.001) && near(down, 0.4, 0.001) && island.page?.contains(brightness),
+        `Up a step (${up.toFixed(2)}), Page Down a page (${down.toFixed(2)})`);
+    island.page?.grab_key_focus();
+
+    // A click on the volume's icon: GNOME's mute (its icon's own click).
+    let mutes = 0;
+    const muteId = fake.output.connect('icon-clicked', () => mutes++);
+    const value = fake.output.slider.value;
+    await clickAt(...centerOf(volume.icon));
+    fake.output.disconnect(muteId);
+    check(mutes === 1 && fake.output.slider.value === value,
+        `a click on the volume's icon mutes, as GNOME's does (${mutes}; ${value.toFixed(2)})`);
+    await restPointer();
+    await screenshotIsland('21-control-centre-capsules', 700);
+
+    // Its chevron: GNOME's menu of outputs, as a page.
+    check(volume.menuButton.mapped && !brightness.menuButton.visible,
+        'a chevron for the outputs\' menu on the volume (not on the brightness: GNOME has none)');
+    await clickAt(...centerOf(volume.menuButton));
+    check(await waitFor(() => host.detailItem === fake.output && host.detail.mapped, 1500),
+        'the chevron opens GNOME\'s menu of outputs as a page');
+    await pressKey(Clutter.KEY_Escape);
+    check(await waitFor(() => !fake.output.menu.isOpen && host.grid.mapped, 1500) && island.page !== null,
+        'Esc goes back to the modules');
+    await restPointer();
+
+    const cut = cutShort(host.grid);
+    check(cut.length === 0, `no name cut short (${cut.join(', ') || 'none'})`);
+}
+
 async function testControlCentre(ext) {
     const modules = ext.stateObj.modules;
     if (!check(modules.get('control-centre') !== null, 'control centre module running'))
@@ -765,11 +914,12 @@ async function testControlCentre(ext) {
     const host = () => modules.get('control-centre').controls;
     const systemTile = quickSettings._system._systemItem;
     const gnomeTiles = () => quickSettings.menu._grid.get_children().filter(c => c instanceof St.Widget);
+    const fake = fakeLevelSliders();
     check(quickSettings.menu._grid.get_parent() === quickSettings.menu.box && gnomeTiles().length === 0 &&
         host()?.moduleOf(systemTile)?.moduleId === 'system' &&
-        host()?.moduleOf(quickSettings._volumeOutput._output)?.moduleId === 'sound' &&
+        host()?.moduleOf(quickSettings._volumeOutput._output)?.moduleId === 'volume' &&
         host()?.moduleOf(quickSettings._darkMode.quickSettingsItems[0])?.moduleId === 'dark',
-    'GNOME\'s tiles moved into the control centre\'s modules (the system buttons, Sound, Dark Style…)');
+    'GNOME\'s tiles moved into the control centre\'s modules (the system buttons, the volume, Dark Style…)');
     const nowPlaying = modules.get('control-centre').nowPlaying;
     check(nowPlaying && host().module('media')?.contains(nowPlaying.actor),
         'Now Playing in its module, top right of the first pane');
@@ -811,6 +961,7 @@ async function testControlCentre(ext) {
     `the page tells where its modules are: ${rects.map(r => `${r.id} ${Math.round(r.x)},${Math.round(r.y)} ` +
         `${Math.round(r.width)}×${Math.round(r.height)} r${Math.round(r.radius)}`).join('; ')}`);
     await screenshotIsland('21-control-centre', 700);
+    await controlCentreCapsules(ext, fake);
 
     // A tile's menu: a page of its own, in place of the modules.
     let changes = 0;
@@ -928,6 +1079,11 @@ async function testControlCentre(ext) {
         dateMenu._messageList.get_parent()?.name === 'calendarArea' &&
         dateMenu._eventsItem.get_parent() === dateMenu._clocksItem.get_parent() &&
         Main.panel._rightBox.contains(button.container), 'turned off, GNOME\'s menus and the icons are back');
+    const gnomeGrid0 = quickSettings.menu._grid;
+    check([fake.brightness, fake.output].every(item => item.get_parent() === gnomeGrid0 && item.visible &&
+        item.slider.get_parent()?.get_parent()?.get_parent() === item &&
+        gnomeGrid0.layout_manager.get_child_meta(gnomeGrid0, item).column_span === 2),
+    'GNOME\'s brightness and volume sliders back in its grid, shown, a row wide, as they were');
     Main.panel.toggleQuickSettings();
     check(await waitFor(() => quickSettings.menu.isOpen, 1000) && island.page === null,
         'and GNOME\'s menu opens again');
@@ -953,6 +1109,7 @@ async function testControlCentre(ext) {
     await waitFor(() => island.page === null && !island.busy, 1000);
 
     await controlCentreReads(ext, toggle);
+    fake.restore();
 
     button.destroy();
     await Scripting.sleep(100);
@@ -1020,6 +1177,7 @@ async function testControlCentrePictures(ext) {
     global.window_group.add_child(area);
     const host = modules.get('control-centre').controls;
     const wifi = Main.panel.statusArea.quickSettings._network?._wirelessToggle;
+    const fake = fakeLevelSliders();
     try {
         for (const behind of ['wallpaper', 'window']) {
             area.visible = behind === 'window';
@@ -1043,7 +1201,7 @@ async function testControlCentrePictures(ext) {
                             `${Math.round(b.get_width())}×${Math.round(b.get_height())}`);
                         actor.get_children().forEach(c => dump(c, depth + 1));
                     };
-                    ['display', 'system'].forEach(id => dump(host.module(id), 0));
+                    ['volume', 'system'].forEach(id => dump(host.module(id), 0));
                 }
                 const menu = wifi?.visible ? wifi.menu : toggle.menu;
                 menu.open(PopupAnimation.NONE);
@@ -1060,6 +1218,7 @@ async function testControlCentrePictures(ext) {
         results.push(`INFO  pictures of the control centre's modules in ${OUTPUT}/control-centre-mac`);
     } finally {
         area.destroy();
+        fake.restore();
         desktopInterface.set_string('color-scheme', scheme);
         bar.reset('surface');
         indicator.quickSettingsItems.forEach(item => item.destroy());

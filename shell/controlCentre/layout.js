@@ -82,7 +82,7 @@ class AtelierControlModule extends St.BoxLayout {
      * Hold a tile, among the others by rank.
      *
      * @param {Clutter.Actor} item
-     * @param {string} kind - 'row', 'square', 'slider', 'compact', 'wide', 'media'
+     * @param {string} kind - 'row', 'square', 'slider', 'capsule', 'compact', 'wide', 'media'
      * @param {number} rank
      * @returns {St.Bin} its slot
      */
@@ -90,7 +90,7 @@ class AtelierControlModule extends St.BoxLayout {
         const slot = new St.Bin({
             style_class: `atelier-cc-slot atelier-cc-${kind}`,
             x_expand: kind !== 'compact',
-            y_expand: ['row', 'square', 'media', 'wide', 'system'].includes(kind),
+            y_expand: ['row', 'square', 'media', 'wide', 'system', 'capsule'].includes(kind),
         });
         slot._rank = rank;
         moveTo(item, () => slot.set_child(item));

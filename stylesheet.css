@@ -717,7 +717,7 @@
 }
 
 /* The Controls tab as macOS lays out its Control Center: rounded modules
-   (shell/controlCentre/layout.js) in a grid of 80 px cells, GNOME's tiles in
+   (shell/controlCentre/layout.js) in a grid of 96 px cells, GNOME's tiles in
    them as a round icon – the accent's when on – with their name beside it,
    or only the icon in a square. (In the island, over another extension's
    styles even when they are !important: Blur my Shell's popup blur restyles
@@ -773,9 +773,72 @@
   padding: 0;
 }
 
-.atelier-cc-module-display,
-.atelier-cc-module-sound {
-  padding: 8px 10px;
+/* Brightness and volume (and the microphone's while an app records) as
+   iOS has them: tall capsules filled from the bottom as far as the level
+   goes, the icon low in them – dark on the fill, light on the glass – no
+   knob (shell/controlCentre/capsule.js). */
+.atelier-cc-module-brightness,
+.atelier-cc-module-volume,
+.atelier-cc-module-microphone {
+  padding: 0;
+}
+
+.atelier-cc-capsule {
+  border-radius: 21px;
+}
+
+.atelier-island .atelier-cc-mac .atelier-cc-capsule:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-cc-capsule-fill {
+  border-radius: 21px;
+  background-color: rgba(255, 255, 255, 0.92);
+}
+
+.atelier-cc-capsule-icon,
+.atelier-cc-capsule-icon-filled {
+  icon-size: 24px;
+}
+
+.atelier-cc-capsule-icon {
+  color: #ffffff;
+}
+
+.atelier-cc-capsule-icon-filled {
+  color: #2c2c2e;
+}
+
+.atelier-cc-capsule-icon-box {
+  margin-bottom: 20px;
+}
+
+/* (The menu of outputs: a chevron at the top.) */
+.atelier-cc-capsule-menu {
+  margin: 8px;
+  padding: 6px;
+  border-radius: 999px;
+}
+
+.atelier-cc-capsule-menu:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.atelier-cc-capsule-menu:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+.atelier-cc-capsule-menu-icon,
+.atelier-cc-capsule-menu-icon-filled {
+  icon-size: 14px;
+}
+
+.atelier-cc-capsule-menu-icon {
+  color: #ffffff;
+}
+
+.atelier-cc-capsule-menu-icon-filled {
+  color: #2c2c2e;
 }
 
 .atelier-island .atelier-cc-mac .quick-toggle,

@@ -19,20 +19,26 @@ import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
+import {LevelCapsule} from './capsule.js';
 import {ControlModule, moduleGrid, rectIn} from './layout.js';
 
 // The modules in their order (lib/controlGrid.js packs them so): the first
-// pane like the left of macOS's Control Center, the second its sliders and
-// the system buttons; extensions' tiles where there is room.
+// pane like the left of macOS's Control Center – connectivity, Now
+// Playing, Do Not Disturb – the second like iOS's: brightness and volume
+// as tall capsules side by side (the microphone's beside them while an
+// app records), the squares beside them, the system buttons under them;
+// extensions' tiles where there is room.
 const MODULES = [
     ['connectivity', {cols: 2, pane: 0, rowPerSlot: true}],
     ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true}],
-    ['dark', {cols: 1, pane: 0}],
-    ['night', {cols: 1, pane: 0}],
     ['focus', {cols: 2, pane: 0}],
-    ['power-mode', {cols: 1, pane: 0}],
-    ['display', {cols: 4, pane: 1, title: 'Display', horizontal: true}],
-    ['sound', {cols: 4, pane: 1, title: 'Sound'}],
+    ['brightness', {cols: 1, rows: 2, pane: 1, fixed: true}],
+    ['volume', {cols: 1, rows: 2, pane: 1, fixed: true}],
+    ['microphone', {cols: 1, rows: 2, pane: 1, fixed: true}],
+    ['dark', {cols: 1, pane: 1}],
+    ['night', {cols: 1, pane: 1}],
+    ['power-mode', {cols: 1, pane: 1}],
+    ['keyboard', {cols: 1, pane: 1}],
     ['system', {cols: 4, pane: 1}],
 ];
 const ORDER = MODULES.map(([id]) => id);
@@ -52,10 +58,10 @@ const BY_CLASS = {
     NightLightToggle: ['night', 'square', 0],
     DoNotDisturbToggle: ['focus', 'row', 0],
     PowerProfilesToggle: ['power-mode', 'square', 0],
-    BrightnessItem: ['display', 'slider', 0],
-    KeyboardBrightnessToggle: ['display', 'compact', 1],
-    OutputStreamSlider: ['sound', 'slider', 0],
-    InputStreamSlider: ['sound', 'slider', 1],
+    BrightnessItem: ['brightness', 'capsule', 0],
+    KeyboardBrightnessToggle: ['keyboard', 'square', 0],
+    OutputStreamSlider: ['volume', 'capsule', 0],
+    InputStreamSlider: ['microphone', 'capsule', 0],
     SystemItem: ['system', 'system', 0],
     BackgroundAppsToggle: ['footer', 'wide', 0],
 };
@@ -387,9 +393,27 @@ export const QuickSettingsHost = GObject.registerClass({
         // tall as they need: the buttons round.)
         if (kind === 'system' || kind === 'wide')
             tweak(item, {y_align: Clutter.ActorAlign.CENTER});
-        const slot = module.addSlot(item, kind, rank);
+        // A slider of GNOME's as a capsule (shell/controlCentre/capsule.js):
+        // GNOME's own kept off the stage meanwhile, alive, the capsule
+        // showing while it would.
+        let capsule = null;
+        if (kind === 'capsule' && item instanceof QuickSettings.QuickSlider && item.slider) {
+            capsule = new LevelCapsule(item, id);
+            item.get_parent()?.remove_child(item);
+        } else if (kind === 'capsule') {
+            kind = 'slider';
+        }
+        const slot = module.addSlot(capsule ?? item, kind, rank);
+        if (capsule) {
+            capsule.visible = item.visible;
+            module.sync();
+        }
         item.connectObject(
-            'notify::visible', () => module.sync(),
+            'notify::visible', () => {
+                if (capsule)
+                    capsule.visible = item.visible;
+                module.sync();
+            },
             'destroy', () => this._forget(item),
             this);
         if (item.menu && item.menu !== this._menu) {
@@ -400,7 +424,7 @@ export const QuickSettingsHost = GObject.registerClass({
                     this._closeDetail(item);
             }, this);
         }
-        this._items.set(item, {slot, module, span, tweaks});
+        this._items.set(item, {slot, module, span, tweaks, capsule});
     }
 
     // A tile destroyed (its extension turned off, say) while here.
@@ -413,6 +437,7 @@ export const QuickSettingsHost = GObject.registerClass({
         if (this._detailItem === item)
             this._closeDetail(item);
         entry.module.removeSlot(entry.slot);
+        entry.capsule?.destroy();
         const extra = this._extras.get(item);
         if (extra) {
             this._extras.delete(item);
@@ -617,11 +642,13 @@ export const QuickSettingsHost = GObject.registerClass({
         // grid in GNOME's order, with their column spans.
         const layout = this._grid.layout_manager;
         const shown = new Map();
-        for (const [item, {slot, module, tweaks}] of this._items) {
+        for (const [item, {slot, module, tweaks, capsule}] of this._items) {
             shown.set(item, item.visible);
             item.disconnectObject(this);
             item.menu?.disconnectObject?.(this);
             module.removeSlot(slot);
+            // (GNOME's slider, off the stage, goes back below.)
+            capsule?.destroy();
             for (const [actor, prop, value] of tweaks.reverse())
                 actor[prop] = value;
         }

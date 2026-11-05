@@ -1,17 +1,18 @@
 import {CELL, GAP, gridSize, packModules, rectsOf, rowsFor} from '../lib/controlGrid.js';
 import {assert, assertEqual} from './util.js';
 
-// The control centre as on a laptop: connectivity, Now Playing, the two
-// squares, the focus row, then Display, Sound, the system buttons.
+// The control centre as on a laptop: connectivity, Now Playing, Do Not
+// Disturb; then brightness and volume as capsules, the squares beside
+// them, the system buttons.
 const LAPTOP = [
     {id: 'connectivity', cols: 2, rows: 3, pane: 0},
     {id: 'media', cols: 2, rows: 2, pane: 0},
-    {id: 'dark', cols: 1, rows: 1, pane: 0},
-    {id: 'night', cols: 1, rows: 1, pane: 0},
     {id: 'dnd', cols: 2, rows: 1, pane: 0},
-    {id: 'power', cols: 1, rows: 1, pane: 0},
-    {id: 'display', cols: 4, rows: 1, pane: 1},
-    {id: 'sound', cols: 4, rows: 1, pane: 1},
+    {id: 'brightness', cols: 1, rows: 2, pane: 1},
+    {id: 'volume', cols: 1, rows: 2, pane: 1},
+    {id: 'dark', cols: 1, rows: 1, pane: 1},
+    {id: 'night', cols: 1, rows: 1, pane: 1},
+    {id: 'power', cols: 1, rows: 1, pane: 1},
     {id: 'system', cols: 4, rows: 1, pane: 1},
 ];
 
@@ -24,27 +25,27 @@ export function testMacLikeLayout() {
     const {placements, rows} = packModules(LAPTOP);
     assertEqual(at(placements, 'connectivity'), [0, 0, 0, 2, 3], 'connectivity: the left of the first pane');
     assertEqual(at(placements, 'media'), [0, 2, 0, 2, 2], 'Now Playing: top right of it');
-    assertEqual(at(placements, 'dark'), [0, 2, 2, 1, 1], 'Dark Style under Now Playing');
-    assertEqual(at(placements, 'night'), [0, 3, 2, 1, 1], 'Night Light beside it');
-    assertEqual(at(placements, 'dnd'), [0, 0, 3, 2, 1], 'Do Not Disturb under connectivity');
-    assertEqual(at(placements, 'power'), [0, 2, 3, 1, 1], 'Power Mode beside it');
-    assertEqual(at(placements, 'display'), [1, 0, 0, 4, 1], 'Display: the second pane\'s top');
-    assertEqual(at(placements, 'sound'), [1, 0, 1, 4, 1], 'then Sound');
+    assertEqual(at(placements, 'dnd'), [0, 2, 2, 2, 1], 'Do Not Disturb under Now Playing');
+    assertEqual(at(placements, 'brightness'), [1, 0, 0, 1, 2], 'brightness: the second pane\'s top left');
+    assertEqual(at(placements, 'volume'), [1, 1, 0, 1, 2], 'volume beside it');
+    assertEqual(at(placements, 'dark'), [1, 2, 0, 1, 1], 'Dark Style beside them');
+    assertEqual(at(placements, 'night'), [1, 3, 0, 1, 1], 'Night Light beside it');
+    assertEqual(at(placements, 'power'), [1, 2, 1, 1, 1], 'Power Mode under Dark Style');
     assertEqual(at(placements, 'system'), [1, 0, 2, 4, 1], 'then the system buttons');
-    assertEqual(rows, 4, 'four rows');
+    assertEqual(rows, 3, 'three rows');
     const [width, height] = gridSize(rows);
-    assert(width > height, `wider than tall (${width} × ${height})`);
+    assert(width > 2 * height, `wider than tall (${width} × ${height})`);
 }
 
 export function testExtensionsOverflow() {
     const extensions = ['caffeine', 'one', 'two', 'three', 'four', 'five', 'six']
         .map(id => ({id, cols: 1, rows: 1, pane: 'any'}));
     const {placements, rows} = packModules([...LAPTOP, ...extensions]);
-    assertEqual(at(placements, 'caffeine'), [0, 3, 3, 1, 1], 'the first fills the focus row');
+    assertEqual(at(placements, 'caffeine'), [1, 3, 1, 1, 1], 'the first beside Power Mode');
     for (const [i, id] of ['one', 'two', 'three', 'four'].entries())
-        assertEqual(at(placements, id), [1, i, 3, 1, 1], `${id}: a square under the system buttons`);
-    assertEqual(at(placements, 'five')?.slice(2), [4, 1, 1], 'then on a row of their own');
-    assertEqual(rows, 5, 'one more row for those');
+        assertEqual(at(placements, id), [0, i, 3, 1, 1], `${id}: a square under the first pane`);
+    assertEqual(at(placements, 'five'), [1, 0, 3, 1, 1], 'then under the system buttons');
+    assertEqual(rows, 4, 'one more row for those');
     const all = placements.map(p => `${p.id}@${p.pane}:${p.col},${p.row}`);
     assertEqual(new Set(all).size, all.length, 'none dropped');
     assertEqual(placements.length, LAPTOP.length + extensions.length, 'every module placed');
@@ -73,7 +74,7 @@ export function testDesktopWithoutModules() {
     const {placements, rows} = packModules([
         {id: 'media', cols: 2, rows: 2, pane: 0},
         {id: 'dark', cols: 1, rows: 1, pane: 0},
-        {id: 'sound', cols: 4, rows: 1, pane: 1},
+        {id: 'volume', cols: 1, rows: 2, pane: 1},
     ]);
     assertEqual(at(placements, 'media'), [0, 0, 0, 2, 2]);
     assertEqual(at(placements, 'dark'), [0, 2, 0, 1, 1], 'beside it');
@@ -85,8 +86,10 @@ export function testPixels() {
     const {placements} = packModules(LAPTOP);
     const rects = rectsOf(placements);
     const step = CELL + GAP;
-    const display = rects.find(r => r.id === 'display');
-    assertEqual([display.x, display.y, display.width, display.height], [4 * step, 0, 4 * step - GAP, CELL]);
+    const volume = rects.find(r => r.id === 'volume');
+    assertEqual([volume.x, volume.y, volume.width, volume.height], [5 * step, 0, CELL, 2 * step - GAP]);
+    const system = rects.find(r => r.id === 'system');
+    assertEqual([system.x, system.y, system.width, system.height], [4 * step, 2 * step, 4 * step - GAP, CELL]);
     const connectivity = rects.find(r => r.id === 'connectivity');
     assertEqual([connectivity.width, connectivity.height], [2 * step - GAP, 3 * step - GAP]);
     assertEqual(rowsFor(CELL), 1, 'a cell\'s height: one row');
