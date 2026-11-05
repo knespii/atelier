@@ -15,8 +15,8 @@ const wideExtension = i => ({id: `wide-${i}`, cols: 4, rows: 1, minCols: 3, maxC
 // The control centre as on a laptop: Wi-Fi, Bluetooth, Airplane Mode, Now
 // Playing, Do Not Disturb; brightness and volume, Dark Style, Night Light,
 // Power Mode, the system buttons.
-const LAPTOP = [conn(3), MEDIA, FOCUS, capsule('brightness'), capsule('volume'), square('dark'), square('night'),
-    square('power-mode'), SYSTEM];
+const LAPTOP = [conn(3), MEDIA, FOCUS, SYSTEM, capsule('brightness'), capsule('volume'), square('dark'),
+    square('night'), square('power-mode')];
 
 const at = (placements, id) => {
     const p = placements.find(q => q.id === id);
@@ -57,6 +57,7 @@ export function testLaptop() {
         assert(placements.find(p => p.id === id).pane === 0, `${id} on the left`);
     for (const id of ['brightness', 'volume', 'dark', 'night', 'power-mode', 'system'])
         assert(placements.find(p => p.id === id).pane === 1, `${id} on the right`);
+    assertEqual(at(placements, 'system'), [4, 0, 4, 1], 'the battery and system buttons: the right, on top');
     const [bx, by] = at(placements, 'brightness');
     assertEqual(at(placements, 'volume').slice(0, 2), [bx + 1, by], 'the volume beside the brightness');
     const [width, height] = gridSize(rows, {columns});
@@ -67,7 +68,7 @@ export function testNoHoleBesideNightLight() {
     // The keyboard's backlight, or an extension's square (Caffeine): in
     // the cell beside Night Light that was left empty.
     for (const extra of [square('keyboard'), extension(0)]) {
-        const modules = [...LAPTOP.slice(0, 8), extra, SYSTEM];
+        const modules = [...LAPTOP, extra];
         const packed = packModules(modules);
         assertPacked(modules, packed, extra.id);
         assertEqual([packed.columns, packed.rows], [COLUMNS, 3], `${extra.id}: as compact`);
@@ -95,9 +96,9 @@ export function testManySets() {
                         ...rows ? [conn(rows)] : [],
                         MEDIA,
                         ...focus ? [FOCUS] : [],
+                        ...system ? [SYSTEM] : [],
                         ...['brightness', 'volume', 'microphone'].slice(0, capsules).map(capsule),
                         ...['dark', 'night', 'power-mode', 'keyboard'].slice(0, squares).map(id => square(id)),
-                        ...system ? [SYSTEM] : [],
                         ...footer ? [FOOTER] : [],
                         ...Array.from({length: extensions}, (_, i) => extension(i)),
                         ...wide ? [wideExtension(0)] : [],

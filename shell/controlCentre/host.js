@@ -24,9 +24,10 @@ import {ControlModule, moduleGrid, rectIn} from './layout.js';
 
 // The modules in their order (lib/controlGrid.js packs them so, with no
 // cell left empty): on the left like macOS's Control Center –
-// connectivity, Now Playing, Do Not Disturb – on the right like iOS's:
-// brightness and volume as tall capsules side by side (the microphone's
-// beside them while an app records), the squares, the system buttons;
+// connectivity, Now Playing, Do Not Disturb – on the right the system
+// buttons and the battery on top, then like iOS's: brightness and volume
+// as tall capsules side by side (the microphone's beside them while an
+// app records), the squares;
 // extensions' tiles and Background Apps where there is room. Those that
 // may grow (Do Not Disturb's pill, the system buttons' and Background
 // Apps' rows, connectivity's rows, Now Playing, the capsules) fill what
@@ -35,6 +36,7 @@ const MODULES = [
     ['connectivity', {cols: 2, pane: 0, rowPerSlot: true, growRows: 2}],
     ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true, growRows: 1, maxCols: 3}],
     ['focus', {cols: 2, pane: 0, maxCols: 4}],
+    ['system', {cols: 4, pane: 1, minCols: 3, maxCols: 8}],
     ['brightness', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
     ['volume', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
     ['microphone', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
@@ -42,7 +44,6 @@ const MODULES = [
     ['night', {cols: 1, pane: 1}],
     ['power-mode', {cols: 1, pane: 1}],
     ['keyboard', {cols: 1, pane: 1}],
-    ['system', {cols: 4, pane: 1, minCols: 3, maxCols: 8}],
     ['footer', {cols: 4, minCols: 2, maxCols: 8}],
 ];
 const ORDER = MODULES.map(([id]) => id);
