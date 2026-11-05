@@ -50,9 +50,13 @@ class AtelierControlModule extends St.BoxLayout {
      * @param {boolean} [spec.rowPerSlot] - a row of cells for each tile shown
      * @param {boolean} [spec.fixed] - exactly so many rows (its tiles fit
      *   at their least height)
+     * @param {number} [spec.minCols] - as few columns as it can do with
+     * @param {number} [spec.maxCols] - as many as it may grow to, so that
+     *   no cell of the grid is left empty
+     * @param {number} [spec.growRows] - so many rows more it may grow by
      */
     _init(id, {cols, rows = 1, pane = 'any', title = null, horizontal = false, always = false, rowPerSlot = false,
-        fixed = false}) {
+        fixed = false, minCols = cols, maxCols = cols, growRows = 0}) {
         super._init({
             style_class: `atelier-cc-module atelier-cc-module-${id}`,
             orientation: Clutter.Orientation.VERTICAL,
@@ -60,6 +64,9 @@ class AtelierControlModule extends St.BoxLayout {
         });
         this.moduleId = id;
         this.cols = cols;
+        this.minCols = minCols;
+        this.maxCols = maxCols;
+        this.growRows = growRows;
         this._minRows = rows;
         this._rowPerSlot = rowPerSlot;
         this.fixedRows = fixed;
@@ -140,24 +147,28 @@ class AtelierControlModule extends St.BoxLayout {
 
 /**
  * Places its modules (ControlModule children) as lib/controlGrid.js packs
- * them: in order, each where it first fits.
+ * them: in a grid with no cell left empty, some of them grown to fill it.
  */
 const ModuleGridLayout = GObject.registerClass(
 class AtelierModuleGridLayout extends Clutter.LayoutManager {
     _pack(container) {
         const size = sizeOf();
         const modules = container.get_children().filter(c => c.visible && c instanceof ControlModule);
+        const byId = new Map(modules.map(module => [module.moduleId, module]));
         const requests = modules.map(module => {
             const width = module.cols * (size.cell + size.gap) - size.gap;
             const [, height] = module.get_preferred_height(width);
             const rows = module.fixedRows ? module.minRows : rowsFor(height, module.minRows, size);
-            return {id: module, cols: module.cols, rows, pane: module.pane};
+            return {id: module.moduleId, cols: module.cols, rows, minCols: module.minCols, maxCols: module.maxCols,
+                maxRows: rows + module.growRows, pane: module.pane};
         });
-        return {...packModules(requests), size};
+        const packed = packModules(requests);
+        const placements = packed.placements.map(p => ({...p, id: byId.get(p.id)}));
+        return {...packed, placements, size: {...size, columns: packed.columns}};
     }
 
-    vfunc_get_preferred_width(_container, _forHeight) {
-        const [width] = gridSize(1, sizeOf());
+    vfunc_get_preferred_width(container, _forHeight) {
+        const [width] = gridSize(1, this._pack(container).size);
         return [width, width];
     }
 

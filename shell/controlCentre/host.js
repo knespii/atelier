@@ -22,24 +22,28 @@ import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js'
 import {LevelCapsule} from './capsule.js';
 import {ControlModule, moduleGrid, rectIn} from './layout.js';
 
-// The modules in their order (lib/controlGrid.js packs them so): the first
-// pane like the left of macOS's Control Center – connectivity, Now
-// Playing, Do Not Disturb – the second like iOS's: brightness and volume
-// as tall capsules side by side (the microphone's beside them while an
-// app records), the squares beside them, the system buttons under them;
-// extensions' tiles where there is room.
+// The modules in their order (lib/controlGrid.js packs them so, with no
+// cell left empty): on the left like macOS's Control Center –
+// connectivity, Now Playing, Do Not Disturb – on the right like iOS's:
+// brightness and volume as tall capsules side by side (the microphone's
+// beside them while an app records), the squares, the system buttons;
+// extensions' tiles and Background Apps where there is room. Those that
+// may grow (Do Not Disturb's pill, the system buttons' and Background
+// Apps' rows, connectivity's rows, Now Playing, the capsules) fill what
+// would be left empty.
 const MODULES = [
-    ['connectivity', {cols: 2, pane: 0, rowPerSlot: true}],
-    ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true}],
-    ['focus', {cols: 2, pane: 0}],
-    ['brightness', {cols: 1, rows: 2, pane: 1, fixed: true}],
-    ['volume', {cols: 1, rows: 2, pane: 1, fixed: true}],
-    ['microphone', {cols: 1, rows: 2, pane: 1, fixed: true}],
+    ['connectivity', {cols: 2, pane: 0, rowPerSlot: true, growRows: 2}],
+    ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true, growRows: 1, maxCols: 3}],
+    ['focus', {cols: 2, pane: 0, maxCols: 4}],
+    ['brightness', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
+    ['volume', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
+    ['microphone', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
     ['dark', {cols: 1, pane: 1}],
     ['night', {cols: 1, pane: 1}],
     ['power-mode', {cols: 1, pane: 1}],
     ['keyboard', {cols: 1, pane: 1}],
-    ['system', {cols: 4, pane: 1}],
+    ['system', {cols: 4, pane: 1, minCols: 3, maxCols: 8}],
+    ['footer', {cols: 4, minCols: 2, maxCols: 8}],
 ];
 const ORDER = MODULES.map(([id]) => id);
 // (Then the extensions' and unknown tiles, in modules of their own.)
@@ -166,11 +170,6 @@ export const QuickSettingsHost = GObject.registerClass({
             this._modules.set(id, module);
             this._gridActor.add_child(module);
         }
-        // Background Apps, under the grid when there are any.
-        this._footer = new ControlModule('footer', {cols: 4});
-        this._footer.x_align = Clutter.ActorAlign.CENTER;
-        this._modulesBox.add_child(this._footer);
-        this._modules.set('footer', this._footer);
         this._setMediaPlaceholder();
 
         // The menus: their layer from GNOME's menu, as the page of the one
@@ -357,7 +356,7 @@ export const QuickSettingsHost = GObject.registerClass({
             const wide = child instanceof QuickSettings.QuickSlider || span > 1 ||
                 !(child instanceof QuickSettings.QuickToggle || child instanceof QuickSettings.QuickMenuToggle);
             const id = `extra-${this._extras.size}-${GLib.uuid_string_random().slice(0, 4)}`;
-            const module = new ControlModule(id, {cols: wide ? 4 : 1});
+            const module = new ControlModule(id, wide ? {cols: 4, minCols: 3, maxCols: 8} : {cols: 1});
             module.add_style_class_name(wide ? 'atelier-cc-module-extra-wide' : 'atelier-cc-module-extra');
             this._extras.set(child, module);
             this._gridActor.add_child(module);
@@ -567,7 +566,7 @@ export const QuickSettingsHost = GObject.registerClass({
             return [];
         const shown = this._detailItem
             ? [['detail', this._detail]]
-            : [...this._gridActor.get_children(), this._footer]
+            : this._gridActor.get_children()
                 .filter(m => m instanceof ControlModule && m.visible)
                 .map(m => [m.moduleId, m]);
         return shown.map(([id, actor]) => {

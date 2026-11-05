@@ -817,6 +817,24 @@ function cutShort(root) {
 // other way round – dragged, clicked, scrolled, stepped with the keys –
 // GNOME's mute from a click on the volume's icon, its outputs' menu from
 // the chevron; no name cut short.
+// The cells of the control centre's grid no module covers (none, as
+// lib/controlGrid.js packs it), from where its modules are.
+function holesIn(grid) {
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const gap = 10 * scale;
+    const step = 96 * scale + gap;
+    const modules = grid.get_children().filter(m => m.visible);
+    const covered = modules.reduce((sum, m) =>
+        sum + Math.round((m.width + gap) / step) * Math.round((m.height + gap) / step), 0);
+    const [x0] = grid.get_transformed_position();
+    const left = Math.min(...modules.map(m => m.get_transformed_position()[0]));
+    const right = Math.max(...modules.map(m => m.get_transformed_position()[0] + m.width));
+    const bottom = Math.max(...modules.map(m => m.y + m.height));
+    const cells = Math.round((right - left + gap) / step) * Math.round((bottom + gap) / step);
+    return {holes: cells - covered, columns: Math.round((right - left + gap) / step),
+        rows: Math.round((bottom + gap) / step), offset: Math.round(left - x0)};
+}
+
 async function controlCentreCapsules(ext, fake) {
     const host = ext.stateObj.modules.get('control-centre').controls;
     const island = ext.stateObj.modules.get('island').island;
@@ -961,6 +979,9 @@ async function testControlCentre(ext) {
     `the page tells where its modules are: ${rects.map(r => `${r.id} ${Math.round(r.x)},${Math.round(r.y)} ` +
         `${Math.round(r.width)}×${Math.round(r.height)} r${Math.round(r.radius)}`).join('; ')}`);
     await screenshotIsland('21-control-centre', 700);
+    const laptop = holesIn(grid);
+    check(laptop.holes === 0, `no cell of its grid left empty (${laptop.columns} × ${laptop.rows}, ` +
+        `${laptop.holes} empty)`);
     await controlCentreCapsules(ext, fake);
 
     // A tile's menu: a page of its own, in place of the modules.
@@ -1109,6 +1130,25 @@ async function testControlCentre(ext) {
     await waitFor(() => island.page === null && !island.busy, 1000);
 
     await controlCentreReads(ext, toggle);
+    // More extensions' squares: still none left empty.
+    const more = [addTestTile(), addTestTile(), addTestTile()];
+    await Scripting.sleep(300);
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+    await restPointer();
+    await Scripting.sleep(500);
+    const crowded = holesIn(host().grid);
+    check(crowded.holes === 0 && island.height <= island.width,
+        `with three more extensions' squares, none left empty either (${crowded.columns} × ${crowded.rows}, ` +
+        `${crowded.holes} empty; ${island.width} × ${island.height})`);
+    await screenshotIsland('21-control-centre-more-tiles', 700);
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => island.page === null && !island.busy, 2000);
+    for (const extra of more) {
+        extra.indicator.quickSettingsItems.forEach(item => item.destroy());
+        extra.indicator.destroy();
+    }
+    await Scripting.sleep(300);
     fake.restore();
 
     button.destroy();
