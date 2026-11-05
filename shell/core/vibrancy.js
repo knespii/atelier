@@ -219,6 +219,24 @@ export async function sampleStage({x, y, width, height}) {
     };
 }
 
+// What is in a part of a picture (lib/lockLook.js regionStats()), kept
+// with the picture for each part: every surface's is worked out anew at
+// each refresh, though only one picture changed (the control centre's
+// modules, its picture taken: 30–50 ms).
+const statsKept = new WeakMap();
+
+function statsOf(image, region) {
+    let kept = statsKept.get(image);
+    if (!kept) {
+        kept = new Map();
+        statsKept.set(image, kept);
+    }
+    const key = region.join(' ');
+    if (!kept.has(key))
+        kept.set(key, regionStats(image, region));
+    return kept.get(key);
+}
+
 // One stylesheet, loaded in place of the one before (a new file each
 // time: St keeps stylesheets by file).
 class Stylesheet {
@@ -240,11 +258,13 @@ class Stylesheet {
     async set(css) {
         const serial = ++this._serial;
         if (!css) {
+            this._wanted = null;
             this._unload();
             return;
         }
         const hash = GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, css, -1).slice(0, 12);
         const name = `vibrancy-${hash}.css`;
+        this._wanted = name;
         if (this._file?.get_basename() === name)
             return;
         GLib.mkdir_with_parents(this._dir, 0o755);
@@ -252,7 +272,9 @@ class Stylesheet {
         await file.replace_contents_bytes_async(new GLib.Bytes(new TextEncoder().encode(css)),
             null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
         if (serial !== this._serial || this._destroyed) {
-            if (file.get_basename() !== this._file?.get_basename())
+            // (Not the one loaded, nor the one asked for since: the same
+            // file, written again meanwhile, is about to be loaded.)
+            if (name !== this._file?.get_basename() && (name !== this._wanted || this._destroyed))
                 file.delete_async(GLib.PRIORITY_DEFAULT, null).catch(() => {});
             return;
         }
@@ -567,7 +589,7 @@ export class VibrancyModule {
         const style = this._background.get_string('picture-options');
         const shown = placement(style, size, sample.picture) ?? placement('zoom', size, sample.picture);
         const on = pictureRegion(rect, shown);
-        const stats = on ? regionStats(this._blurredFor(shown, look, frosted), on.region) : null;
+        const stats = on ? statsOf(this._blurredFor(shown, look, frosted), on.region) : null;
         return withBackground(stats, on?.cover ?? 0, background);
     }
 
@@ -576,7 +598,7 @@ export class VibrancyModule {
     _behind(surface, look) {
         const picture = surface.picture();
         if (picture) {
-            return regionStats(this._blurredPicture(picture, look, surface.frosted()),
+            return statsOf(this._blurredPicture(picture, look, surface.frosted()),
                 surface.region() ?? [0, 0, 1, 1]);
         }
         const color = surface.behind?.();

@@ -6908,7 +6908,7 @@ async function testNewProfile(ext, atelier) {
     bar.set_string('surface', 'glass');
     bar.set_string('island-shape', 'notch');
     await Scripting.sleep(500);
-    check(islandModule._glass?._live === null, 'at rest, the island\'s glass is of the wallpaper');
+    check(islandModule._glass?.live === false, 'at rest, the island\'s glass is of the wallpaper');
     atelier.toggleSwitcher();
     await Scripting.sleep(500);
     // Grown out, live glass: of the windows (and widgets) under it too.
@@ -6935,7 +6935,7 @@ async function testNewProfile(ext, atelier) {
     }
     check(await waitFor(() => islandModule._sheet === null, 6000) && atelier._store.getAll().length === count + 1,
         'Esc saves nothing');
-    check(await waitFor(() => islandModule._glass?._live === null, 3000), 'and the island at rest, of the wallpaper again');
+    check(await waitFor(() => islandModule._glass?.live === false, 3000), 'and the island at rest, of the wallpaper again');
     bar.reset('surface');
     bar.reset('island-shape');
     await Scripting.sleep(300);
@@ -9587,16 +9587,33 @@ async function testLockUnlockShows() {
     }
 }
 
-// The control centre opening out of a notch of glass, as the user has it
-// (the bar one island of glass with it), over a maximised window: its glass
-// only as large as the island and its shadow – not most of the monitor,
-// all of which was drawn again every frame it grew – and the frames it
-// opens in each drawn, by the GPU too, in a few milliseconds. Three times
-// (ATELIER_TEST_SCALE: at that scale).
+// The control centre opening out of a notch of glass and closing back into
+// it, as the user has it (the bar one island of glass with it), over a
+// maximised window: its glass only as large as the island and its shadow –
+// not most of the monitor, all of which was drawn again every frame it
+// grew. Each frame of the way (from the frame clock's start of it until the
+// GPU has drawn it: the JS of the frame, laying out, painting) in a few
+// milliseconds, none of them much longer, and none missed for work in
+// between; meanwhile no stylesheet loaded nor the shell's style changed
+// (each restyles all of it), its glass's texture made anew once at most,
+// and – once it has opened before – none of its type and icons restyled
+// at all. Three times each, once it has opened and closed a first time
+// (the first, its page made, GNOME's tiles taken in and styled, said
+// apart). (ATELIER_TEST_SCALE: at that scale.)
 async function testControlCentrePace(ext) {
     const back = await useTestScale('The control centre\'s pace');
     const bar = ext.stateObj._settings.get_child('bar');
     const slow = Boolean(GLib.getenv('ATELIER_TEST_SLOW'));
+    const theme = St.ThemeContext.get_for_stage(global.stage);
+    const themeProto = Object.getPrototypeOf(theme.get_theme());
+    const load = themeProto.load_stylesheet;
+    const count = {loads: 0, restyles: 0, styled: 0};
+    themeProto.load_stylesheet = function (...args) {
+        count.loads++;
+        return load.apply(this, args);
+    };
+    const themeId = theme.connect('changed', () => count.restyles++);
+    const watched = [];
     try {
         bar.set_string('style', 'island');
         bar.set_string('island-shape', 'notch');
@@ -9611,50 +9628,144 @@ async function testControlCentrePace(ext) {
         await restPointer();
         await Scripting.sleep(1000);
         const monitor = Main.layoutManager.primaryMonitor;
-        const painted = [];
+        const settled = () => !['x', 'width', 'height'].some(name => island.get_transition(name)) &&
+            (!islandModule._morph || islandModule._morph.done);
+        const phases = Object.fromEntries(['first-open', 'first-close', 'open', 'close'].map(phase =>
+            [phase, {frames: [], gaps: [], loads: 0, restyles: 0, refits: [], styled: []}]));
         let largest = 0;
-        for (let round = 0; round < 3; round++) {
-            // (Each frame waited for until the GPU has drawn it.)
-            const timings = [];
+        // (The type and icons in it restyled: every St widget of its page.)
+        const watchStyles = page => {
+            if (!page || watched.some(([actor]) => actor === page))
+                return;
+            const walk = actor => {
+                if (actor instanceof St.Widget)
+                    watched.push([actor, actor.connect('style-changed', () => count.styled++)]);
+                actor.get_children().forEach(walk);
+            };
+            walk(page);
+        };
+        // From the click (or the key) until the island is at rest: each
+        // frame's time and the time between frames.
+        const watch = async (phase, action, done) => {
+            const record = phases[phase];
+            const glass = islandModule._glass;
+            let size = `${glass?.width}x${glass?.height}`;
+            let refits = 0;
             let start = 0;
+            let last = 0;
+            const before = {...count};
+            const now = () => GLib.get_monotonic_time() / 1000;
+            const begin = () => (start ||= now());
             const ids = [
-                global.stage.connect('before-paint', () => (start = GLib.get_monotonic_time())),
+                global.stage.connect('prepare-frame', begin),
+                global.stage.connect('before-update', begin),
+                // (A frame with nothing to draw: none to time.)
+                global.stage.connect('after-update', () => (start = 0)),
                 global.stage.connect('after-paint', (_, view) => {
                     view?.get_framebuffer?.()?.finish();
+                    const end = now();
                     if (start)
-                        timings.push((GLib.get_monotonic_time() - start) / 1000);
+                        record.frames.push(end - start);
+                    // (Apart while the island moves: at rest, there is
+                    // nothing new to draw.)
+                    const moving = ['x', 'width', 'height'].some(name => island.get_transition(name));
+                    if (last && moving)
+                        record.gaps.push(end - last);
                     start = 0;
-                    const glass = islandModule._glass;
-                    if (glass)
-                        largest = Math.max(largest, glass.width * glass.height / (monitor.width * monitor.height));
+                    last = moving ? end : 0;
+                    const g = islandModule._glass;
+                    if (g) {
+                        largest = Math.max(largest, g.width * g.height / (monitor.width * monitor.height));
+                        if (`${g.width}x${g.height}` !== size)
+                            refits++;
+                        size = `${g.width}x${g.height}`;
+                    }
                 }),
             ];
-            await clickAt(...centerOf(island));
-            await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
-            await Scripting.sleep(200);
-            ids.forEach(id => global.stage.disconnect(id));
-            painted.push(...timings);
-            await pressKey(Clutter.KEY_Escape);
-            await waitFor(() => !island.page && !island.busy, 3000);
+            try {
+                await action();
+                await waitFor(done, 3000);
+            } finally {
+                ids.forEach(id => global.stage.disconnect(id));
+            }
+            record.loads += count.loads - before.loads;
+            record.restyles += count.restyles - before.restyles;
+            record.refits.push(refits);
+            record.styled.push(count.styled - before.styled);
+        };
+        for (let round = 0; round < 4; round++) {
+            const first = round === 0 ? 'first-' : '';
+            await watch(`${first}open`, () => clickAt(...centerOf(island)),
+                () => hasClass(island.page, 'atelier-cc') && !island.busy && settled() && island.page.opacity === 255);
+            watchStyles(island.page);
+            await Scripting.sleep(400);
+            await watch(`${first}close`, () => pressKey(Clutter.KEY_Escape),
+                () => !island.page && !island.busy && settled() && !islandModule._morph);
             await restPointer();
-            await Scripting.sleep(600);
+            await Scripting.sleep(800);
         }
-        const spread = spreadOf(painted);
-        const pace = `the control centre opening, ${global.stage.width} × ${global.stage.height} at ` +
-            `${global.stage.get_resource_scale()}×: ${spread.n} frames, drawn in ${ms(spread.mean)} ms on average, ` +
-            `${ms(spread.p95)} for 95 % of them, ${ms(spread.max)} at most; its glass ${Math.round(100 * largest)} % ` +
-            'of the monitor at most';
-        check(largest < 0.35, `${pace}: its glass only round it`);
-        if (slow)
-            results.push(`INFO  drawn without a GPU: ${pace}`);
-        else
-            check(spread.mean <= 7, pace);
+        check(largest < 0.35, `the control centre's glass ${Math.round(100 * largest)} % of the monitor at most: ` +
+            'only round it');
+        const size = `${global.stage.width} × ${global.stage.height} at ${global.stage.get_resource_scale()}×`;
+        results.push(`INFO  meanwhile, ${count.loads} stylesheets loaded and the shell restyled ${count.restyles} ` +
+            'times in all');
+        for (const phase of ['first-open', 'first-close']) {
+            const spread = spreadOf(phases[phase].frames);
+            results.push(`INFO  the control centre ${phase === 'first-open' ? 'opening' : 'closing'} the first ` +
+                `time, ${size}: ${spread.n} frames, ${ms(spread.mean)} ms on average, ${ms(spread.max)} at most; ` +
+                `${phases[phase].loads} stylesheets loaded, its glass's texture made anew ` +
+                `${phases[phase].refits.join(', ')} times`);
+        }
+        for (const phase of ['open', 'close']) {
+            const record = phases[phase];
+            const spread = spreadOf(record.frames);
+            const gaps = [...record.gaps].sort((a, b) => a - b);
+            const interval = gaps[Math.floor(gaps.length / 2)] ?? 0;
+            const longest = gaps.at(-1) ?? 0;
+            const pace = `the control centre ${phase === 'open' ? 'opening' : 'closing'}, ${size}: ${spread.n} ` +
+                `frames, each drawn in ${ms(spread.mean)} ms on average, ${ms(spread.p95)} for 95 % of them, ` +
+                `${ms(spread.max)} at most; ${ms(interval)} ms apart, ${ms(longest)} at most`;
+            if (slow) {
+                results.push(`INFO  drawn without a GPU: ${pace}`);
+            } else {
+                // (Not quite every frame: as it opens, GNOME's modal grab has
+                // all of the stage drawn again once – the window under it
+                // loses the keyboard, and is drawn anew.)
+                check(spread.mean <= PACE_MEAN && spread.p95 <= PACE_MAX && spread.max <= PACE_ONCE &&
+                    longest <= 2.5 * interval + 1,
+                `${pace} (at most ${PACE_MEAN} ms on average, ${PACE_MAX} for 95 %, ${PACE_ONCE} once, ` +
+                    'none missed)');
+            }
+            check(record.loads === 0 && record.restyles === 0,
+                `${phase === 'open' ? 'opening' : 'closing'}, no stylesheet loaded (${record.loads}) nor the ` +
+                `shell restyled (${record.restyles})`);
+            check(record.refits.every(n => n <= 1),
+                `${phase === 'open' ? 'opening' : 'closing'}, its glass's texture made anew once at most ` +
+                `(${record.refits.join(', ')} times)`);
+        }
+        // (Opened before, laid out and styled: as it was, and closing too –
+        // but for a handful, GNOME's tiles that follow the keyboard.)
+        check([...phases.open.styled, ...phases.close.styled].every(n => n <= 5),
+            'opened again, next to none of its type and icons restyled (371 a time before) ' +
+            `(${phases.open.styled.join(', ')} opening, ${phases.close.styled.join(', ')} closing)`);
     } finally {
+        watched.forEach(([actor, id]) => actor.disconnect(id));
+        theme.disconnect(themeId);
+        themeProto.load_stylesheet = load;
         await closeTestWindows();
         ['style', 'island-shape', 'surface', 'compact'].forEach(key => bar.reset(key));
         await back?.();
     }
 }
+
+// The control centre's frames, opening and closing (testControlCentrePace),
+// in milliseconds: on average, 95 % of them, and the longest.
+const PACE_MEAN = 6;
+const PACE_MAX = 10;
+const PACE_ONCE = 20;
+
+
+
 
 async function setMonitorScale(scale) {
     const state = await displayConfig('GetCurrentState', null,
