@@ -248,6 +248,14 @@ export const Island = GObject.registerClass({
     }
 
     /**
+     * @returns {number[]|null} [x, y, width, height] of where the island
+     *   grows or shrinks to (or is): round its page, or at rest; once placed
+     */
+    targetRect() {
+        return this._target ?? null;
+    }
+
+    /**
      * Make pages at least this wide, e.g. as wide as the one island the
      * whole bar is; pages that fill the island are laid out at it.
      *
@@ -465,8 +473,9 @@ export const Island = GObject.registerClass({
         if (target !== this._idle)
             this._setExpanded(true);
 
+        this._target = [Math.round(this._anchor.centerX - width / 2), this._anchor.top, width, height];
         this.ease({
-            x: Math.round(this._anchor.centerX - width / 2),
+            x: this._target[0],
             width,
             height,
             duration: animate ? MORPH_TIME : 0,

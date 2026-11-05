@@ -23,7 +23,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {
     FROST, REST_LIGHT, bodyRect, boundsOf, edgeReach, sameLight, textureFrame,
 } from '../../lib/glassLook.js';
-import {MAX_MODULES} from '../../lib/moduleMorph.js';
 import {glassLight} from './glassLight.js';
 import {
     DIM_TIME, GlassEasing, MATERIAL_CODE, MATERIAL_DECLARATIONS, glassScale, materialUniforms, setMaterial,
@@ -79,10 +78,6 @@ uniform vec4 partnerBody;
 uniform vec3 partnerLook;
 uniform float partnerTie;
 uniform vec2 glassLight;
-uniform float moduleCount;
-uniform vec4 modules[${MAX_MODULES}];
-uniform vec4 moduleLooks[${MAX_MODULES}];
-uniform float smallShare;
 float atelier_small_share = 1.0;
 
 float atelier_smin(float a, float b, float k) {
@@ -145,60 +140,11 @@ float atelier_notch(vec2 p, vec4 r, vec4 b, vec2 corners, float e) {
 }
 
 // The rectangle, its ears and the rest as the notch has them – nothing,
-// when it has no size (all of it is modules then, but for the first).
+// when it has no size.
 float atelier_main(vec2 p, vec4 b) {
     if (rect.z <= 0.0 || rect.w <= 0.0)
         return 100000.0;
     return atelier_notch(p, rect, b, radii, ear);
-}
-
-// A module: a rounded rectangle of its own, with its own corners.
-float atelier_box_of(vec2 p, vec4 r, float radius) {
-    vec2 halfSize = r.zw * 0.5;
-    vec2 q = abs(p - r.xy - halfSize) - halfSize + vec2(radius);
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-}
-
-// The two modules nearest to the pixel (atelier_shape() finds them, as the
-// material asks for it first), their looks: what the pixel's lens, edges
-// and shadow are of – the distances to them asked for again and again (a
-// pixel's neighbours', its shadow's), not to every module each time.
-bool atelier_near = false;
-vec4 atelier_near0 = vec4(0.0);
-vec4 atelier_near1 = vec4(0.0);
-vec4 atelier_look0 = vec4(0.0);
-float atelier_radius1 = 0.0;
-
-void atelier_find_near(vec2 p) {
-    float d0 = 100000.0;
-    float d1 = 100000.0;
-    atelier_near1 = vec4(-100000.0, -100000.0, 0.0, 0.0);
-    for (int i = 0; i < ${MAX_MODULES}; i++) {
-        if (float(i) >= moduleCount)
-            break;
-        float d = atelier_box_of(p, modules[i], moduleLooks[i].x);
-        if (d < d0) {
-            d1 = d0;
-            atelier_near1 = atelier_near0;
-            atelier_radius1 = atelier_look0.x;
-            d0 = d;
-            atelier_near0 = modules[i];
-            atelier_look0 = moduleLooks[i];
-        } else if (d < d1) {
-            d1 = d;
-            atelier_near1 = modules[i];
-            atelier_radius1 = moduleLooks[i].x;
-        }
-    }
-    atelier_near = true;
-}
-
-// The control centre's modules, each a piece of glass of its own: the
-// nearest of them.
-float atelier_modules(vec2 p) {
-    if (!atelier_near)
-        atelier_find_near(p);
-    return min(atelier_box_of(p, atelier_near0, atelier_look0.x), atelier_box_of(p, atelier_near1, atelier_radius1));
 }
 
 float atelier_drip(vec2 p, float d) {
@@ -218,8 +164,6 @@ float atelier_drip(vec2 p, float d) {
 
 float atelier_shape(vec2 p) {
     float d = atelier_drip(p, atelier_main(p, rect));
-    if (moduleCount > 0.0)
-        d = min(d, atelier_modules(p));
     // (A pixel of its edge that its partner covers too – their sides one
     // below the one island's ears, their bottoms one at rest – it covers
     // only as much more as it covers: drawn by both, one over the other,
@@ -251,10 +195,7 @@ float atelier_others(vec2 p) {
 }
 
 float atelier_own_body(vec2 p) {
-    float d = atelier_drip(p, atelier_main(p, body));
-    if (moduleCount > 0.0)
-        d = min(d, atelier_modules(p));
-    return d;
+    return atelier_drip(p, atelier_main(p, body));
 }
 
 float atelier_body(vec2 p) {
@@ -266,11 +207,9 @@ float atelier_body(vec2 p) {
 // the partner's where it is the nearer. (Their rectangles', not their
 // ears': where the island's glass and the one island are as near, inside
 // as they grow apart, each its own – deeper in the one island's ears, the
-// island's glass looked like the one island's down to them.) Or a module's,
-// with its light, where it is the nearest.
+// island's glass looked like the one island's down to them.)
 void atelier_part(vec2 p, out vec2 light, out float thick) {
     light = glassLight;
-    atelier_small_share = smallShare;
     float d = rect.z > 0.0 && rect.w > 0.0 ? atelier_rounded(p, body, radii) : 100000.0;
     thick = min(rect.z, rect.w);
     float k = max(blend, 0.001);
@@ -291,15 +230,6 @@ void atelier_part(vec2 p, out vec2 light, out float thick) {
     }
     if (partner.z > 0.0 && partner.w > 0.0 && atelier_rounded(p, partnerBody, partnerLook.xy) < d)
         thick = min(partner.z, partner.w);
-    if (moduleCount > 0.0) {
-        if (!atelier_near)
-            atelier_find_near(p);
-        if (atelier_box_of(p, atelier_near0, atelier_look0.x) < d) {
-            thick = min(atelier_near0.z, atelier_near0.w);
-            light = atelier_look0.yz;
-            atelier_small_share = atelier_look0.w;
-        }
-    }
 }
 ${MATERIAL_DECLARATIONS}
 `;
@@ -331,8 +261,7 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     _init(params) {
         super._init(params);
         const names = ['origin', 'size', 'rect', 'body', 'radii', 'ear', 'drop', 'dropRadius', 'neck', 'blend',
-            'partner', 'partnerBody', 'partnerLook', 'partnerTie', 'glassLight', 'moduleCount', 'modules', 'moduleLooks',
-            'smallShare'];
+            'partner', 'partnerBody', 'partnerLook', 'partnerTie', 'glassLight'];
         this._at = Object.fromEntries(names.map(name => [name, this.get_uniform_location(name)]));
         this._material = materialUniforms(this);
         this._look = [null, 1, {}];
@@ -340,7 +269,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
         this.setNeck([0, 0, 0, 0]);
         this.setPartner(null);
         this.setLight(REST_LIGHT);
-        this.setModules([], [], 1);
         this.setReach(null);
         this.setMaterial(null, 1);
     }
@@ -399,29 +327,6 @@ class AtelierRoundedMaskEffect extends Shell.GLSLEffect {
     /** @param {number[]} light - where it comes from, [x, y] (y down) */
     setLight(light) {
         this.set_uniform_float(this._at.glassLight, 2, light);
-    }
-
-    /**
-     * Modules, each a piece of glass of its own besides the rectangle.
-     *
-     * @param {number[][]} modules - [x, y, width, height, radius, small]
-     *   relative to the actor, up to MAX_MODULES: small, how much of a small
-     *   control's lighter face it has (0 … 1, 0 if not given)
-     * @param {number[][]} lights - where each one's light comes from, [x, y]
-     * @param {number} small - how much of it the rectangle has, 0 … 1
-     */
-    setModules(modules, lights, small) {
-        const rects = new Array(MAX_MODULES * 4).fill(0);
-        const looks = new Array(MAX_MODULES * 4).fill(0);
-        modules.slice(0, MAX_MODULES).forEach(([x, y, width, height, radius, share = 0], i) => {
-            rects.splice(i * 4, 4, x, y, width, height);
-            looks.splice(i * 4, 4, Math.max(0, Math.min(radius, width / 2, height / 2)),
-                ...lights[i] ?? REST_LIGHT, share);
-        });
-        this.set_uniform_float(this._at.smallShare, 1, [small]);
-        this.set_uniform_float(this._at.moduleCount, 1, [Math.min(modules.length, MAX_MODULES)]);
-        this.set_uniform_float(this._at.modules, 4, rects);
-        this.set_uniform_float(this._at.moduleLooks, 4, looks);
     }
 
     /** @param {number[]|null} reach - [x1, y1, x2, y2] it draws within */
@@ -576,14 +481,11 @@ class AtelierGlassSurface extends St.Widget {
         this._drop = null;
         this._neck = null;
         this._partner = null;
-        // (The control centre's modules, on the stage, and their light.)
-        this._modules = null;
-        this._moduleLights = [];
         this._yields = yields;
         this._live = null;
         this._liveOn = false;
         // (Bounds on the stage its frame and its live glass keep room for
-        // meanwhile: all the island's modules go through as they move.)
+        // meanwhile: all the island goes through as it grows and shrinks.)
         this._reserved = null;
         // (Glass over a plain colour instead: its colour, and the actor
         // that shows it, eased in and out.)
@@ -941,45 +843,8 @@ class AtelierGlassSurface extends St.Widget {
         } else {
             this._mask.setNeck([0, 0, 0, 0]);
         }
-        this._applyModules();
         this._applyPartner();
         this._syncLive();
-    }
-
-    /**
-     * Modules: rounded rectangles in stage coordinates, each a piece of
-     * glass of its own besides its shape (setShape(), which may have no
-     * size then) – with its lens, its glint, its contour and its shadow,
-     * and the light it catches; nothing of it between them. (The control
-     * centre's.)
-     *
-     * They, and its shape with them, have the face of large glass, however
-     * small (not a small control's lighter one), but as much of it as small
-     * says.
-     *
-     * @param {number[][]|null} modules - [x, y, width, height, radius,
-     *   small] each, up to lib/moduleMorph.js MAX_MODULES: small, how much
-     *   of a small control's face it has (0 … 1, 0 if not given); null (or
-     *   none) for none
-     * @param {number} [small] - how much of it its shape has, 0 … 1
-     */
-    setModules(modules, small = 1) {
-        modules = modules?.length ? modules.slice(0, MAX_MODULES) : null;
-        small = modules ? small : 1;
-        if (JSON.stringify(modules) === JSON.stringify(this._modules) && small === this._small)
-            return;
-        this._small = small;
-        // (Others than before: each with the light from above, until the
-        // pointer says otherwise.)
-        if ((modules?.length ?? 0) !== (this._modules?.length ?? 0))
-            this._moduleLights = (modules ?? []).map(() => this._light);
-        this._modules = modules;
-        this._shapesChanged();
-    }
-
-    /** @returns {number[][]|null} its modules, as setModules() took them last */
-    get modules() {
-        return this._modules;
     }
 
     /**
@@ -1002,12 +867,6 @@ class AtelierGlassSurface extends St.Widget {
     _roomBounds() {
         const bounds = this._bounds();
         return this._reserved && bounds ? boundsOf([bounds, this._reserved]) : bounds;
-    }
-
-    _applyModules() {
-        const modules = (this._modules ?? []).map(([x, y, width, height, radius, small]) =>
-            [x - this.x, y - this.y, width, height, radius, small]);
-        this._mask.setModules(modules, this._moduleLights, this._small ?? 1);
     }
 
     /**
@@ -1114,8 +973,6 @@ class AtelierGlassSurface extends St.Widget {
             const [cx, top, bottom, hw] = this._neck;
             boxes.push([cx - hw, top, cx + hw, bottom]);
         }
-        for (const [x, y, width, height] of this._modules ?? [])
-            boxes.push([x, y, x + width, y + height]);
         if (boxes.length === 0 || this.width === 0) {
             this._live.hide();
             return;
@@ -1205,10 +1062,9 @@ class AtelierGlassSurface extends St.Widget {
     }
 
     // [x, y, width, height] on the stage of its shapes, a drop's and its
-    // neck's too (and its modules', unless only its own shape's are
-    // wanted), null for none.
-    _bounds(own = false) {
-        const rects = own ? [] : (this._modules ?? []).map(m => m.slice(0, 4));
+    // neck's too, null for none.
+    _bounds() {
+        const rects = [];
         if (this._shape) {
             const [x, y, width, height, , , ear] = this._shape;
             rects.push([x - ear, y, width + 2 * ear, height]);
@@ -1224,11 +1080,10 @@ class AtelierGlassSurface extends St.Widget {
         return boundsOf(rects);
     }
 
-    // What the light leans by: all of the glass it is part of (but for its
-    // modules, each of which catches its own).
+    // What the light leans by: all of the glass it is part of.
     _glassBounds() {
         const partner = this._partner;
-        return boundsOf([this._bounds(true) ?? [0, 0, 0, 0], partner?.slice(0, 4) ?? [0, 0, 0, 0]]);
+        return boundsOf([this._bounds() ?? [0, 0, 0, 0], partner?.slice(0, 4) ?? [0, 0, 0, 0]]);
     }
 
     // (Its shapes changed: drawn again where they were and where they are,
@@ -1248,16 +1103,15 @@ class AtelierGlassSurface extends St.Widget {
 
     /**
      * For the light (shell/core/glassLight.js): all of the glass it is
-     * part of, on the stage, while it is shown – then each module.
+     * part of, on the stage, while it is shown.
      *
      * @returns {number[][]}
      */
     lightAreas() {
         if (!this._look || !this.mapped || this.opacity === 0)
             return [];
-        const modules = (this._modules ?? []).map(m => m.slice(0, 4));
-        const bounds = this._glassBounds() ?? modules[0];
-        return bounds ? [bounds, ...modules] : [];
+        const bounds = this._glassBounds();
+        return bounds ? [bounds] : [];
     }
 
     /** @returns {object|null} how its light leans (LOOK's) */
@@ -1270,18 +1124,11 @@ class AtelierGlassSurface extends St.Widget {
      * @returns {boolean} whether it changed (and is drawn again, only where
      *   the surface's shapes are)
      */
-    setLights([light, ...modules]) {
-        const count = this._modules?.length ?? 0;
-        const lights = modules.slice(0, count);
-        const moved = lights.length === count && lights.some((l, i) => !sameLight(l, this._moduleLights[i] ?? REST_LIGHT));
-        if (!light || (sameLight(light, this._light) && !moved))
+    setLights([light]) {
+        if (!light || sameLight(light, this._light))
             return false;
         this._light = light;
         this._mask.setLight(light);
-        if (moved) {
-            this._moduleLights = lights;
-            this._applyModules();
-        }
         const bounds = this._bounds();
         if (bounds)
             this._redrawWithin(bounds);

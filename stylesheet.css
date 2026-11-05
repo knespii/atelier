@@ -1505,17 +1505,26 @@
   background-color: transparent;
 }
 
-/* Of glass, each of the control centre's modules is a piece of the island's
-   glass (shell/island/module.js): no card of its own over it. */
+/* Of glass, the control centre is one piece of the island's glass, its
+   modules in it apart by the room between them (shell/island/module.js):
+   no card of their own over it. */
 .atelier-island-glass .atelier-cc-module,
 .atelier-island-glass .atelier-cc-detail {
   background-color: transparent;
   border-color: transparent;
 }
 
-/* (The tabs a pill of glass, with room round them.) */
+/* (The tabs with room round them.) */
 .atelier-island-glass .atelier-cc-tabs {
   padding: 4px;
+}
+
+/* Brightness and volume: a faint light track in the glass, filled as far
+   as the level goes – light under either type (dark type is on light glass:
+   lighter still under it, its icon reads the better; the fill turns dark
+   then, lib/vibrancy.js ccModule). */
+.atelier-island-glass .atelier-cc-capsule {
+  background-color: rgba(255, 255, 255, 0.12);
 }
 
 /* A sheet dripping from the island: what it is made of is drawn under it,

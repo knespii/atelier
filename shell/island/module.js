@@ -10,13 +10,11 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {adjustAnimationTime} from 'resource:///org/gnome/shell/misc/animationUtils.js';
 import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
 import {boundsOf} from '../../lib/glassLook.js';
-import {fullRect, morphRects} from '../../lib/moduleMorph.js';
 import {effectiveWallpaper} from '../../lib/profiles.js';
 import {COME_OUT_TIME, EAR_RADIUS, capsuleHeight} from '../core/barMetrics.js';
 import {NotchEars} from '../core/ears.js';
@@ -43,12 +41,13 @@ const GLASS_REACH = 0.9;
 // What a page open in the island covers, about (the glance), logical
 // pixels: where its type has to read.
 const PAGE_REGION = [400, 300];
-// The corners of a module of the control centre that has none of its own
-// (another tab's content), logical pixels: as its modules'.
-const MODULE_RADIUS = 22;
 // The pages open in the island, whose type follows what is behind them.
 const PAGE_CLASS = 'atelier-island-paged';
 const PAGE_ROOT = `.atelier-island .${PAGE_CLASS}`;
+
+// Whether a page is the control centre's (whose modules' type follows what
+// is behind each: shell/controlCentre/ink.js).
+const isControlCentre = page => Boolean(page) && typeof page.moduleRects === 'function';
 
 // Whether a window shows anywhere in a rectangle of the stage (on the
 // workspace shown).
@@ -105,6 +104,8 @@ export class IslandModule {
         this._liquid = null;
         this._partner = null;
         this._vibrant = null;
+        // (The control centre open, or on its way back to rest: frosted.)
+        this._centreShown = false;
         this._shapeWatchers = new Set();
         this._watchedShape = null;
         /** GNOME's SystemActions unless replaced (tests never power off) */
@@ -234,8 +235,10 @@ export class IslandModule {
             'notify::visible', () => this._queueShape(),
             'notify::opacity', () => this._queueShape(),
             'style-changed', () => this._queueShape(),
-            'page-opened', () => this._followModules(),
-            'page-closed', () => this._followModules(),
+            'page-opened', () => this._syncShape(),
+            'page-closed', () => this._syncShape(),
+            // (Back at rest: its frost goes.)
+            'transitions-completed', () => this._queueShape(),
             this);
         this._syncLook();
 
@@ -260,7 +263,7 @@ export class IslandModule {
         this._glass = null;
         this._ears?.destroy();
         this._ears = null;
-        this._dropMorph();
+        this._dropShapeLater();
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         // Whoever waits for an announcement goes on without it.
@@ -612,9 +615,6 @@ export class IslandModule {
         const island = this._island;
         if (this._stopped || !island?.visible || island.opacity === 0)
             return null;
-        // (Open as the control centre, the first of its modules: the tabs.)
-        if (this._glass && this._moduleShape)
-            return this._moduleShape;
         return this._islandShape();
     }
 
@@ -701,10 +701,11 @@ export class IslandModule {
         if (this._glass) {
             // (Under a sheet, its liquid is the island's glass too.)
             this._glass.visible = shown && !this._liquid;
-            // Open as the control centre, a piece of glass for each of its
-            // modules, nothing between them.
-            const modules = this._liquid ? null : this._syncModules(shape);
-            this._moduleShape = modules?.[0].slice(0, 7) ?? null;
+            // Open as the control centre, one piece of glass, as for any
+            // page: its modules lie in it, apart only by the room between
+            // them.
+            const cc = isControlCentre(island.page);
+            const closing = this._syncCentre(cc, shape);
             // Under GNOME's controls (the control centre, a tile's menu open
             // in it), frosted: the windows' type behind them is a soft wash
             // there, no second line of type under theirs – the same glass,
@@ -713,22 +714,13 @@ export class IslandModule {
             // GNOME's blur eased is all of what it blurs worked out anew
             // every frame. (First: its frame is fitted round its shapes as
             // far as the frost blurs.)
-            const frosted = (island.page?.has_style_class_name('atelier-cc') ?? false) ||
-                Boolean(this._morph?.closing);
+            const frosted = (island.page?.has_style_class_name('atelier-cc') ?? false) || closing;
             this._glass.setFrost(frosted, {instant: frosted});
-            // (Room for all the modules go through as they move, while the
-            // control centre is open or closing: its texture made once, not
-            // anew at each step it grows, its live glass not moved – the
-            // whole stage drawn again.)
-            this._glass.reserve(this._morph?.room ?? this._room ?? null);
-            if (modules) {
-                this._glass.setModules(modules.slice(1).map(([x, y, w, h, radius, , , small]) =>
-                    [x, y, w, h, radius, small]), modules[0][7]);
-                this._glass.setShape(...modules[0].slice(0, 7));
-            } else {
-                this._glass.setModules(null);
-                this._glass.setShape(...shape);
-            }
+            // (Room for all it goes through as it grows and shrinks: its
+            // texture made once, not anew at each step it grows, its live
+            // glass not moved – the whole stage drawn again.)
+            this._glass.reserve(this._room ?? null);
+            this._glass.setShape(...shape);
             this._glass.setLive(live && island.expanded);
         }
         if (this._liquid) {
@@ -748,172 +740,43 @@ export class IslandModule {
         }
     }
 
-    // The control centre's page opened, or it closed: its modules followed
-    // as they move, come and go. (They say so as the page is laid out:
-    // their glass follows before the next frame is drawn, not then.)
-    _followModules() {
-        const page = this._island?.page;
-        const cc = page && typeof page.moduleRects === 'function' ? page : null;
-        if (cc !== this._modulesPage) {
-            this._modulesPage?.disconnectObject(this);
-            this._modulesPage = cc;
-            cc?.connectObject('modules-changed', () => this._queueModules(), 'destroy', () => {
-                if (this._modulesPage === cc)
-                    this._modulesPage = null;
-            }, this);
+    // The control centre open, or closing (back to rest, not yet there):
+    // the room its glass keeps for all it goes through, from the capsule
+    // to where the island grows to – made once, kept once it is at rest,
+    // for the next time (its glass not made smaller and larger again: each
+    // time, what is under it all drawn again). Returns whether it is
+    // closing.
+    _syncCentre(open, shape) {
+        const island = this._island;
+        if (open) {
+            this._centreShown = true;
+        } else if (this._centreShown && (island.page || (!island.expanded && !this._moving()))) {
+            // (Back at rest, or another page open in its place.)
+            this._centreShown = false;
         }
-        this._syncShape();
+        if (!this._centreShown)
+            return false;
+        const ear = shape[6];
+        const rest = island.restRect();
+        const target = island.targetRect();
+        const withEars = r => [r[0] - ear, r[1], r[2] + 2 * ear, r[3]];
+        const dy = island.translation_y;
+        this._room = boundsOf([this._room, withEars(shape),
+            rest && withEars([rest[0], rest[1] + dy, rest[2], rest[3]]),
+            target && withEars([target[0], target[1] + dy, target[2], target[3]])].filter(Boolean));
+        return !open;
     }
 
-    _queueModules() {
-        if (this._modulesLater || this._stopped)
-            return;
-        this._modulesLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
-            this._modulesLater = 0;
-            if (!this._stopped && this._island)
-                this._syncShape();
-            return GLib.SOURCE_REMOVE;
-        });
+    _moving() {
+        return ['x', 'width', 'height'].some(name => this._island.get_transition(name));
     }
 
-    _dropMorph() {
-        if (this._modulesLater)
-            global.compositor.get_laters().remove(this._modulesLater);
-        this._modulesLater = 0;
+    _dropShapeLater() {
         if (this._shapeLater)
             global.compositor.get_laters().remove(this._shapeLater);
         this._shapeLater = 0;
         this._shapeQueued = false;
-        this._modulesPage?.disconnectObject(this);
-        this._modulesPage = null;
-        this._morph?.timeline.stop();
-        this._morph = null;
-        this._moduleShape = null;
-    }
-
-    // Where the control centre's modules are on the stage, as rects
-    // (lib/moduleMorph.js), and a key of where they are in the page (the
-    // same as the island moves); null while it isn't open, no rects while
-    // they aren't laid out yet.
-    _moduleTargets() {
-        const page = this._island.page;
-        if (!page || page !== this._modulesPage)
-            return null;
-        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-        const box = page.get_allocation_box();
-        const x = this._island.x + box.x1 + page.translation_x;
-        const y = this._island.y + this._island.translation_y + box.y1 + page.translation_y;
-        const shown = page.moduleRects().filter(r => r.width > 0 && r.height > 0);
-        const rects = shown.map(r => fullRect({id: r.id, x: x + r.x, y: y + r.y, width: r.width, height: r.height,
-            radius: r.radius > 0 ? r.radius : MODULE_RADIUS * scale}));
-        // (Others in the page, not the page elsewhere: as the island moves,
-        // they go with it.)
-        const key = shown.map(r => [r.id, r.x, r.y, r.width, r.height, r.radius].map(v =>
-            (typeof v === 'number' ? Math.round(v * 100) : v)).join(' ')).join(';');
-        return {rects, key};
-    }
-
-    // Where the control centre's modules will be, about, before they are
-    // laid out: its page's content, centred under the island at rest.
-    _pageRoom() {
-        const page = this._island.page;
-        const rest = this._island.restRect();
-        if (!page || page !== this._modulesPage || !rest)
-            return null;
-        let [, width] = page.get_preferred_width(-1);
-        if (page.fillsWidth)
-            width = Math.max(width, this._island.layout_manager.minPageWidth ?? 0);
-        const [, height] = page.get_preferred_height(width);
-        if (!(width > 0 && height > 0))
-            return null;
-        const node = page.get_theme_node();
-        const [left, right, top, bottom] = [St.Side.LEFT, St.Side.RIGHT, St.Side.TOP, St.Side.BOTTOM]
-            .map(side => node.get_padding(side));
-        return [Math.round(rest[0] + rest[2] / 2 - width / 2) + left, rest[1] + this._island.translation_y + top,
-            width - left - right, height - top - bottom];
-    }
-
-    /**
-     * The island's glass while it is (or was, a moment ago) the control
-     * centre: each module a piece of its own, from the capsule as it
-     * opens, back into it as it closes, from one set to the other as a
-     * detail's page opens and closes, or another tab shows – eased as the
-     * island grows and shrinks (MORPH_TIME, easeOutExpo).
-     *
-     * @param {number[]} shape - the island's own, as _islandShape() has it
-     * @returns {number[][]|null} what to draw, [x, y, width, height, radius,
-     *   bottomRadius, ear, small] each, the first with the ears (its shape,
-     *   the others its modules); null for the island's shape only
-     */
-    _syncModules(shape) {
-        // (The capsule a small control: its lighter face.)
-        const rectOf = ([x, y, width, height, radius, bottomRadius, ear], id = 'island') =>
-            fullRect({id, x, y, width, height, radius, bottomRadius, ear, small: 1});
-        const open = this._moduleTargets();
-        let targets = open?.rects;
-        let key = open?.key;
-        const morph = this._morph;
-        if (!targets) {
-            if (!morph) {
-                // (At rest: the capsule's corners, for its way back to it.)
-                if (!this._island.expanded)
-                    this._restShape = shape;
-                return null;
-            }
-            // Closed: back into the capsule (or into another page's shape).
-            const rest = this._island.restRect();
-            const [, , , , radius, bottomRadius, ear] = this._restShape ?? shape;
-            targets = [this._island.page || !rest ? rectOf(shape)
-                : rectOf([rest[0], rest[1] + this._island.translation_y, rest[2], rest[3], radius, bottomRadius, ear])];
-            key = 'closed';
-        } else if (targets.length === 0) {
-            // (Not laid out yet: as it was until they are.)
-            targets = morph?.to ?? [rectOf(shape)];
-            key = morph?.key ?? 'unplaced';
-        }
-        if (!morph || key !== morph.key) {
-            const from = morph?.shown ?? [rectOf(shape)];
-            morph?.timeline.stop();
-            const duration = adjustAnimationTime(MORPH_TIME);
-            const timeline = new Clutter.Timeline({actor: this._island, duration: Math.max(1, duration),
-                progress_mode: Clutter.AnimationMode.EASE_OUT_EXPO});
-            // (All they go through: from where they are to where they go,
-            // and what it had room for already.)
-            // (And where the modules will be, before they are laid out.)
-            // Kept once it is back at rest, for the next time: its glass not
-            // made smaller and larger again – each time, what is under it all
-            // drawn again.
-            const room = boundsOf([...from, ...targets].map(r => [r.x - (r.ear ?? 0), r.y,
-                r.width + 2 * (r.ear ?? 0), r.height]).concat([morph?.room, this._room, this._pageRoom()]
-                .filter(Boolean)));
-            this._room = room;
-            const next = {from, to: targets, key, shown: from, timeline, closing: !open, done: duration <= 0, room};
-            timeline.connect('new-frame', () => this._queueShape());
-            // (Its time back at 0 once it is over.)
-            timeline.connect('completed', () => {
-                next.done = true;
-                this._syncShape();
-            });
-            this._morph = next;
-            if (!next.done)
-                timeline.start();
-        }
-        const current = this._morph;
-        if (current.to !== targets) {
-            current.room = boundsOf([current.room, ...targets.map(r => [r.x - (r.ear ?? 0), r.y,
-                r.width + 2 * (r.ear ?? 0), r.height])].filter(Boolean));
-            this._room = current.room;
-        }
-        current.to = targets;
-        const t = current.done ? 1 : current.timeline.get_progress();
-        current.shown = morphRects(current.from, current.to, t);
-        if (t >= 1 && current.closing) {
-            this._morph = null;
-            return null;
-        }
-        if (current.shown.length === 0)
-            return null;
-        return current.shown.map(r => [r.x, r.y, r.width, r.height, r.radius, r.bottomRadius, r.ear, r.small]);
+        this._centreShown = false;
     }
 
     // Of glass, its type and icons follow what is behind the glass
@@ -989,7 +852,7 @@ export class IslandModule {
         const page = island.page;
         // (The control centre's modules each have their own:
         // shell/controlCentre/ink.js.)
-        if (!page || typeof page.moduleRects === 'function')
+        if (!page || isControlCentre(page))
             return;
         let overWindows = false;
         if (!Main.overview.visible) {
@@ -1057,7 +920,7 @@ export class IslandModule {
     // out as usual.
     _stop() {
         this._stopped = true;
-        this._dropMorph();
+        this._dropShapeLater();
         this._timeouts.forEach(id => GLib.source_remove(id));
         this._timeouts.clear();
         if (this._laterId)
