@@ -3,6 +3,7 @@
 // holds GNOME's quick settings, GNOME's notification list and calendar,
 // and the icons extensions put into the bar; its power button opens
 // Atelier's power menu. Without the island, GNOME's menus work as usual.
+// (The Controls tab: shell/controlCentre/host.js.)
 
 import St from 'gi://St';
 
@@ -13,7 +14,6 @@ import {whenSystemItem} from '../core/systemItem.js';
 import {DateMenuHost} from './dateMenuHost.js';
 import {QuickSettingsHost} from './host.js';
 import {ControlCentreInk} from './ink.js';
-import {NowPlayingModule} from './media.js';
 import {ControlCentrePage} from './page.js';
 import {ExtensionTray} from './tray.js';
 
@@ -36,8 +36,6 @@ export class ControlCentreModule {
         this._kept = null;
         this._watched = null;
         this._stopWaiting = null;
-        this._mediaActor = null;
-        this._nowPlaying = null;
         this._ink = null;
     }
 
@@ -51,28 +49,9 @@ export class ControlCentreModule {
         return this._page;
     }
 
-    /** @returns {QuickSettingsHost|null} GNOME's tiles in their modules, while adopted */
+    /** @returns {QuickSettingsHost|null} the Controls tab, while adopted */
     get controls() {
         return this._quickSettingsHost;
-    }
-
-    /**
-     * Put an actor in the Controls tab's Now Playing module (top right of
-     * the first pane, 2 × 2 cells), in place of its "Not Playing"
-     * placeholder; null puts the placeholder back. Kept while the control
-     * centre is turned off and on; the actor stays the caller's (taken out,
-     * never destroyed).
-     *
-     * @param {Clutter.Actor|null} actor
-     */
-    setMediaModule(actor) {
-        this._mediaActor = actor;
-        this._quickSettingsHost?.setMediaModule(actor ?? this._nowPlaying?.actor ?? null);
-    }
-
-    /** @returns {NowPlayingModule|null} the Now Playing module, while adopted */
-    get nowPlaying() {
-        return this._nowPlaying ?? null;
     }
 
     /** @returns {ExtensionTray|null} */
@@ -187,10 +166,8 @@ export class ControlCentreModule {
             this._watched?.disconnectObject(this);
             this._watched = island;
             island.connectObject('page-closed', () => {
-                if (this._page && island.page !== this._page) {
+                if (this._page && island.page !== this._page)
                     this._page = null;
-                    this._quickSettingsHost?.closeMenus();
-                }
             }, 'destroy', () => (this._watched = null), this);
         }
         const tabs = this._tabs();
@@ -200,6 +177,9 @@ export class ControlCentreModule {
             page = null;
         }
         if (page) {
+            // (Back in reach first: resting, a tab other than the Controls
+            // stays hidden, as it was while the page rested.)
+            island.adopt(page);
             page.reopen(tab);
         } else {
             page = this._newPage(tabs, tab);
@@ -214,20 +194,19 @@ export class ControlCentreModule {
         }
         this._page = page;
         this._ink?.attach(page);
+        // (Its tiles coming in one after another.)
+        if (page.tab === 'controls')
+            this._quickSettingsHost.playOpen();
     }
 
     _newPage(tabs, tab) {
         const page = new ControlCentrePage(tabs, tab);
         page.keepAlive = true;
-        // (A menu's page in place of the modules: the island eases to it.)
-        this._quickSettingsHost.connectObject('detail-changed', () => page.resized(), page);
         page.connect('destroy', () => {
             if (this._kept === page)
                 this._kept = null;
-            if (this._page !== page)
-                return;
-            this._page = null;
-            this._quickSettingsHost?.closeMenus();
+            if (this._page === page)
+                this._page = null;
         });
         return page;
     }
@@ -237,7 +216,6 @@ export class ControlCentreModule {
         if (!page)
             return;
         this._page = null;
-        this._quickSettingsHost?.closeMenus();
         this._islandModule()?.island?.close(page);
     }
 
@@ -247,7 +225,6 @@ export class ControlCentreModule {
         if (!this._page)
             return;
         this._page = null;
-        this._quickSettingsHost?.closeMenus();
         this._islandModule()?.closeUnseen();
     }
 
@@ -255,7 +232,9 @@ export class ControlCentreModule {
         const tabs = [{
             id: 'controls', label: 'Controls', icon: 'preferences-system-symbolic',
             actor: this._quickSettingsHost.actor,
-            onShow: () => this._quickSettingsHost?.closeMenus(),
+            onShow: () => this._quickSettingsHost?.rest(),
+            onRest: () => this._quickSettingsHost?.rest(),
+            handleKeyPress: event => this._quickSettingsHost?.handleKeyPress(event) ?? false,
             moduleRects: page => this._quickSettingsHost?.moduleRects(page) ?? [],
         }];
         if (this._dateMenuHost) {
@@ -297,15 +276,15 @@ export class ControlCentreModule {
         return this._modules?.get('island') ?? null;
     }
 
-    // Take GNOME's tiles, list and calendar into the control centre.
+    // Take GNOME's sliders, list and calendar into the control centre.
     _adopt() {
         if (this._quickSettingsHost)
             return;
-        this._quickSettingsHost = new QuickSettingsHost(this._quickSettings);
+        const quickSettings = this._quickSettings;
+        this._quickSettingsHost = new QuickSettingsHost(quickSettings);
+        this._quickSettingsHost.takeSlider('brightness', quickSettings._brightness?.quickSettingsItems?.[0] ?? null);
+        this._quickSettingsHost.takeSlider('volume', quickSettings._volumeOutput?._output ?? null);
         this._ink = new ControlCentreInk({modules: this._modules});
-        // Now Playing (MPRIS), unless another actor was given for its place.
-        this._nowPlaying = new NowPlayingModule();
-        this._quickSettingsHost.setMediaModule(this._mediaActor ?? this._nowPlaying.actor);
         if (this._dateMenu?._messageList && this._dateMenu._calendar)
             this._dateMenuHost = new DateMenuHost(this._dateMenu);
         this._quickSettings.can_focus = false;
@@ -342,11 +321,8 @@ export class ControlCentreModule {
         this._kept = null;
         this._ink?.destroy();
         this._ink = null;
-        this._quickSettingsHost?.disconnectObject(this);
         this._quickSettingsHost?.release();
         this._quickSettingsHost = null;
-        this._nowPlaying?.destroy();
-        this._nowPlaying = null;
         this._dateMenuHost?.release();
         this._dateMenuHost = null;
         this._tray?.restore();

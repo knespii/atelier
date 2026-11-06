@@ -1,703 +1,955 @@
-// GNOME's quick settings – Wi-Fi, Bluetooth, sliders, power mode, Caffeine
-// and every other tile, with their menus – shown in Atelier's control centre
-// as macOS lays out its Control Center: rounded modules in a grid two
-// panes wide (shell/controlCentre/layout.js, lib/controlGrid.js). The tiles
-// stay GNOME's (and the extensions'): each moves out of GNOME's grid into a
-// module, new ones too (an extension's go where there is room), and a
-// tile's menu opens as a page of its own in place of the modules. It all
-// goes back when the control centre is turned off.
+// The control centre's Controls tab, as its Layout & Motion spec has it:
+// one row of four columns – Wi-Fi, Bluetooth and Airplane pills; Caffeine
+// and Output tiles; brightness and volume as tall capsules; the system tile
+// (the battery, screenshot, settings, lock, power) – at 0.8 of the spec's
+// pixels (lib/ccLayout.js), each tile placed absolutely in its column. A
+// pill's or Output's chevron opens it as a card in place, growing over its
+// neighbours as they step back (lib/ccLayout.js tileState(): the UI is a
+// function of which card is open); a click outside it or Esc closes it.
+// The motion is the spec's (lib/ccMotion.js, run by animator.js), turned
+// round from wherever it is.
+//
+// What it shows and does is GNOME's own, through adapters (adapters.js):
+// its toggles stay where GNOME has them, unseen (its menu doesn't open
+// while the control centre is there). GNOME's brightness and volume
+// sliders are shown as capsules (capsule.js), GNOME's own kept off the
+// stage meanwhile and put back when the control centre lets go.
 
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
-import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
-import Meta from 'gi://Meta';
+import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {DURATIONS, OPEN_DELAYS, rowDelays} from '../../lib/ccMotion.js';
+import {CARDS, INNER, OPEN, ORDER, SIZE, TILES, fitScale, restRects, tileState, timeLeft,
+    toggleOpen} from '../../lib/ccLayout.js';
+import {Animator} from './animator.js';
+import {dropPending, makeAdapters} from './adapters.js';
 import {LevelCapsule} from './capsule.js';
-import {ControlModule, moduleGrid, rectIn} from './layout.js';
+import {rectIn} from './layout.js';
+import {ChipRow, FnLayout, ListRow, RoundToggle, Tile, iconOf, place, pressable, px, scaleOf,
+    setIcon} from './tiles.js';
 
-// The modules in their order (lib/controlGrid.js packs them so, with no
-// cell left empty): on the left like macOS's Control Center –
-// connectivity, Now Playing, Do Not Disturb – on the right the system
-// buttons and the battery on top, then like iOS's: brightness and volume
-// as tall capsules side by side (the microphone's beside them while an
-// app records), the squares;
-// extensions' tiles and Background Apps where there is room. Those that
-// may grow (Do Not Disturb's pill, the system buttons' and Background
-// Apps' rows, connectivity's rows, Now Playing, the capsules) fill what
-// would be left empty.
-const MODULES = [
-    ['connectivity', {cols: 2, pane: 0, rowPerSlot: true, growRows: 2}],
-    ['media', {cols: 2, rows: 2, pane: 0, always: true, fixed: true, growRows: 1, maxCols: 3}],
-    ['focus', {cols: 2, pane: 0, maxCols: 4}],
-    ['system', {cols: 4, pane: 1, minCols: 3, maxCols: 8}],
-    ['brightness', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
-    ['volume', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
-    ['microphone', {cols: 1, rows: 2, pane: 1, fixed: true, growRows: 1}],
-    ['dark', {cols: 1, pane: 1}],
-    ['night', {cols: 1, pane: 1}],
-    ['power-mode', {cols: 1, pane: 1}],
-    ['keyboard', {cols: 1, pane: 1}],
-    ['footer', {cols: 4, minCols: 2, maxCols: 8}],
-];
-const ORDER = MODULES.map(([id]) => id);
-// (Then the extensions' and unknown tiles, in modules of their own.)
+// The tiles' shapes.
+const SHAPES = {wifi: 'pill', bt: 'pill', airplane: 'pill', caffeine: 'tile', output: 'tile',
+    brightness: 'slider', volume: 'slider', system: 'tile'};
+// Each tile's header: so high (spec px); a card's list starts under it.
+const PILL_HEADER = 112;
+const OUTPUT_HEADER = 108;
+// Rows a list shows at most (the last, "Other network…", "Pair new
+// device…", besides).
+const MAX_NETWORKS = 3;
+const MAX_DEVICES = 3;
+// The Wi-Fi card's mini pills: so high, so far in from its sides and up
+// from its foot (spec px).
+const MINI = {height: 60, inset: 16, bottom: 14};
+// The output list's rows: each this far below the one before (spec px).
+const OUTPUT_STEP = 70;
+// Caffeine's chips.
+const CAFFEINE_CHIPS = ['30 min', '1 h', 'Until off'];
+const CAFFEINE_SUBTITLES = ['Awake for 30 min', 'Awake for 1 h', 'Screen stays awake'];
+// How far each moves (spec px): a tile as the panel opens, a list's row,
+// the mini pills and chips coming in.
+const OPEN_DY = -14;
+const ROW_DY = 10;
+const FOOT_DY = 12;
 
-// GNOME's tiles by their class (as GNOME names them), for when they are not
-// found through GNOME's indicators.
-const BY_CLASS = {
-    NMWirelessToggle: ['connectivity', 'row', 0],
-    BluetoothToggle: ['connectivity', 'row', 1],
-    NMWiredToggle: ['connectivity', 'row', 2],
-    RfkillToggle: ['connectivity', 'row', 3],
-    NMBluetoothToggle: ['connectivity', 'row', 4],
-    NMModemToggle: ['connectivity', 'row', 5],
-    NMVpnToggle: ['connectivity', 'row', 6],
-    DarkModeToggle: ['dark', 'square', 0],
-    NightLightToggle: ['night', 'square', 0],
-    DoNotDisturbToggle: ['focus', 'row', 0],
-    PowerProfilesToggle: ['power-mode', 'square', 0],
-    BrightnessItem: ['brightness', 'capsule', 0],
-    KeyboardBrightnessToggle: ['keyboard', 'square', 0],
-    OutputStreamSlider: ['volume', 'capsule', 0],
-    InputStreamSlider: ['microphone', 'capsule', 0],
-    SystemItem: ['system', 'system', 0],
-    BackgroundAppsToggle: ['footer', 'wide', 0],
-};
-// (And by their icon, the last resort.)
-const BY_ICON = {
-    'dark-mode-symbolic': ['dark', 'square', 0],
-    'night-light-symbolic': ['night', 'square', 0],
-};
+const coffeeIcon = () => Gio.FileIcon.new(Gio.File.new_for_uri(
+    GLib.Uri.resolve_relative(import.meta.url, '../../icons/coffee-symbolic.svg', GLib.UriFlags.NONE)));
 
-const DND_SCHEMA = 'org.gnome.desktop.notifications';
-
-// The page of an open menu: as wide as a pane of modules.
-const DetailLayout = GObject.registerClass(
-class AtelierControlDetailLayout extends Clutter.LayoutManager {
-    // The open menus' (one, but while one closes as another opens) height:
-    // their content's, at once, not the height GNOME eases them through
-    // under a tile.
-    _heightOf(container, width) {
-        let height = 0;
-        for (const child of container) {
-            const menu = child._delegate;
-            if (!child.visible || !menu?.isOpen)
-                continue;
-            const content = menu.box ?? child;
-            height = Math.max(height, content.get_preferred_height(width)[1]);
-        }
-        return height;
-    }
-
-    vfunc_get_preferred_width(container, forHeight) {
-        let [min, nat] = [0, 0];
-        for (const child of container) {
-            if (!child.visible || !child._delegate?.isOpen)
-                continue;
-            const [cMin, cNat] = child.get_preferred_width(forHeight);
-            min = Math.max(min, cMin);
-            nat = Math.max(nat, cNat);
-        }
-        return [min, nat];
-    }
-
-    vfunc_get_preferred_height(container, forWidth) {
-        const height = this._heightOf(container, forWidth);
-        return [height, height];
-    }
-
-    vfunc_allocate(container, box) {
-        const width = box.get_width();
-        const height = Math.max(box.get_height(), this._heightOf(container, width));
-        for (const child of container) {
-            if (child.visible)
-                child.allocate(new Clutter.ActorBox({x1: 0, y1: 0, x2: width, y2: height}));
-        }
-    }
-});
-
-export const QuickSettingsHost = GObject.registerClass({
-    Signals: {
-        // A menu's page opened or closed (in place of the modules).
-        'detail-changed': {},
-    },
-}, class AtelierQuickSettingsHost extends GObject.Object {
+export const QuickSettingsHost = GObject.registerClass(
+class AtelierQuickSettingsHost extends GObject.Object {
     /**
      * @param {object} quickSettings - Main.panel.statusArea.quickSettings
      */
     _init(quickSettings) {
         super._init();
         this._quickSettings = quickSettings;
-        this._menu = quickSettings.menu;
-        const {_grid: grid, _overlay: overlay} = this._menu;
-        this._grid = grid;
-        this._overlay = overlay;
-        this._placeholder = grid.layout_manager?._overlay ?? null;
-        this._injections = new InjectionManager();
-        this._laterId = 0;
-        this._pending = new Set();
-        this._siblings = new Map();
-        // Each tile taken: {slot, module, span, tweaks}.
-        this._items = new Map();
-        this._extras = new Map();
-        this._detailItem = null;
-        this._mediaActor = null;
-
-        this._menu.close(PopupAnimation.NONE);
+        this._open = null;
+        this._connecting = null;
+        this._busyDevice = null;
+        this._serial = 0;
+        this._sliders = new Map();
 
         this.actor = new St.BoxLayout({
             style_class: 'atelier-cc-tiles atelier-cc-mac',
             orientation: Clutter.Orientation.VERTICAL,
             x_expand: true,
         });
-        this._modulesBox = new St.BoxLayout({
-            style_class: 'atelier-cc-modules-box',
-            orientation: Clutter.Orientation.VERTICAL,
-            x_expand: true,
+        this.grid = new St.Widget({
+            style_class: 'atelier-cc-grid',
+            layout_manager: new FnLayout((container, box) => this._allocateGrid(box), () => this._gridSize()),
+            x_align: Clutter.ActorAlign.CENTER,
+            reactive: false,
         });
-        this.actor.add_child(this._modulesBox);
-        this._gridActor = moduleGrid();
-        this._modulesBox.add_child(this._gridActor);
-        this._modules = new Map();
-        for (const [id, spec] of MODULES) {
-            const module = new ControlModule(id, spec);
-            this._modules.set(id, module);
-            this._gridActor.add_child(module);
+        this.actor.add_child(this.grid);
+        this.animator = new Animator(this.grid);
+        this.grid.connect('destroy', () => this.animator.destroy());
+
+        // A click anywhere round an open card (over the whole panel, under
+        // the card) closes it.
+        this._closeArea = new Clutter.Actor({reactive: true, visible: false});
+        this._closeArea.connect('button-press-event', () => {
+            this.setOpen(null);
+            return Clutter.EVENT_STOP;
+        });
+        this._closeArea.connect('touch-event', (_, event) => {
+            if (event.type() === Clutter.EventType.TOUCH_BEGIN)
+                this.setOpen(null);
+            return Clutter.EVENT_STOP;
+        });
+
+        this._tiles = new Map();
+        this._build();
+        this.grid.add_child(this._closeArea);
+
+        this._adapters = {};
+        this.setAdapters(makeAdapters(quickSettings));
+        this._applyState({instant: true});
+
+        // (Fitted again to a monitor of another width.)
+        Main.layoutManager.connectObject('monitors-changed', () => this.grid.queue_relayout(), this);
+    }
+
+    // ---- Building ----
+
+    _build() {
+        const a = this.animator;
+        // The pills.
+        for (const [id, title, icon] of [['wifi', 'Wi-Fi', 'network-wireless-signal-excellent-symbolic'],
+            ['bt', 'Bluetooth', 'bluetooth-active-symbolic'], ['airplane', 'Airplane Mode', 'airplane-mode-symbolic']]) {
+            const card = id in CARDS;
+            const tile = new Tile(id, {shape: 'pill', card});
+            const header = new St.BoxLayout({style_class: 'atelier-cc-pill-header', x_expand: true});
+            tile.toggle = new RoundToggle(icon, title, a);
+            tile.toggle.connect('clicked', () => this._toggleRadio(id));
+            header.add_child(tile.toggle);
+            const text = new St.BoxLayout({x_expand: true, style_class: 'atelier-cc-pill-text'});
+            const lines = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER});
+            tile.title = new St.Label({style_class: 'atelier-cc-title', text: title});
+            tile.subtitle = new St.Label({style_class: 'atelier-cc-subtitle', text: ''});
+            lines.add_child(tile.title);
+            lines.add_child(tile.subtitle);
+            text.add_child(lines);
+            tile.addFocusables(tile.toggle);
+            if (card) {
+                tile.chevron = iconOf('go-next-symbolic', 'atelier-cc-chevron');
+                tile.chevron.y_align = Clutter.ActorAlign.CENTER;
+                tile.chevron.set_pivot_point(0.5, 0.5);
+                text.add_child(tile.chevron);
+                tile.opener = pressable(new St.Button({style_class: 'atelier-cc-opener', child: text, x_expand: true,
+                    can_focus: true, accessible_name: title, label_actor: tile.title}), a);
+                tile.opener.connect('clicked', () => this.setOpen(toggleOpen(this._open, id)));
+                header.add_child(tile.opener);
+                tile.addFocusables(tile.opener);
+            } else {
+                header.add_child(text);
+            }
+            tile.header = tile.addPart(header, w => [0, 0, w, px(PILL_HEADER)]);
+            if (card)
+                this._buildList(tile, id);
+            this._add(tile);
         }
-        this._setMediaPlaceholder();
 
-        // The menus: their layer from GNOME's menu, as the page of the one
-        // open. (Not under their tiles any more: each in place of the
-        // modules.)
-        this._detail = new St.Bin({style_class: 'atelier-cc-detail', visible: false, x_expand: true});
-        this.actor.add_child(this._detail);
-        this._overlayParent = overlay.get_parent();
-        this._overlayConstraints = overlay.get_constraints();
-        overlay.clear_constraints();
-        this._overlayParent.remove_child(overlay);
-        this._overlayLayout = overlay.layout_manager;
-        overlay.layout_manager = new DetailLayout();
-        this._detail.set_child(overlay);
-        this._menuConstraints = new Map();
-        for (const child of overlay.get_children())
-            this._adoptMenuActor(child);
-        overlay.connectObject(
-            'child-added', (_, child) => this._adoptMenuActor(child),
-            'child-removed', (_, child) => this._releaseMenuActor(child),
-            this);
+        // Caffeine.
+        {
+            const tile = new Tile('caffeine', {shape: 'tile'});
+            const header = new St.BoxLayout({style_class: 'atelier-cc-tile-header', x_expand: true});
+            tile.toggle = new RoundToggle(coffeeIcon(), 'Caffeine', a);
+            tile.toggle.connect('clicked', () => this._adapters.caffeine.setOn(!this._adapters.caffeine.on));
+            header.add_child(tile.toggle);
+            const lines = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER});
+            tile.title = new St.Label({style_class: 'atelier-cc-title', text: 'Caffeine'});
+            tile.subtitle = new St.Label({style_class: 'atelier-cc-subtitle'});
+            lines.add_child(tile.title);
+            lines.add_child(tile.subtitle);
+            header.add_child(lines);
+            tile.header = tile.addPart(header, w => [0, 0, w, px(OUTPUT_HEADER)]);
+            tile.chips = new ChipRow(a, index => this._adapters.caffeine.choose(index));
+            tile.chips.setLabels(CAFFEINE_CHIPS);
+            tile.addPart(tile.chips, chipsPlace);
+            tile.addFocusables(tile.toggle, ...tile.chips.chips);
+            this._add(tile);
+        }
 
-        this._header = this._makeHeader();
+        // Output.
+        {
+            const tile = new Tile('output', {shape: 'tile', card: true});
+            const header = new St.BoxLayout({style_class: 'atelier-cc-tile-header', x_expand: true});
+            const circle = new St.Bin({style_class: 'atelier-cc-round atelier-cc-round-big atelier-cc-round-static',
+                y_align: Clutter.ActorAlign.CENTER});
+            tile.icon = iconOf('audio-headphones-symbolic', 'atelier-cc-round-icon atelier-cc-round-icon-big');
+            circle.set_child(tile.icon);
+            header.add_child(circle);
+            const lines = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER});
+            tile.title = new St.Label({style_class: 'atelier-cc-title', text: 'Output'});
+            tile.subtitle = new St.Label({style_class: 'atelier-cc-subtitle'});
+            lines.add_child(tile.title);
+            lines.add_child(tile.subtitle);
+            header.add_child(lines);
+            tile.chevron = iconOf('go-next-symbolic', 'atelier-cc-chevron');
+            tile.chevron.y_align = Clutter.ActorAlign.CENTER;
+            tile.chevron.set_pivot_point(0.5, 0.5);
+            header.add_child(tile.chevron);
+            tile.opener = pressable(new St.Button({style_class: 'atelier-cc-opener atelier-cc-opener-tile',
+                child: header, can_focus: true, accessible_name: 'Output', label_actor: tile.title}), a);
+            tile.opener.connect('clicked', () => this.setOpen(toggleOpen(this._open, 'out')));
+            tile.header = tile.addPart(tile.opener, w => [0, 0, w, px(OUTPUT_HEADER)]);
+            tile.chips = new ChipRow(a, index => this._chooseOutputChip(index));
+            tile.addPart(tile.chips, chipsPlace);
+            tile.addFocusables(tile.opener, ...tile.chips.chips);
+            this._buildList(tile, 'out');
+            this._add(tile);
+        }
 
-        // Do Not Disturb as a tile, when GNOME has none (before GNOME 49).
-        this._dnd = null;
-        if (!grid.get_children().some(child => child.constructor.name === 'DoNotDisturbToggle'))
-            this._addDndToggle();
+        // Brightness and volume: their slots (the capsules come in them).
+        for (const id of ['brightness', 'volume']) {
+            const tile = new Tile(id, {shape: 'slider'});
+            tile.slot = tile.addPart(new St.Bin({style_class: 'atelier-cc-slider-slot', x_expand: true, y_expand: true}));
+            this._add(tile);
+        }
 
-        // GNOME's tiles, in its order (to put them back so), and those that
-        // come later, from extensions. (An extension's is put before
-        // Background Apps', which is in a module now: before nothing, here.)
-        this._order = grid.get_children();
-        const host = this;
-        this._injections.overrideMethod(this._menu, 'insertItemBefore', original => function (item, sibling, ...rest) {
-            if (sibling && sibling.get_parent() !== this._grid) {
-                host._siblings.set(item, sibling);
-                sibling = null;
-            }
-            return original.call(this, item, sibling, ...rest);
-        });
-        grid.connectObject('child-added', (_, child) => this._queueAdopt(child), this);
-        for (const child of grid.get_children())
-            this._adopt(child);
+        // The system tile.
+        {
+            const tile = new Tile('system', {shape: 'tile'});
+            const box = new St.BoxLayout({style_class: 'atelier-cc-system', orientation: Clutter.Orientation.VERTICAL,
+                x_expand: true, y_expand: true});
+            const label = new St.BoxLayout({style_class: 'atelier-cc-battery-label'});
+            tile.batteryIcon = iconOf('battery-level-90-symbolic', 'atelier-cc-battery-icon');
+            tile.batteryIcon.y_align = Clutter.ActorAlign.CENTER;
+            tile.batteryTitle = new St.Label({style_class: 'atelier-cc-battery-title', text: 'Battery',
+                y_align: Clutter.ActorAlign.CENTER});
+            label.add_child(tile.batteryIcon);
+            label.add_child(tile.batteryTitle);
+            box.add_child(label);
+            tile.percent = new St.Label({style_class: 'atelier-cc-battery-percent', text: ''});
+            box.add_child(tile.percent);
+            tile.timeLeft = new St.Label({style_class: 'atelier-cc-battery-time', text: ''});
+            box.add_child(tile.timeLeft);
+            tile.bar = new St.Widget({style_class: 'atelier-cc-battery-bar', x_expand: true,
+                layout_manager: new FnLayout((container, b) => {
+                    const fill = container.get_first_child();
+                    place(fill, 0, 0, b.get_width() * (container._fraction ?? 0), b.get_height());
+                })});
+            tile.bar._fraction = 0;
+            tile.bar.add_child(new St.Widget({style_class: 'atelier-cc-battery-fill'}));
+            box.add_child(tile.bar);
+            box.add_child(new St.Widget({y_expand: true}));
+            const buttons = new St.BoxLayout({style_class: 'atelier-cc-system-buttons', x_expand: true});
+            tile.buttons = {};
+            const names = [['screenshot', 'screenshooter-symbolic', 'Take Screenshot'],
+                ['settings', 'applications-system-symbolic', 'Settings'],
+                ['lock', 'system-lock-screen-symbolic', 'Lock Screen'],
+                ['power', 'system-shutdown-symbolic', 'Power Off Menu']];
+            names.forEach(([name, icon, accessible], i) => {
+                if (i > 0)
+                    buttons.add_child(new St.Widget({x_expand: true}));
+                const button = pressable(new St.Button({
+                    style_class: `atelier-cc-system-button atelier-cc-system-${name}`,
+                    child: iconOf(icon, 'atelier-cc-system-icon'), can_focus: true, accessible_name: accessible,
+                    y_align: Clutter.ActorAlign.CENTER,
+                }), a);
+                button.connect('clicked', () => this._adapters.system.activate(name));
+                buttons.add_child(button);
+                tile.buttons[name] = button;
+                tile.addFocusables(button);
+            });
+            box.add_child(buttons);
+            tile.addPart(box);
+            this._add(tile);
+        }
     }
 
-    _makeHeader() {
-        const header = new St.BoxLayout({style_class: 'atelier-cc-detail-header', x_expand: true});
-        const back = new St.Button({
-            style_class: 'atelier-cc-detail-back',
-            accessible_name: 'Back',
-            can_focus: true,
-            child: new St.Icon({icon_name: 'go-previous-symbolic'}),
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        back.connect('clicked', () => this.closeMenus(PopupAnimation.FULL));
-        header.add_child(back);
-        this._headerTitle = new St.Label({
-            style_class: 'atelier-cc-detail-title',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        header.add_child(this._headerTitle);
-        this._switch = new PopupMenu.Switch(false);
-        this._switch.reactive = false;
-        this._switchButton = new St.Button({
-            style_class: 'atelier-cc-detail-switch',
-            can_focus: true,
-            child: this._switch,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        this._switchButton.connect('clicked', () => {
-            const item = this._detailItem;
-            if (item)
-                activate(item);
-        });
-        header.add_child(this._switchButton);
-        // (Gone with a menu destroyed while open: made anew for the next.)
-        header.connect('destroy', () => {
-            if (this._header === header)
-                this._header = null;
-        });
-        return header;
-    }
-
-    _addDndToggle() {
-        const schema = Gio.SettingsSchemaSource.get_default()?.lookup(DND_SCHEMA, true);
-        if (!schema)
-            return;
-        const settings = new Gio.Settings({schema_id: DND_SCHEMA});
-        const toggle = new QuickSettings.QuickToggle({
-            title: 'Do Not Disturb',
-            iconName: 'notifications-disabled-symbolic',
-            toggleMode: true,
-        });
-        toggle.add_style_class_name('atelier-cc-dnd');
-        const sync = () => {
-            toggle.checked = !settings.get_boolean('show-banners');
-            toggle.subtitle = toggle.checked ? 'On' : null;
-        };
-        sync();
-        settings.connectObject('changed::show-banners', sync, toggle);
-        toggle.connect('notify::checked', () => {
-            if (settings.get_boolean('show-banners') === toggle.checked)
-                settings.set_boolean('show-banners', !toggle.checked);
-        });
-        this._dnd = {toggle, settings};
-        this._place(toggle, ['focus', 'row', 0]);
-    }
-
-    // What a tile is, where it goes: [module, kind, rank].
-    _classify(item) {
-        const qs = this._quickSettings;
-        const of = indicator => indicator?.quickSettingsItems?.includes(item) ?? false;
-        const name = item.constructor?.name ?? '';
-        if (of(qs._network) || of(qs._bluetooth) || of(qs._rfkill))
-            return BY_CLASS[name] ?? ['connectivity', 'row', 7];
-        if (of(qs._darkMode))
-            return BY_CLASS.DarkModeToggle;
-        if (of(qs._nightLight))
-            return BY_CLASS.NightLightToggle;
-        if (of(qs._powerProfiles))
-            return BY_CLASS.PowerProfilesToggle;
-        if (of(qs._brightness))
-            return BY_CLASS.BrightnessItem;
-        if (of(qs._backlight))
-            return BY_CLASS.KeyboardBrightnessToggle;
-        if (item === qs._volumeOutput?._output)
-            return BY_CLASS.OutputStreamSlider;
-        if (item === qs._volumeInput?._input)
-            return BY_CLASS.InputStreamSlider;
-        if (item === qs._system?._systemItem)
-            return BY_CLASS.SystemItem;
-        if (of(qs._backgroundApps))
-            return BY_CLASS.BackgroundAppsToggle;
-        if (BY_CLASS[name])
-            return BY_CLASS[name];
-        if (BY_ICON[item.icon_name])
-            return BY_ICON[item.icon_name];
-        return null;
-    }
-
-    _queueAdopt(child) {
-        this._pending.add(child);
-        if (this._laterId)
-            return;
-        // (Once GNOME has set its column span: right after adding it.)
-        this._laterId = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
-            this._laterId = 0;
-            const pending = [...this._pending];
-            this._pending.clear();
-            for (const child of pending) {
-                if (child.get_parent() === this._grid)
-                    this._adopt(child, true);
-            }
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
-    _adopt(child, late = false) {
-        if (child === this._placeholder || this._items.has(child) || !(child instanceof St.Widget))
-            return;
-        if (late) {
-            // Where GNOME (or the extension) put it among its tiles.
-            const before = this._siblings.get(child) ?? child.get_next_sibling();
-            this._siblings.delete(child);
-            const index = before ? this._order.indexOf(before) : -1;
-            if (index < 0)
-                this._order.push(child);
+    // A card's list (and, Wi-Fi's, its mini pills): placed for the card
+    // open, shown only while it is.
+    _buildList(tile, key) {
+        const a = this.animator;
+        const open = OPEN[key];
+        const top = key === 'out' ? OUTPUT_HEADER : PILL_HEADER;
+        const bottom = key === 'wifi' ? MINI.height + MINI.bottom + 8 : 14;
+        const list = new St.BoxLayout({style_class: `atelier-cc-list atelier-cc-list-${key}`,
+            orientation: Clutter.Orientation.VERTICAL, x_expand: true, visible: false});
+        tile.rows = new Map();
+        tile.placeholder = new St.Label({style_class: 'atelier-cc-list-placeholder', visible: false});
+        tile.placeholder.clutter_text.line_wrap = true;
+        if (key === 'out') {
+            // The outputs: a highlight under the one chosen, sliding to
+            // another; its check with it. (All of them: scrolled when more
+            // than fit.)
+            tile.rowsBox = new St.Widget({style_class: 'atelier-cc-output-rows', x_expand: true,
+                layout_manager: new FnLayout((container, b) => this._allocateOutputRows(tile, b),
+                    () => [0, px(OUTPUT_STEP) * Math.max(1, tile.rows.size) - px(OUTPUT_STEP - 64)])});
+            tile.selection = new St.Widget({style_class: 'atelier-cc-output-pill',
+                layout_manager: new Clutter.BinLayout(), opacity: 0});
+            tile.selection.add_child(new St.Icon({style_class: 'atelier-cc-row-check', icon_name: 'object-select-symbolic',
+                x_align: Clutter.ActorAlign.END, y_align: Clutter.ActorAlign.CENTER, x_expand: true}));
+            tile.rowsBox.add_child(tile.selection);
+            const scroll = new St.ScrollView({style_class: 'atelier-cc-list-scroll', x_expand: true, y_expand: true,
+                hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC,
+                overlay_scrollbars: true});
+            const scrolled = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
+            scrolled.add_child(tile.rowsBox);
+            if ('child' in scroll)
+                scroll.child = scrolled;
             else
-                this._order.splice(index, 0, child);
+                scroll.add_actor(scrolled);
+            list.add_child(scroll);
+        } else {
+            tile.rowsBox = new St.BoxLayout({style_class: 'atelier-cc-rows', orientation: Clutter.Orientation.VERTICAL,
+                x_expand: true});
+            list.add_child(tile.rowsBox);
         }
+        list.add_child(tile.placeholder);
+        tile.list = tile.addPart(list, () => [0, px(top), px(open.width), px(open.height - top - bottom)]);
+        if (key === 'wifi') {
+            // Bluetooth and Airplane Mode, small, at its foot.
+            const foot = new St.BoxLayout({style_class: 'atelier-cc-minis', x_expand: true, visible: false});
+            tile.minis = {};
+            for (const [id, title, icon] of [['bt', 'Bluetooth', 'bluetooth-active-symbolic'],
+                ['airplane', 'Airplane', 'airplane-mode-symbolic']]) {
+                const mini = new St.BoxLayout({style_class: 'atelier-cc-mini', x_expand: true});
+                const toggle = new RoundToggle(icon, title, a, 'small');
+                toggle.connect('clicked', () => this._toggleRadio(id));
+                mini.add_child(toggle);
+                const lines = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true,
+                    y_align: Clutter.ActorAlign.CENTER});
+                const label = new St.Label({style_class: 'atelier-cc-mini-title', text: title});
+                const subtitle = new St.Label({style_class: 'atelier-cc-mini-subtitle'});
+                lines.add_child(label);
+                lines.add_child(subtitle);
+                mini.add_child(lines);
+                foot.add_child(mini);
+                tile.minis[id] = {toggle, subtitle};
+                tile.addFocusables(toggle);
+            }
+            tile.foot = tile.addPart(foot, () => [px(MINI.inset), px(open.height - MINI.bottom - MINI.height),
+                px(open.width - 2 * MINI.inset), px(MINI.height)]);
+        }
+    }
+
+    _add(tile) {
+        tile._rect = {...TILES[tile.tileId]};
+        tile.set_pivot_point(0.5, 0.5);
+        this._tiles.set(tile.tileId, tile);
+        this.grid.add_child(tile);
+    }
+
+    // ---- Adapters ----
+
+    /**
+     * Show and act through these adapters (adapters.js; the tests' fakes),
+     * in place of those it has.
+     *
+     * @param {object} adapters - {wifi, bt, airplane, output, caffeine, system}, some
+     */
+    setAdapters(adapters) {
+        for (const [name, adapter] of Object.entries(adapters)) {
+            const old = this._adapters[name];
+            if (old === adapter)
+                continue;
+            if (old?._ccChangedId)
+                old.disconnect(old._ccChangedId);
+            if (old && old !== adapter && !old._keep)
+                old.destroy?.();
+            this._adapters[name] = adapter;
+            adapter._ccChangedId = adapter.connect('changed', () => this._render());
+        }
+        this._render({instant: true});
+    }
+
+    /** @returns {object} the adapters it shows */
+    get adapters() {
+        return this._adapters;
+    }
+
+    // ---- The sliders ----
+
+    /**
+     * Show GNOME's slider (its brightness, its volume) as a capsule in its
+     * slot, GNOME's own kept off the stage meanwhile.
+     *
+     * @param {string} id - 'brightness' or 'volume'
+     * @param {QuickSettings.QuickSlider|null} item
+     */
+    takeSlider(id, item) {
+        const tile = this._tiles.get(id);
+        this._dropSlider(id);
+        if (!item?.slider)
+            return;
+        // (Made once its slot is on the stage: a capsule measures itself as
+        // it is made.)
+        if (!this.grid.get_stage()) {
+            this._pendingSliders ??= new Map();
+            this._pendingSliders.set(id, item);
+            this.grid.connectObject('stage-views-changed', () => {
+                if (!this.grid.get_stage())
+                    return;
+                this.grid.disconnectObject(this);
+                const pending = this._pendingSliders;
+                this._pendingSliders = null;
+                for (const [key, slider] of pending)
+                    this.takeSlider(key, slider);
+            }, this);
+            return;
+        }
+        const parent = item.get_parent();
         let span = 1;
         try {
-            span = this._grid.layout_manager.get_child_meta(this._grid, child)?.column_span ?? 1;
+            span = parent?.layout_manager?.get_child_meta(parent, item)?.column_span ?? 1;
         } catch {
             span = 1;
         }
-        let place = this._classify(child);
-        if (!place) {
-            // An extension's (or one Atelier doesn't know): a square of its
-            // own, or a pane wide when it is a slider or GNOME's grid gave it
-            // its whole width.
-            const wide = child instanceof QuickSettings.QuickSlider || span > 1 ||
-                !(child instanceof QuickSettings.QuickToggle || child instanceof QuickSettings.QuickMenuToggle);
-            const id = `extra-${this._extras.size}-${GLib.uuid_string_random().slice(0, 4)}`;
-            const module = new ControlModule(id, wide ? {cols: 4, minCols: 3, maxCols: 8} : {cols: 1});
-            module.add_style_class_name(wide ? 'atelier-cc-module-extra-wide' : 'atelier-cc-module-extra');
-            this._extras.set(child, module);
-            this._gridActor.add_child(module);
-            this._modules.set(id, module);
-            place = [id, wide ? 'wide' : 'square', 0];
-        }
-        this._place(child, place, span);
-    }
-
-    _place(item, [id, kind, rank], span = 1) {
-        const module = this._modules.get(id);
-        const tweaks = [];
-        const tweak = (actor, props) => {
-            if (!actor)
-                return;
-            for (const [prop, value] of Object.entries(props)) {
-                tweaks.push([actor, prop, actor[prop]]);
-                actor[prop] = value;
-            }
+        const entry = {item, parent, index: parent?.get_children().indexOf(item) ?? -1, span};
+        parent?.remove_child(item);
+        // (No chevron of its own: the Output tile has the outputs.)
+        entry.capsule = new LevelCapsule(item, id, {menu: false});
+        // (Its chevron, a right click, the Menu key: the Output card.)
+        entry.capsule.openMenu = () => this.setOpen('out');
+        tile.slot.set_child(entry.capsule);
+        const sync = () => {
+            // (Without one – no backlight, no sound – its place stays, faint.)
+            // (Its slot faint, not the capsule: its own opacity is its own.)
+            entry.capsule.reactive = item.visible;
+            tile.slot.opacity = item.visible ? 255 : 90;
         };
-        // GNOME's toggle as a round icon with its name beside it (in a
-        // square, only the icon): its box as tall as it needs, centred, so
-        // the icon's circle stays round.
-        const inner = item._title ? item : item._box?.get_first_child?.();
-        if (inner?._box && (item instanceof QuickSettings.QuickToggle || item instanceof QuickSettings.QuickMenuToggle)) {
-            tweak(inner._box, {y_align: Clutter.ActorAlign.CENTER});
-            if (kind === 'square' || kind === 'compact') {
-                tweak(inner._title?.get_parent(), {visible: false});
-                tweak(item._box, {x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
-            }
-        }
-        // (The system buttons and a wide tile in the middle of theirs, as
-        // tall as they need: the buttons round.)
-        if (kind === 'system' || kind === 'wide')
-            tweak(item, {y_align: Clutter.ActorAlign.CENTER});
-        // A slider of GNOME's as a capsule (shell/controlCentre/capsule.js):
-        // GNOME's own kept off the stage meanwhile, alive, the capsule
-        // showing while it would.
-        let capsule = null;
-        if (kind === 'capsule' && item instanceof QuickSettings.QuickSlider && item.slider) {
-            capsule = new LevelCapsule(item, id);
-            item.get_parent()?.remove_child(item);
-        } else if (kind === 'capsule') {
-            kind = 'slider';
-        }
-        const slot = module.addSlot(capsule ?? item, kind, rank);
-        if (capsule) {
-            capsule.visible = item.visible;
-            module.sync();
-        }
-        item.connectObject(
-            'notify::visible', () => {
-                if (capsule)
-                    capsule.visible = item.visible;
-                module.sync();
-            },
-            'destroy', () => this._forget(item),
-            this);
-        if (item.menu && item.menu !== this._menu) {
-            item.menu.connectObject('open-state-changed', (menu, open) => {
-                if (open)
-                    this._openDetail(item);
-                else
-                    this._closeDetail(item);
-            }, this);
-        }
-        this._items.set(item, {slot, module, span, tweaks, capsule});
+        sync();
+        item.connectObject('notify::visible', sync, 'destroy', () => this._dropSlider(id, false), this);
+        tile.addFocusables(entry.capsule);
+        this._sliders.set(id, entry);
     }
 
-    // A tile destroyed (its extension turned off, say) while here.
-    _forget(item) {
-        const entry = this._items.get(item);
+    _dropSlider(id, putBack = true) {
+        const entry = this._sliders.get(id);
         if (!entry)
             return;
-        this._items.delete(item);
-        this._order = this._order.filter(a => a !== item);
-        if (this._detailItem === item)
-            this._closeDetail(item);
-        entry.module.removeSlot(entry.slot);
-        entry.capsule?.destroy();
-        const extra = this._extras.get(item);
-        if (extra) {
-            this._extras.delete(item);
-            this._modules.delete(extra.moduleId);
-            extra.destroy();
-        }
-    }
-
-    _adoptMenuActor(child) {
-        // (Not under its tile any more.)
-        const constraints = child.get_constraints().filter(c => c.enabled);
-        constraints.forEach(c => (c.enabled = false));
-        this._menuConstraints.set(child, constraints);
-    }
-
-    _releaseMenuActor(child) {
-        const constraints = this._menuConstraints.get(child);
-        this._menuConstraints.delete(child);
-        constraints?.forEach(c => (c.enabled = true));
-    }
-
-    // A tile's menu opened: its page in place of the modules, with a
-    // header – back, its name, its switch – in the menu (whose grab takes
-    // the clicks in it, and closes it on any other).
-    _openDetail(item) {
-        if (this._detailItem && this._detailItem !== item)
-            this._closeDetail(this._detailItem);
-        const menu = item.menu;
-        this._detailItem = item;
-        this._header ??= this._makeHeader();
-        this._headerTitle.text = menu._headerTitle?.text || item.title || item.accessible_name || '';
-        const switchable = item instanceof QuickSettings.QuickMenuToggle ||
-            (item instanceof QuickSettings.QuickToggle && item.toggle_mode);
-        this._switchButton.visible = switchable;
-        this._switchBinding = switchable
-            ? item.bind_property('checked', this._switch, 'state', GObject.BindingFlags.SYNC_CREATE) : null;
-        this._switchButton.accessible_name = this._headerTitle.text;
-        this._header.get_parent()?.remove_child(this._header);
-        menu.box.insert_child_at_index(this._header, 0);
-        const gnomeHeader = menu._header;
-        if (gnomeHeader) {
-            this._gnomeHeader = {actor: gnomeHeader, visible: gnomeHeader.visible};
-            gnomeHeader.visible = false;
-            gnomeHeader.connectObject('notify::visible', () => {
-                if (gnomeHeader.visible) {
-                    this._gnomeHeader.visible = true;
-                    gnomeHeader.visible = false;
-                }
-            }, this);
-        }
-        menu.box.add_style_class_name('atelier-cc-detail-menu');
-        this._modulesBox.hide();
-        this._detail.show();
-        this.emit('detail-changed');
-    }
-
-    _closeDetail(item) {
-        if (this._detailItem !== item)
+        this._sliders.delete(id);
+        const tile = this._tiles.get(id);
+        tile.focusables = tile.focusables.filter(f => f !== entry.capsule);
+        const {item, parent, index, span} = entry;
+        item.disconnectObject(this);
+        tile.slot.opacity = 255;
+        tile.slot.set_child(null);
+        entry.capsule.destroy();
+        if (!putBack || !parent || item.get_parent())
             return;
-        this._detailItem = null;
-        this._switchBinding?.unbind();
-        this._switchBinding = null;
-        const menu = item.menu;
-        this._header?.get_parent()?.remove_child(this._header);
-        if (this._gnomeHeader) {
-            const {actor, visible} = this._gnomeHeader;
-            this._gnomeHeader = null;
-            actor.disconnectObject(this);
-            actor.visible = visible;
-        }
-        menu?.box?.remove_style_class_name('atelier-cc-detail-menu');
-        this._detail.hide();
-        this._modulesBox.show();
-        this.emit('detail-changed');
-    }
-
-    /** @returns {boolean} whether a menu's page shows (and not the modules) */
-    get detailOpen() {
-        return this._detailItem !== null;
-    }
-
-    /** @returns {Clutter.Actor|null} the tile whose menu's page shows */
-    get detailItem() {
-        return this._detailItem;
-    }
-
-    /** @returns {St.Widget} the grid of modules */
-    get grid() {
-        return this._gridActor;
-    }
-
-    /** @returns {St.Widget} the page of a menu */
-    get detail() {
-        return this._detail;
-    }
-
-    /** @returns {St.BoxLayout} the open page's header (back, name, switch) */
-    get header() {
-        return this._header;
-    }
-
-    /**
-     * @param {string} id - a module's ('connectivity', 'media', 'sound'…)
-     * @returns {ControlModule|null}
-     */
-    module(id) {
-        return this._modules.get(id) ?? null;
-    }
-
-    /**
-     * @param {Clutter.Actor} item - a tile
-     * @returns {ControlModule|null} the module it is in
-     */
-    moduleOf(item) {
-        return this._items.get(item)?.module ?? null;
-    }
-
-    /**
-     * The modules shown, where they are in an ancestor (the page), each
-     * with its actor: one, the open menu's page, while that shows.
-     *
-     * @param {Clutter.Actor} ancestor
-     * @returns {{id: string, x: number, y: number, width: number, height: number, radius: number, actor: Clutter.Actor}[]}
-     */
-    moduleRects(ancestor) {
-        if (!this.actor.visible)
-            return [];
-        const shown = this._detailItem
-            ? [['detail', this._detail]]
-            : this._gridActor.get_children()
-                .filter(m => m instanceof ControlModule && m.visible)
-                .map(m => [m.moduleId, m]);
-        return shown.map(([id, actor]) => {
-            const rect = rectIn(actor, ancestor);
-            return rect ? {id, ...rect, actor} : null;
-        }).filter(Boolean);
-    }
-
-    /**
-     * Put an actor in the Now Playing module (or, null, its placeholder
-     * back). The actor stays its owner's: taken out, not destroyed, when
-     * the control centre lets go.
-     *
-     * @param {Clutter.Actor|null} actor
-     */
-    setMediaModule(actor) {
-        const media = this._modules.get('media');
-        for (const slot of [...media.slots]) {
-            const child = slot.get_child();
-            media.removeSlot(slot);
-            if (child && child === this._placeholderActor)
-                child.destroy();
-        }
-        this._placeholderActor = null;
-        this._mediaActor = actor;
-        if (actor)
-            media.addSlot(actor, 'media');
+        // (Shown or not as GNOME has it now.)
+        const visible = item.visible;
+        const children = parent.get_children();
+        if (index >= 0 && index < children.length)
+            parent.insert_child_below(item, children[index]);
         else
-            this._setMediaPlaceholder();
-    }
-
-    _setMediaPlaceholder() {
-        const box = new St.BoxLayout({
-            style_class: 'atelier-cc-media-placeholder',
-            orientation: Clutter.Orientation.VERTICAL,
-            x_expand: true,
-            y_expand: true,
-        });
-        box.add_child(new St.Widget({style_class: 'atelier-cc-media-placeholder-art', x_align: Clutter.ActorAlign.START}));
-        box.add_child(new St.Label({style_class: 'atelier-cc-media-placeholder-title', text: 'Not Playing', y_expand: true,
-            y_align: Clutter.ActorAlign.END}));
-        this._placeholderActor = box;
-        this._modules.get('media').addSlot(box, 'media');
+            parent.add_child(item);
+        // (Clutter shows one hidden as it is added.)
+        item.visible = visible;
+        if (span > 1)
+            parent.layout_manager?.child_set_property?.(parent, item, 'column-span', span);
     }
 
     /**
-     * Close a tile's menu that is open (its page goes).
-     *
-     * @param {number} [animate] - a PopupAnimation
+     * @param {string} id - 'brightness' or 'volume'
+     * @returns {LevelCapsule|null}
      */
-    closeMenus(animate = PopupAnimation.NONE) {
-        const open = this._detailItem?.menu ?? this._menu._activeMenu;
-        open?.close(animate);
-        this._menu._activeMenu?.close(animate);
+    capsule(id) {
+        return this._sliders.get(id)?.capsule ?? null;
     }
 
-    /** Give the tiles and the menus' layer back to GNOME's menu. */
-    release() {
-        if (this._laterId)
-            global.compositor.get_laters().remove(this._laterId);
-        this._laterId = 0;
-        this._pending.clear();
-        this.closeMenus();
-        if (this._detailItem)
-            this._closeDetail(this._detailItem);
-        this._injections.clear();
-        this._grid.disconnectObject(this);
-        this._overlay.disconnectObject(this);
-        this.actor.get_parent()?.remove_child(this.actor);
+    // ---- State ----
 
-        // The tiles: out of their modules, as they were, back in GNOME's
-        // grid in GNOME's order, with their column spans.
-        const layout = this._grid.layout_manager;
-        const shown = new Map();
-        for (const [item, {slot, module, tweaks, capsule}] of this._items) {
-            shown.set(item, item.visible);
-            item.disconnectObject(this);
-            item.menu?.disconnectObject?.(this);
-            module.removeSlot(slot);
-            // (GNOME's slider, off the stage, goes back below.)
-            capsule?.destroy();
-            for (const [actor, prop, value] of tweaks.reverse())
-                actor[prop] = value;
+    /** @returns {string|null} the card open: 'wifi', 'bt', 'out' or null */
+    get open() {
+        return this._open;
+    }
+
+    /**
+     * @param {string} id - lib/ccLayout.js TILES
+     * @returns {Tile|null}
+     */
+    tile(id) {
+        return this._tiles.get(id) ?? null;
+    }
+
+    /**
+     * Open a card (or none: null), the spec's way.
+     *
+     * @param {string|null} key - 'wifi', 'bt', 'out' or null
+     * @param {object} [options]
+     * @param {boolean} [options.instant]
+     */
+    setOpen(key, {instant = false} = {}) {
+        if (key !== null && !(key in OPEN))
+            return;
+        if (key === this._open && !instant)
+            return;
+        const was = this._open;
+        this._open = key;
+        this._adapters.wifi?.watchNetworks?.(key === 'wifi');
+        this._applyState({instant, was});
+        if (key === null && was && !instant) {
+            // (Esc, and the close area: the keyboard back on its chevron.)
+            const opener = this._tiles.get(CARDS[was])?.opener;
+            if (opener && global.stage.key_focus && this.grid.contains(global.stage.key_focus))
+                opener.grab_key_focus();
         }
-        if (this._dnd) {
-            this._dnd.settings.disconnectObject(this._dnd.toggle);
-            this._items.delete(this._dnd.toggle);
-            this._dnd.toggle.destroy();
-            this._dnd = null;
-        }
-        for (const item of this._order) {
-            if (this._items.has(item) && !item.get_parent()) {
-                this._grid.add_child(item);
-                // (Clutter shows one hidden as it is added.)
-                item.visible = shown.get(item);
+    }
+
+    // Every tile as the state has it (lib/ccLayout.js tileState()).
+    _applyState({instant = false, was = null} = {}) {
+        const a = this.animator;
+        const open = this._open;
+        const k = px(1);
+        for (const id of ORDER) {
+            const tile = this._tiles.get(id);
+            const state = tileState(id, open);
+            const rect = tile._rect;
+            if (['x', 'y', 'width', 'height'].some(name => rect[name] !== state[name]) ||
+                a.targetOf(rect, 'width') !== undefined) {
+                a.ease(rect, {x: state.x, y: state.y, width: state.width, height: state.height},
+                    {curve: 'morph', duration: DURATIONS.morph, instant,
+                        onUpdate: () => this._moved()});
+            }
+            // Stepped back (hidden or dimmed) or not: its pivot set as it
+            // goes there, kept as it comes back.
+            if (state.scale !== 1)
+                tile.set_pivot_point(state.pivotX, state.pivotY);
+            const dimmed = state.opacity > 0 && state.opacity < 1;
+            a.ease(tile, {opacity: Math.round(state.opacity * 255)},
+                {curve: 'fade', duration: dimmed ? DURATIONS.dimFade : DURATIONS.hideFade, instant});
+            a.ease(tile, {translation_y: state.dy * k, scale: state.scale},
+                {curve: 'morph', duration: dimmed ? DURATIONS.dimMove : DURATIONS.hideMove, instant});
+            tile.setInert(state.inert);
+            if (tile.raised) {
+                a.ease(tile.raised, {opacity: state.raised ? 255 : 0},
+                    {curve: 'fade', duration: DURATIONS.raisedBg, instant});
+                a.ease(tile.glass, {opacity: state.raised ? 0 : 255},
+                    {curve: 'fade', duration: DURATIONS.raisedBg, instant});
+                a.ease(tile.chevron, {rotation_angle_z: state.chevron},
+                    {curve: 'spring', duration: DURATIONS.chevron, instant});
+                if (state.raised)
+                    tile.opener.add_accessible_state(Atk.StateType.EXPANDED);
+                else
+                    tile.opener.remove_accessible_state(Atk.StateType.EXPANDED);
             }
         }
-        this._order.filter(a => a.get_parent() === this._grid)
-            .forEach((a, i) => this._grid.set_child_at_index(a, i));
-        for (const [item, {span}] of this._items) {
-            if (item.get_parent() === this._grid && span > 1)
-                layout.child_set_property(this._grid, item, 'column-span', span);
+        // The card opening: on top, the close area under it. (No shadow
+        // under it: a soft one, moved with it, cost each frame twice what
+        // the rest of it does.)
+        const cardId = open ? CARDS[open] : null;
+        const card = cardId ? this._tiles.get(cardId) : null;
+        const closing = was ? this._tiles.get(CARDS[was]) : null;
+        if (card) {
+            this.grid.set_child_above_sibling(card, null);
+            this.grid.set_child_below_sibling(this._closeArea, card);
+            this._closeArea.show();
+            this._showList(card, open, instant);
+        } else {
+            this._closeArea.hide();
         }
-        this._items.clear();
-        this._extras.clear();
-        // (The media module's actor is its owner's.)
-        if (this._mediaActor)
-            this._modules.get('media').slots.forEach(slot => slot.set_child(null));
-        this._mediaActor = null;
+        if (closing && closing !== card) {
+            // (Its list goes at once; it shrinks back over the others.)
+            this._hideList(closing, was, instant);
+            if (!card)
+                this.grid.set_child_above_sibling(closing, null);
+        }
+    }
 
-        // The menus' layer.
-        this._header?.get_parent()?.remove_child(this._header);
-        this._header?.destroy();
-        this._header = null;
-        this._detail.set_child(null);
-        for (const child of this._overlay.get_children())
-            this._releaseMenuActor(child);
-        this._menuConstraints.clear();
-        this._overlay.layout_manager = this._overlayLayout;
-        this._overlayParent.add_child(this._overlay);
-        this._overlayConstraints.forEach(constraint => this._overlay.add_constraint(constraint));
+    // A card's rect moved this frame: laid out anew.
+    _moved() {
+        this.grid.queue_relayout();
+    }
 
+    // A card's list (its rows coming in one after another) and what goes
+    // while it is open.
+    _showList(tile, key, instant) {
+        tile.list.show();
+        this._renderList(tile, key, {instant: true});
+        const rows = this._listRows(tile);
+        const delays = key === 'out' ? rowDelays(rows.length, {first: 80, lastApart: false}) : rowDelays(rows.length);
+        rows.forEach((row, i) => {
+            this.animator.ease(row, {opacity: 255, translation_y: 0, scale: 1},
+                {curve: 'enter', duration: DURATIONS.row, delay: delays[i], instant,
+                    from: {opacity: 0, translation_y: px(ROW_DY), scale: 0.97}});
+        });
+        if (tile.foot) {
+            tile.foot.show();
+            this.animator.ease(tile.foot, {opacity: 255, translation_y: 0},
+                {curve: 'enter', duration: DURATIONS.miniPills, delay: 280, instant,
+                    from: {opacity: 0, translation_y: px(FOOT_DY)}});
+        }
+        if (tile.chips) {
+            this.animator.stop(tile.chips);
+            tile.chips.hide();
+        }
+    }
+
+    _hideList(tile, key, instant) {
+        for (const row of this._listRows(tile))
+            this.animator.stop(row);
+        tile.list.hide();
+        if (tile.foot) {
+            this.animator.stop(tile.foot);
+            tile.foot.hide();
+        }
+        if (tile.chips) {
+            tile.chips.show();
+            this.animator.ease(tile.chips, {opacity: 255, translation_y: 0},
+                {curve: 'enter', duration: DURATIONS.chipsBack, instant,
+                    from: {opacity: 0, translation_y: px(FOOT_DY)}});
+        }
+    }
+
+    _listRows(tile) {
+        return [...tile.rowsBox.get_children()].filter(c => c instanceof ListRow && c.visible);
+    }
+
+    // ---- What it shows ----
+
+    _render({instant = false} = {}) {
+        const {wifi, bt, airplane, output, caffeine, system} = this._adapters;
+        if (!wifi || !bt || !airplane || !output || !caffeine || !system)
+            return;
+        const animate = !instant;
+        // The pills.
+        const wifiTile = this._tiles.get('wifi');
+        const network = wifi.networks.find(n => n.connected);
+        wifiTile.toggle.setOn(wifi.on, animate);
+        wifiTile.subtitle.text = this._connecting !== null ? 'Connecting…'
+            : !wifi.available ? 'Unavailable'
+                : !wifi.on ? 'Off'
+                    : network ? `${network.name}${network.secure ? ' · secured' : ''}` : 'Not connected';
+        wifiTile.toggle.reactive = wifi.available;
+        const btTile = this._tiles.get('bt');
+        btTile.toggle.setOn(bt.on, animate);
+        btTile.subtitle.text = this._busyDevice !== null ? 'Connecting…'
+            : !bt.available ? 'Unavailable' : !bt.on ? 'Off' : bt.connectedName || 'On';
+        btTile.toggle.reactive = bt.available;
+        const airTile = this._tiles.get('airplane');
+        airTile.toggle.setOn(airplane.on, animate);
+        airTile.subtitle.text = !airplane.available ? 'Unavailable' : airplane.on ? 'On' : 'Off';
+        airTile.toggle.reactive = airplane.available;
+        for (const [id, adapter] of [['bt', bt], ['airplane', airplane]]) {
+            const mini = wifiTile.minis[id];
+            mini.toggle.setOn(adapter.on, animate);
+            mini.toggle.reactive = adapter.available;
+            mini.subtitle.text = this._tiles.get(id).subtitle.text;
+        }
+
+        // Caffeine.
+        const caffeineTile = this._tiles.get('caffeine');
+        caffeineTile.toggle.setOn(caffeine.on, animate);
+        const choice = caffeine.choice;
+        caffeineTile.subtitle.text = caffeine.on ? CAFFEINE_SUBTITLES[choice ?? 2] : 'Off';
+        caffeineTile.chips.select(choice ?? -1, {shown: caffeine.on, animate});
+
+        // Output: up to three outputs on its chips, the one chosen.
+        const outputTile = this._tiles.get('output');
+        const devices = output.devices;
+        const active = devices.find(d => d.id === output.activeId) ?? null;
+        outputTile.subtitle.text = active?.name ?? (devices.length ? '' : 'No output');
+        setIcon(outputTile.icon, active?.icon ?? 'audio-speakers-symbolic');
+        const chips = devices.slice(0, 3);
+        outputTile.chips.setLabels(chips.map(d => d.short));
+        outputTile.chips.select(chips.findIndex(d => d === active), {animate});
+
+        // The system tile.
+        const systemTile = this._tiles.get('system');
+        const battery = system.battery;
+        systemTile.batteryTitle.text = battery.present ? 'Battery' : 'Power';
+        setIcon(systemTile.batteryIcon, battery.present
+            ? `battery-level-${Math.min(100, Math.round(battery.percent / 10) * 10)}${battery.discharging ? '' : '-charging'}-symbolic`
+            : 'ac-adapter-symbolic');
+        systemTile.percent.text = battery.present ? `${battery.percent} %` : 'AC';
+        const left = battery.present ? timeLeft(battery) : '';
+        systemTile.timeLeft.text = battery.present ? left || (battery.charged ? 'Fully charged' : 'Charging')
+            : 'No battery';
+        systemTile.bar.visible = battery.present;
+        systemTile.bar._fraction = battery.percent / 100;
+        systemTile.bar.queue_relayout();
+        for (const [name, button] of Object.entries(systemTile.buttons)) {
+            button.reactive = system.shows(name);
+            button.opacity = system.shows(name) ? 255 : 90;
+        }
+
+        // The card open: its list as it is now.
+        if (this._open) {
+            const card = this._tiles.get(CARDS[this._open]);
+            this._renderList(card, this._open, {instant});
+        }
+    }
+
+    // A card's rows, kept by what each is (each updated in place: its
+    // highlight fades as it is connected or connecting).
+    _renderList(tile, key, {instant = false} = {}) {
+        const animate = !instant;
+        let rows = [];
+        let placeholder = '';
+        if (key === 'wifi') {
+            const wifi = this._adapters.wifi;
+            if (!wifi.on || !wifi.available) {
+                placeholder = wifi.available ? 'Wi-Fi is off. Turn it on to see networks.' : 'No Wi-Fi adapter.';
+            } else {
+                rows = wifi.networks.slice(0, MAX_NETWORKS).map(n => {
+                    const connecting = this._connecting === n.id;
+                    return {id: `net:${n.id}`, kind: 'network', icon: n.icon, title: n.name,
+                        note: connecting ? 'Connecting…' : n.connected && this._connecting === null ? 'Connected' : '',
+                        check: n.connected && this._connecting === null, spinning: connecting,
+                        lit: connecting || (n.connected && this._connecting === null),
+                        activate: () => this._connectNetwork(n.id)};
+                });
+                rows.push({id: 'other', kind: 'action', icon: 'list-add-symbolic', title: 'Other network…',
+                    activate: () => wifi.openSettings()});
+            }
+        } else if (key === 'bt') {
+            const bt = this._adapters.bt;
+            if (!bt.on || !bt.available) {
+                placeholder = bt.available ? 'Bluetooth is off. Turn it on to see devices.' : 'No Bluetooth adapter.';
+            } else {
+                rows = bt.devices.slice(0, MAX_DEVICES).map(d => {
+                    const busy = this._busyDevice === d.id;
+                    const connected = d.connected && !busy;
+                    return {id: `dev:${d.id}`, kind: 'device', icon: d.icon, title: d.name,
+                        subtitle: busy ? 'Connecting…' : connected
+                            ? `Connected${d.battery !== null ? ` · ${d.battery} %` : ''}` : 'Paired',
+                        check: connected, spinning: busy, lit: busy || connected,
+                        activate: () => this._connectDevice(d.id)};
+                });
+                rows.push({id: 'pair', kind: 'action', icon: 'list-add-symbolic', title: 'Pair new device…',
+                    activate: () => bt.openSettings()});
+            }
+        } else {
+            const output = this._adapters.output;
+            rows = output.devices.map(d => ({id: `out:${d.id}`, kind: 'output', icon: d.icon, title: d.name,
+                subtitle: d.detail ?? '', activate: () => output.select(d.id)}));
+            if (!rows.length)
+                placeholder = 'No sound output.';
+        }
+        tile.placeholder.text = placeholder;
+        tile.placeholder.visible = placeholder !== '';
+        const keep = new Set(rows.map(r => r.id));
+        for (const [id, row] of tile.rows) {
+            if (!keep.has(id)) {
+                this.animator.stop(row);
+                row.destroy();
+                tile.rows.delete(id);
+            }
+        }
+        rows.forEach((spec, i) => {
+            let row = tile.rows.get(spec.id);
+            if (!row) {
+                row = new ListRow(spec.kind, this.animator);
+                row.connect('clicked', () => row._activate?.());
+                tile.rows.set(spec.id, row);
+                tile.rowsBox.add_child(row);
+                tile.addFocusables(row);
+                row.connect('destroy', () => (tile.focusables = tile.focusables.filter(f => f !== row)));
+            }
+            row._activate = spec.activate;
+            row.update(spec, animate);
+            tile.rowsBox.set_child_at_index(row, key === 'out' ? i + 1 : i);
+        });
+        if (key === 'out') {
+            const index = this._adapters.output.devices.findIndex(d => d.id === this._adapters.output.activeId);
+            tile._selected = index;
+            const to = Math.max(0, index) * px(OUTPUT_STEP);
+            this.animator.ease(tile.selection, {translation_y: to},
+                {curve: 'slide', duration: DURATIONS.select, instant: instant || tile.selection.opacity === 0});
+            this.animator.ease(tile.selection, {opacity: index >= 0 ? 255 : 0},
+                {curve: 'fade', duration: DURATIONS.selectColour, instant});
+            tile.rowsBox.queue_relayout();
+        }
+    }
+
+    _allocateOutputRows(tile, box) {
+        const width = box.get_width();
+        const step = px(OUTPUT_STEP);
+        const height = px(64);
+        place(tile.selection, 0, 0, width, height);
+        let i = 0;
+        for (const row of tile.rowsBox.get_children()) {
+            if (row === tile.selection || !row.visible)
+                continue;
+            place(row, 0, i * step, width, height);
+            i++;
+        }
+    }
+
+    _chooseOutputChip(index) {
+        const device = this._adapters.output.devices[index];
+        if (device)
+            this._adapters.output.select(device.id);
+    }
+
+    // The radios, the spec's way: Airplane on turns Wi-Fi and Bluetooth off
+    // (GNOME's rfkill does); Wi-Fi or Bluetooth on turns Airplane off.
+    _toggleRadio(id) {
+        const {wifi, bt, airplane} = this._adapters;
+        if (id === 'airplane') {
+            airplane.setOn(!airplane.on);
+            return;
+        }
+        const adapter = id === 'wifi' ? wifi : bt;
+        const on = !adapter.on;
+        if (on && airplane.on)
+            airplane.setOn(false);
+        adapter.setOn(on);
+    }
+
+    async _connectNetwork(id) {
+        if (this._connecting !== null)
+            return;
+        const network = this._adapters.wifi.networks.find(n => n.id === id);
+        if (!network || network.connected)
+            return;
+        this._connecting = id;
+        const serial = this._serial;
+        this._render();
+        await this._adapters.wifi.join(id);
+        if (serial !== this._serial)
+            return;
+        this._connecting = null;
+        this._render();
+    }
+
+    async _connectDevice(id) {
+        if (this._busyDevice !== null)
+            return;
+        const device = this._adapters.bt.devices.find(d => d.id === id);
+        if (!device || device.connected)
+            return;
+        this._busyDevice = id;
+        const serial = this._serial;
+        this._render();
+        await this._adapters.bt.join(id);
+        if (serial !== this._serial)
+            return;
+        this._busyDevice = null;
+        this._render();
+    }
+
+    // ---- The panel ----
+
+    /**
+     * The panel opening: every tile comes in from a little above, small and
+     * clear, one after another (the spec's delays).
+     */
+    playOpen() {
+        this.setOpen(null, {instant: true});
+        const k = px(1);
+        for (const id of ORDER) {
+            const tile = this._tiles.get(id);
+            tile.set_pivot_point(0.5, 0.5);
+            this.animator.ease(tile, {opacity: 255, translation_y: 0, scale: 1},
+                {curve: 'open', duration: DURATIONS.open, delay: OPEN_DELAYS[id],
+                    from: {opacity: 0, translation_y: OPEN_DY * k, scale: 0.94}});
+        }
+    }
+
+    /** Back at rest, at once: no card open, nothing moving. */
+    rest() {
+        this.setOpen(null, {instant: true});
+        this.animator.finish();
+    }
+
+    /**
+     * Esc closes a card open (the keyboard back on its chevron).
+     *
+     * @param {Clutter.Event} event
+     * @returns {boolean} whether it did
+     */
+    handleKeyPress(event) {
+        if (event.get_key_symbol() === Clutter.KEY_Escape && this._open) {
+            this.setOpen(null);
+            return true;
+        }
+        return false;
+    }
+
+    // ---- Layout ----
+
+    // The panel's inner area at Atelier's size – and smaller where the
+    // monitor is too narrow for it (the grid scaled down as one).
+    _fit() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        const scale = scaleOf();
+        // (The panel's padding and the island's margins round it.)
+        const room = monitor ? monitor.width / scale - 2 * 24 * SIZE : 0;
+        return fitScale(room);
+    }
+
+    _gridSize() {
+        const fit = this._fit();
+        return [px(INNER.width) * fit, px(INNER.height) * fit];
+    }
+
+    _allocateGrid(box) {
+        const fit = this._fit();
+        if (Math.abs(this.grid.scale_x - fit) > 1e-3) {
+            this.grid.set_pivot_point(0, 0);
+            this.grid.set_scale(fit, fit);
+        }
+        const k = px(1);
+        for (const child of this.grid) {
+            if (child instanceof Tile) {
+                const r = child._rect;
+                place(child, Math.round(r.x * k), Math.round(r.y * k), Math.round(r.width * k),
+                    Math.round(r.height * k));
+            }
+        }
+        place(this._closeArea, 0, 0, px(INNER.width), px(INNER.height));
+    }
+
+    /**
+     * The tiles where they rest, in an ancestor (the page), each with its
+     * actor and radius – for the tests and the page's modules (their type
+     * keeps to the spec's: not turned light or dark for what is behind
+     * them, shell/controlCentre/ink.js).
+     *
+     * @param {Clutter.Actor} ancestor
+     * @returns {{id: string, x: number, y: number, width: number, height: number, radius: number,
+     *   actor: Clutter.Actor, ink: boolean}[]}
+     */
+    moduleRects(ancestor) {
+        const grid = rectIn(this.grid, ancestor);
+        if (!this.actor?.visible || !grid)
+            return [];
+        const fit = this.grid.scale_x;
+        const k = px(1) * fit;
+        return restRects().map(r => ({
+            id: r.id, x: grid.x + r.x * k, y: grid.y + r.y * k, width: r.width * k, height: r.height * k,
+            radius: r.radius * k, actor: this._tiles.get(r.id), ink: false,
+        }));
+    }
+
+    /** Give GNOME's sliders back and let go of everything. */
+    release() {
+        this._serial++;
+        dropPending();
+        Main.layoutManager.disconnectObject(this);
+        this.grid.disconnectObject(this);
+        this._pendingSliders = null;
+        for (const id of [...this._sliders.keys()])
+            this._dropSlider(id);
+        for (const adapter of Object.values(this._adapters)) {
+            if (adapter._ccChangedId)
+                adapter.disconnect(adapter._ccChangedId);
+            adapter._ccChangedId = 0;
+            adapter.destroy?.();
+        }
+        this._adapters = {};
+        this.animator.finish();
+        this.actor.get_parent()?.remove_child(this.actor);
         this.actor.destroy();
         this.actor = null;
     }
 });
 
-// Click a tile as St would: a toggle's state flips, then it is clicked.
-function activate(item) {
-    if (item.toggle_mode)
-        item.checked = !item.checked;
-    item.emit('clicked', Clutter.BUTTON_PRIMARY);
+// The chips' row at the foot of a tile.
+function chipsPlace(width, height) {
+    return [px(24), height - px(24) - px(44), width - 2 * px(24), px(44)];
 }

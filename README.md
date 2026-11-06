@@ -97,9 +97,11 @@ profile called **Original**, so there is always a way back.
   it in the settings). WhatsApp (as a Chrome app) starts with Reply and Mute,
   Claude with none.
 - **Control centre**: click the island (or <kbd>Super</kbd>+<kbd>S</kbd>) for
-  GNOME's quick settings in the island – sound, brightness, Wi‑Fi, Bluetooth,
-  power mode, night light, dark style, keyboard light, airplane mode and the
-  tiles of extensions such as Caffeine, with their menus. Further tabs hold
+  its controls in the island – Wi‑Fi, Bluetooth and airplane mode (Wi‑Fi's
+  networks and Bluetooth's devices in cards that open in place), Caffeine
+  (the Caffeine extension's, or Atelier's own), the sound output, brightness
+  and volume, the battery and the screenshot, settings, lock and power
+  buttons – all of them GNOME's own state. Further tabs hold
   GNOME's notification list with Do Not Disturb (<kbd>Super</kbd>+<kbd>V</kbd>),
   the calendar with the day's events, the notes, Claude Code's numbers and the
   icons extensions put into the top bar, as tiles that do what the icons did.

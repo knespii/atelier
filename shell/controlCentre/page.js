@@ -16,26 +16,30 @@ import {rectIn} from './layout.js';
  * @property {Clutter.Actor} actor - the content; it outlives the page
  * @property {Function} [available] - () => boolean, whether the tab shows
  * @property {Function} [onShow] - called when the tab comes up
+ * @property {Function} [onRest] - called when the page rests, closed
  * @property {Function} [moduleRects] - (page) => its modules' rects in the
  *   page (see ControlCentrePage.moduleRects); without, the tab is one
+ * @property {Function} [handleKeyPress] - (event) => whether it took a key
+ *   (before the page's own: Esc closing a card, say)
  */
 
 /**
  * @typedef {object} ModuleRect
- * @property {string} id - 'tabs', a module's ('connectivity', 'media',
- *   'sound', 'detail' for an open menu's page…) or a tab's
+ * @property {string} id - 'tabs', a tile's of the Controls tab ('wifi',
+ *   'output', 'system'…) or a tab's
  * @property {number} x - in the page, logical pixels
  * @property {number} y
  * @property {number} width
  * @property {number} height
  * @property {number} radius - of its corners
  * @property {Clutter.Actor} actor - the module
+ * @property {boolean} [ink] - false: its type stays as it is set (not
+ *   turned for what is behind it: shell/controlCentre/ink.js)
  */
 
 export const ControlCentrePage = GObject.registerClass({
     Signals: {
-        // The modules moved, came or went, a menu's page opened or closed,
-        // the tab changed: moduleRects() has changed. (Emitted as the page
+        // The modules moved, came or went, the tab changed: moduleRects() has changed. (Emitted as the page
         // is laid out: a handler must not change any actor's layout.)
         'modules-changed': {},
     },
@@ -141,6 +145,8 @@ export const ControlCentrePage = GObject.registerClass({
      * (Cheap to style again as it opens: not GNOME's tiles, which stay.)
      */
     rest() {
+        for (const tab of this._tabs)
+            tab.onRest?.();
         const children = this.get_children();
         for (const tab of this._tabs) {
             if (tab.id !== 'controls' && children.includes(tab.actor))
@@ -169,8 +175,8 @@ export const ControlCentrePage = GObject.registerClass({
 
     /**
      * Every module shown, where it is in the page: the tabs' bar, then the
-     * Controls tab's modules (or the open menu's page), or the other tab's
-     * content as one.
+     * Controls tab's tiles (where they rest), or the other tab's content as
+     * one.
      *
      * @returns {ModuleRect[]}
      */
@@ -214,6 +220,8 @@ export const ControlCentrePage = GObject.registerClass({
     }
 
     handleKeyPress(event) {
+        if (this._tabs.find(tab => tab.id === this._tab)?.handleKeyPress?.(event))
+            return true;
         // Ctrl+Tab goes through the tabs; arrows and Tab move between controls.
         const symbol = event.get_key_symbol();
         const ctrl = (event.get_state() & Clutter.ModifierType.CONTROL_MASK) !== 0;

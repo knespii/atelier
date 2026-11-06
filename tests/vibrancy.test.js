@@ -272,7 +272,7 @@ export function testStaysOnDark() {
 }
 
 export function testDarkOnLight() {
-    for (const surface of ['island', 'pages', 'ccTabs', 'ccModule', 'ccDetail', 'ccPane', 'bar', 'dock']) {
+    for (const surface of ['island', 'pages', 'ccTabs', 'ccPane', 'bar', 'dock']) {
         const backdrop = on(LIGHT, REGULAR, LIGHT_STYLE);
         assertEqual(polarityFor(LIGHT, {prefer: 'dark'}, surface), 'dark', `${surface}: dark type`);
         for (const ink of INKS[surface].filter(i => ['text', 'icon', 'mark'].includes(i.kind))) {
@@ -440,15 +440,12 @@ export function testInksAsTheStylesheetSetsThem() {
     assert(checked > 40, `checked ${checked}`);
 }
 
-// The control centre, a module at a time (shell/controlCentre/ink.js):
-// GNOME's controls as stylesheet.css restyles them for the island's glass.
-// Over a light window: dark type, every ink reading on its faint pill –
-// which turns dark, as faint, to show – the slider's trough still seen,
-// and what is on the accent as GNOME has it, its own type the accent's
-// (onPrimary), in either polarity. Over a dark one, as it is set. Half
-// over each: a module over each half its own polarity.
+// The control centre, a module at a time (shell/controlCentre/ink.js): the
+// tabs' bar and another tab as stylesheet.css styles them for the island's
+// glass. Over a light window: dark type; over a dark one, as it is set.
+// Half over each: a module over each half its own polarity.
 export function testControlCentre() {
-    const CC = ['ccTabs', 'ccModule', 'ccDetail', 'ccPane'];
+    const CC = ['ccTabs', 'ccPane'];
     const window = '#f6f6f4';
     const backdrop = on(window, REGULAR, LIGHT_STYLE);
     for (const inks of CC) {
@@ -463,35 +460,7 @@ export function testControlCentre() {
         surfaceRules({roots: [root], scope: 's', inks, backdrop: over, polarity}, palette);
     const ruleOf = (rules, selector, property = 'color') => rules.find(rule =>
         rule.split(' {')[0].split(',\n').includes(`${root}.s ${selector}`) && rule.includes(`{ ${property}:`));
-    const module = rulesOf('ccModule', 'dark');
-    assert(ruleOf(module, '.quick-toggle .quick-toggle-title')?.includes('rgba(0, 0, 0, 1)'),
-        `a tile's name black (${ruleOf(module, '.quick-toggle .quick-toggle-title')})`);
-    const subtitle = ruleOf(module, '.quick-toggle .quick-toggle-subtitle');
-    assert(subtitle && !subtitle.includes('rgba(0, 0, 0, 1)') && !subtitle.includes('255, 255, 255'),
-        `its state dark, quieter (${subtitle})`);
-    assertEqual(ruleOf(module, '.quick-toggle .quick-toggle-icon', 'background-color')?.split('{ ')[1],
-        'background-color: rgba(0, 0, 0, 0.16); }', 'the round icon\'s white pill a faint dark one');
-    assertEqual(ruleOf(module, '.quick-settings-system-item .icon-button', 'background-color')?.split('{ ')[1],
-        'background-color: rgba(0, 0, 0, 0.12) !important; }', 'the system buttons\' pills too, over GNOME\'s own');
-    const checked = ruleOf(module, '.quick-toggle:checked .quick-toggle-icon');
-    const accent = ruleOf(module, '.quick-toggle:checked .quick-toggle-icon', 'background-color');
-    assert(checked?.includes('color: -st-accent-fg-color;') && accent?.includes('-st-accent-color;'),
-        `a tile that is on: the accent, and its own type on it (${checked}; ${accent})`);
-    assert(module.indexOf(checked) > module.indexOf(ruleOf(module, '.quick-toggle .quick-toggle-icon')),
-        'after the rest, as specific');
-    // The slider: its icon dark, its trough dark and as seen as on
-    // Atelier's dark.
-    assert(ruleOf(module, '.quick-slider .icon-button')?.includes('rgba(0, 0, 0'), 'the slider\'s icon dark');
-    assertEqual(ruleOf(module, '.slider', '-barlevel-background-color')?.split('{ ')[1],
-        '-barlevel-background-color: rgba(0, 0, 0, 0.14); }', 'the slider\'s trough dark, as faint');
-    const fill = {color: '#000000', alpha: 0.14};
-    assert(lcOf(fill, backdrop.dark, 'dark') >= lcOf({color: '#ffffff', alpha: 0.14}, REFERENCE, 'light'),
-        `as seen as on Atelier's dark (Lc ${lcOf(fill, backdrop.dark, 'dark').toFixed(0)})`);
-    // Now Playing, the tabs, a menu's page, another tab.
-    for (const [inks, selector] of [['ccModule', '.atelier-cc-media-title'], ['ccModule', '.atelier-cc-media-artist'],
-        ['ccModule', '.atelier-cc-media-button'], ['ccTabs', '.atelier-cc-tab:checked'],
-        ['ccDetail', '.atelier-cc-detail-title'], ['ccDetail', '.popup-menu-item'],
-        ['ccPane', '.calendar .calendar-day']]) {
+    for (const [inks, selector] of [['ccTabs', '.atelier-cc-tab:checked'], ['ccPane', '.calendar .calendar-day']]) {
         const rule = ruleOf(rulesOf(inks, 'dark'), selector);
         assert(/color: rgba\((\d{1,2}), \1, \1/.test(rule ?? ''), `${inks} ${selector}: dark (${rule})`);
     }
@@ -511,20 +480,11 @@ export function testControlCentre() {
         assertEqual(dark.filter(rule => rule.includes('rgba(')), [], `${inks}: over the dark glass, as set`);
         assert(dark.every(rule => /accent|transparent/.test(rule)), `${inks}: only the accent's (${dark})`);
     }
-    // A note in a menu (insensitive too) stays as it is set where the
-    // insensitive items' colour changes: over the middling grey of dark
-    // glass over a light window.
-    const grey = rulesOf('ccDetail', 'light', on(window));
-    assert(ruleOf(grey, '.popup-menu-item:insensitive') &&
-        ruleOf(grey, '.popup-inactive-menu-item:insensitive')?.includes('rgba(255, 255, 255, 1)') &&
-        grey.indexOf(ruleOf(grey, '.popup-inactive-menu-item:insensitive')) >
-            grey.indexOf(ruleOf(grey, '.popup-menu-item:insensitive')),
-    `a note white, after the insensitive items' colour (${grey.filter(rule => rule.includes('insensitive'))})`);
     // A module over a light window, the one beside it over a dark
     // wallpaper: each its own polarity, in either style.
     for (const options of [{}, LIGHT_STYLE]) {
         const prefer = options.light ? 'dark' : 'light';
-        const short = wallpaper => shortOn(wallpaper, 'ccModule', REGULAR, options);
+        const short = wallpaper => shortOn(wallpaper, 'ccPane', REGULAR, options);
         assertEqual([polarityOf(short(window), {prefer}), polarityOf(short(DARK), {prefer})], ['dark', 'light'],
             `half over a light window, half over a dark wallpaper (${prefer} preferred): dark type on one, light on the other`);
     }

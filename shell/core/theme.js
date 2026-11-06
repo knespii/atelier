@@ -59,19 +59,6 @@ export function paletteStylesheet(p) {
 .atelier-island .atelier-cc-tab:checked { background-color: ${d.primaryContainer}; color: ${d.onPrimaryContainer}; }
 .atelier-island .atelier-cc-tab:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
 .atelier-island .atelier-cc .calendar .calendar-day.calendar-today { background-color: ${d.primary}; color: ${d.onPrimary}; }
-.atelier-island .atelier-cc .quick-toggle:checked,
-.atelier-island .atelier-cc .quick-toggle:checked:hover,
-.atelier-island .atelier-cc .quick-toggle:checked:focus,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:checked:hover,
-.atelier-island .atelier-cc .quick-toggle-menu .header .icon.active,
-.atelier-island .atelier-cc .quick-toggle-menu .button:checked,
-.atelier-island .atelier-cc .toggle-switch:checked { background-color: ${d.primary}; color: ${d.onPrimary}; }
-.atelier-island .atelier-cc .quick-toggle-has-menu:checked .quick-toggle-separator { background-color: st-transparentize(${d.onPrimary}, 0.7); }
-.atelier-island .atelier-cc .quick-toggle:focus,
-.atelier-island .atelier-cc .quick-toggle-has-menu .quick-toggle-menu-button:focus,
-.atelier-island .atelier-cc .quick-slider .slider-bin:focus { box-shadow: inset 0 0 0 2px ${d.primary}; }
-.atelier-island .atelier-cc .slider { -barlevel-active-background-color: ${d.primary}; }
 `;
 }
 

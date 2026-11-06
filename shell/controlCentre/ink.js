@@ -1,7 +1,7 @@
 // The control centre's type and icons, a module at a time (Apple's
-// vibrancy, shell/core/vibrancy.js): each module – the tabs' bar, each card
-// of the Controls tab, a menu's page, another tab – is a surface of its
-// own, its rect the module's, its type light or dark for what is behind
+// vibrancy, shell/core/vibrancy.js): each module – the tabs' bar, another
+// tab – is a surface of its own (the Controls tab's tiles keep the type
+// their spec gives them, on their own fills), its rect the module's, its type light or dark for what is behind
 // that module alone (a module over a light window dark, the one beside it
 // over a dark wallpaper light), each with its own hysteresis. Its glass is
 // as it is, darkened only as the glass-dim setting has it.
@@ -32,7 +32,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {layersOf, sampleStage} from '../core/vibrancy.js';
 import {windowsUnder} from '../island/module.js';
-import {ControlModule} from './layout.js';
 
 // The actors the classes go on, as the stylesheet has them: in the
 // control centre in the island (as specific as stylesheet.css's own rules
@@ -55,15 +54,12 @@ const SETTLE_MAX = 2000;
 
 /**
  * @param {string} id - a module's (page.js ModuleRect)
- * @param {Clutter.Actor} actor - the module
  * @returns {string} which of lib/vibrancy.js INKS
  */
-export function inksOf(id, actor) {
+export function inksOf(id) {
     if (id === 'tabs')
         return 'ccTabs';
-    if (id === 'detail')
-        return 'ccDetail';
-    return actor instanceof ControlModule ? 'ccModule' : 'ccPane';
+    return 'ccPane';
 }
 
 // A picture of the screen with a part of it filled from the row just under
@@ -339,6 +335,10 @@ export class ControlCentreInk {
             : page.get_transformed_position();
         let changed = false;
         for (const rect of page.moduleRects()) {
+            // (The Controls tab's tiles keep their own type, on their own
+            // fills, as its spec has them.)
+            if (rect.ink === false)
+                continue;
             let state = this._states.get(rect.id);
             if (!state) {
                 state = {actor: null, stage: null, layers: [], overWindows: false, veiled: null};
@@ -377,7 +377,7 @@ export class ControlCentreInk {
         const id = `cc-${rect.id}`;
         return vibrancy.surface({
             id,
-            inks: inksOf(rect.id, rect.actor),
+            inks: inksOf(rect.id),
             roots: [ROOT],
             rect: () => state.stage,
             picture: () => (this._covers(state.stage) ? this._picture.picture : null),

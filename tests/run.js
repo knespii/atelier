@@ -8,7 +8,6 @@ import * as ccLayout from './ccLayout.test.js';
 import * as ccMotion from './ccMotion.test.js';
 import * as claudeUsage from './claudeUsage.test.js';
 import * as compat from './compat.test.js';
-import * as controlGrid from './controlGrid.test.js';
 import * as depth from './depth.test.js';
 import * as dockActions from './dockActions.test.js';
 import * as dockGeometry from './dockGeometry.test.js';
@@ -35,7 +34,6 @@ import * as lockType from './lockType.test.js';
 import * as dockMagnify from './dockMagnify.test.js';
 import * as windowLiquid from './windowLiquid.test.js';
 import * as migrate from './migrate.test.js';
-import * as mpris from './mpris.test.js';
 import * as notes from './notes.test.js';
 import * as notifications from './notifications.test.js';
 import * as palette from './palette.test.js';
@@ -53,7 +51,7 @@ import * as widgets from './widgets.test.js';
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
     apca, lockColor, lockType, glyphStretch, glyphOutlines, glyphSdf, glyphAtlas, glassBackdrop, glassClock, glassLook, vibrancy,
-    controlGrid, levelCapsule, mpris, ccLayout, ccMotion};
+    levelCapsule, ccLayout, ccMotion};
 
 let total = 0;
 let failures = 0;
