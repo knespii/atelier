@@ -819,7 +819,8 @@
 .atelier-cc-capsule-value {
   height: 26px;
   margin-top: 18px;
-  font-size: 21px;
+  font-size: 15.75pt; /* 21 px */
+  color: #ffffff;
   font-weight: bold;
 }
 

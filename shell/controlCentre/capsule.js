@@ -76,8 +76,9 @@ const GLOW = {rise: 3.2, blur: 17.6, alpha: 0.5};
 // The focus ring: so far out (its offset and its width).
 const RING_OUT = 6;
 
-const DARK = [0x1b / 255, 0x1b / 255, 0x1b / 255];
-const LIGHT = [1, 1, 1];
+// A colour of a theme node's, for Cairo (the stylesheet's, as the
+// adaptive type sets it: lib/vibrancy.js).
+const rgbaOf = color => [color.red / 255, color.green / 255, color.blue / 255, color.alpha / 255];
 
 const NAMES = {brightness: 'Brightness', volume: 'Volume', microphone: 'Microphone'};
 
@@ -305,6 +306,9 @@ class AtelierCapsuleValue extends St.DrawingArea {
         this.set_pivot_point(0.5, 0.5);
         this._text = '';
         this._dark = false;
+        // (Dark, over the fill: as the icon is there.)
+        this.darkInk = null;
+        this.connect('style-changed', () => this.queue_repaint());
     }
 
     /**
@@ -337,7 +341,8 @@ class AtelierCapsuleValue extends St.DrawingArea {
         layout.set_font_description(font);
         layout.set_text(this._text, -1);
         const [, logical] = layout.get_pixel_extents();
-        cr.setSourceRGBA(...(this._dark ? DARK : LIGHT), 1);
+        const ink = this._dark && this.darkInk ? this.darkInk() : this.get_theme_node().get_foreground_color();
+        cr.setSourceRGBA(...rgbaOf(ink));
         cr.moveTo((width - logical.width) / 2 - logical.x, (height - logical.height) / 2 - logical.y);
         PangoCairo.show_layout(cr, layout);
         cr.$dispose();
@@ -349,10 +354,10 @@ class AtelierCapsuleValue extends St.DrawingArea {
  */
 const Ink = GObject.registerClass(
 class AtelierCapsuleInk extends St.DrawingArea {
-    _init(draw, color) {
-        super._init({x_expand: true, y_expand: true});
+    _init(draw, styleClass) {
+        super._init({style_class: styleClass, x_expand: true, y_expand: true});
         this._draw = draw;
-        this._color = color;
+        this.connect('style-changed', () => this.queue_repaint());
     }
 
     vfunc_repaint() {
@@ -361,7 +366,7 @@ class AtelierCapsuleInk extends St.DrawingArea {
         const unit = Math.min(width, height) / 24;
         cr.translate((width - 24 * unit) / 2, (height - 24 * unit) / 2);
         cr.scale(unit, unit);
-        cr.setSourceRGBA(...this._color, 1);
+        cr.setSourceRGBA(...rgbaOf(this.get_theme_node().get_foreground_color()));
         cr.setLineCap(Cairo.LineCap.ROUND);
         cr.setLineJoin(Cairo.LineJoin.ROUND);
         this._draw(cr);
@@ -424,8 +429,8 @@ class AtelierCapsuleIconPart extends St.Widget {
     _init(path) {
         super._init({layout_manager: new Clutter.BinLayout(), x_expand: true, y_expand: true});
         this.set_pivot_point(0.5, 0.5);
-        this.light = new Ink(PATHS[path], LIGHT);
-        this.dark = new Ink(PATHS[path], DARK);
+        this.light = new Ink(PATHS[path], 'atelier-cc-capsule-icon');
+        this.dark = new Ink(PATHS[path], 'atelier-cc-capsule-icon-filled');
         this.add_child(this.light);
         this.add_child(this.dark);
     }
@@ -472,6 +477,11 @@ class AtelierCapsuleIcon extends St.Widget {
             this._light.gicon = gicon;
             this._dark.gicon = gicon;
         }
+    }
+
+    /** @returns {Cogl.Color} the icon's colour on the fill */
+    darkInk() {
+        return this._layers[0][1].get_theme_node().get_foreground_color();
     }
 
     /** @param {number} ink - 0 light … 1 dark */
@@ -619,6 +629,7 @@ export const LevelCapsule = GObject.registerClass({
         this._body.add_child(this._value);
         this.icon = new CapsuleIcon(name);
         this._body.add_child(this.icon);
+        this._value.darkInk = () => this.icon.darkInk();
         // The menu (Sound's outputs), where GNOME has one and it is asked for.
         this.menuButton = null;
         this._chevron = null;
