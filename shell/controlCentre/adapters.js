@@ -1,6 +1,6 @@
 // What the Controls tab shows and does, from GNOME's own state: its
-// quick settings' Wi-Fi, Bluetooth and Airplane Mode toggles (and what they
-// know: NetworkManager's networks, GNOME Bluetooth's devices, rfkill), its
+// quick settings' Wi-Fi, Wired, Bluetooth and Airplane Mode toggles (and
+// what they know: NetworkManager's networks and wired connections, GNOME Bluetooth's devices, rfkill), its
 // volume slider's outputs (Gvc), its system item's battery (UPower) and
 // buttons, and the Caffeine extension's toggle – or, without it, Atelier's
 // own inhibitor. Each adapter tells of a change ('changed', once for many)
@@ -29,6 +29,9 @@ const NM_DISCONNECTED = 30;
 const NM_PREPARE = 40;
 const NM_ACTIVATED = 100;
 const NM_FAILED = 120;
+// (NM.ActiveConnectionState.)
+const NM_CONNECTION_ACTIVATING = 1;
+const NM_CONNECTION_ACTIVATED = 2;
 
 // UPower's (UPower.DeviceState).
 const DISCHARGING = 2;
@@ -244,6 +247,123 @@ export class WifiAdapter extends Adapter {
     destroy() {
         this.watchNetworks(false);
         super.destroy();
+    }
+}
+
+/**
+ * Wired: GNOME's wired toggle (NMWiredToggle) and its items – a device
+ * each, with a cable in (GNOME shows no other), and its connections, as
+ * GNOME's wired menu has them. Turned on or off as GNOME's toggle does it;
+ * a connection chosen as its menu does.
+ *
+ * State: available (a cable in), on (a connection up or on its way),
+ * connecting, speed (Mb/s, of the device connected; 0 unknown),
+ * connections [{id, name, device, speed, active, connecting}].
+ */
+export class WiredAdapter extends Adapter {
+    constructor(quickSettings) {
+        super();
+        this._toggle = quickSettings._network?._wiredToggle ?? null;
+        this._changedItems = () => {
+            this._watchItems();
+            this._changed();
+        };
+        this._watch(this._toggle,
+            'notify::visible', this._changedItems,
+            'notify::checked', this._changedItems,
+            'notify::subtitle', this._changedItems,
+            'notify::icon-name', this._changedItems);
+        this._watchItems();
+    }
+
+    // Each device's item and the device: their connections, states, speeds.
+    _watchItems() {
+        for (const item of this._toggle?._items?.values() ?? []) {
+            if (!this._watched.has(item)) {
+                this._watch(item,
+                    'notify::visible', this._changedItems,
+                    'notify::is-active', this._changedItems,
+                    'notify::name', this._changedItems,
+                    'notify::icon-name', this._changedItems);
+            }
+            const device = item._device;
+            if (device && !this._watched.has(device)) {
+                this._watch(device,
+                    'notify::speed', () => this._changed(),
+                    'notify::state', this._changedItems,
+                    'notify::available-connections', this._changedItems);
+            }
+        }
+    }
+
+    // GNOME's items shown: a cable in.
+    _items() {
+        if (!this._toggle?.visible)
+            return [];
+        return [...this._toggle._items?.values() ?? []].filter(item => item.visible);
+    }
+
+    get available() {
+        return this._items().length > 0;
+    }
+
+    get on() {
+        return this.available && Boolean(this._toggle?.checked);
+    }
+
+    get connecting() {
+        return this._items().some(item => item.state === NM_CONNECTION_ACTIVATING);
+    }
+
+    get speed() {
+        const item = this._items().find(i => i.state === NM_CONNECTION_ACTIVATED);
+        return item?._device?.speed ?? 0;
+    }
+
+    get connections() {
+        const connections = [];
+        for (const item of this._items()) {
+            const device = item.name || '';
+            const speed = item._device?.speed ?? 0;
+            const entries = [...item._connectionItems?.entries() ?? []];
+            if (!entries.length) {
+                // (None saved: GNOME's "Connect", which makes one.)
+                connections.push({id: `device:${device}`, name: device || 'Wired', device: '', speed,
+                    active: false, connecting: false, _activate: () => item.activate()});
+                continue;
+            }
+            for (const [connection, connectionItem] of entries) {
+                const state = connectionItem.state;
+                connections.push({
+                    id: connection.get_uuid?.() ?? connection.get_id(), name: connection.get_id() || device,
+                    device, speed,
+                    active: state === NM_CONNECTION_ACTIVATED, connecting: state === NM_CONNECTION_ACTIVATING,
+                    _activate: () => item.activateConnection(connection),
+                });
+            }
+        }
+        return connections;
+    }
+
+    /** Turn the wired connection on or off: GNOME's toggle clicked. */
+    setOn(on) {
+        if (this.on !== on)
+            click(this._toggle);
+    }
+
+    /**
+     * Bring a connection up (one up already stays so).
+     *
+     * @param {string} id
+     */
+    activate(id) {
+        const connection = this.connections.find(c => c.id === id);
+        if (connection && !connection.active && !connection.connecting)
+            connection._activate();
+    }
+
+    openSettings() {
+        openPanel('gnome-network-panel.desktop');
     }
 }
 
@@ -678,6 +798,7 @@ export class SystemAdapter extends Adapter {
 export function makeAdapters(quickSettings) {
     return {
         wifi: new WifiAdapter(quickSettings),
+        wired: new WiredAdapter(quickSettings),
         bt: new BluetoothAdapter(quickSettings),
         airplane: new AirplaneAdapter(quickSettings),
         output: new OutputAdapter(quickSettings),
