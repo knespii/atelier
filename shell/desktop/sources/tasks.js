@@ -9,7 +9,7 @@ import Soup from 'gi://Soup?version=3.0';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
 
-import {COMPLETE, listsUrl, parseLists, parseTasks, taskUrl, tasksUrl} from '../../../lib/googleTasks.js';
+import {COMPLETE, accessTokenOf, bearer, listsUrl, parseLists, parseTasks, taskUrl, tasksUrl} from '../../../lib/googleTasks.js';
 
 Gio._promisify(Goa.Client, 'new');
 Gio._promisify(Goa.OAuth2BasedProxy.prototype, 'call_get_access_token');
@@ -64,13 +64,12 @@ export class TasksSource extends EventEmitter {
     }
 
     async _token(object) {
-        const [, token] = await object.get_oauth2_based().call_get_access_token(this._cancellable);
-        return token;
+        return accessTokenOf(await object.get_oauth2_based().call_get_access_token(this._cancellable));
     }
 
     async _request(method, url, token, body = null) {
         const message = Soup.Message.new(method, url);
-        message.get_request_headers().append('Authorization', `Bearer ${token}`);
+        message.get_request_headers().append('Authorization', bearer(token));
         if (body)
             message.set_request_body_from_bytes('application/json', new GLib.Bytes(new TextEncoder().encode(body)));
         const bytes = await this._session.send_and_read_async(message, GLib.PRIORITY_LOW, this._cancellable);

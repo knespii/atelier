@@ -1,5 +1,5 @@
 import {lastWeeks, parseContributions, validUser} from '../lib/github.js';
-import {parseLists, parseTasks} from '../lib/googleTasks.js';
+import {accessTokenOf, bearer, parseLists, parseTasks} from '../lib/googleTasks.js';
 import {
     DEFAULT_LAYOUT, LOCK_KINDS, PITCH, UNIT, allowsSize, cardGlass, cardStyle, cellAt, cellOrigin, cellsOf, findSpot, fitLayout, fits,
     freeLimits, freeSize, gridOrigin, gridSize, namedSize, nearestSize, nearestSpot, newId, nextSize, normalizeWidgets, parseLayout,
@@ -180,6 +180,21 @@ export function testGithubContributions() {
     assertEqual(weeks[0][0], 0, 'Sunday the 27th starts the first week');
     assertEqual(weeks[1].slice(0, 3), [2, 4, null], 'the last week up to its last day');
     assert(validUser('octo-cat') && !validUser('-bad') && !validUser('a b') && !validUser(''));
+}
+
+export function testGoogleTasksToken() {
+    // GJS 1.82 hands GetAccessToken back as [token, expires_in]: the token,
+    // not the seconds, goes in the header.
+    assertEqual(bearer(accessTokenOf(['ya29.token', 3599])), 'Bearer ya29.token', 'the token, not 3599');
+    assertEqual(accessTokenOf([true, 'ya29.token', 3599]), 'ya29.token', 'with a boolean before it');
+    assertEqual(accessTokenOf('ya29.token'), 'ya29.token', 'alone');
+    let threw = false;
+    try {
+        accessTokenOf([3599]);
+    } catch {
+        threw = true;
+    }
+    assert(threw, 'no token: an error, not "Bearer 3599"');
 }
 
 export function testGoogleTasks() {
