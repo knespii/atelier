@@ -1,5 +1,5 @@
-import {BUMP_SCALE, PAGE, STEP, STRETCH, bumpScale, bumps, fillTop, iconCovered, labelCovered, levelOf, originOf,
-    percentOf, pointerLevel, sendDelay, speakerParts, splitAt, stepped, stretchOf, sunRays, valueOf} from '../lib/levelCapsule.js';
+import {BUMP_SCALE, PAGE, STEP, STRETCH, bumpScale, bumps, fillTop, iconCovered, levelOf, originOf,
+    pointerLevel, sendDelay, speakerParts, splitAt, stepped, stretchOf, sunRays, valueOf} from '../lib/levelCapsule.js';
 import {EASE, linear} from '../lib/cubicBezier.js';
 import {assert, assertEqual} from './util.js';
 
@@ -56,9 +56,6 @@ export function testBump() {
 
 export function testIcons() {
     assert(!iconCovered(0.17) && iconCovered(0.18), 'the icon dark past 17 %');
-    assert(!labelCovered(0.88) && labelCovered(0.89), 'the value dark past 88 %');
-    assertEqual(percentOf(0.78), '78%', 'as the value shows');
-    assertEqual(percentOf(1.2), '100%', 'clamped');
     assertEqual(sunRays(0), {angle: 0, scale: 0.6}, 'no brightness: small rays, upright');
     assertEqual(sunRays(100), {angle: 90, scale: 1}, 'full: whole, a quarter turn');
     assertEqual(sunRays(50), {angle: 45, scale: 0.8}, 'half');

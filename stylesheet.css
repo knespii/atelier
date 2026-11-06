@@ -815,15 +815,6 @@
   border: 2px solid -st-accent-color;
 }
 
-/* The value at the top as it is held (drawn: its font from here). */
-.atelier-cc-capsule-value {
-  height: 26px;
-  margin-top: 18px;
-  font-size: 15.75pt; /* 21 px */
-  color: #ffffff;
-  font-weight: bold;
-}
-
 .atelier-cc-capsule-icon,
 .atelier-cc-capsule-icon-filled {
   icon-size: 26px;

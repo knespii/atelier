@@ -38,12 +38,11 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
-import PangoCairo from 'gi://PangoCairo';
 import St from 'gi://St';
 
 import {EASE, linear} from '../../lib/cubicBezier.js';
 import {
-    PAGE, STEP, bumpScale, bumps, fillTop, iconCovered, labelCovered, levelOf, originOf, percentOf,
+    PAGE, STEP, bumpScale, bumps, fillTop, iconCovered, levelOf, originOf,
     pointerLevel, sendDelay, speakerParts, splitAt, stepped, stretchOf, sunRays, valueOf,
 } from '../../lib/levelCapsule.js';
 
@@ -58,8 +57,6 @@ const MOTION = {
     rays: [160, EASE.ease],
     parts: [200, EASE.ease],
     bump: [360, EASE.bump],
-    labelFade: [200, EASE.ease],
-    labelPop: [380, EASE.spring],
     dim: [250, EASE.ease],
 };
 // Less motion asked for: no springs, short.
@@ -68,8 +65,7 @@ const REDUCED = [150, EASE.out];
 // Held: lifted so much; the other capsules dimmed to so much.
 const LIFT = 1.045;
 const DIMMED = 0.55;
-// (Logical pixels, the spec's ×0.8.) The value's rise as it shows; its shadow.
-const LABEL_RISE = 9.6;
+// (Logical pixels, the spec's ×0.8.) Its shadow as it is held.
 const SHADOW = {y: 14.4, blur: 35.2, alpha: 0.38};
 // The glow over the fill's edge (its box-shadow: 0 −3.2 17.6 white at 0.5).
 const GLOW = {rise: 3.2, blur: 17.6, alpha: 0.5};
@@ -284,67 +280,6 @@ class AtelierCapsuleGlow extends St.DrawingArea {
         cr.setSource(gradient);
         cr.rectangle(0, 0, width, height);
         cr.fill();
-        cr.$dispose();
-    }
-});
-
-/**
- * The value at the capsule's top as it is held ("78%"): its figures drawn,
- * not laid out, so a new one each frame redraws only them.
- */
-const ValueLabel = GObject.registerClass(
-class AtelierCapsuleValue extends St.DrawingArea {
-    _init() {
-        super._init({
-            style_class: 'atelier-cc-capsule-value',
-            x_expand: true,
-            // (BinLayout aligns only what expands.)
-            y_expand: true,
-            y_align: Clutter.ActorAlign.START,
-            opacity: 0,
-        });
-        this.set_pivot_point(0.5, 0.5);
-        this._text = '';
-        this._dark = false;
-        // (Dark, over the fill: as the icon is there.)
-        this.darkInk = null;
-        this.connect('style-changed', () => this.queue_repaint());
-    }
-
-    /**
-     * @param {string} text
-     * @param {boolean} dark - over the fill
-     */
-    show(text, dark) {
-        if (text === this._text && dark === this._dark)
-            return;
-        this._text = text;
-        this._dark = dark;
-        this.queue_repaint();
-    }
-
-    get text() {
-        return this._text;
-    }
-
-    vfunc_repaint() {
-        const cr = this.get_context();
-        const [width, height] = this.get_surface_size();
-        const font = this.get_theme_node().get_font().copy();
-        if (!font.get_size_is_absolute()) {
-            // (In pixels as St's labels have it: Clutter's resolution, the
-            // text's scaling with it.)
-            const dpi = PangoCairo.context_get_resolution(this.get_pango_context());
-            font.set_absolute_size(font.get_size() * (dpi > 0 ? dpi : 96) / 72);
-        }
-        const layout = PangoCairo.create_layout(cr);
-        layout.set_font_description(font);
-        layout.set_text(this._text, -1);
-        const [, logical] = layout.get_pixel_extents();
-        const ink = this._dark && this.darkInk ? this.darkInk() : this.get_theme_node().get_foreground_color();
-        cr.setSourceRGBA(...rgbaOf(ink));
-        cr.moveTo((width - logical.width) / 2 - logical.x, (height - logical.height) / 2 - logical.y);
-        PangoCairo.show_layout(cr, layout);
         cr.$dispose();
     }
 });
@@ -624,11 +559,8 @@ export const LevelCapsule = GObject.registerClass({
         this.add_child(this._body);
         this.track = this._body.track;
         this._fill = this._body.fill;
-        this._value = new ValueLabel();
-        this._body.add_child(this._value);
         this.icon = new CapsuleIcon(name);
         this._body.add_child(this.icon);
-        this._value.darkInk = () => this.icon.darkInk();
         // The menu (Sound's outputs), where GNOME has one and it is asked for.
         this.menuButton = null;
         this._chevron = null;
@@ -692,7 +624,7 @@ export const LevelCapsule = GObject.registerClass({
 
         // As it is, at once.
         const target = this._target();
-        for (const [key, value] of [['lift', 1], ['stretch', 1], ['bump', 1], ['labelIn', 0], ['labelPop', 0], ['dim', 0]])
+        for (const [key, value] of [['lift', 1], ['stretch', 1], ['bump', 1], ['dim', 0]])
             this._motion.set(key, value);
         this._motion.set('level', target);
         this._react(target, true);
@@ -754,16 +686,6 @@ export const LevelCapsule = GObject.registerClass({
         return this._body.scale_y;
     }
 
-    /** @returns {string} the value shown at its top as it is held, "78%" */
-    get valueText() {
-        return this._value.text;
-    }
-
-    /** @returns {St.DrawingArea} the value at its top (shown as it is held) */
-    get valueLabel() {
-        return this._value;
-    }
-
     /** @returns {number} the level GNOME's slider is at */
     _target() {
         return levelOf(this.slider.value, this.slider.maximum_value);
@@ -807,16 +729,6 @@ export const LevelCapsule = GObject.registerClass({
         case 'cross':
             this.icon.parts[key].opacity = Math.round(255 * Math.min(1, Math.max(0, value)));
             break;
-        case 'labelIn':
-            this._value.opacity = Math.round(255 * Math.min(1, Math.max(0, value)));
-            break;
-        case 'labelPop': {
-            const s = scaleFactor();
-            this._value.translation_y = -LABEL_RISE * s * (1 - value);
-            const scale = 0.85 + 0.15 * value;
-            this._value.set_scale(scale, scale);
-            break;
-        }
         }
     }
 
@@ -831,7 +743,6 @@ export const LevelCapsule = GObject.registerClass({
             for (const key of ['wave1', 'wave2', 'cross'])
                 ease(key, parts[key] ? 1 : 0, 'parts');
         }
-        this._value.show(percentOf(level), labelCovered(level));
     }
 
     // Up on reaching an end, and back.
@@ -943,8 +854,6 @@ export const LevelCapsule = GObject.registerClass({
         shadow.opacity = held ? 255 : 0;
         this._glowAt(fillTop(this._level, this._body.height));
         this._motion.to('lift', held ? LIFT : 1, reduced ? REDUCED : held ? MOTION.grab : MOTION.release);
-        this._motion.to('labelIn', held ? 1 : 0, this._mode('labelFade'));
-        this._motion.to('labelPop', held ? 1 : 0, this._mode('labelPop'));
         if (!held)
             this._motion.to('stretch', 1, reduced ? REDUCED : MOTION.rubber);
         for (const other of groups.get(this._group) ?? []) {

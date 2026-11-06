@@ -876,14 +876,14 @@ async function controlCentreCapsules(ext, fake) {
     await pointerDown(middle, y + height * 0.5);
     await Scripting.sleep(350);
     check(volume.held && begins === 1 && Math.abs(volume.scale_x - 1.045) < 0.006 && near(volume.level, 0.5) &&
-        volume.valueText === '50%' && volume.valueLabel.opacity === 255 &&
+        !volume.valueLabel &&
         Math.abs(brightness.opacity - 0.55 * 255) < 2 && brightness.dimmed,
-    `pressed half way up: held there, lifted ${volume.scale_x.toFixed(3)}, "${volume.valueText}" at its top, ` +
+    `pressed half way up: held there, lifted ${volume.scale_x.toFixed(3)}, no value shown, ` +
         `the brightness dimmed (${(brightness.opacity / 255).toFixed(2)})`);
     await pointerAlong(middle, y + height * 0.5, middle, y + height * 0.3);
     await Scripting.sleep(200);
-    check(near(levelOfOutput(), 0.7) && near(volume.level, 0.7) && volume.valueText === '70%',
-        `dragged up a fifth of its height: a fifth more (${levelOfOutput().toFixed(2)}, "${volume.valueText}")`);
+    check(near(levelOfOutput(), 0.7) && near(volume.level, 0.7),
+        `dragged up a fifth of its height: a fifth more (${levelOfOutput().toFixed(2)})`);
     await screenshotIsland('21-capsule-drag', 700);
     // Past the top: full, stretched up (its bottom holding), 9 % at most.
     // (The island is at the top of the screen: past its top as far as the screen goes.)
@@ -891,7 +891,7 @@ async function controlCentreCapsules(ext, fake) {
     await pointerAlong(middle, y + height * 0.3, middle, above);
     await Scripting.sleep(250);
     const stretchedUp = volume.stretch;
-    check(near(levelOfOutput(), 1, 0.001) && volume.valueText === '100%' && stretchedUp > 1.02 && stretchedUp <= 1.09 &&
+    check(near(levelOfOutput(), 1, 0.001) && stretchedUp > 1.02 && stretchedUp <= 1.09 &&
         volume._body.pivot_point.y === 1 && Math.abs(volume.scale_x - 1.045) < 0.006,
     `past the top, full, stretched up ${((stretchedUp - 1) * 100).toFixed(1)} % from its bottom (≤ 9 %)`);
     await screenshotIsland('21-capsule-past-top', 700);
@@ -903,7 +903,7 @@ async function controlCentreCapsules(ext, fake) {
     await Scripting.sleep(350);
     const stretchedDown = volume.stretch;
     const parts = volume.icon.parts;
-    check(near(levelOfOutput(), 0, 0.001) && volume.valueText === '0%' && stretchedDown > 1.04 && stretchedDown <= 1.09 &&
+    check(near(levelOfOutput(), 0, 0.001) && stretchedDown > 1.04 && stretchedDown <= 1.09 &&
         volume._body.pivot_point.y === 0 && parts.cross.opacity === 255 && parts.wave1.opacity === 0,
     `past the bottom, empty, stretched down ${((stretchedDown - 1) * 100).toFixed(1)} % from its top, the speaker crossed`);
     await screenshotIsland('21-capsule-at-zero', 700);
