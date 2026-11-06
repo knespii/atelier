@@ -9714,7 +9714,7 @@ async function testControlCentrePace(ext) {
         await clickAt(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy && settled(), 3000);
         await Scripting.sleep(600);
-        const capsule = ext.stateObj.modules.get('control-centre').controls.module('volume')?.slots[0]?.get_child();
+        const capsule = ext.stateObj.modules.get('control-centre').controls.capsule('volume');
         if (check(capsule?.mapped, 'the volume\'s capsule there to drag')) {
             const [cx, cy] = capsule.get_transformed_position();
             const [cw, ch] = capsule.get_transformed_size();
