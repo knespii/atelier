@@ -9873,7 +9873,9 @@ async function testControlCentrePace(ext) {
                 `capsule's parts restyled (${styled}), its slot not laid out anew (${allocations})`);
         }
         await pressKey(Clutter.KEY_Escape);
-        await waitFor(() => !island.page && !island.busy, 3000);
+        check(await waitFor(() => !island.page && !island.busy, 3000),
+            'Esc closes the control centre after the drag');
+        await restPointer();
     } finally {
         fake?.restore();
         watched.forEach(([actor, id]) => actor.disconnect(id));
