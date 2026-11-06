@@ -931,7 +931,30 @@ function fakeAdapters() {
     const system = make({battery: {present: true, percent: 90, seconds: 15000, discharging: true, charged: false}});
     system.shows = () => true;
     system.activate = name => system.calls.push(name);
-    return {wifi, bt, airplane, output, caffeine, system};
+    // Wired: a cable in, not connected (Wi-Fi shows) until plug(true).
+    const wired = make({
+        available: true, on: false, connecting: false, speed: 1000,
+        connections: [
+            {id: 'eth', name: 'Wired connection 1', device: 'Ethernet', speed: 1000, active: false, connecting: false},
+            {id: 'dock', name: 'Dock', device: 'Ethernet', speed: 1000, active: false, connecting: false},
+        ],
+    });
+    const wiredUp = id => {
+        wired.on = id !== null;
+        wired.connections = wired.connections.map(c => ({...c, active: c.id === id}));
+        wired.changed();
+    };
+    wired.plug = connected => wiredUp(connected ? 'eth' : null);
+    wired.setOn = on => {
+        wired.calls.push(`on ${on}`);
+        wiredUp(on ? 'eth' : null);
+    };
+    wired.activate = id => {
+        wired.calls.push(`activate ${id}`);
+        wiredUp(id);
+    };
+    wired.openSettings = () => wired.calls.push('settings');
+    return {wifi, wired, bt, airplane, output, caffeine, system};
 }
 
 // Brightness and volume as capsules (shell/controlCentre/capsule.js) in
@@ -1061,6 +1084,86 @@ async function controlCentreCapsules(ext, fake) {
     `the sun's rays grow and turn with the brightness (5 %: ${low[0].toFixed(2)}, ${low[1].toFixed(1)}°; ` +
         `100 %: ${high[0].toFixed(2)}, ${high[1].toFixed(1)}°)`);
 
+}
+
+// Ethernet connected: Wired in Wi-Fi's place, crossfaded (each stepping
+// back as a card's neighbours do, no jump); its card as Wi-Fi's, its
+// connections and Wired Settings…; turned off from it, it stays to be
+// turned on again; disconnected, Wi-Fi comes back. Airplane Mode leaves it
+// be.
+async function controlCentreWired(host, fakes, at, isAt) {
+    const tile = id => host.tile(id);
+    const [wifi, wired] = [tile('wifi'), tile('wired')];
+    check(wired.opacity === 0 && !wired.toggle.can_focus && wifi.opacity === 255,
+        'without Ethernet, Wi-Fi shows, Wired away');
+    const fades = [];
+    const fadeId = global.stage.connect('after-paint', () => fades.push([wifi.opacity, wired.opacity]));
+    fakes.wired.plug(true);
+    await waitFor(() => host.animator.busy, 1000);
+    await waitFor(() => !host.animator.busy, 3000);
+    global.stage.disconnect(fadeId);
+    const between = fades.filter(([a, b]) => a > 0 && a < 255 && b > 0 && b < 255).length;
+    check(wired.opacity === 255 && wifi.opacity === 0 && isAt('wired', [0, 0, 340, 112]) && between > 2 &&
+        Math.abs(wired.translation_y) < 0.5 && !wifi.toggle.can_focus && wired.toggle.accent.scale_x === 1 &&
+        wired.subtitle.text === 'Connected · 1 Gb/s',
+    `Ethernet connected: Wired in Wi-Fi's place, crossfaded (${between} frames between; ${at('wired')}; ` +
+        `${wired.subtitle.text})`);
+    const ids = host.moduleRects(global.stage).map(r => r.id);
+    check(ids.includes('wired') && !ids.includes('wifi'), `the page tells of Wired, not Wi-Fi (${ids.join(', ')})`);
+    await restPointer();
+    await screenshotIsland('21-control-centre-wired', 460);
+
+    // Its card.
+    await clickAt(...centerOf(wired.opener));
+    check(host.open === 'wired', 'Wired\'s chevron opens its card');
+    await waitFor(() => !host.animator.busy, 3000);
+    await Scripting.sleep(200);
+    const rows = [...wired.rows.values()];
+    check(isAt('wired', [0, 0, 460, 376]) && rows.length === 3 && rows[0].title.text === 'Wired connection 1' &&
+        rows[0].check.visible && rows[0].subtitle.text === 'Connected · 1 Gb/s' && rows[1].subtitle.text === 'Ethernet' &&
+        rows[2].title.text === 'Wired Settings…' && wired.foot.mapped && tile('bt').opacity === 0 &&
+        Math.abs(tile('caffeine').opacity - 77) < 2,
+    `its card as Wi-Fi's: its connections, Wired Settings…, the mini pills (${at('wired')}; ` +
+        `${rows.map(r => r.title.text).join(', ')})`);
+    const cut = cutShort(wired);
+    check(cut.length === 0, `no name cut short in it (${cut.join(', ') || 'none'})`);
+    await restPointer();
+    await screenshotIsland('21-control-centre-wired-card', 460);
+    await clickAt(...centerOf(rows[1]));
+    await waitFor(() => !host.animator.busy, 2000);
+    check(fakes.wired.calls.at(-1) === 'activate dock' && wired.rows.get('wire:dock').check.visible,
+        `another connection clicked: up (${fakes.wired.calls.join(', ')})`);
+    await clickAt(...centerOf(wired.rows.get('wired-settings')));
+    check(fakes.wired.calls.at(-1) === 'settings', 'Wired Settings… opens GNOME\'s');
+    await pressKey(Clutter.KEY_Escape);
+    await waitFor(() => host.open === null && !host.animator.busy, 3000);
+
+    // Off from it: it stays; on again.
+    await clickAt(...centerOf(wired.toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    check(fakes.wired.calls.at(-1) === 'on false' && wired.opacity === 255 && wired.subtitle.text === 'Off' &&
+        wired.toggle.accent.scale_x === 0, 'turned off from its pill, Wired stays there, Off');
+    await clickAt(...centerOf(wired.toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    check(fakes.wired.calls.at(-1) === 'on true' && wired.toggle.accent.scale_x === 1, 'and on again');
+
+    // Airplane Mode leaves it be.
+    const asked = fakes.wired.calls.length;
+    await clickAt(...centerOf(tile('airplane').toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    check(fakes.airplane.on && fakes.wired.on && wired.opacity === 255 && fakes.wired.calls.length === asked,
+        'Airplane Mode on: Wired stays on');
+    await clickAt(...centerOf(tile('airplane').toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    fakes.wifi.setOn(true);
+    fakes.bt.setOn(true);
+
+    // Disconnected: Wi-Fi back.
+    fakes.wired.plug(false);
+    await waitFor(() => host.animator.busy, 1000);
+    await waitFor(() => !host.animator.busy, 3000);
+    check(wifi.opacity === 255 && wired.opacity === 0 && isAt('wifi', [0, 0, 340, 112]) && wifi.toggle.can_focus,
+        `Ethernet disconnected: Wi-Fi back (${at('wifi')})`);
 }
 
 // A tile's rect on the stage.
@@ -1302,6 +1405,8 @@ async function controlCentreChecks(ext) {
     check(out.chips.visible && out.chips.opacity === 255 && out.chips.chips[2]._dark.opacity === 255,
         'closed, its chips back, HDMI\'s chosen');
 
+    await controlCentreWired(host(), fakes, at, isAt);
+
     // Reduced motion: short and plain.
     const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
     iface.set_boolean('enable-animations', false);
@@ -1346,7 +1451,17 @@ async function controlCentreChecks(ext) {
     check(await waitFor(() => island.page === null, 1000), 'and closes it');
 
     // GNOME's power button (the real adapter's) opens Atelier's power menu.
-    const {SystemAdapter} = await import(`file://${ext.path}/shell/controlCentre/adapters.js`);
+    const {SystemAdapter, WiredAdapter} = await import(`file://${ext.path}/shell/controlCentre/adapters.js`);
+    // (GNOME's wired toggle only read: its state as it has it.)
+    {
+        const realWired = new WiredAdapter(quickSettings);
+        const read = [realWired.available, realWired.on, realWired.connecting, realWired.speed,
+            realWired.connections.length];
+        realWired.destroy();
+        check(realWired._toggle === (quickSettings._network?._wiredToggle ?? null) &&
+            read.every(v => typeof v === 'boolean' || Number.isFinite(v)) && (read[0] || !read[1]),
+        `GNOME's wired toggle read (available, on, connecting, speed, connections: ${read.join(', ')})`);
+    }
     host().setAdapters({system: new SystemAdapter(quickSettings)});
     Main.panel.toggleQuickSettings();
     await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 2000);
@@ -1402,8 +1517,9 @@ async function controlCentreChecks(ext) {
     check(unread === null && await waitFor(() => host()?.capsule('volume')?.item === fake.output &&
         host()?.capsule('brightness')?.item === fake.brightness &&
         host()?.adapters.wifi?._toggle === (quickSettings._network?._wirelessToggle ?? null) &&
+        host()?.adapters.wired?._toggle === (quickSettings._network?._wiredToggle ?? null) &&
         host()?.adapters.bt?._toggle === (quickSettings._bluetooth?.quickSettingsItems?.[0] ?? null), 2000),
-    'on before GNOME made its indicators: its Wi-Fi, Bluetooth and sliders read as they come');
+    'on before GNOME made its indicators: its Wi-Fi, Wired, Bluetooth and sliders read as they come');
     Main.panel.toggleQuickSettings();
     await waitFor(() => island.page === null && !island.busy, 2000);
     host().setAdapters(fakes);
