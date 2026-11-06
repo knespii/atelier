@@ -790,22 +790,42 @@
   padding: 0;
 }
 
-.atelier-cc-capsule {
-  border-radius: 21px;
+/* (The capsule itself only lifts and dims; its body draws it: the
+   glass's track, the fill inside its edge, the edge brighter as it is
+   held. The spec's sizes ×0.8.) */
+.atelier-cc-capsule-track {
+  border-radius: 35px;
+  border: 1.2px solid rgba(255, 255, 255, 0.40);
 }
 
-.atelier-island .atelier-cc-mac .atelier-cc-capsule:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
+.atelier-cc-capsule-edge {
+  border-radius: 35px;
+  /* (Over the track's 0.40: 0.75 together.) */
+  border: 1.2px solid rgba(255, 255, 255, 0.58);
 }
 
 .atelier-cc-capsule-fill {
-  border-radius: 21px;
+  border-radius: 34px;
   background-color: rgba(255, 255, 255, 0.92);
+}
+
+/* Focused from the keyboard: a ring 2 px wide, 4 px away. */
+.atelier-cc-capsule-ring {
+  border-radius: 41px;
+  border: 2px solid -st-accent-color;
+}
+
+/* The value at the top as it is held (drawn: its font from here). */
+.atelier-cc-capsule-value {
+  height: 26px;
+  margin-top: 18px;
+  font-size: 21px;
+  font-weight: bold;
 }
 
 .atelier-cc-capsule-icon,
 .atelier-cc-capsule-icon-filled {
-  icon-size: 24px;
+  icon-size: 26px;
 }
 
 .atelier-cc-capsule-icon {
@@ -813,11 +833,13 @@
 }
 
 .atelier-cc-capsule-icon-filled {
-  color: #2c2c2e;
+  color: #1b1b1b;
 }
 
 .atelier-cc-capsule-icon-box {
-  margin-bottom: 20px;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 27px;
 }
 
 /* (The menu of outputs: a chevron at the top.) */
@@ -1523,7 +1545,7 @@
    as the level goes – light under either type (dark type is on light glass:
    lighter still under it, its icon reads the better; the fill turns dark
    then, lib/vibrancy.js ccModule). */
-.atelier-island-glass .atelier-cc-capsule {
+.atelier-island-glass .atelier-cc-capsule-track {
   background-color: rgba(255, 255, 255, 0.12);
 }
 
