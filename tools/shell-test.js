@@ -1020,7 +1020,8 @@ async function controlCentreCapsules(ext, fake) {
         volume._body.pivot_point.y === 1 && Math.abs(volume.scale_x - 1.045) < 0.006,
     `past the top, full, stretched up ${((stretchedUp - 1) * 100).toFixed(1)} % from its bottom (≤ 9 %)`);
     await screenshotIsland('21-capsule-past-top', 700);
-    check(cutUp.length === 0, `stretched past the top and lifted, all of it and its shadow drawn (${cutUp.join('; ') || 'nothing cut'})`);
+    check(cutUp.length === 0,
+        `stretched past the top and lifted, all of it and its shadow drawn (${cutUp.join('; ') || 'nothing cut'})`);
     await pointerAlong(middle, above, middle, 1);
     await Scripting.sleep(250);
     check(volume.stretch <= 1.09, `as far past it as it goes, still 9 % at most (${((volume.stretch - 1) * 100).toFixed(1)} %)`);
@@ -1034,7 +1035,8 @@ async function controlCentreCapsules(ext, fake) {
         volume._body.pivot_point.y === 0 && parts.cross.opacity === 255 && parts.wave1.opacity === 0,
     `past the bottom, empty, stretched down ${((stretchedDown - 1) * 100).toFixed(1)} % from its top, the speaker crossed`);
     await screenshotIsland('21-capsule-at-zero', 700);
-    check(cutDown.length === 0, `stretched past the bottom and lifted, all of it and its shadow drawn (${cutDown.join('; ') || 'nothing cut'})`);
+    check(cutDown.length === 0,
+        `stretched past the bottom and lifted, all of it and its shadow drawn (${cutDown.join('; ') || 'nothing cut'})`);
     await pointerUp();
     await Scripting.sleep(700);
     check(!volume.held && ends === 1 && Math.abs(volume.scale_x - 1) < 0.003 && Math.abs(volume.stretch - 1) < 0.003 &&
@@ -1120,7 +1122,8 @@ async function controlCentreWired(host, fakes, at, isAt) {
     await Scripting.sleep(200);
     const rows = [...wired.rows.values()];
     check(isAt('wired', [0, 0, 460, 376]) && rows.length === 3 && rows[0].title.text === 'Wired connection 1' &&
-        rows[0].check.visible && rows[0].subtitle.text === 'Connected · 1 Gb/s' && rows[1].subtitle.text === 'Ethernet' &&
+        rows[0].check.visible && rows[0].subtitle.text === 'Connected · 1 Gb/s' &&
+        rows[1].subtitle.text === 'Ethernet' &&
         rows[2].title.text === 'Wired Settings…' && wired.foot.mapped && tile('bt').opacity === 0 &&
         Math.abs(tile('caffeine').opacity - 77) < 2,
     `its card as Wi-Fi's: its connections, Wired Settings…, the mini pills (${at('wired')}; ` +

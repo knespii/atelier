@@ -134,7 +134,8 @@ class AtelierQuickSettingsHost extends GObject.Object {
         const a = this.animator;
         // The pills.
         for (const [id, title, icon] of [['wifi', 'Wi-Fi', 'network-wireless-signal-excellent-symbolic'],
-            ['wired', 'Wired', 'network-wired-symbolic'], ['bt', 'Bluetooth', 'bluetooth-active-symbolic'], ['airplane', 'Airplane Mode', 'airplane-mode-symbolic']]) {
+            ['wired', 'Wired', 'network-wired-symbolic'], ['bt', 'Bluetooth', 'bluetooth-active-symbolic'],
+            ['airplane', 'Airplane Mode', 'airplane-mode-symbolic']]) {
             const card = id in CARDS;
             const tile = new Tile(id, {shape: 'pill', card});
             const header = new St.BoxLayout({style_class: 'atelier-cc-pill-header', x_expand: true});
