@@ -4,6 +4,8 @@
 import System from 'system';
 
 import * as apca from './apca.test.js';
+import * as ccLayout from './ccLayout.test.js';
+import * as ccMotion from './ccMotion.test.js';
 import * as claudeUsage from './claudeUsage.test.js';
 import * as compat from './compat.test.js';
 import * as controlGrid from './controlGrid.test.js';
@@ -51,7 +53,7 @@ import * as widgets from './widgets.test.js';
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
     apca, lockColor, lockType, glyphStretch, glyphOutlines, glyphSdf, glyphAtlas, glassBackdrop, glassClock, glassLook, vibrancy,
-    controlGrid, levelCapsule, mpris};
+    controlGrid, levelCapsule, mpris, ccLayout, ccMotion};
 
 let total = 0;
 let failures = 0;
