@@ -40,6 +40,7 @@ import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import St from 'gi://St';
 
+import {SIZE} from '../../lib/ccLayout.js';
 import {EASE, linear} from '../../lib/cubicBezier.js';
 import {
     PAGE, STEP, bumpScale, bumps, fillTop, iconCovered, levelOf, originOf,
@@ -65,12 +66,15 @@ const REDUCED = [150, EASE.out];
 // Held: lifted so much; the other capsules dimmed to so much.
 const LIFT = 1.045;
 const DIMMED = 0.55;
-// (Logical pixels, the spec's ×0.8.) Its shadow as it is held.
-const SHADOW = {y: 14.4, blur: 35.2, alpha: 0.38};
-// The glow over the fill's edge (its box-shadow: 0 −3.2 17.6 white at 0.5).
-const GLOW = {rise: 3.2, blur: 17.6, alpha: 0.5};
+// (Logical pixels: the spec's at Atelier's size, lib/ccLayout.js SIZE.)
+// Its shadow as it is held.
+const SHADOW = {y: 18 * SIZE, blur: 44 * SIZE, alpha: 0.38};
+// The glow over the fill's edge (its box-shadow: 0 −4 22 white at 0.5).
+const GLOW = {rise: 4 * SIZE, blur: 22 * SIZE, alpha: 0.5};
 // The focus ring: so far out (its offset and its width).
-const RING_OUT = 6;
+const RING_OUT = 7.5 * SIZE;
+// A click so near the icon (above or below it) is on it: GNOME's mute.
+const ICON_REACH = 15 * SIZE;
 
 // A colour of a theme node's, for Cairo (the stylesheet's, as the
 // adaptive type sets it: lib/vibrancy.js).
@@ -552,6 +556,8 @@ export const LevelCapsule = GObject.registerClass({
         this._pending = null;
         this._sentAt = null;
         this._sendId = 0;
+        // (The ancestors whose clip it lifted while it is out of its place.)
+        this._unclipped = null;
 
         this._body = new CapsuleBody();
         // (Stretched up, its bottom holds: this._origin.)
@@ -633,11 +639,13 @@ export const LevelCapsule = GObject.registerClass({
             if (!this.mapped) {
                 this._endPress();
                 this._motion.finish();
+                this._overflow(this._out());
             }
         });
         this.connect('destroy', () => {
             this._endPress();
             this._motion.destroy();
+            this._overflow(false);
             if (this._sendId)
                 GLib.source_remove(this._sendId);
             this._sendId = 0;
@@ -704,9 +712,11 @@ export const LevelCapsule = GObject.registerClass({
             break;
         case 'lift':
             this.set_scale(value, value);
+            this._overflow(this._out());
             break;
         case 'stretch':
             this._body.scale_y = value;
+            this._overflow(this._out());
             break;
         case 'dim':
             this.opacity = Math.round(255 * (1 - (1 - DIMMED) * value));
@@ -843,6 +853,33 @@ export const LevelCapsule = GObject.registerClass({
         this._split();
     }
 
+    // Whether it is out of its place: held, lifted or stretched.
+    _out() {
+        return this._held || this._motion.get('lift') !== 1 || this._motion.get('stretch') !== 1;
+    }
+
+    // Out of its place, it may reach past the page (the island clips what
+    // is in it, for its corners as it grows): its stretch, lift and shadow
+    // seen whole, its ancestors' clips lifted until it is back. (Only
+    // while a capsule is held or settling: the page is at rest then.)
+    _overflow(out) {
+        if (out === Boolean(this._unclipped))
+            return;
+        if (out) {
+            this._unclipped = [];
+            for (let actor = this.get_parent(); actor; actor = actor.get_parent()) {
+                if (actor.clip_to_allocation) {
+                    actor.clip_to_allocation = false;
+                    this._unclipped.push(actor);
+                }
+            }
+        } else {
+            for (const actor of this._unclipped)
+                actor.clip_to_allocation = true;
+            this._unclipped = null;
+        }
+    }
+
     // Lifted as it is held, or set down.
     _hold(held) {
         if (held === this._held)
@@ -856,6 +893,7 @@ export const LevelCapsule = GObject.registerClass({
         this._motion.to('lift', held ? LIFT : 1, reduced ? REDUCED : held ? MOTION.grab : MOTION.release);
         if (!held)
             this._motion.to('stretch', 1, reduced ? REDUCED : MOTION.rubber);
+        this._overflow(this._out());
         for (const other of groups.get(this._group) ?? []) {
             if (other !== this)
                 other.dimmed = held;
@@ -888,7 +926,7 @@ export const LevelCapsule = GObject.registerClass({
     // The icon's part of it: a click there mutes (where GNOME's does).
     _onIcon(y) {
         const box = this.icon.get_allocation_box();
-        const reach = 12 * scaleFactor();
+        const reach = ICON_REACH * scaleFactor();
         return this.item.iconReactive && y >= box.y1 - reach && y <= box.y2 + reach;
     }
 
