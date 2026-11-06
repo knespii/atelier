@@ -9,6 +9,7 @@ import GdkPixbuf from 'gi://GdkPixbuf';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Graphene from 'gi://Graphene';
 import Meta from 'gi://Meta';
 import Mtk from 'gi://Mtk';
 import Pango from 'gi://Pango';
@@ -43,6 +44,7 @@ import * as dockWindows from './dock-tests/windows.js';
 import {
     MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutOpacity, cutoutPath, modelPath, pictureState, workerPath,
 } from '../lib/depth.js';
+import {SIZE as CC_SIZE} from '../lib/ccLayout.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GLASS_FULL} from '../lib/seeThrough.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize, sizeOf} from '../lib/widgets.js';
@@ -776,6 +778,37 @@ function fakeLevelSliders() {
     };
 }
 
+// What of an actor (on the stage: its transformed bounds) is cut off by
+// its ancestors' clips – their allocations (clip_to_allocation) or clips
+// set – or by the screen (with screen: true): a word for each, none when
+// all of it is drawn.
+function clippedBounds(actor, {screen = false} = {}) {
+    const e = actor.get_transformed_extents();
+    const [x1, y1] = [e.get_x(), e.get_y()];
+    const [x2, y2] = [x1 + e.get_width(), y1 + e.get_height()];
+    const cut = [];
+    const outside = (r, name) => {
+        if (x1 < r[0] - 0.5 || y1 < r[1] - 0.5 || x2 > r[2] + 0.5 || y2 > r[3] + 0.5)
+            cut.push(`${name} [${r.map(Math.round)}] cuts [${[x1, y1, x2, y2].map(Math.round)}]`);
+    };
+    for (let a = actor.get_parent(); a && a !== global.stage; a = a.get_parent()) {
+        const name = a.constructor.name;
+        if (a.clip_to_allocation) {
+            const r = a.get_transformed_extents();
+            outside([r.get_x(), r.get_y(), r.get_x() + r.get_width(), r.get_y() + r.get_height()], name);
+        }
+        if (a.has_clip) {
+            const [cx, cy, cw, ch] = a.get_clip();
+            const corners = [[cx, cy], [cx + cw, cy + ch]].map(([px, py]) =>
+                a.apply_transform_to_point(new Graphene.Point3D({x: px, y: py, z: 0})));
+            outside([corners[0].x, corners[0].y, corners[1].x, corners[1].y], `${name}'s clip`);
+        }
+    }
+    if (screen)
+        outside([0, 0, global.stage.width, global.stage.height], 'the screen');
+    return cut;
+}
+
 // The labels in the control centre's modules cut short ("Airplane M…").
 function cutShort(root) {
     const cut = [];
@@ -902,7 +935,7 @@ function fakeAdapters() {
 }
 
 // Brightness and volume as capsules (shell/controlCentre/capsule.js) in
-// their column, 132 × 376 of the spec's pixels at 0.8, side by side: filled
+// their column, 132 × 376 of the spec's pixels at 0.4, side by side: filled
 // as far as GNOME's sliders go and the other way round – dragged, clicked,
 // scrolled, stepped with the keys – GNOME's mute from a click on the
 // volume's icon, its chevron opening the Output card.
@@ -915,12 +948,12 @@ async function controlCentreCapsules(ext, fake) {
         volume.item === fake.output && !fake.output.get_parent() && !fake.brightness.get_parent(),
     'brightness and volume as capsules of their own, GNOME\'s sliders kept off the stage'))
         return;
-    const k = 0.8 * St.ThemeContext.get_for_stage(global.stage).scale_factor * host.grid.scale_x;
+    const k = CC_SIZE * St.ThemeContext.get_for_stage(global.stage).scale_factor * host.grid.scale_x;
     const [bx, by] = brightness.get_transformed_position();
     const [vx] = volume.get_transformed_position();
     const [bw, bh] = brightness.get_transformed_size();
     check(Math.abs(bw - 132 * k) < 2 && Math.abs(bh - 376 * k) < 2 && Math.abs(vx - bx - 152 * k) < 2,
-        `132 × 376 at 0.8, 20 apart (${Math.round(bw)} × ${Math.round(bh)}, ${Math.round(vx - bx)} apart)`);
+        `132 × 376 at ${CC_SIZE}, 20 apart (${Math.round(bw)} × ${Math.round(bh)}, ${Math.round(vx - bx)} apart)`);
     const near = (a, b, by = 0.03) => Math.abs(a - b) <= by;
     check(near(brightness.level, 0.7) && near(volume.level, 0.4),
         `filled as far as GNOME's sliders go (${brightness.level.toFixed(2)}, ${volume.level.toFixed(2)})`);
@@ -959,10 +992,12 @@ async function controlCentreCapsules(ext, fake) {
     await pointerAlong(middle, y + height * 0.3, middle, above);
     await Scripting.sleep(250);
     const stretchedUp = volume.stretch;
+    const cutUp = [...clippedBounds(volume._body, {screen: true}), ...clippedBounds(volume._body.shadow)];
     check(near(levelOfOutput(), 1, 0.001) && stretchedUp > 1.02 && stretchedUp <= 1.09 &&
         volume._body.pivot_point.y === 1 && Math.abs(volume.scale_x - 1.045) < 0.006,
     `past the top, full, stretched up ${((stretchedUp - 1) * 100).toFixed(1)} % from its bottom (≤ 9 %)`);
     await screenshotIsland('21-capsule-past-top', 700);
+    check(cutUp.length === 0, `stretched past the top and lifted, all of it and its shadow drawn (${cutUp.join('; ') || 'nothing cut'})`);
     await pointerAlong(middle, above, middle, 1);
     await Scripting.sleep(250);
     check(volume.stretch <= 1.09, `as far past it as it goes, still 9 % at most (${((volume.stretch - 1) * 100).toFixed(1)} %)`);
@@ -970,17 +1005,21 @@ async function controlCentreCapsules(ext, fake) {
     await pointerAlong(middle, 1, middle, y + height * 1.3);
     await Scripting.sleep(350);
     const stretchedDown = volume.stretch;
+    const cutDown = [...clippedBounds(volume._body, {screen: true}), ...clippedBounds(volume._body.shadow)];
     const parts = volume.icon.parts;
     check(near(levelOfOutput(), 0, 0.001) && stretchedDown > 1.04 && stretchedDown <= 1.09 &&
         volume._body.pivot_point.y === 0 && parts.cross.opacity === 255 && parts.wave1.opacity === 0,
     `past the bottom, empty, stretched down ${((stretchedDown - 1) * 100).toFixed(1)} % from its top, the speaker crossed`);
     await screenshotIsland('21-capsule-at-zero', 700);
+    check(cutDown.length === 0, `stretched past the bottom and lifted, all of it and its shadow drawn (${cutDown.join('; ') || 'nothing cut'})`);
     await pointerUp();
     await Scripting.sleep(700);
     check(!volume.held && ends === 1 && Math.abs(volume.scale_x - 1) < 0.003 && Math.abs(volume.stretch - 1) < 0.003 &&
         brightness.opacity === 255 && !brightness.dimmed && near(levelOfOutput(), 0, 0.001),
     `let go: set down (${volume.scale_x.toFixed(3)}), unstretched (${volume.stretch.toFixed(3)}), the brightness ` +
         `bright again (${brightness.opacity}), the volume left at 0`);
+    check(await waitFor(() => island.clip_to_allocation && !volume._unclipped, 1500),
+        'settled, the island clips what is in it again');
     dragIds.forEach(id => volume.disconnect(id));
     fake.output.slider.value = 0.65 * fake.output.slider.maximum_value;
     await Scripting.sleep(500);
@@ -1032,7 +1071,7 @@ function stageRect(actor) {
 }
 
 // The Controls tab as its spec lays it out: four columns – the pills, the
-// Caffeine and Output tiles, the capsules, the system tile – at 0.8 of its
+// Caffeine and Output tiles, the capsules, the system tile – at 0.4 of its
 // pixels; GNOME's toggles left in GNOME's grid, unseen (its sliders only
 // shown as capsules). What it shows is its adapters' (fakes here); what it
 // does goes through them. Each card grows in place from its corner over
@@ -1042,7 +1081,17 @@ function stageRect(actor) {
 // Caffeine and Output chips' pill slides, a network connecting spins until
 // it has, Airplane Mode and the radios keep each other off. GNOME's power
 // button opens Atelier's power menu. Turned off, GNOME's sliders go back.
+// (ATELIER_TEST_SCALE: at that scale.)
 async function testControlCentre(ext) {
+    const back = await useTestScale('The control centre');
+    try {
+        await controlCentreChecks(ext);
+    } finally {
+        await back?.();
+    }
+}
+
+async function controlCentreChecks(ext) {
     const modules = ext.stateObj.modules;
     if (!check(modules.get('control-centre') !== null, 'control centre module running'))
         return;
@@ -1082,7 +1131,7 @@ async function testControlCentre(ext) {
     await Scripting.sleep(300);
     const grid = host().grid;
     const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-    const k = 0.8 * scale * grid.scale_x;
+    const k = CC_SIZE * scale * grid.scale_x;
     const origin = stageRect(grid);
     const at = id => {
         const r = stageRect(host().tile(id));
@@ -1093,7 +1142,7 @@ async function testControlCentre(ext) {
         volume: [832, 0, 132, 376], system: [984, 0, 352, 376]};
     const off = Object.entries(expected).filter(([id, rect]) => at(id).some((v, i) => Math.abs(v - rect[i]) > 1));
     check(off.length === 0 && Math.abs(origin.width / k - 1336) < 2 && Math.abs(origin.height / k - 376) < 2,
-        `its tiles where the spec has them, at 0.8 (${off.map(([id]) => `${id} ${at(id)}`).join('; ') ||
+        `its tiles where the spec has them, at ${CC_SIZE} (${off.map(([id]) => `${id} ${at(id)}`).join('; ') ||
             `${Math.round(origin.width)} × ${Math.round(origin.height)}`})`);
     const rects = page.moduleRects();
     check(rects[0]?.id === 'tabs' && Object.keys(expected).every(id => rects.some(r => r.id === id && r.ink === false)),
@@ -1244,7 +1293,7 @@ async function testControlCentre(ext) {
     await clickAt(...centerOf(out.rows.get('out:hdmi')));
     await waitFor(() => !host().animator.busy, 3000);
     global.stage.disconnect(slideId);
-    check(fakes.output.calls.includes('select hdmi') && Math.abs(out.selection.translation_y - 2 * 70 * 0.8 * scale) < 1 &&
+    check(fakes.output.calls.includes('select hdmi') && Math.abs(out.selection.translation_y - 2 * 70 * CC_SIZE * scale) < 1 &&
         Math.max(...slide) > out.selection.translation_y + 0.5,
     `an output clicked: the highlight slides to it, a little past and back (${Math.round(Math.max(...slide))}, ` +
         `${Math.round(out.selection.translation_y)})`);
