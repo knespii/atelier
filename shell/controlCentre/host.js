@@ -25,8 +25,8 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DURATIONS, OPEN_DELAYS, rowDelays} from '../../lib/ccMotion.js';
-import {CARDS, INNER, OPEN, ORDER, SIZE, TILES, fitScale, restRects, tileState, timeLeft,
-    toggleOpen} from '../../lib/ccLayout.js';
+import {CARDS, INNER, OPEN, ORDER, SIZE, TILES, fitScale, linkSpeed, restRects, tileState, timeLeft,
+    toggleOpen, wiredSubtitle} from '../../lib/ccLayout.js';
 import {Animator} from './animator.js';
 import {dropPending, makeAdapters} from './adapters.js';
 import {LevelCapsule} from './capsule.js';
@@ -35,7 +35,7 @@ import {ChipRow, FnLayout, ListRow, RoundToggle, Tile, iconOf, place, pressable,
     setIcon} from './tiles.js';
 
 // The tiles' shapes.
-const SHAPES = {wifi: 'pill', bt: 'pill', airplane: 'pill', caffeine: 'tile', output: 'tile',
+const SHAPES = {wifi: 'pill', wired: 'pill', bt: 'pill', airplane: 'pill', caffeine: 'tile', output: 'tile',
     brightness: 'slider', volume: 'slider', system: 'tile'};
 // Each tile's header: so high (spec px); a card's list starts under it.
 const PILL_HEADER = 112;
@@ -44,6 +44,9 @@ const OUTPUT_HEADER = 108;
 // device…", besides).
 const MAX_NETWORKS = 3;
 const MAX_DEVICES = 3;
+// The wired connections the Wired card lists at most (as devices are: two
+// lines each), "Wired Settings…" besides.
+const MAX_WIRED = 2;
 // The Wi-Fi card's mini pills: so high, so far in from its sides and up
 // from its foot (spec px).
 const MINI = {height: 60, inset: 16, bottom: 14};
@@ -70,6 +73,10 @@ class AtelierQuickSettingsHost extends GObject.Object {
         super._init();
         this._quickSettings = quickSettings;
         this._open = null;
+        // Wired in Wi-Fi's place (Ethernet connected); kept there, turned
+        // off from it, until the panel opens again.
+        this._wired = false;
+        this._wiredKept = false;
         this._connecting = null;
         this._busyDevice = null;
         this._serial = 0;
@@ -127,7 +134,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
         const a = this.animator;
         // The pills.
         for (const [id, title, icon] of [['wifi', 'Wi-Fi', 'network-wireless-signal-excellent-symbolic'],
-            ['bt', 'Bluetooth', 'bluetooth-active-symbolic'], ['airplane', 'Airplane Mode', 'airplane-mode-symbolic']]) {
+            ['wired', 'Wired', 'network-wired-symbolic'], ['bt', 'Bluetooth', 'bluetooth-active-symbolic'], ['airplane', 'Airplane Mode', 'airplane-mode-symbolic']]) {
             const card = id in CARDS;
             const tile = new Tile(id, {shape: 'pill', card});
             const header = new St.BoxLayout({style_class: 'atelier-cc-pill-header', x_expand: true});
@@ -279,7 +286,8 @@ class AtelierQuickSettingsHost extends GObject.Object {
         const a = this.animator;
         const open = OPEN[key];
         const top = key === 'out' ? OUTPUT_HEADER : PILL_HEADER;
-        const bottom = key === 'wifi' ? MINI.height + MINI.bottom + 8 : 14;
+        const minis = key === 'wifi' || key === 'wired';
+        const bottom = minis ? MINI.height + MINI.bottom + 8 : 14;
         const list = new St.BoxLayout({style_class: `atelier-cc-list atelier-cc-list-${key}`,
             orientation: Clutter.Orientation.VERTICAL, x_expand: true, visible: false});
         tile.rows = new Map();
@@ -314,7 +322,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
         }
         list.add_child(tile.placeholder);
         tile.list = tile.addPart(list, () => [0, px(top), px(open.width), px(open.height - top - bottom)]);
-        if (key === 'wifi') {
+        if (minis) {
             // Bluetooth and Airplane Mode, small, at its foot.
             const foot = new St.BoxLayout({style_class: 'atelier-cc-minis', x_expand: true, visible: false});
             tile.minis = {};
@@ -353,7 +361,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
      * Show and act through these adapters (adapters.js; the tests' fakes),
      * in place of those it has.
      *
-     * @param {object} adapters - {wifi, bt, airplane, output, caffeine, system}, some
+     * @param {object} adapters - {wifi, wired, bt, airplane, output, caffeine, system}, some
      */
     setAdapters(adapters) {
         for (const [name, adapter] of Object.entries(adapters)) {
@@ -468,7 +476,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
 
     // ---- State ----
 
-    /** @returns {string|null} the card open: 'wifi', 'bt', 'out' or null */
+    /** @returns {string|null} the card open: 'wifi', 'wired', 'bt', 'out' or null */
     get open() {
         return this._open;
     }
@@ -484,13 +492,16 @@ class AtelierQuickSettingsHost extends GObject.Object {
     /**
      * Open a card (or none: null), the spec's way.
      *
-     * @param {string|null} key - 'wifi', 'bt', 'out' or null
+     * @param {string|null} key - 'wifi', 'wired', 'bt', 'out' or null
      * @param {object} [options]
      * @param {boolean} [options.instant]
      */
     setOpen(key, {instant = false} = {}) {
         if (key !== null && !(key in OPEN))
             return;
+        // (Not the card of the pill away.)
+        if (key === (this._wired ? 'wifi' : 'wired'))
+            key = null;
         if (key === this._open && !instant)
             return;
         const was = this._open;
@@ -512,7 +523,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
         const k = px(1);
         for (const id of ORDER) {
             const tile = this._tiles.get(id);
-            const state = tileState(id, open);
+            const state = tileState(id, open, {wired: this._wired});
             const rect = tile._rect;
             if (['x', 'y', 'width', 'height'].some(name => rect[name] !== state[name]) ||
                 a.targetOf(rect, 'width') !== undefined) {
@@ -525,8 +536,14 @@ class AtelierQuickSettingsHost extends GObject.Object {
             if (state.scale !== 1)
                 tile.set_pivot_point(state.pivotX, state.pivotY);
             const dimmed = state.opacity > 0 && state.opacity < 1;
+            // (The pill away – Wi-Fi's or Wired's, in one place – gone
+            // once it has faded: not taking the other's clicks.)
+            const away = id === (this._wired ? 'wifi' : 'wired');
+            if (!away)
+                tile.show();
             a.ease(tile, {opacity: Math.round(state.opacity * 255)},
-                {curve: 'fade', duration: dimmed ? DURATIONS.dimFade : DURATIONS.hideFade, instant});
+                {curve: 'fade', duration: dimmed ? DURATIONS.dimFade : DURATIONS.hideFade, instant,
+                    onDone: away ? finished => finished && this._wired === (id === 'wifi') && tile.hide() : null});
             a.ease(tile, {translation_y: state.dy * k, scale: state.scale},
                 {curve: 'morph', duration: dimmed ? DURATIONS.dimMove : DURATIONS.hideMove, instant});
             tile.setInert(state.inert);
@@ -617,10 +634,30 @@ class AtelierQuickSettingsHost extends GObject.Object {
     // ---- What it shows ----
 
     _render({instant = false} = {}) {
-        const {wifi, bt, airplane, output, caffeine, system} = this._adapters;
+        const {wifi, wired, bt, airplane, output, caffeine, system} = this._adapters;
         if (!wifi || !bt || !airplane || !output || !caffeine || !system)
             return;
         const animate = !instant;
+        // Wired in Wi-Fi's place, or Wi-Fi back: one crossfaded to the
+        // other, stepping back as a card's neighbours do.
+        if (!wired?.available || wired.on)
+            this._wiredKept = false;
+        const showWired = Boolean(wired?.available && (wired.on || wired.connecting || this._wiredKept));
+        if (showWired !== this._wired) {
+            this._wired = showWired;
+            const was = this._open;
+            if (was === 'wifi' || was === 'wired') {
+                this._open = null;
+                this._adapters.wifi?.watchNetworks?.(false);
+            }
+            this._applyState({instant, was: this._open === null ? was : null});
+        }
+        if (wired) {
+            const wiredTile = this._tiles.get('wired');
+            wiredTile.toggle.setOn(wired.on, animate);
+            wiredTile.subtitle.text = wiredSubtitle(wired);
+            wiredTile.toggle.reactive = wired.available;
+        }
         // The pills.
         const wifiTile = this._tiles.get('wifi');
         const network = wifi.networks.find(n => n.connected);
@@ -640,10 +677,12 @@ class AtelierQuickSettingsHost extends GObject.Object {
         airTile.subtitle.text = !airplane.available ? 'Unavailable' : airplane.on ? 'On' : 'Off';
         airTile.toggle.reactive = airplane.available;
         for (const [id, adapter] of [['bt', bt], ['airplane', airplane]]) {
-            const mini = wifiTile.minis[id];
-            mini.toggle.setOn(adapter.on, animate);
-            mini.toggle.reactive = adapter.available;
-            mini.subtitle.text = this._tiles.get(id).subtitle.text;
+            for (const pill of ['wifi', 'wired']) {
+                const mini = this._tiles.get(pill).minis[id];
+                mini.toggle.setOn(adapter.on, animate);
+                mini.toggle.reactive = adapter.available;
+                mini.subtitle.text = this._tiles.get(id).subtitle.text;
+            }
         }
 
         // Caffeine.
@@ -711,6 +750,22 @@ class AtelierQuickSettingsHost extends GObject.Object {
                 rows.push({id: 'other', kind: 'action', icon: 'list-add-symbolic', title: 'Other network…',
                     activate: () => wifi.openSettings()});
             }
+        } else if (key === 'wired') {
+            const wired = this._adapters.wired;
+            if (!wired?.available) {
+                placeholder = 'No cable connected.';
+            } else {
+                rows = wired.connections.slice(0, MAX_WIRED).map(c => {
+                    const fast = c.active ? linkSpeed(c.speed) : '';
+                    return {id: `wire:${c.id}`, kind: 'device', icon: 'network-wired-symbolic', title: c.name,
+                        subtitle: c.connecting ? 'Connecting…' : c.active ? ['Connected', fast].filter(Boolean).join(' · ')
+                            : c.device,
+                        check: c.active, spinning: c.connecting, lit: c.active || c.connecting,
+                        activate: () => wired.activate(c.id)};
+                });
+            }
+            rows.push({id: 'wired-settings', kind: 'action', icon: 'preferences-system-symbolic', title: 'Wired Settings…',
+                activate: () => wired?.openSettings()});
         } else if (key === 'bt') {
             const bt = this._adapters.bt;
             if (!bt.on || !bt.available) {
@@ -794,7 +849,15 @@ class AtelierQuickSettingsHost extends GObject.Object {
     // The radios, the spec's way: Airplane on turns Wi-Fi and Bluetooth off
     // (GNOME's rfkill does); Wi-Fi or Bluetooth on turns Airplane off.
     _toggleRadio(id) {
-        const {wifi, bt, airplane} = this._adapters;
+        const {wifi, wired, bt, airplane} = this._adapters;
+        if (id === 'wired') {
+            // (Not a radio: Airplane Mode leaves it be. Turned off here, it
+            // stays in Wi-Fi's place to turn on again.)
+            if (wired?.on)
+                this._wiredKept = true;
+            wired?.setOn(!wired.on);
+            return;
+        }
         if (id === 'airplane') {
             airplane.setOn(!airplane.on);
             return;
@@ -845,10 +908,15 @@ class AtelierQuickSettingsHost extends GObject.Object {
      * clear, one after another (the spec's delays).
      */
     playOpen() {
+        this._wiredKept = false;
+        this._render({instant: true});
         this.setOpen(null, {instant: true});
         const k = px(1);
         for (const id of ORDER) {
             const tile = this._tiles.get(id);
+            // (Not the pill away: Wi-Fi's or Wired's.)
+            if (tileState(id, null, {wired: this._wired}).opacity === 0)
+                continue;
             tile.set_pivot_point(0.5, 0.5);
             this.animator.ease(tile, {opacity: 255, translation_y: 0, scale: 1},
                 {curve: 'open', duration: DURATIONS.open, delay: OPEN_DELAYS[id],
@@ -926,7 +994,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
             return [];
         const fit = this.grid.scale_x;
         const k = px(1) * fit;
-        return restRects().map(r => ({
+        return restRects(this._wired).map(r => ({
             id: r.id, x: grid.x + r.x * k, y: grid.y + r.y * k, width: r.width * k, height: r.height * k,
             radius: r.radius * k, actor: this._tiles.get(r.id), ink: false,
         }));
