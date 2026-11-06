@@ -44,12 +44,26 @@ class Adapter extends Signals.EventEmitter {
         super();
         this._changedId = 0;
         this._watched = new Set();
+        this._ids = new Map();
     }
 
     // Connect to a GObject's signals, until destroyed.
     _watch(object, ...args) {
         if (!object)
             return;
+        // (Not all have connectObject: a D-Bus proxy GNOME made before the
+        // shell added it, as in the lock screen's session. Its handlers by
+        // their ids, then.)
+        if (typeof object.connectObject !== 'function') {
+            if (typeof object.connect !== 'function')
+                return;
+            const ids = this._ids.get(object) ?? [];
+            for (let i = 0; i + 1 < args.length; i += 2)
+                ids.push(object.connect(args[i], args[i + 1]));
+            this._ids.set(object, ids);
+            this._watched.add(object);
+            return;
+        }
         object.connectObject(...args, this);
         // (GNOME's toggle gone – the shell quitting, say: not read again.)
         if (object instanceof Clutter.Actor && !this._watched.has(object)) {
@@ -69,7 +83,12 @@ class Adapter extends Signals.EventEmitter {
         if (!object || !this._watched.delete(object))
             return;
         try {
-            object.disconnectObject(this);
+            const ids = this._ids.get(object);
+            this._ids.delete(object);
+            if (ids)
+                ids.forEach(id => object.disconnect(id));
+            else
+                object.disconnectObject(this);
         } catch {
             // (Gone already.)
         }

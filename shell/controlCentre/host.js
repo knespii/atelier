@@ -108,7 +108,13 @@ class AtelierQuickSettingsHost extends GObject.Object {
         this.grid.add_child(this._closeArea);
 
         this._adapters = {};
-        this.setAdapters(makeAdapters(quickSettings));
+        try {
+            this.setAdapters(makeAdapters(quickSettings));
+        } catch (e) {
+            // (Nothing left behind half made.)
+            this.actor.destroy();
+            throw e;
+        }
         this._applyState({instant: true});
 
         // (Fitted again to a monitor of another width.)
