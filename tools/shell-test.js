@@ -931,18 +931,64 @@ async function controlCentreCapsules(ext, fake) {
     fake.brightness.slider.value = 0.3;
     check(await waitFor(() => near(brightness.level, 0.3, 0.005), 1000),
         `GNOME's brightness at 30 %: the capsule a third full (${brightness.level.toFixed(2)})`);
+
+    // Dragged: as far up as the pointer (the spec's mapping), from the
+    // press on.
     const [x, y] = volume.get_transformed_position();
     const [width, height] = volume.get_transformed_size();
     const middle = x + width / 2;
+    const levelOfOutput = () => fake.output.slider.value / fake.output.slider.maximum_value;
+    let begins = 0;
+    let ends = 0;
+    const dragIds = [volume.connect('drag-begin', () => begins++), volume.connect('drag-end', () => ends++)];
     await pointerDown(middle, y + height * 0.5);
-    await pointerAlong(middle, y + height * 0.5, middle, y + height * 0.25);
+    await Scripting.sleep(350);
+    check(volume.held && begins === 1 && Math.abs(volume.scale_x - 1.045) < 0.006 && near(volume.level, 0.5) &&
+        !volume.valueLabel &&
+        Math.abs(brightness.opacity - 0.55 * 255) < 2 && brightness.dimmed,
+    `pressed half way up: held there, lifted ${volume.scale_x.toFixed(3)}, no value shown, ` +
+        `the brightness dimmed (${(brightness.opacity / 255).toFixed(2)})`);
+    await pointerAlong(middle, y + height * 0.5, middle, y + height * 0.3);
+    await Scripting.sleep(200);
+    check(near(levelOfOutput(), 0.7) && near(volume.level, 0.7),
+        `dragged up a fifth of its height: a fifth more (${levelOfOutput().toFixed(2)})`);
+    await screenshotIsland('21-capsule-drag', 700);
+    // Past the top: full, stretched up (its bottom holding), 9 % at most.
+    // (The island is at the top of the screen: past its top as far as the screen goes.)
+    const above = Math.max(1, y - height * 0.3);
+    await pointerAlong(middle, y + height * 0.3, middle, above);
+    await Scripting.sleep(250);
+    const stretchedUp = volume.stretch;
+    check(near(levelOfOutput(), 1, 0.001) && stretchedUp > 1.02 && stretchedUp <= 1.09 &&
+        volume._body.pivot_point.y === 1 && Math.abs(volume.scale_x - 1.045) < 0.006,
+    `past the top, full, stretched up ${((stretchedUp - 1) * 100).toFixed(1)} % from its bottom (≤ 9 %)`);
+    await screenshotIsland('21-capsule-past-top', 700);
+    await pointerAlong(middle, above, middle, 1);
+    await Scripting.sleep(250);
+    check(volume.stretch <= 1.09, `as far past it as it goes, still 9 % at most (${((volume.stretch - 1) * 100).toFixed(1)} %)`);
+    // Past the bottom: empty, stretched down (its top holding), the mute's cross.
+    await pointerAlong(middle, 1, middle, y + height * 1.3);
+    await Scripting.sleep(350);
+    const stretchedDown = volume.stretch;
+    const parts = volume.icon.parts;
+    check(near(levelOfOutput(), 0, 0.001) && stretchedDown > 1.04 && stretchedDown <= 1.09 &&
+        volume._body.pivot_point.y === 0 && parts.cross.opacity === 255 && parts.wave1.opacity === 0,
+    `past the bottom, empty, stretched down ${((stretchedDown - 1) * 100).toFixed(1)} % from its top, the speaker crossed`);
+    await screenshotIsland('21-capsule-at-zero', 700);
     await pointerUp();
     await Scripting.sleep(700);
-    check(near(fake.output.slider.value, 0.65, 0.05),
-        `dragged up a quarter, GNOME's volume a quarter more (${fake.output.slider.value.toFixed(2)})`);
-    await clickAt(bx + bw / 2, by + bh * 0.2);
-    await Scripting.sleep(700);
-    check(near(fake.brightness.slider.value, 0.8, 0.05),
+    check(!volume.held && ends === 1 && Math.abs(volume.scale_x - 1) < 0.003 && Math.abs(volume.stretch - 1) < 0.003 &&
+        brightness.opacity === 255 && !brightness.dimmed && near(levelOfOutput(), 0, 0.001),
+    `let go: set down (${volume.scale_x.toFixed(3)}), unstretched (${volume.stretch.toFixed(3)}), the brightness ` +
+        `bright again (${brightness.opacity}), the volume left at 0`);
+    dragIds.forEach(id => volume.disconnect(id));
+    fake.output.slider.value = 0.65 * fake.output.slider.maximum_value;
+    await Scripting.sleep(500);
+    // Clicked high up the brightness: there.
+    const [bX, bY] = brightness.get_transformed_position();
+    const [bW, bH] = brightness.get_transformed_size();
+    await clickAt(bX + bW / 2, bY + bH * 0.2);
+    check(near(fake.brightness.slider.value, 0.8),
         `clicked high up, the brightness there (${fake.brightness.slider.value.toFixed(2)})`);
     fake.brightness.slider.value = 0.5;
     brightness.grab_key_focus();
@@ -958,6 +1004,24 @@ async function controlCentreCapsules(ext, fake) {
         await waitFor(() => host.open === null && !host.animator.busy, 2000);
     }
     await restPointer();
+    await screenshotIsland('21-control-centre-capsules', 700);
+
+    // The sun's rays with the brightness: small and upright when low,
+    // whole and a quarter turned when full.
+    const rays = brightness.icon.parts.rays;
+    fake.brightness.slider.value = 0.05;
+    await Scripting.sleep(600);
+    const low = [rays.scale_x, rays.rotation_angle_z];
+    await screenshotIsland('21-capsule-brightness-low', 700);
+    fake.brightness.slider.value = 1;
+    await Scripting.sleep(600);
+    const high = [rays.scale_x, rays.rotation_angle_z];
+    await screenshotIsland('21-capsule-brightness-high', 700);
+    check(Math.abs(low[0] - 0.62) < 0.01 && Math.abs(low[1] - 4.5) < 0.5 && Math.abs(high[0] - 1) < 0.01 &&
+        Math.abs(high[1] - 90) < 0.5,
+    `the sun's rays grow and turn with the brightness (5 %: ${low[0].toFixed(2)}, ${low[1].toFixed(1)}°; ` +
+        `100 %: ${high[0].toFixed(2)}, ${high[1].toFixed(1)}°)`);
+
 }
 
 // A tile's rect on the stage.
@@ -1479,12 +1543,12 @@ async function testControlCentreGlass(ext) {
         // The capsules: brightness and volume, each with its track.
         const capsules = [];
         const walk = actor => {
-            if (hasClass(actor, 'atelier-cc-capsule') && actor.mapped)
+            if (hasClass(actor, 'atelier-cc-capsule') && actor.track && actor.mapped)
                 capsules.push(actor);
             actor.get_children().forEach(walk);
         };
         walk(page);
-        const tracks = capsules.map(c => c.get_theme_node().get_background_color().alpha);
+        const tracks = capsules.map(c => (c.track ?? c).get_theme_node().get_background_color().alpha);
         check(['brightness', 'volume'].every(id => rects.some(r => r.id === id)) && capsules.length >= 2 &&
             tracks.every(a => a > 10 && a < 80) && capsules.every(c => c.height > c.width * 1.5),
         `the brightness and volume capsules there, tall, each with a faint track (${capsules.length}, ` +
@@ -9461,6 +9525,7 @@ async function testControlCentrePace(ext) {
     };
     const themeId = theme.connect('changed', () => count.restyles++);
     const watched = [];
+    let fake = null;
     try {
         bar.set_string('style', 'island');
         bar.set_string('island-shape', 'notch');
@@ -9641,7 +9706,80 @@ async function testControlCentrePace(ext) {
         check([...phases.open.styled, ...phases.close.styled].every(n => n <= 5),
             'opened again, next to none of its type and icons restyled (371 a time before) ' +
             `(${phases.open.styled.join(', ')} opening, ${phases.close.styled.join(', ')} closing)`);
+
+        // A capsule dragged up and down, past its ends: each frame's time;
+        // nothing restyled or laid out anew as it goes.
+        fake = fakeLevelSliders();
+        await Scripting.sleep(500);
+        await clickAt(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy && settled(), 3000);
+        await Scripting.sleep(600);
+        const capsule = ext.stateObj.modules.get('control-centre').controls.module('volume')?.slots[0]?.get_child();
+        if (check(capsule?.mapped, 'the volume\'s capsule there to drag')) {
+            const [cx, cy] = capsule.get_transformed_position();
+            const [cw, ch] = capsule.get_transformed_size();
+            const frames = [];
+            let styled = 0;
+            let allocations = 0;
+            const styleIds = [];
+            const walk = actor => {
+                if (actor instanceof St.Widget)
+                    styleIds.push([actor, actor.connect('style-changed', () => styled++)]);
+                actor.get_children().forEach(walk);
+            };
+            walk(capsule);
+            const slot = capsule.get_parent();
+            const allocationId = slot.connect('notify::allocation', () => allocations++);
+            let start = 0;
+            const begin = () => (start ||= GLib.get_monotonic_time() / 1000);
+            const frameIds = [
+                global.stage.connect('prepare-frame', begin),
+                global.stage.connect('before-update', begin),
+                global.stage.connect('after-update', () => (start = 0)),
+                global.stage.connect('after-paint', (_, view) => {
+                    view?.get_framebuffer?.()?.finish();
+                    if (start)
+                        frames.push(GLib.get_monotonic_time() / 1000 - start);
+                    start = 0;
+                }),
+            ];
+            const restylesBefore = count.restyles;
+            try {
+                await pointerDown(cx + cw / 2, cy + ch * 0.5);
+                // (Up past the top, down past the bottom, back: a frame's
+                // move at a time.)
+                const path = [0.5, -0.3, 1.3, 0.5];
+                for (let leg = 1; leg < path.length; leg++) {
+                    for (let i = 1; i <= 40; i++) {
+                        const at = path[leg - 1] + (path[leg] - path[leg - 1]) * i / 40;
+                        virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(), cx + cw / 2, cy + ch * at);
+                        await Scripting.sleep(16);
+                    }
+                }
+                await pointerUp();
+                await Scripting.sleep(700);
+            } finally {
+                frameIds.forEach(id => global.stage.disconnect(id));
+                styleIds.forEach(([actor, id]) => actor.disconnect(id));
+                slot.disconnect(allocationId);
+            }
+            const spread = spreadOf(frames);
+            const pace = `a capsule dragged past its ends, ${size}: ${spread.n} frames, each drawn in ` +
+                `${ms(spread.mean)} ms on average, ${ms(spread.p95)} for 95 %, ${ms(spread.max)} at most`;
+            if (slow)
+                results.push(`INFO  drawn without a GPU: ${pace}`);
+            else
+                check(spread.n > 60 && spread.mean <= PACE_MEAN, `${pace} (at most ${PACE_MEAN} ms on average)`);
+            check(count.restyles === restylesBefore && styled === 0 && allocations === 0,
+                `dragged, the shell not restyled (${count.restyles - restylesBefore}), none of the ` +
+                `capsule's parts restyled (${styled}), its slot not laid out anew (${allocations})`);
+        }
+        await pressKey(Clutter.KEY_Escape);
+        check(await waitFor(() => !island.page && !island.busy, 3000),
+            'Esc closes the control centre after the drag');
+        await restPointer();
     } finally {
+        fake?.restore();
         watched.forEach(([actor, id]) => actor.disconnect(id));
         theme.disconnect(themeId);
         themeProto.load_stylesheet = load;

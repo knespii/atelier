@@ -24,6 +24,7 @@ import * as glyphOutlines from './glyphOutlines.test.js';
 import * as glyphSdf from './glyphSdf.test.js';
 import * as glyphStretch from './glyphStretch.test.js';
 import * as levelCapsule from './levelCapsule.test.js';
+import * as cubicBezier from './cubicBezier.test.js';
 import * as gtkCss from './gtkCss.test.js';
 import * as liquid from './liquid.test.js';
 import * as otherExtensions from './otherExtensions.test.js';
@@ -51,7 +52,7 @@ import * as widgets from './widgets.test.js';
 const suites = {profiles, themes, thumbnails, gtkCss, migrate, palette, terminal, notifications, claudeUsage, widgets, notes, profileTransfer, slack, liquid, otherExtensions, dockMagnify, windowLiquid,
     dockGeometry, dockVisibility, dockActions, dockIndicators, dockLocations, dockTheme, dockImport, compat, lockState, steadyTime, lockLook, photos, depth,
     apca, lockColor, lockType, glyphStretch, glyphOutlines, glyphSdf, glyphAtlas, glassBackdrop, glassClock, glassLook, vibrancy,
-    levelCapsule, ccLayout, ccMotion};
+    levelCapsule, ccLayout, ccMotion, cubicBezier};
 
 let total = 0;
 let failures = 0;
