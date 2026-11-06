@@ -1434,7 +1434,7 @@ async function testControlCentreGlass(ext) {
         // The capsules: brightness and volume, each with its track.
         const capsules = [];
         const walk = actor => {
-            if (hasClass(actor, 'atelier-cc-capsule') && actor.mapped)
+            if (hasClass(actor, 'atelier-cc-capsule') && actor.track && actor.mapped)
                 capsules.push(actor);
             actor.get_children().forEach(walk);
         };

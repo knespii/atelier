@@ -600,7 +600,6 @@ export const LevelCapsule = GObject.registerClass({
             layout_manager: new Clutter.BinLayout(),
             reactive: true,
             can_focus: true,
-            track_hover: true,
             x_expand: true,
             y_expand: true,
             accessible_role: Atk.Role.SLIDER,

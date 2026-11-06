@@ -1546,8 +1546,10 @@
    as the level goes – light under either type (dark type is on light glass:
    lighter still under it, its icon reads the better; the fill turns dark
    then, lib/vibrancy.js ccModule). */
+/* (0.23: the capsule's and its slot's 0.12 over each other, as it looked
+   when both were tinted.) */
 .atelier-island-glass .atelier-cc-capsule-track {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.23);
 }
 
 /* A sheet dripping from the island: what it is made of is drawn under it,
