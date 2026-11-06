@@ -1,6 +1,6 @@
 import {
-    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, fitScale, panelSize, restRects, setRadio, shortOutputName, tileState,
-    timeLeft, toggleOpen,
+    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
+    tileState, timeLeft, toggleOpen, wiredSubtitle,
 } from '../lib/ccLayout.js';
 import {assert, assertEqual} from './util.js';
 
@@ -26,7 +26,8 @@ export function testTilesInTheirColumns() {
     }
     assertEqual([TILES.wifi.y, TILES.bt.y, TILES.airplane.y], [0, 132, 264], 'the pills at 0 / 132 / 264');
     assertEqual([TILES.caffeine.y, TILES.output.y], [0, 198], 'Caffeine and Output at 0 / 198');
-    assertEqual(restRects().length, ORDER.length, 'a rect for each tile');
+    assertEqual(restRects().map(r => r.id), ORDER.filter(id => id !== 'wired'), 'a rect for each tile shown');
+    assertEqual(restRects(true)[0].id, 'wired', 'Wired\'s in Wi-Fi\'s place');
 }
 
 export function testFit() {
@@ -78,6 +79,33 @@ export function testDerivedBluetoothAndOutput() {
     const caffeine = tileState('caffeine', 'out');
     assertEqual([caffeine.opacity, caffeine.dy, caffeine.scale], [0, -14, 0.94], 'Caffeine steps back up');
     assertEqual(tileState('wifi', 'out').opacity, 1, 'column 1 stays');
+}
+
+export function testWiredInWifisPlace() {
+    assertEqual([TILES.wired.x, TILES.wired.y, TILES.wired.width, TILES.wired.height],
+        [TILES.wifi.x, TILES.wifi.y, TILES.wifi.width, TILES.wifi.height], 'Wired where Wi-Fi is');
+    const wifi = tileState('wifi', null);
+    const wired = tileState('wired', null);
+    assert(wifi.opacity === 1 && wired.opacity === 0 && wired.inert && wired.dy === -16 && wired.scale === 0.94,
+        'without Ethernet: Wi-Fi, Wired stepped back');
+    const swapped = [tileState('wifi', null, {wired: true}), tileState('wired', null, {wired: true})];
+    assert(swapped[0].opacity === 0 && swapped[0].inert && swapped[1].opacity === 1 && !swapped[1].inert,
+        'with it: Wired, Wi-Fi stepped back');
+    const open = tileState('wired', 'wired', {wired: true});
+    assertEqual([open.width, open.height, open.raised], [460, 376, true], 'its card as Wi-Fi\'s');
+    assertEqual([tileState('bt', 'wired', {wired: true}).opacity, tileState('caffeine', 'wired', {wired: true}).opacity],
+        [0, 0.3], 'Bluetooth stepped back, column 2 dimmed');
+    assertEqual(tileState('wifi', 'wifi', {wired: true}).raised, false, 'Wi-Fi\'s card not open while away');
+    assertEqual(tileState('wired', 'bt', {wired: true}).dy, -16, 'Bluetooth\'s card: Wired up');
+}
+
+export function testWiredSubtitle() {
+    assertEqual([linkSpeed(1000), linkSpeed(2500), linkSpeed(100), linkSpeed(0), linkSpeed(-1)],
+        ['1 Gb/s', '2.5 Gb/s', '100 Mb/s', '', ''], 'speeds');
+    assertEqual(wiredSubtitle({on: true, connecting: false, speed: 1000}), 'Connected · 1 Gb/s', 'connected');
+    assertEqual(wiredSubtitle({on: true, connecting: false}), 'Connected', 'speed unknown');
+    assertEqual(wiredSubtitle({on: true, connecting: true, speed: 1000}), 'Connecting…', 'connecting');
+    assertEqual(wiredSubtitle({on: false, connecting: false}), 'Off', 'off');
 }
 
 export function testTimeLeftAndNames() {

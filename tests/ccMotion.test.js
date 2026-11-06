@@ -80,5 +80,6 @@ export function testDelays() {
     assertEqual(rowDelays(4), [90, 140, 190, 250], 'Wi-Fi: three networks, then Other network…');
     assertEqual(rowDelays(3, {first: 80, lastApart: false}), [80, 130, 180], 'the outputs');
     assertEqual(rowDelays(1), [90], 'one row');
-    assertEqual(Object.values(OPEN_DELAYS), [60, 110, 140, 160, 190, 220, 260, 300], 'the panel opening, in order');
+    assertEqual(Object.values(OPEN_DELAYS), [60, 60, 110, 140, 160, 190, 220, 260, 300],
+        'the panel opening, in order (Wired as Wi-Fi, in its place)');
 }
