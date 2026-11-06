@@ -723,28 +723,30 @@
   margin: 0;
 }
 
-/* The Controls tab as its Layout & Motion spec has it, at 0.8 of its pixels
+/* The Controls tab as its Layout & Motion spec has it, at 0.4 of its pixels
    (shell/controlCentre/host.js, lib/ccLayout.js): pills, tiles and cards
    of the spec's translucent fills in the island's one notch of glass, white
    type, GNOME's accent for what is on. Placed and moved by the control
-   centre itself; here only how each looks. */
+   centre itself; here only how each looks. (No type under 7 px, the mini
+   pills' toggles 20 px: half of the spec's would read and hit too badly.
+   Edges 1 px: St rounds them to whole pixels.) */
 
 .atelier-cc-grid {
-  margin: 0 6.4px 6.4px;
+  margin: 0 3.2px 3.2px;
 }
 
 .atelier-cc-glass {
   background-color: rgba(40, 34, 24, 0.42);
-  border: 1.2px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .atelier-cc-glass-pill {
-  border-radius: 44.8px;
+  border-radius: 22.4px;
 }
 
 .atelier-cc-glass-tile,
 .atelier-cc-raised {
-  border-radius: 32px;
+  border-radius: 16px;
 }
 
 .atelier-cc-raised {
@@ -756,17 +758,17 @@
 }
 
 .atelier-cc-pill-header {
-  padding: 0 17.6px 0 19.2px;
-  spacing: 14.4px;
+  padding: 0 8.8px 0 9.6px;
+  spacing: 7.2px;
 }
 
 .atelier-cc-tile-header {
-  padding: 19.2px;
-  spacing: 14.4px;
+  padding: 9.6px;
+  spacing: 7.2px;
 }
 
 .atelier-cc-pill-text {
-  spacing: 8px;
+  spacing: 4px;
 }
 
 .atelier-cc-opener {
@@ -775,23 +777,23 @@
 }
 
 .atelier-cc-opener-tile {
-  border-radius: 32px;
+  border-radius: 16px;
 }
 
 .atelier-cc-title {
-  font-size: 16px;
+  font-size: 8px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .atelier-cc-subtitle {
-  font-size: 12px;
+  font-size: 7px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-chevron {
-  icon-size: 16px;
+  icon-size: 8px;
   color: rgba(255, 255, 255, 0.78);
 }
 
@@ -802,13 +804,13 @@
 }
 
 .atelier-cc-round-big {
-  width: 48px;
-  height: 48px;
+  width: 24px;
+  height: 24px;
 }
 
 .atelier-cc-round-small {
-  width: 36px;
-  height: 36px;
+  width: 20px;
+  height: 20px;
 }
 
 .atelier-cc-round-idle,
@@ -827,20 +829,20 @@
 }
 
 .atelier-cc-round-icon-big {
-  icon-size: 21px;
+  icon-size: 10.5px;
 }
 
 .atelier-cc-round-icon-small {
-  icon-size: 16px;
+  icon-size: 9px;
 }
 
 /* Chips, the one chosen on a light pill that slides between them. */
 .atelier-cc-chip {
-  border-radius: 17.6px;
+  border-radius: 8.8px;
 }
 
 .atelier-cc-chip-label {
-  font-size: 12px;
+  font-size: 7px;
   font-weight: 600;
   color: #ffffff;
 }
@@ -850,27 +852,27 @@
 }
 
 .atelier-cc-chip-pill {
-  border-radius: 17.6px;
+  border-radius: 8.8px;
   background-color: #f1f0ec;
 }
 
 /* A card's list. */
 .atelier-cc-list {
-  padding: 0 12.8px;
+  padding: 0 6.4px;
 }
 
 .atelier-cc-rows {
-  spacing: 1.6px;
+  spacing: 0.8px;
 }
 
 .atelier-cc-list-placeholder {
-  padding: 12.8px;
-  font-size: 12.8px;
+  padding: 6.4px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-row {
-  border-radius: 17.6px;
+  border-radius: 8.8px;
   color: #ffffff;
 }
 
@@ -880,146 +882,146 @@
 
 .atelier-cc-row-network,
 .atelier-cc-row-action {
-  height: 35.2px;
+  height: 17.6px;
 }
 
 .atelier-cc-row-device {
-  height: 44.8px;
+  height: 22.4px;
 }
 
 .atelier-cc-row-output {
-  border-radius: 20px;
+  border-radius: 10px;
 }
 
 .atelier-cc-row-highlight {
-  border-radius: 17.6px;
+  border-radius: 8.8px;
   background-color: rgba(255, 255, 255, 0.14);
 }
 
 .atelier-cc-row-content {
-  padding: 0 12px;
-  spacing: 9.6px;
+  padding: 0 6px;
+  spacing: 4.8px;
 }
 
 .atelier-cc-row-icon {
-  icon-size: 16px;
+  icon-size: 8px;
   color: #ffffff;
 }
 
 .atelier-cc-row-icon-small {
-  icon-size: 15px;
+  icon-size: 7.5px;
 }
 
 .atelier-cc-row-circle {
-  width: 30.4px;
-  height: 30.4px;
+  width: 15.2px;
+  height: 15.2px;
   border-radius: 999px;
   background-color: rgba(255, 255, 255, 0.16);
 }
 
 .atelier-cc-row-title {
-  font-size: 12.8px;
+  font-size: 7px;
   font-weight: 600;
   color: #ffffff;
 }
 
 .atelier-cc-row-subtitle,
 .atelier-cc-row-note {
-  font-size: 10.4px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-row-check {
-  icon-size: 14px;
+  icon-size: 7px;
   color: #ffffff;
 }
 
 .atelier-cc-output-pill {
-  border-radius: 20px;
-  border: 1.2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   background-color: rgba(255, 255, 255, 0.16);
-  padding: 0 12px;
+  padding: 0 6px;
 }
 
 .atelier-cc-spinner {
-  width: 12.8px;
-  height: 12.8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-top-color: #ffffff;
 }
 
 /* The Wi-Fi card's mini pills: Bluetooth and Airplane Mode. */
 .atelier-cc-minis {
-  spacing: 8px;
+  spacing: 4px;
 }
 
 .atelier-cc-mini {
   border-radius: 999px;
-  padding: 0 12px 0 6px;
-  spacing: 8px;
+  padding: 0 6px 0 3px;
+  spacing: 4px;
   background-color: rgba(255, 255, 255, 0.08);
-  border: 1.2px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .atelier-cc-mini-title {
-  font-size: 12px;
+  font-size: 7px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .atelier-cc-mini-subtitle {
-  font-size: 10.4px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 /* The system tile: the battery, the four buttons. */
 .atelier-cc-system {
-  padding: 24px 22.4px 22.4px;
+  padding: 12px 11.2px 11.2px;
 }
 
 .atelier-cc-battery-label {
-  spacing: 6px;
+  spacing: 3px;
 }
 
 .atelier-cc-battery-icon {
-  icon-size: 14px;
+  icon-size: 7px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-battery-title {
-  font-size: 12px;
+  font-size: 7px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-battery-percent {
-  font-size: 57.6px;
+  font-size: 28.8px;
   font-weight: 700;
   letter-spacing: -2.3px;
   color: #ffffff;
 }
 
 .atelier-cc-battery-time {
-  font-size: 12px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.78);
-  padding-bottom: 9.6px;
+  padding-bottom: 4.8px;
 }
 
 .atelier-cc-battery-bar {
-  height: 6.4px;
-  border-radius: 3.2px;
+  height: 3.2px;
+  border-radius: 1.6px;
   background-color: rgba(255, 255, 255, 0.2);
 }
 
 .atelier-cc-battery-fill {
-  border-radius: 3.2px;
+  border-radius: 1.6px;
   background-color: #ffffff;
 }
 
 .atelier-cc-system-button {
-  width: 51.2px;
-  height: 51.2px;
+  width: 25.6px;
+  height: 25.6px;
   border-radius: 999px;
   background-color: rgba(255, 255, 255, 0.16);
   color: #ffffff;
@@ -1030,11 +1032,11 @@
 }
 
 .atelier-cc-system-power {
-  border: 2px solid -st-accent-color;
+  border: 1px solid -st-accent-color;
 }
 
 .atelier-cc-system-icon {
-  icon-size: 20px;
+  icon-size: 10px;
 }
 
 /* The keyboard's ring: GNOME's accent. */
@@ -1043,7 +1045,7 @@
 .atelier-cc-chip:focus,
 .atelier-cc-row:focus,
 .atelier-cc-system-button:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
+  box-shadow: inset 0 0 0 1px -st-accent-color;
 }
 
 /* Brightness and volume (and the microphone's while an app records) as
@@ -1052,32 +1054,32 @@
    knob (shell/controlCentre/capsule.js). */
 /* (The capsule itself only lifts and dims; its body draws it: the
    glass's track, the fill inside its edge, the edge brighter as it is
-   held. The spec's sizes ×0.8.) */
+   held. The spec's sizes ×0.4.) */
 .atelier-cc-capsule-track {
-  border-radius: 35px;
-  border: 1.2px solid rgba(255, 255, 255, 0.40);
+  border-radius: 17.5px;
+  border: 1px solid rgba(255, 255, 255, 0.40);
 }
 
 .atelier-cc-capsule-edge {
-  border-radius: 35px;
+  border-radius: 17.5px;
   /* (Over the track's 0.40: 0.75 together.) */
-  border: 1.2px solid rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.58);
 }
 
 .atelier-cc-capsule-fill {
-  border-radius: 34px;
+  border-radius: 16.5px;
   background-color: rgba(255, 255, 255, 0.92);
 }
 
 /* Focused from the keyboard: a ring 2 px wide, 4 px away. */
 .atelier-cc-capsule-ring {
-  border-radius: 41px;
-  border: 2px solid -st-accent-color;
+  border-radius: 20.5px;
+  border: 1px solid -st-accent-color;
 }
 
 .atelier-cc-capsule-icon,
 .atelier-cc-capsule-icon-filled {
-  icon-size: 26px;
+  icon-size: 13px;
 }
 
 .atelier-cc-capsule-icon {
@@ -1089,15 +1091,15 @@
 }
 
 .atelier-cc-capsule-icon-box {
-  width: 26px;
-  height: 26px;
-  margin-bottom: 27px;
+  width: 13px;
+  height: 13px;
+  margin-bottom: 13.5px;
 }
 
 /* (The menu of outputs: a chevron at the top.) */
 .atelier-cc-capsule-menu {
-  margin: 8px;
-  padding: 6px;
+  margin: 4px;
+  padding: 3px;
   border-radius: 999px;
 }
 
@@ -1106,12 +1108,12 @@
 }
 
 .atelier-cc-capsule-menu:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
+  box-shadow: inset 0 0 0 1px -st-accent-color;
 }
 
 .atelier-cc-capsule-menu-icon,
 .atelier-cc-capsule-menu-icon-filled {
-  icon-size: 14px;
+  icon-size: 7px;
 }
 
 .atelier-cc-capsule-menu-icon {

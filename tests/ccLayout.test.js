@@ -13,8 +13,8 @@ export function testColumns() {
     for (let i = 1; i < COLUMNS.length; i++)
         assertEqual(COLUMNS[i].x, COLUMNS[i - 1].x + COLUMNS[i - 1].width + GAP, `column ${i + 1} a gap after`);
     assertEqual(panelSize(), {width: 1392, height: 432}, 'the panel with its padding');
-    // At Atelier's size: 1336 × 376 → about 1069 × 301.
-    assert(near(INNER.width * SIZE, 1068.8) && near(INNER.height * SIZE, 300.8), 'at 0.8');
+    // At Atelier's size: 1336 × 376 → about 534 × 150.
+    assert(near(INNER.width * SIZE, 534.4) && near(INNER.height * SIZE, 150.4), 'at 0.4');
 }
 
 export function testTilesInTheirColumns() {
@@ -31,7 +31,7 @@ export function testTilesInTheirColumns() {
 
 export function testFit() {
     assertEqual(fitScale(2000), 1, 'a wide monitor: as it is');
-    assert(near(fitScale(1392 * 0.8 / 2), 0.5), 'half as wide: half the size');
+    assert(near(fitScale(1392 * SIZE / 2), 0.5), 'half as wide: half the size');
     assertEqual(fitScale(0), 1, 'no width known: as it is');
 }
 
