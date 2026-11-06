@@ -1334,6 +1334,31 @@ async function testControlCentre(ext) {
     Main.panel.toggleQuickSettings();
     await waitFor(() => island.page === null && !island.busy, 2000);
 
+    // On before GNOME has made its indicators (as the session starts: it
+    // awaits their modules): Wi-Fi, Bluetooth and the sliders read once
+    // they come into GNOME's grid.
+    const late = ['_network', '_bluetooth', '_rfkill', '_volumeOutput', '_brightness', '_system'];
+    const made = late.map(key => quickSettings[key]);
+    settings.set_boolean('enabled', false);
+    await Scripting.sleep(300);
+    late.forEach(key => (quickSettings[key] = undefined));
+    settings.set_boolean('enabled', true);
+    await Scripting.sleep(400);
+    const unread = host()?.capsule('volume') ?? null;
+    late.forEach((key, i) => (quickSettings[key] = made[i]));
+    const newcomer = new St.Widget();
+    quickSettings.menu._grid.add_child(newcomer);
+    newcomer.destroy();
+    Main.panel.toggleQuickSettings();
+    check(unread === null && await waitFor(() => host()?.capsule('volume')?.item === fake.output &&
+        host()?.capsule('brightness')?.item === fake.brightness &&
+        host()?.adapters.wifi?._toggle === (quickSettings._network?._wirelessToggle ?? null) &&
+        host()?.adapters.bt?._toggle === (quickSettings._bluetooth?.quickSettingsItems?.[0] ?? null), 2000),
+    'on before GNOME made its indicators: its Wi-Fi, Bluetooth and sliders read as they come');
+    Main.panel.toggleQuickSettings();
+    await waitFor(() => island.page === null && !island.busy, 2000);
+    host().setAdapters(fakes);
+
     await controlCentreReads(ext);
     fake.restore();
     button.destroy();

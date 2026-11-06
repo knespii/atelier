@@ -5,6 +5,7 @@
 // Atelier's power menu. Without the island, GNOME's menus work as usual.
 // (The Controls tab: shell/controlCentre/host.js.)
 
+import GLib from 'gi://GLib';
 import St from 'gi://St';
 
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -12,10 +13,18 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {whenSystemItem} from '../core/systemItem.js';
 import {DateMenuHost} from './dateMenuHost.js';
+import {makeAdapters} from './adapters.js';
 import {QuickSettingsHost} from './host.js';
 import {ControlCentreInk} from './ink.js';
 import {ControlCentrePage} from './page.js';
 import {ExtensionTray} from './tray.js';
+
+// Whether GNOME has made its quick settings' indicators (it awaits their
+// modules as the shell starts: undefined until then, null where it has none).
+function indicatorsReady(quickSettings) {
+    return ['_network', '_bluetooth', '_rfkill', '_volumeOutput', '_brightness', '_system']
+        .every(key => quickSettings[key] !== undefined);
+}
 
 export class ControlCentreModule {
     /**
@@ -282,8 +291,25 @@ export class ControlCentreModule {
             return;
         const quickSettings = this._quickSettings;
         this._quickSettingsHost = new QuickSettingsHost(quickSettings);
-        this._quickSettingsHost.takeSlider('brightness', quickSettings._brightness?.quickSettingsItems?.[0] ?? null);
-        this._quickSettingsHost.takeSlider('volume', quickSettings._volumeOutput?._output ?? null);
+        this._takeSliders();
+        // GNOME makes its indicators (Wi-Fi, Bluetooth, sound, brightness…)
+        // after the shell starts, awaiting their modules: enabled before
+        // that – as the session starts – none is there yet. Read again as
+        // they come into GNOME's grid.
+        if (!indicatorsReady(quickSettings)) {
+            quickSettings.menu._grid.connectObject('child-added', () => {
+                if (!indicatorsReady(quickSettings) || this._indicatorsId)
+                    return;
+                this._indicatorsId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                    this._indicatorsId = 0;
+                    quickSettings.menu._grid.disconnectObject(this);
+                    this._quickSettingsHost?.setAdapters(makeAdapters(quickSettings));
+                    this._takeSliders();
+                    this._page?.sync?.();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }, this);
+        }
         this._ink = new ControlCentreInk({modules: this._modules});
         if (this._dateMenu?._messageList && this._dateMenu._calendar)
             this._dateMenuHost = new DateMenuHost(this._dateMenu);
@@ -308,8 +334,24 @@ export class ControlCentreModule {
         St.ThemeContext.get_for_stage(global.stage).connectObject('notify::scale-factor', drop, this);
     }
 
+    // GNOME's brightness and volume sliders, as capsules.
+    _takeSliders() {
+        const quickSettings = this._quickSettings;
+        const host = this._quickSettingsHost;
+        const brightness = quickSettings._brightness?.quickSettingsItems?.[0] ?? null;
+        const volume = quickSettings._volumeOutput?._output ?? null;
+        if (brightness && host.capsule('brightness')?.item !== brightness)
+            host.takeSlider('brightness', brightness);
+        if (volume && host.capsule('volume')?.item !== volume)
+            host.takeSlider('volume', volume);
+    }
+
     // Give everything back to GNOME.
     _release() {
+        if (this._indicatorsId)
+            GLib.source_remove(this._indicatorsId);
+        this._indicatorsId = 0;
+        this._quickSettings?.menu?._grid?.disconnectObject(this);
         Main.layoutManager.uiGroup.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
         St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
