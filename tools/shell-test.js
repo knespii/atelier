@@ -45,6 +45,7 @@ import {
     MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutOpacity, cutoutPath, modelPath, pictureState, workerPath,
 } from '../lib/depth.js';
 import {SIZE as CC_SIZE, TYPE as CC_TYPE} from '../lib/ccLayout.js';
+import {pointerLevel as capsuleLevel, stretchOf as capsuleStretch} from '../lib/levelCapsule.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GLASS_FULL} from '../lib/seeThrough.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize, sizeOf} from '../lib/widgets.js';
@@ -1203,6 +1204,158 @@ function stageRect(actor) {
     return {x, y, width, height};
 }
 
+// A capsule dragged a frame at a time, as a hand does (the spec: the fill
+// follows the finger with no delay, the rubber from the first pixel past
+// the edge): each frame drawn, the level and the stretch are those of the
+// pointer GNOME last told it of – none a frame behind – the stretch 10, 20
+// and 40 px past the bottom (and the top, as far as the screen goes) the
+// spec's for that far (stretchOf), and none of it jumps from one frame to
+// the next. Its rect as pressed is in the stage's pixels, unlifted.
+async function controlCentreCapsuleFrames(ext, fake) {
+    const host = ext.stateObj.modules.get('control-centre').controls;
+    const volume = host.capsule('volume');
+    if (!check(volume?.mapped, 'the volume\'s capsule there to drag a frame at a time'))
+        return;
+    fake.output.slider.value = 0.5 * fake.output.slider.maximum_value;
+    await Scripting.sleep(600);
+    const [x, top] = volume.get_transformed_position();
+    const [width, height] = volume.get_transformed_size();
+    const bottom = top + height;
+    const middle = Math.round(x + width / 2);
+    // Each frame drawn: the pointer it was last told of, and what it shows.
+    let told = null;
+    const frames = [];
+    // (And as a fast mouse tells it, many times a frame.)
+    const swept = [];
+    // (And taken again as it springs back.)
+    const again = [];
+    let sweeping = false;
+    let retaken = false;
+    const move = volume._movePress;
+    volume._movePress = function (event) {
+        told = event.get_coords()[1];
+        return move.call(this, event);
+    };
+    const paintId = global.stage.connect('after-paint', () => {
+        if (told !== null && volume.held) {
+            (retaken ? again : sweeping ? swept : frames).push({y: told, level: volume.level, stretch: volume.stretch,
+                lift: volume.scale_x, pivot: volume._body.pivot_point.y});
+        }
+    });
+    // (Waits for a frame drawn, or a while.)
+    const nextFrame = () => new Promise(resolve => {
+        let timeoutId = 0;
+        const id = global.stage.connect('after-paint', () => {
+            global.stage.disconnect(id);
+            GLib.source_remove(timeoutId);
+            resolve();
+        });
+        timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            global.stage.disconnect(id);
+            resolve();
+            return GLib.SOURCE_REMOVE;
+        });
+    });
+    // To y, so many pixels a frame, each move told before the next.
+    const along = async (from, to, step = 2) => {
+        const n = Math.max(1, Math.round(Math.abs(to - from) / step));
+        for (let i = 1; i <= n; i++) {
+            const y = Math.round(from + (to - from) * i / n);
+            virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(), middle, y);
+            await waitFor(() => told !== null && Math.abs(told - y) < 0.75, 300);
+            await nextFrame();
+        }
+    };
+    const room = Math.min(40, Math.floor(top) - 2);
+    try {
+        await pointerDown(middle, Math.round(top + height / 2));
+        // (A move to take it, held a while to lift.)
+        await along(top + height / 2, top + height / 2 - 12);
+        await Scripting.sleep(300);
+        await along(top + height / 2 - 12, bottom + 40);
+        await along(bottom + 40, top + height / 2, 4);
+        if (room > 0)
+            await along(top + height / 2, top - room);
+        // A mouse that tells it every 2 ms (as a 500 Hz one), 60 px past
+        // the bottom in 0.8 s.
+        sweeping = true;
+        await pointerSweep(middle, top - Math.max(0, room), middle, bottom + 60, 800, 2);
+        await Scripting.sleep(100);
+        sweeping = false;
+        // Let go 60 px past the bottom, and taken again 80 ms later.
+        const button = state => virtualPointer.notify_button(GLib.get_monotonic_time(), Clutter.BUTTON_PRIMARY, state);
+        button(Clutter.ButtonState.RELEASED);
+        await waitFor(() => !volume.held, 300);
+        virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(), middle, Math.round(top + height * 0.4));
+        await Scripting.sleep(80);
+        retaken = true;
+        told = Math.round(top + height * 0.4);
+        button(Clutter.ButtonState.PRESSED);
+        await along(top + height * 0.4, top + height * 0.4 - 16);
+        await Scripting.sleep(150);
+        retaken = false;
+        await pointerUp();
+    } finally {
+        global.stage.disconnect(paintId);
+        delete volume._movePress;
+    }
+    // What it should show for a pointer at y.
+    const wanted = y => {
+        const {value, over} = capsuleLevel(y, top, bottom);
+        return {level: value / 100, stretch: capsuleStretch(over)};
+    };
+    const late = frames.filter(f => Math.abs(f.level - wanted(f.y).level) > 0.006);
+    const loose = frames.filter(f => Math.abs(f.stretch - wanted(f.y).stretch) > 0.002);
+    const first = (list, key) => (list.length ? `: at ${list[0].y.toFixed(1)}, ${list[0][key].toFixed(4)} for ` +
+        `${wanted(list[0].y)[key].toFixed(4)}` : '');
+    check(frames.length > 100 && late.length === 0,
+        `dragged a frame at a time, each frame's fill the pointer's (${frames.length} frames, ` +
+        `${late.length} behind${first(late, 'level')})`);
+    check(loose.length === 0,
+        `and its stretch the pointer's, past either end (${loose.length} of ${frames.length} frames ` +
+        `behind${first(loose, 'stretch')})`);
+    const behind = swept.filter(f => Math.abs(f.stretch - wanted(f.y).stretch) > 0.002 ||
+        Math.abs(f.level - wanted(f.y).level) > 0.006);
+    const most = swept.reduce((m, f) => Math.max(m, Math.abs(f.stretch - wanted(f.y).stretch)), 0);
+    check(swept.length > 20 && behind.length === 0,
+        `told many times a frame (a 500 Hz mouse), still each frame the pointer's (${behind.length} of ` +
+        `${swept.length} frames behind, the stretch ${(most * 100).toFixed(2)} % off at most)`);
+    const steps = again.slice(1).map((f, i) => Math.abs(f.stretch - again[i].stretch));
+    check(again.length > 4 && Math.abs(again.at(-1).stretch - 1) < 0.002 && Math.max(...steps) <= 0.02,
+        `taken again as it springs back, caught up with the pointer without a jump (from ` +
+        `${again[0]?.stretch.toFixed(4)}, at most ${(Math.max(0, ...steps) * 100).toFixed(2)} % a frame, ` +
+        `${again.at(-1)?.stretch.toFixed(4)} at the end)`);
+    // 10, 20, 40 px past the bottom, and the top.
+    const at = (y, pivot) => frames.find(f => Math.abs(f.y - y) < 0.75 && f.pivot === pivot);
+    const past = [10, 20, 40].map(d => [`${d} px below`, at(Math.round(bottom + d), 0), Math.round(bottom + d)])
+        .concat([10, 20, 40].filter(d => d <= room)
+            .map(d => [`${d} px above`, at(Math.round(top - d), 1), Math.round(top - d)]));
+    const off = past.filter(([, f, y]) => !f || Math.abs(f.stretch - wanted(y).stretch) > 0.002);
+    check(off.length === 0,
+        `past the ends, stretched as the spec has it for so far (${past.map(([what, f, y]) =>
+            `${what}: ${f ? ((f.stretch - 1) * 100).toFixed(2) : '?'} %, ` +
+            `${((wanted(y).stretch - 1) * 100).toFixed(2)} wanted`).join('; ')})`);
+    // No frame's stretch or lift a jump from the one before.
+    const jumps = [];
+    let largest = 0;
+    for (let i = 1; i < frames.length; i++) {
+        const [a, b] = [frames[i - 1], frames[i]];
+        const moved = Math.abs(wanted(b.y).stretch - wanted(a.y).stretch);
+        largest = Math.max(largest, Math.abs(b.stretch - a.stretch));
+        if (Math.abs(b.stretch - a.stretch) > moved + 0.002 || Math.abs(b.lift - a.lift) > 0.012) {
+            jumps.push(`${a.stretch.toFixed(4)}→${b.stretch.toFixed(4)}, ` +
+                `lift ${a.lift.toFixed(3)}→${b.lift.toFixed(3)}`);
+        }
+    }
+    check(jumps.length === 0,
+        `nothing jumps from a frame to the next (${jumps.length ? jumps.slice(0, 3).join('; ') : 'none'}; ` +
+        `the stretch at most ${(largest * 100).toFixed(2)} % a frame, ${height.toFixed(0)} px tall)`);
+    check(await waitFor(() => !volume.held && Math.abs(volume.stretch - 1) < 0.003 &&
+        Math.abs(volume.scale_x - 1) < 0.003, 1500),
+    `let go, it springs back (${volume.stretch.toFixed(3)}, ${volume.scale_x.toFixed(3)})`);
+    await restPointer();
+}
+
 // The Controls tab as its spec lays it out: four columns – the pills, the
 // Caffeine and Output tiles, the capsules, the system tile – at SIZE of its
 // pixels; GNOME's toggles left in GNOME's grid, unseen (its sliders only
@@ -1492,6 +1645,7 @@ async function controlCentreChecks(ext) {
     await Scripting.sleep(200);
 
     await controlCentreCapsules(ext, fake);
+    await controlCentreCapsuleFrames(ext, fake);
 
     // The system tile's buttons go to GNOME's (stand-ins here).
     await clickAt(...centerOf(tile('system').buttons.settings));
@@ -6224,17 +6378,21 @@ function displayConfig(method, params, replyType = null) {
  *
  * @param {string[]} connectors - from left to right
  * @param {string} primary - the main one
+ * @param {object} [scales] - a connector's scale, if not 1 (the nearest
+ *   its mode has)
  */
-async function arrangeMonitors(connectors, primary) {
+async function arrangeMonitors(connectors, primary, scales = {}) {
     const state = await displayConfig('GetCurrentState', null,
         '(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})');
     const [serial, monitors] = state.recursiveUnpack();
     const modes = new Map(monitors.map(([[connector], list]) => [connector, list.find(mode => mode[6]['is-current'])]));
     let x = 0;
     const logical = connectors.map(connector => {
-        const [mode, width] = modes.get(connector);
-        const monitor = [x, 0, 1.0, 0, connector === primary, [[connector, mode, {}]]];
-        x += width;
+        const [mode, width, , , , supported] = modes.get(connector);
+        const wanted = scales[connector] ?? 1;
+        const scale = supported.reduce((best, s) => (Math.abs(s - wanted) < Math.abs(best - wanted) ? s : best), 1);
+        const monitor = [x, 0, scale, 0, connector === primary, [[connector, mode, {}]]];
+        x += Math.round(width / scale);
         return monitor;
     });
     await displayConfig('ApplyMonitorsConfig',
@@ -6340,6 +6498,36 @@ async function testTwoMonitors(ext) {
     await waitFor(() => desktop.grid[0] === grid[0], 3000);
     await Scripting.sleep(400);
     check(cells() === placed, `the bigger one the main one again, where they were on it (${cells()})`);
+}
+
+// A capsule on the main monitor at 125 %, another monitor to the left of
+// it (so not at the stage's origin, as a laptop's external monitor may
+// be): dragged a frame at a time, it follows the pointer as on one.
+async function testCapsuleBesideAnotherMonitor(ext) {
+    const island = ext.stateObj.modules.get('island').island;
+    const primaryScale = () => global.display.get_monitor_scale(Main.layoutManager.primaryIndex);
+    await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0', {'Meta-0': 1.25});
+    if (!check(await waitFor(() => Main.layoutManager.primaryMonitor.x > 0 && primaryScale() > 1.2, 5000),
+        'the main monitor at 125 %, another to its left'))
+        return;
+    await Scripting.sleep(2000);
+    const fake = fakeLevelSliders();
+    try {
+        await clickAt(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+        await Scripting.sleep(800);
+        const capsule = ext.stateObj.modules.get('control-centre').controls.capsule('volume');
+        results.push(`INFO  the main monitor at ${Main.layoutManager.primaryMonitor.x}, ${primaryScale()}×; ` +
+            `the volume's capsule at ${capsule?.get_transformed_position().map(Math.round)}`);
+        await controlCentreCapsuleFrames(ext, fake);
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => !island.page && !island.busy, 3000);
+    } finally {
+        fake.restore();
+        await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0');
+        await waitFor(() => primaryScale() === 1, 5000);
+        await Scripting.sleep(1000);
+    }
 }
 
 /**
@@ -11579,6 +11767,7 @@ export async function run() {
         }
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
+            await testCapsuleBesideAnotherMonitor(ext);
             await testDockOnTwoMonitors(ext);
             testQuitWithWorkQueued(ext);
             return;
