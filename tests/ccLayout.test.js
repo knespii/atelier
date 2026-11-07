@@ -246,12 +246,12 @@ export function testChipLayout() {
     const thirds = Math.round((138.6 - 8.8) / 3 * 10) / 10;
     assertEqual(widths(28, 11, 34), [thirds, thirds, thirds], 'labels with room in their thirds: thirds');
     assertEqual(widths(40, 37, 25), [48.8, 45.8, 35.2], 'one too wide: as wide as it needs, the rest even');
+    const narrower = chipLayout(138.6, [44, 38, 26], {gap: 4.4, room: 8.8});
+    assert(narrower.every((c, i) => near(c.width, [44, 38, 26][i] + 8.8, 1e-6)) && narrower[1].x - 52.8 < 4.4,
+        `too little room for all of it: the gaps narrower first (${narrower.map(c => c.x.toFixed(1))})`);
     const cramped = widths(49, 44, 29);
-    assert(near(cramped.reduce((a, b) => a + b, 0), 129.8, 0.2) && cramped[0] > 49 && cramped[1] > 44,
-        `too little room for all of it: less room round each (${cramped})`);
-    const wide = chipLayout(138.6, [54, 42, 40], {gap: 4.4, room: 8.8});
-    assert(wide.every((c, i) => c.width >= [54, 42, 40][i] - 1e-9) && near(wide[2].x + wide[2].width, 138.6, 1e-6),
-        `wider still: the gaps narrower (${wide.map(c => c.x.toFixed(1))})`);
+    assert(near(cramped.reduce((a, b) => a + b, 0), 138.6, 0.2) && near(cramped[0] - 49, cramped[2] - 29, 0.1) &&
+        cramped[0] > 49, `then less room round each, no gaps (${cramped})`);
     const over = chipLayout(138.6, [67, 54, 49], {gap: 4.4, room: 8.8});
     assert(near(over[2].x + over[2].width, 138.6, 1e-6) && over[0].width > over[2].width,
         `too long for the row: in it all the same (${over.map(c => c.width.toFixed(1))})`);
