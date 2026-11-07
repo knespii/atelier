@@ -1685,6 +1685,13 @@ async function controlCentreChecks(ext) {
         `GNOME's wired toggle read (available, on, connecting, speed, connections: ${read.join(', ')})`);
     }
     host().setAdapters({system: new SystemAdapter(quickSettings)});
+    {
+        // (UPower's battery only read: what is known of it, or none.)
+        const b = host().adapters.system.battery;
+        check(['percent', 'seconds', 'toFull', 'rate'].every(k => Number.isFinite(b[k])) &&
+            (b.health === null || b.health > 0) && typeof b.charging === 'boolean',
+        `GNOME's battery read: ${b.present ? `${b.percent} %, ${b.rate} W, health ${b.health}` : 'none'}`);
+    }
     Main.panel.toggleQuickSettings();
     await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 2000);
     const systemItem = quickSettings._system._systemItem;
@@ -1882,6 +1889,19 @@ async function controlCentreBattery(host, fakes, island) {
         await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 2000);
         await settle();
         check(bar.waving, 'opened again, charging: its shimmer again');
+
+        // With reduced motion: no shimmer, no filling as it opens.
+        const iface = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
+        iface.set_boolean('enable-animations', false);
+        await Scripting.sleep(200);
+        if (!St.Settings.get().enable_animations) {
+            const waving = bar.waving;
+            bar.grow(0);
+            check(!waving && bar.level === 0.6 && host().animator.targetOf(bar, 'level') === undefined,
+                `with reduced motion, charging: no shimmer (${waving}), no filling from empty (${bar.level})`);
+        }
+        iface.reset('enable-animations');
+        await Scripting.sleep(200);
 
         // Without a battery: no bar; the rest in the middle of the tile.
         system.setBattery({present: false, percent: 0, charging: false, discharging: false});
