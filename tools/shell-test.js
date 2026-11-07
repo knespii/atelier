@@ -956,7 +956,13 @@ function fakeAdapters() {
         caffeine.on = true;
         caffeine.changed();
     };
-    const system = make({battery: {present: true, percent: 90, seconds: 15000, discharging: true, charged: false}});
+    const system = make({battery: {present: true, percent: 90, seconds: 15000, toFull: 0, discharging: true,
+        charging: false, charged: false, rate: 11.6, health: 92}});
+    // (Its battery as told: plugged in, unplugged, at another level.)
+    system.setBattery = changes => {
+        system.battery = {...system.battery, ...changes};
+        system.changed();
+    };
     system.shows = () => true;
     system.activate = name => system.calls.push(name);
     // Wired: a cable in, not connected (Wi-Fi shows) until plug(true).
@@ -1484,6 +1490,8 @@ async function controlCentreChecks(ext) {
             `${(origin.height / scale).toFixed(1)}`);
     }
 
+    await controlCentreBattery(host, fakes, island);
+
     // A toggle: its circle grows (the spring overshooting), a button held
     // shrinks.
     const accent = tile('airplane').toggle.accent;
@@ -1744,6 +1752,156 @@ async function controlCentreChecks(ext) {
     await Scripting.sleep(100);
     check(!modules.get('control-centre').tray.tiles.some(t => t.indicator === button),
         'a removed extension\'s tile goes away');
+}
+
+// The system tile's battery: a tall capsule filling the tile's middle,
+// filled as far as its level goes (grown from empty as the panel opens);
+// green with a shimmer while charging – only while charging and shown;
+// orange when low, red when critical; under the pointer, lifted, its
+// details (W, time, health) in place of its status line. Without a
+// battery: no bar, what it shows in the middle of the tile. Pictures of
+// each in battery/.
+async function controlCentreBattery(host, fakes, island) {
+    const system = fakes.system;
+    const kept = {...system.battery};
+    const tile = host().tile('system');
+    const bar = tile.bar;
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    const logical = v => v / scale;
+    GLib.mkdir_with_parents(`${OUTPUT}/battery`, 0o755);
+    const shoot = name => {
+        const r = stageRect(tile);
+        return screenshotArea(`battery/${name}`, Math.floor(r.x - 12), Math.floor(r.y - 12), Math.ceil(r.width + 24),
+            Math.ceil(r.height + 24));
+    };
+    const settle = () => waitFor(() => !host().animator.busy, 3000);
+    try {
+        // In the middle: from the status line to the bar, the bar to the
+        // buttons, only a little apart.
+        const status = stageRect(tile.timeLeft.get_parent());
+        const barRect = stageRect(bar);
+        const buttons = stageRect(tile.buttons.screenshot);
+        const inner = status;
+        const gaps = [barRect.y - (status.y + status.height), buttons.y - (barRect.y + barRect.height)].map(logical);
+        check(gaps.every(g => g >= 4 && g <= 16) && logical(barRect.height) >= 30 &&
+            Math.abs(barRect.width - inner.width) < 1.5,
+        `the battery bar fills the tile's middle: ${logical(barRect.width).toFixed(1)} × ` +
+            `${logical(barRect.height).toFixed(1)} px, ${gaps.map(g => g.toFixed(1)).join(' and ')} px from the ` +
+            'status line and the buttons');
+        // Filled as far as the level: bright up to it, the track after.
+        system.setBattery({percent: 60, charging: false, discharging: true});
+        await settle();
+        await Scripting.sleep(100);
+        await shoot('battery-60');
+        const r = stageRect(bar);
+        const t = stageRect(tile);
+        const sample = at => averageColor('battery/battery-60', r.x - t.x + 12 + r.width * at - 1,
+            r.y - t.y + 12 + r.height / 2 - 2, 2, 4).reduce((a, b) => a + b) / 3;
+        const [filled, edge, empty] = [0.5, 0.58, 0.66].map(sample);
+        check(Math.abs(bar.level - 0.6) < 0.001 && filled > 200 && edge > 200 && empty < filled - 80,
+            `filled as far as its level, 60 % (${filled.toFixed(0)} and ${edge.toFixed(0)} at 50 and 58 %, ` +
+                `${empty.toFixed(0)} at 66 %)`);
+
+        // Grown from empty as the panel opens: once, eased, to its level.
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => island.page === null && !island.busy, 2000);
+        const levels = [];
+        const levelId = global.stage.connect('after-paint', () => tile.mapped && levels.push(bar.level));
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 2000);
+        await settle();
+        global.stage.disconnect(levelId);
+        const rising = levels.every((v, i) => i === 0 || v >= levels[i - 1] - 1e-6);
+        check(levels[0] < 0.05 && levels.some(v => v > 0.2 && v < 0.5) && rising &&
+            Math.abs(levels.at(-1) - 0.6) < 1e-6,
+        `as the panel opens, the bar fills from empty to its level (${levels.length} frames: ` +
+            `${levels[0]?.toFixed(2)} … ${levels.at(-1)?.toFixed(2)})`);
+        await restPointer();
+
+        // Charging: green, a shimmer – drawn again only while it is.
+        system.setBattery({charging: true, discharging: false, toFull: 4800, rate: 24.3});
+        await Scripting.sleep(300);
+        const before = bar.repaints;
+        await Scripting.sleep(500);
+        const drawn = bar.repaints - before;
+        check(bar.waving && drawn >= 10, `charging, its shimmer runs (drawn ${drawn} times in 0.5 s)`);
+        await Scripting.sleep(700);
+        await shoot('battery-charging');
+        system.setBattery({charging: false, discharging: true, toFull: 0, rate: 11.6});
+        await settle();
+        const still = bar.repaints;
+        await Scripting.sleep(500);
+        check(!bar.waving && bar.repaints === still,
+            `unplugged, it stops (drawn ${bar.repaints - still} times in 0.5 s)`);
+
+        // Under the pointer: lifted, its details in place of its status line.
+        system.setBattery({charging: true, discharging: false, toFull: 4800, rate: 24.3});
+        await Scripting.sleep(200);
+        await pointerTo(...centerOf(bar));
+        await Scripting.sleep(500);
+        const details = tile.details.text;
+        check(bar.hover && tile.details.opacity === 255 && tile.timeLeft.opacity === 0 &&
+            Math.abs(bar.scale_x - 1.04) < 0.002 && /24\.3 W/.test(details) && /1 h 20 min/.test(details) &&
+            /92 %/.test(details) && cutShort(tile).length === 0,
+        `the pointer over it: lifted (${bar.scale_x.toFixed(3)}), its details shown – "${details}"`);
+        await shoot('battery-hover');
+        system.setBattery({charging: false, discharging: true, toFull: 0, rate: 11.6, health: null});
+        await Scripting.sleep(300);
+        check(/11\.6 W/.test(tile.details.text) && /left/.test(tile.details.text) && !/%/.test(tile.details.text),
+            `unplugged meanwhile: its time to empty; health unknown, not told ("${tile.details.text}")`);
+        await restPointer();
+        await Scripting.sleep(400);
+        check(!bar.hover && tile.details.opacity === 0 && tile.timeLeft.opacity === 255 && bar.scale_x === 1,
+            'the pointer gone: its status line back, the bar at rest');
+
+        // Low, critical.
+        system.setBattery({percent: 15, seconds: 2700, health: 92});
+        await settle();
+        await Scripting.sleep(100);
+        await shoot('battery-15');
+        const low = averageColor('battery/battery-15', r.x - t.x + 12 + r.width * 0.07,
+            r.y - t.y + 12 + r.height / 2 - 2, 2, 4);
+        check(bar._tone === 'low' && low[0] > low[2] + 60, `15 %: orange (${low.join(', ')})`);
+        system.setBattery({percent: 8});
+        await settle();
+        check(bar._tone === 'critical', 'at 8 %: critical, red');
+
+        // Closed while charging: nothing drawn any more.
+        system.setBattery({percent: 60, charging: true, discharging: false});
+        await Scripting.sleep(300);
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => island.page === null && !island.busy, 2000);
+        const shut = bar.repaints;
+        await Scripting.sleep(400);
+        const closed = bar.repaints;
+        await Scripting.sleep(800);
+        check(!bar.waving && bar.repaints === closed,
+            `closed while charging, its shimmer stops (drawn ${closed - shut} times as it faded out, ` +
+                `${bar.repaints - closed} since)`);
+        Main.panel.toggleQuickSettings();
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 2000);
+        await settle();
+        check(bar.waving, 'opened again, charging: its shimmer again');
+
+        // Without a battery: no bar; the rest in the middle of the tile.
+        system.setBattery({present: false, percent: 0, charging: false, discharging: false});
+        await Scripting.sleep(300);
+        const tileRect = stageRect(tile);
+        const label = stageRect(tile.batteryTitle.get_parent());
+        const statusLine = stageRect(tile.timeLeft.get_parent());
+        const button = stageRect(tile.buttons.screenshot);
+        const [top, bottom] = [label.y - tileRect.y, tileRect.y + tileRect.height - (button.y + button.height)];
+        const between = button.y - (statusLine.y + statusLine.height);
+        check(!bar.visible && !bar.waving && tile.timeLeft.text === 'No battery' &&
+            Math.abs(top - bottom) < 3 * scale && logical(between) <= 24,
+        `no battery: no bar, the rest in the middle (${logical(top).toFixed(1)} px above, ` +
+            `${logical(bottom).toFixed(1)} below, ${logical(between).toFixed(1)} between)`);
+        await shoot('battery-none');
+    } finally {
+        system.setBattery(kept);
+        await restPointer();
+        await settle();
+    }
 }
 
 // A page of a browser, say, behind the island: mostly light, lines of small
@@ -10056,7 +10214,8 @@ async function testControlCentrePace(ext) {
         // A card growing and shrinking (Wi-Fi's, Bluetooth's, Output's):
         // each frame's time, as the island's.
         const host = ext.stateObj.modules.get('control-centre').controls;
-        host.setAdapters(fakeAdapters());
+        const paceFakes = fakeAdapters();
+        host.setAdapters(paceFakes);
         await clickAt(...centerOf(island));
         await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy && settled() &&
             !host.animator.busy, 3000);
@@ -10086,8 +10245,70 @@ async function testControlCentrePace(ext) {
                 await Scripting.sleep(300);
             }
         }
+        // The battery charging, the pointer over it and along it: each
+        // frame's time; nothing restyled, nor the bar laid out anew.
+        const battery = {frames: [], restyles: 0, allocations: 0, styled: 0};
+        {
+            const bar = host.tile('system').bar;
+            paceFakes.system.setBattery({percent: 60, charging: true, discharging: false, toFull: 4800, rate: 24.3});
+            await Scripting.sleep(300);
+            const before = count.restyles;
+            let styled = 0;
+            const styleIds = [bar, host.tile('system').details].map(actor =>
+                [actor, actor.connect('style-changed', () => styled++)]);
+            const allocationId = bar.connect('notify::allocation', () => battery.allocations++);
+            let start = 0;
+            const now = () => GLib.get_monotonic_time() / 1000;
+            const ids = [
+                global.stage.connect('prepare-frame', () => (start ||= now())),
+                global.stage.connect('before-update', () => (start ||= now())),
+                global.stage.connect('after-update', () => (start = 0)),
+                global.stage.connect('after-paint', (_, view) => {
+                    view?.get_framebuffer?.()?.finish();
+                    if (start)
+                        battery.frames.push(now() - start);
+                    start = 0;
+                }),
+            ];
+            try {
+                const [bx, by] = bar.get_transformed_position();
+                const [bw, bh] = bar.get_transformed_size();
+                // (Onto it, along it and back, off it: a frame's move at a time.)
+                await pointerTo(bx + bw * 0.1, by + bh / 2);
+                for (const [from, to] of [[0.1, 0.9], [0.9, 0.1]]) {
+                    for (let i = 1; i <= 50; i++) {
+                        virtualPointer.notify_absolute_motion(GLib.get_monotonic_time(),
+                            bx + bw * (from + (to - from) * i / 50), by + bh / 2);
+                        await Scripting.sleep(16);
+                    }
+                }
+                await restPointer();
+                await Scripting.sleep(600);
+            } finally {
+                ids.forEach(id => global.stage.disconnect(id));
+                styleIds.forEach(([actor, id]) => actor.disconnect(id));
+                bar.disconnect(allocationId);
+            }
+            battery.restyles = count.restyles - before;
+            battery.styled = styled;
+            paceFakes.system.setBattery({charging: false, discharging: true, toFull: 0, rate: 11.6});
+        }
         await pressKey(Clutter.KEY_Escape);
         await waitFor(() => !island.page && !island.busy && settled(), 3000);
+        {
+            const spread = spreadOf(battery.frames);
+            const pace = `the battery charging, the pointer along it, ${global.stage.width} × ${global.stage.height} ` +
+                `at ${global.stage.get_resource_scale()}×: ${spread.n} frames, each drawn in ${ms(spread.mean)} ms on ` +
+                `average, ${ms(spread.p95)} for 95 % of them, ${ms(spread.max)} at most`;
+            if (slow)
+                results.push(`INFO  drawn without a GPU: ${pace}`);
+            else
+                check(spread.n > 60 && spread.mean <= PACE_MEAN, `${pace} (at most ${PACE_MEAN} ms on average)`);
+            check(battery.restyles === 0 && battery.allocations === 0 && battery.styled <= 2,
+                `the battery's shimmer and the pointer over it: the shell not restyled (${battery.restyles}), the ` +
+                `bar not laid out anew (${battery.allocations}), it and its details restyled ${battery.styled} ` +
+                'times (the pointer coming and going)');
+        }
         const cardSpread = spreadOf(cards.frames);
         const cardPace = `a card growing and shrinking, ${global.stage.width} × ${global.stage.height} at ` +
             `${global.stage.get_resource_scale()}×: ${cardSpread.n} frames, each drawn in ${ms(cardSpread.mean)} ms ` +
