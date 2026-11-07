@@ -44,7 +44,7 @@ import * as dockWindows from './dock-tests/windows.js';
 import {
     MAX_COVER, MAX_GLYPH_COVER, chosenModel, cutoutOpacity, cutoutPath, modelPath, pictureState, workerPath,
 } from '../lib/depth.js';
-import {SIZE as CC_SIZE} from '../lib/ccLayout.js';
+import {SIZE as CC_SIZE, TYPE as CC_TYPE} from '../lib/ccLayout.js';
 import {STRETCH} from '../lib/lockLook.js';
 import {GLASS_FULL} from '../lib/seeThrough.js';
 import {GAP, PITCH, SIZES, cellOrigin, gridOrigin, gridSize, sizeOf} from '../lib/widgets.js';
@@ -824,6 +824,33 @@ function cutShort(root) {
     return cut;
 }
 
+// The labels in the control centre's Controls tab (or its tabs) not of
+// its type's scale (lib/ccLayout.js TYPE): their text and size, logical px.
+function offTheTypeScale(root, sizes = Object.values(CC_TYPE)) {
+    const off = [];
+    const walk = actor => {
+        if (actor instanceof St.Label && actor.text?.trim()) {
+            const font = actor.get_theme_node().get_font();
+            const px = font.get_size() / Pango.SCALE * (font.get_size_is_absolute() ? 1 : 96 / 72);
+            if (!sizes.some(size => Math.abs(px - size) < 0.05))
+                off.push(`"${actor.text}" ${px.toFixed(2)} px`);
+        }
+        actor.get_children().forEach(walk);
+    };
+    walk(root);
+    return off;
+}
+
+// A chip row's labels against their chips: how much room each has left
+// (logical px; less than none: it doesn't fit).
+function chipRoom(row) {
+    const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+    return row.chips.filter(c => c.visible).map(c => {
+        const [, natural] = c._light.get_preferred_width(-1);
+        return `${c._light.text} ${((c.width - natural) / scale).toFixed(1)}`;
+    });
+}
+
 // Stand-ins for what the Controls tab shows and does (its adapters,
 // shell/controlCentre/adapters.js): headless, GNOME has no Wi-Fi,
 // Bluetooth, sound or battery. Each tells of a change as the real ones do;
@@ -958,7 +985,7 @@ function fakeAdapters() {
 }
 
 // Brightness and volume as capsules (shell/controlCentre/capsule.js) in
-// their column, 132 × 376 of the spec's pixels at 0.4, side by side: filled
+// their column, 132 × 376 of the spec's pixels at SIZE, side by side: filled
 // as far as GNOME's sliders go and the other way round – dragged, clicked,
 // scrolled, stepped with the keys – GNOME's mute from a click on the
 // volume's icon, its chevron opening the Output card.
@@ -1177,7 +1204,7 @@ function stageRect(actor) {
 }
 
 // The Controls tab as its spec lays it out: four columns – the pills, the
-// Caffeine and Output tiles, the capsules, the system tile – at 0.4 of its
+// Caffeine and Output tiles, the capsules, the system tile – at SIZE of its
 // pixels; GNOME's toggles left in GNOME's grid, unseen (its sliders only
 // shown as capsules). What it shows is its adapters' (fakes here); what it
 // does goes through them. Each card grows in place from its corner over
@@ -1273,6 +1300,21 @@ async function controlCentreChecks(ext) {
     }
     const cut = cutShort(grid);
     check(cut.length === 0, `no name cut short (${cut.join(', ') || 'none'})`);
+    {
+        // Its type of one scale: 11, 9.5 and 28 px; the tabs' 11.
+        const off = offTheTypeScale(grid);
+        const tabs = offTheTypeScale(page._bar, [CC_TYPE.tab]);
+        check(off.length === 0 && tabs.length === 0,
+            `its type of one scale, ${Object.values(CC_TYPE).join(' / ')} px (${[...off, ...tabs].join(', ') ||
+                'all of it'})`);
+        const room = [...chipRoom(tile('caffeine').chips), ...chipRoom(tile('output').chips)];
+        check(room.every(r => Number(r.split(' ').at(-1)) >= 0),
+            `the chips' labels in their chips (room left, px: ${room.join(', ')})`);
+        const panel = stageRect(page);
+        console.log(`Atelier test: the Controls page ${(panel.width / scale).toFixed(1)} × ` +
+            `${(panel.height / scale).toFixed(1)} logical px, its grid ${(origin.width / scale).toFixed(1)} × ` +
+            `${(origin.height / scale).toFixed(1)}`);
+    }
 
     // A toggle: its circle grows (the spring overshooting), a button held
     // shrinks.

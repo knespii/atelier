@@ -1,7 +1,7 @@
 // The control centre's Controls tab, as its Layout & Motion spec has it:
 // one row of four columns – Wi-Fi, Bluetooth and Airplane pills; Caffeine
 // and Output tiles; brightness and volume as tall capsules; the system tile
-// (the battery, screenshot, settings, lock, power) – at 0.4 of the spec's
+// (the battery, screenshot, settings, lock, power) – at 0.55 of the spec's
 // pixels (lib/ccLayout.js), each tile placed absolutely in its column. A
 // pill's or Output's chevron opens it as a card in place, growing over its
 // neighbours as they step back (lib/ccLayout.js tileState(): the UI is a

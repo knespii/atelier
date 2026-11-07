@@ -1,8 +1,8 @@
 import {
-    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
+    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, TYPE, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
     tileState, timeLeft, toggleOpen, wiredSubtitle,
 } from '../lib/ccLayout.js';
-import {assert, assertEqual} from './util.js';
+import {assert, assertEqual, stylesheetRules} from './util.js';
 
 const near = (a, b, by = 1e-6) => Math.abs(a - b) < by;
 
@@ -13,8 +13,8 @@ export function testColumns() {
     for (let i = 1; i < COLUMNS.length; i++)
         assertEqual(COLUMNS[i].x, COLUMNS[i - 1].x + COLUMNS[i - 1].width + GAP, `column ${i + 1} a gap after`);
     assertEqual(panelSize(), {width: 1392, height: 432}, 'the panel with its padding');
-    // At Atelier's size: 1336 × 376 → about 534 × 150.
-    assert(near(INNER.width * SIZE, 534.4) && near(INNER.height * SIZE, 150.4), 'at 0.4');
+    // At Atelier's size: 1336 × 376 → about 735 × 207.
+    assert(near(INNER.width * SIZE, 734.8) && near(INNER.height * SIZE, 206.8), 'at 0.55');
 }
 
 export function testTilesInTheirColumns() {
@@ -121,4 +121,119 @@ export function testTimeLeftAndNames() {
         'headphones by their icon');
     assertEqual(shortOutputName({description: 'Analog Output – Built-in Audio'}), 'Speakers', 'analog output');
     assertEqual(shortOutputName({description: 'Studio Monitor Interface'}), 'Studio Mo…', 'else its first words, short');
+}
+
+// The Controls tab's sizes in stylesheet.css (spec px: its Layout & Motion
+// spec's, or as Atelier drew them at 0.8 of it where it says none), each
+// at SIZE of them – icons whole pixels; edges 1 px, as St draws them, not
+// here – so that a SIZE changed changes them all.
+const SPEC_SIZES = {
+    '.atelier-cc-grid': {margin: [0, 8, 8]},
+    '.atelier-cc-glass-pill': {'border-radius': [56]},
+    '.atelier-cc-raised': {'border-radius': [40]},
+    '.atelier-cc-pill-header': {padding: [0, 22, 0, 24], spacing: [18]},
+    '.atelier-cc-tile-header': {padding: [24], spacing: [18]},
+    '.atelier-cc-pill-text': {spacing: [10]},
+    '.atelier-cc-opener-tile': {'border-radius': [40]},
+    '.atelier-cc-chevron': {'icon-size': [20]},
+    '.atelier-cc-round-big': {width: [60], height: [60]},
+    '.atelier-cc-round-small': {width: [45], height: [45]},
+    '.atelier-cc-round-icon-big': {'icon-size': [26]},
+    '.atelier-cc-round-icon-small': {'icon-size': [20]},
+    '.atelier-cc-chip': {'border-radius': [22]},
+    '.atelier-cc-chip-pill': {'border-radius': [22]},
+    '.atelier-cc-list': {padding: [0, 16]},
+    '.atelier-cc-rows': {spacing: [2]},
+    '.atelier-cc-list-placeholder': {padding: [16]},
+    '.atelier-cc-row': {'border-radius': [22]},
+    '.atelier-cc-row-action': {height: [44]},
+    '.atelier-cc-row-device': {height: [56]},
+    '.atelier-cc-row-output': {'border-radius': [25]},
+    '.atelier-cc-row-highlight': {'border-radius': [22]},
+    '.atelier-cc-row-content': {padding: [0, 15], spacing: [12]},
+    '.atelier-cc-row-icon': {'icon-size': [20]},
+    '.atelier-cc-row-icon-small': {'icon-size': [18.75]},
+    '.atelier-cc-row-circle': {width: [38], height: [38]},
+    '.atelier-cc-row-check': {'icon-size': [17.5]},
+    '.atelier-cc-output-pill': {'border-radius': [25], padding: [0, 15]},
+    '.atelier-cc-spinner': {width: [16], height: [16]},
+    '.atelier-cc-minis': {spacing: [10]},
+    '.atelier-cc-mini': {padding: [0, 15, 0, 7.5], spacing: [10]},
+    '.atelier-cc-system': {padding: [30, 28, 28]},
+    '.atelier-cc-battery-label': {spacing: [7.5]},
+    '.atelier-cc-battery-icon': {'icon-size': [17.5]},
+    '.atelier-cc-battery-time': {'padding-bottom': [12]},
+    '.atelier-cc-battery-bar': {height: [8], 'border-radius': [4]},
+    '.atelier-cc-battery-fill': {'border-radius': [4]},
+    '.atelier-cc-system-button': {width: [64], height: [64]},
+    '.atelier-cc-system-icon': {'icon-size': [25]},
+    // The capsules: the fill inside the 1 px edge, the ring 7.5 out
+    // (shell/controlCentre/capsule.js).
+    '.atelier-cc-capsule-track': {'border-radius': [44]},
+    '.atelier-cc-capsule-edge': {'border-radius': [44]},
+    '.atelier-cc-capsule-fill': {'border-radius': [{spec: 44, px: -1}]},
+    '.atelier-cc-capsule-ring': {'border-radius': [51.5]},
+    '.atelier-cc-capsule-icon-filled': {'icon-size': [32]},
+    // (Its box as big as its icon.)
+    '.atelier-cc-capsule-icon-box': {width: [{spec: 32, icon: true}], height: [{spec: 32, icon: true}],
+        'margin-bottom': [34]},
+    '.atelier-cc-capsule-menu': {margin: [10], padding: [7.5]},
+    '.atelier-cc-capsule-menu-icon-filled': {'icon-size': [17.5]},
+};
+
+// Its type, of the one scale.
+const TYPE_OF = {
+    '.atelier-cc-title': TYPE.title,
+    '.atelier-cc-mini-title': TYPE.title,
+    '.atelier-cc-subtitle': TYPE.secondary,
+    '.atelier-cc-chip-label': TYPE.secondary,
+    '.atelier-cc-list-placeholder': TYPE.secondary,
+    '.atelier-cc-row-title': TYPE.secondary,
+    '.atelier-cc-row-subtitle': TYPE.secondary,
+    '.atelier-cc-row-note': TYPE.secondary,
+    '.atelier-cc-mini-subtitle': TYPE.secondary,
+    '.atelier-cc-battery-title': TYPE.secondary,
+    '.atelier-cc-battery-time': TYPE.secondary,
+    '.atelier-cc-battery-percent': TYPE.battery,
+    '.atelier-cc-tab-label': TYPE.tab,
+};
+
+export function testStylesheetAtSize() {
+    const rules = stylesheetRules();
+    const valueOf = (selector, property) =>
+        rules.filter(rule => rule.selectors.includes(selector) && property in rule.declarations).at(-1)
+            ?.declarations[property];
+    const pixels = value => value.split(/\s+/).map(v => v === '0' ? 0 : Number(/^(-?[\d.]+)px$/.exec(v)?.[1]));
+    let checked = 0;
+    for (const [selector, properties] of Object.entries(SPEC_SIZES)) {
+        for (const [property, spec] of Object.entries(properties)) {
+            const value = valueOf(selector, property);
+            assert(value !== undefined, `${selector} sets its ${property}`);
+            const expected = spec.map(v => {
+                const at = typeof v === 'number' ? v * SIZE : v.spec * SIZE + (v.px ?? 0);
+                return property === 'icon-size' || v.icon ? Math.round(at) : at;
+            });
+            const got = pixels(value);
+            assert(got.length === expected.length && got.every((v, i) => Math.abs(v - expected[i]) < 0.006),
+                `${selector} ${property}: the spec's ${spec.map(v => v.spec ?? v).join(' ')} at ${SIZE} ` +
+                `(${expected.map(v => Math.round(v * 100) / 100).join(' ')}), not ${value}`);
+            checked++;
+        }
+    }
+    // The type: of the scale, each font size of the tab's (and the tabs').
+    const known = new Set(Object.keys(TYPE_OF));
+    for (const rule of rules) {
+        const size = rule.declarations['font-size'];
+        if (!size)
+            continue;
+        for (const selector of rule.selectors.filter(s => /^\.atelier-cc-(?!media|notif|calendar|ext)/.test(s)))
+            assert(known.has(selector), `${selector}'s font size (${size}) of the Controls tab's type`);
+    }
+    for (const [selector, px] of Object.entries(TYPE_OF)) {
+        assertEqual(valueOf(selector, 'font-size'), `${px}px`, `${selector}: its type`);
+        checked++;
+    }
+    assertEqual(valueOf('.atelier-cc-battery-percent', 'letter-spacing'), `${-0.04 * TYPE.battery}px`,
+        'the battery\'s figure −0.04 em apart');
+    assert(checked > 70, `checked ${checked}`);
 }

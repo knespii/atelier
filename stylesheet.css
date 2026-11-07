@@ -723,16 +723,18 @@
   margin: 0;
 }
 
-/* The Controls tab as its Layout & Motion spec has it, at 0.4 of its pixels
-   (shell/controlCentre/host.js, lib/ccLayout.js): pills, tiles and cards
-   of the spec's translucent fills in the island's one notch of glass, white
-   type, GNOME's accent for what is on. Placed and moved by the control
-   centre itself; here only how each looks. (No type under 7 px, the mini
-   pills' toggles 20 px: half of the spec's would read and hit too badly.
-   Edges 1 px: St rounds them to whole pixels.) */
+/* The Controls tab as its Layout & Motion spec has it, at 0.55 of its
+   pixels (shell/controlCentre/host.js, lib/ccLayout.js SIZE): pills, tiles
+   and cards of the spec's translucent fills in the island's one notch of
+   glass, white type, GNOME's accent for what is on. Placed and moved by the
+   control centre itself; here only how each looks. Each size the spec's
+   × 0.55 (tests/ccLayout.test.js holds the spec's and checks them), but
+   the type, of one scale (lib/ccLayout.js TYPE): titles 11 px bold, the
+   rest 9.5 px, the battery 28 px. (Edges 1 px: St rounds them to whole
+   pixels. Icons whole pixels.) */
 
 .atelier-cc-grid {
-  margin: 0 3.2px 3.2px;
+  margin: 0 4.4px 4.4px;
 }
 
 .atelier-cc-glass {
@@ -741,12 +743,12 @@
 }
 
 .atelier-cc-glass-pill {
-  border-radius: 22.4px;
+  border-radius: 30.8px;
 }
 
 .atelier-cc-glass-tile,
 .atelier-cc-raised {
-  border-radius: 16px;
+  border-radius: 22px;
 }
 
 .atelier-cc-raised {
@@ -758,17 +760,17 @@
 }
 
 .atelier-cc-pill-header {
-  padding: 0 8.8px 0 9.6px;
-  spacing: 7.2px;
+  padding: 0 12.1px 0 13.2px;
+  spacing: 9.9px;
 }
 
 .atelier-cc-tile-header {
-  padding: 9.6px;
-  spacing: 7.2px;
+  padding: 13.2px;
+  spacing: 9.9px;
 }
 
 .atelier-cc-pill-text {
-  spacing: 4px;
+  spacing: 5.5px;
 }
 
 .atelier-cc-opener {
@@ -777,23 +779,23 @@
 }
 
 .atelier-cc-opener-tile {
-  border-radius: 16px;
+  border-radius: 22px;
 }
 
 .atelier-cc-title {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .atelier-cc-subtitle {
-  font-size: 7px;
+  font-size: 9.5px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-chevron {
-  icon-size: 8px;
+  icon-size: 11px;
   color: rgba(255, 255, 255, 0.78);
 }
 
@@ -804,13 +806,13 @@
 }
 
 .atelier-cc-round-big {
-  width: 24px;
-  height: 24px;
+  width: 33px;
+  height: 33px;
 }
 
 .atelier-cc-round-small {
-  width: 20px;
-  height: 20px;
+  width: 24.75px;
+  height: 24.75px;
 }
 
 .atelier-cc-round-idle,
@@ -829,20 +831,20 @@
 }
 
 .atelier-cc-round-icon-big {
-  icon-size: 10.5px;
+  icon-size: 14px;
 }
 
 .atelier-cc-round-icon-small {
-  icon-size: 9px;
+  icon-size: 11px;
 }
 
 /* Chips, the one chosen on a light pill that slides between them. */
 .atelier-cc-chip {
-  border-radius: 8.8px;
+  border-radius: 12.1px;
 }
 
 .atelier-cc-chip-label {
-  font-size: 7px;
+  font-size: 9.5px;
   font-weight: 600;
   color: #ffffff;
 }
@@ -852,27 +854,27 @@
 }
 
 .atelier-cc-chip-pill {
-  border-radius: 8.8px;
+  border-radius: 12.1px;
   background-color: #f1f0ec;
 }
 
 /* A card's list. */
 .atelier-cc-list {
-  padding: 0 6.4px;
+  padding: 0 8.8px;
 }
 
 .atelier-cc-rows {
-  spacing: 0.8px;
+  spacing: 1.1px;
 }
 
 .atelier-cc-list-placeholder {
-  padding: 6.4px;
-  font-size: 7px;
+  padding: 8.8px;
+  font-size: 9.5px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-row {
-  border-radius: 8.8px;
+  border-radius: 12.1px;
   color: #ffffff;
 }
 
@@ -882,70 +884,70 @@
 
 .atelier-cc-row-network,
 .atelier-cc-row-action {
-  height: 17.6px;
+  height: 24.2px;
 }
 
 .atelier-cc-row-device {
-  height: 22.4px;
+  height: 30.8px;
 }
 
 .atelier-cc-row-output {
-  border-radius: 10px;
+  border-radius: 13.75px;
 }
 
 .atelier-cc-row-highlight {
-  border-radius: 8.8px;
+  border-radius: 12.1px;
   background-color: rgba(255, 255, 255, 0.14);
 }
 
 .atelier-cc-row-content {
-  padding: 0 6px;
-  spacing: 4.8px;
+  padding: 0 8.25px;
+  spacing: 6.6px;
 }
 
 .atelier-cc-row-icon {
-  icon-size: 8px;
+  icon-size: 11px;
   color: #ffffff;
 }
 
 .atelier-cc-row-icon-small {
-  icon-size: 7.5px;
+  icon-size: 10px;
 }
 
 .atelier-cc-row-circle {
-  width: 15.2px;
-  height: 15.2px;
+  width: 20.9px;
+  height: 20.9px;
   border-radius: 999px;
   background-color: rgba(255, 255, 255, 0.16);
 }
 
 .atelier-cc-row-title {
-  font-size: 7px;
+  font-size: 9.5px;
   font-weight: 600;
   color: #ffffff;
 }
 
 .atelier-cc-row-subtitle,
 .atelier-cc-row-note {
-  font-size: 7px;
+  font-size: 9.5px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-row-check {
-  icon-size: 7px;
+  icon-size: 10px;
   color: #ffffff;
 }
 
 .atelier-cc-output-pill {
-  border-radius: 10px;
+  border-radius: 13.75px;
   border: 1px solid rgba(255, 255, 255, 0.35);
   background-color: rgba(255, 255, 255, 0.16);
-  padding: 0 6px;
+  padding: 0 8.25px;
 }
 
 .atelier-cc-spinner {
-  width: 7px;
-  height: 7px;
+  width: 8.8px;
+  height: 8.8px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-top-color: #ffffff;
@@ -953,75 +955,75 @@
 
 /* The Wi-Fi card's mini pills: Bluetooth and Airplane Mode. */
 .atelier-cc-minis {
-  spacing: 4px;
+  spacing: 5.5px;
 }
 
 .atelier-cc-mini {
   border-radius: 999px;
-  padding: 0 6px 0 3px;
-  spacing: 4px;
+  padding: 0 8.25px 0 4.12px;
+  spacing: 5.5px;
   background-color: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .atelier-cc-mini-title {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 700;
   color: #ffffff;
 }
 
 .atelier-cc-mini-subtitle {
-  font-size: 7px;
+  font-size: 9.5px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 /* The system tile: the battery, the four buttons. */
 .atelier-cc-system {
-  padding: 12px 11.2px 11.2px;
+  padding: 16.5px 15.4px 15.4px;
 }
 
 .atelier-cc-battery-label {
-  spacing: 3px;
+  spacing: 4.12px;
 }
 
 .atelier-cc-battery-icon {
-  icon-size: 7px;
+  icon-size: 10px;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-battery-title {
-  font-size: 7px;
+  font-size: 9.5px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .atelier-cc-battery-percent {
-  font-size: 28.8px;
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: -2.3px;
+  letter-spacing: -1.12px;
   color: #ffffff;
 }
 
 .atelier-cc-battery-time {
-  font-size: 7px;
+  font-size: 9.5px;
   color: rgba(255, 255, 255, 0.78);
-  padding-bottom: 4.8px;
+  padding-bottom: 6.6px;
 }
 
 .atelier-cc-battery-bar {
-  height: 3.2px;
-  border-radius: 1.6px;
+  height: 4.4px;
+  border-radius: 2.2px;
   background-color: rgba(255, 255, 255, 0.2);
 }
 
 .atelier-cc-battery-fill {
-  border-radius: 1.6px;
+  border-radius: 2.2px;
   background-color: #ffffff;
 }
 
 .atelier-cc-system-button {
-  width: 25.6px;
-  height: 25.6px;
+  width: 35.2px;
+  height: 35.2px;
   border-radius: 999px;
   background-color: rgba(255, 255, 255, 0.16);
   color: #ffffff;
@@ -1036,7 +1038,7 @@
 }
 
 .atelier-cc-system-icon {
-  icon-size: 10px;
+  icon-size: 14px;
 }
 
 /* The keyboard's ring: GNOME's accent. */
@@ -1045,7 +1047,7 @@
 .atelier-cc-chip:focus,
 .atelier-cc-row:focus,
 .atelier-cc-system-button:focus {
-  box-shadow: inset 0 0 0 1px -st-accent-color;
+  box-shadow: inset 0 0 0 1.4px -st-accent-color;
 }
 
 /* Brightness and volume (and the microphone's while an app records) as
@@ -1054,32 +1056,32 @@
    knob (shell/controlCentre/capsule.js). */
 /* (The capsule itself only lifts and dims; its body draws it: the
    glass's track, the fill inside its edge, the edge brighter as it is
-   held. The spec's sizes ×0.4.) */
+   held. The spec's sizes ×0.55.) */
 .atelier-cc-capsule-track {
-  border-radius: 17.5px;
+  border-radius: 24.2px;
   border: 1px solid rgba(255, 255, 255, 0.40);
 }
 
 .atelier-cc-capsule-edge {
-  border-radius: 17.5px;
+  border-radius: 24.2px;
   /* (Over the track's 0.40: 0.75 together.) */
   border: 1px solid rgba(255, 255, 255, 0.58);
 }
 
 .atelier-cc-capsule-fill {
-  border-radius: 16.5px;
+  border-radius: 23.2px;
   background-color: rgba(255, 255, 255, 0.92);
 }
 
 /* Focused from the keyboard: a ring 2 px wide, 4 px away. */
 .atelier-cc-capsule-ring {
-  border-radius: 20.5px;
+  border-radius: 28.33px;
   border: 1px solid -st-accent-color;
 }
 
 .atelier-cc-capsule-icon,
 .atelier-cc-capsule-icon-filled {
-  icon-size: 13px;
+  icon-size: 18px;
 }
 
 .atelier-cc-capsule-icon {
@@ -1091,15 +1093,15 @@
 }
 
 .atelier-cc-capsule-icon-box {
-  width: 13px;
-  height: 13px;
-  margin-bottom: 13.5px;
+  width: 18px;
+  height: 18px;
+  margin-bottom: 18.7px;
 }
 
 /* (The menu of outputs: a chevron at the top.) */
 .atelier-cc-capsule-menu {
-  margin: 4px;
-  padding: 3px;
+  margin: 5.5px;
+  padding: 4.12px;
   border-radius: 999px;
 }
 
@@ -1108,12 +1110,12 @@
 }
 
 .atelier-cc-capsule-menu:focus {
-  box-shadow: inset 0 0 0 1px -st-accent-color;
+  box-shadow: inset 0 0 0 1.4px -st-accent-color;
 }
 
 .atelier-cc-capsule-menu-icon,
 .atelier-cc-capsule-menu-icon-filled {
-  icon-size: 7px;
+  icon-size: 10px;
 }
 
 .atelier-cc-capsule-menu-icon {
@@ -1175,11 +1177,12 @@
   font-weight: bold;
 }
 
-/* Tabs of the control centre: icons, the current one with its name */
+/* Tabs of the control centre: icons, the current one with its name – of
+   the Controls tab's type, its titles' 11 px (lib/ccLayout.js TYPE) */
 
 .atelier-cc-tabs {
   border-radius: 999px;
-  spacing: 6px;
+  spacing: 5px;
   padding: 0 0 2px;
   margin: 0;
   background-color: transparent;
@@ -1188,7 +1191,7 @@
 }
 
 .atelier-cc-tab {
-  padding: 5px 10px;
+  padding: 4px 9px;
   margin: 0;
   border: none;
   border-radius: 999px;
@@ -1212,7 +1215,7 @@
 }
 
 .atelier-cc-tab-box {
-  spacing: 6px;
+  spacing: 5px;
   padding: 0;
   margin: 0;
   background-color: transparent;
@@ -1220,14 +1223,14 @@
 }
 
 .atelier-cc-tab-icon {
-  icon-size: 16px;
+  icon-size: 14px;
 }
 
 .atelier-cc-tab-label {
   padding: 0;
   margin: 0;
   background-color: transparent;
-  font-size: 9.5pt;
+  font-size: 11px;
   font-weight: bold;
 }
 
@@ -1430,7 +1433,7 @@
 
 /* (The tabs with room round them.) */
 .atelier-island-glass .atelier-cc-tabs {
-  padding: 4px;
+  padding: 3.5px;
 }
 
 /* Brightness and volume: a faint light track in the glass, filled as far
