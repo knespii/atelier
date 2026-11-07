@@ -51,6 +51,8 @@ import {
 const MOTION = {
     grab: [220, EASE.grab],
     release: [520, EASE.release],
+    // (Held, the stretch is the pointer's at once: this only catches it
+    // up from a spring back still going – Motion.chase().)
     stretch: [60, linear],
     rubber: [620, EASE.rubber],
     settle: [340, EASE.settle],
@@ -141,6 +143,31 @@ class Motion {
         }
         this._tweens.set(name, {from: this.get(name), to, start: now(), duration, ease});
         this._run();
+    }
+
+    /**
+     * Where the pointer has it: at once – each move, the same frame (an
+     * ease begun anew at each of a mouse's moves, many a frame, would
+     * hardly move at all). Only from where an ease of its own left it (a
+     * spring back still going) is it caught up, over so long, linearly, to
+     * wherever the pointer has it meanwhile: no jump.
+     *
+     * @param {string} name
+     * @param {number} to
+     * @param {Array} motion - [ms, curve] to catch up over
+     */
+    chase(name, to, [duration]) {
+        const tween = this._tweens.get(name);
+        if (tween?.chase) {
+            tween.to = to;
+            return;
+        }
+        if (tween && !tween.fn && duration > 0 && this._actor.mapped) {
+            this._tweens.set(name, {chase: true, from: this.get(name), to, start: now(), duration, ease: linear});
+            this._run();
+            return;
+        }
+        this.set(name, to);
     }
 
     /**
@@ -919,7 +946,7 @@ export const LevelCapsule = GObject.registerClass({
                 this._origin = origin;
                 this._body.set_pivot_point(0.5, origin === 'bottom' ? 1 : 0);
             }
-            this._motion.to('stretch', stretchOf(over), MOTION.stretch);
+            this._motion.chase('stretch', stretchOf(over), MOTION.stretch);
         }
     }
 
