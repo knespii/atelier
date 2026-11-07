@@ -34,6 +34,8 @@ const NM_CONNECTION_ACTIVATING = 1;
 const NM_CONNECTION_ACTIVATED = 2;
 
 // UPower's (UPower.DeviceState).
+const CHARGING = 1;
+const PENDING_CHARGE = 5;
 const DISCHARGING = 2;
 const PENDING_DISCHARGE = 6;
 const FULLY_CHARGED = 4;
@@ -734,7 +736,8 @@ function uninhibit(cookie) {
  * The battery (GNOME's system item's, UPower's display device) and the
  * system buttons (GNOME's: screenshot, settings, lock, power off).
  *
- * State: battery {present, percent, seconds, discharging, charged}; buttons
+ * State: battery {present, percent, seconds, toFull, discharging, charging,
+ * charged, rate (W), health (%, or null)}; buttons
  * {screenshot, settings, lock, power: {visible}}.
  */
 export class SystemAdapter extends Adapter {
@@ -764,13 +767,31 @@ export class SystemAdapter extends Adapter {
     get battery() {
         const proxy = this._power?._proxy;
         const present = Boolean(proxy?.IsPresent);
-        if (!present)
-            return {present: false, percent: 0, seconds: 0, discharging: false, charged: false};
+        if (!present) {
+            return {present: false, percent: 0, seconds: 0, toFull: 0, discharging: false, charging: false,
+                charged: false, rate: 0, health: null};
+        }
         const state = proxy.State;
+        // (Only read, as UPower has told GNOME's proxy them – its interface
+        // names fewer, but it keeps them all: the power drawn, W; the
+        // energy it holds full now and as it was made, Wh.)
+        const cached = name => {
+            try {
+                const value = proxy.get_cached_property(name)?.unpack();
+                return Number.isFinite(value) ? value : 0;
+            } catch {
+                return 0;
+            }
+        };
+        const [full, design] = [cached('EnergyFull'), cached('EnergyFullDesign')];
         return {
             present, percent: Math.round(proxy.Percentage ?? 0), seconds: proxy.TimeToEmpty ?? 0,
+            toFull: proxy.TimeToFull ?? 0,
             discharging: state === DISCHARGING || state === PENDING_DISCHARGE,
+            charging: state === CHARGING || state === PENDING_CHARGE,
             charged: state === FULLY_CHARGED,
+            rate: Math.abs(cached('EnergyRate')),
+            health: full > 0 && design > 0 ? 100 * full / design : null,
         };
     }
 
