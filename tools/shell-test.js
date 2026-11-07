@@ -6321,17 +6321,21 @@ function displayConfig(method, params, replyType = null) {
  *
  * @param {string[]} connectors - from left to right
  * @param {string} primary - the main one
+ * @param {object} [scales] - a connector's scale, if not 1 (the nearest
+ *   its mode has)
  */
-async function arrangeMonitors(connectors, primary) {
+async function arrangeMonitors(connectors, primary, scales = {}) {
     const state = await displayConfig('GetCurrentState', null,
         '(ua((ssss)a(siiddada{sv})a{sv})a(iiduba(ssss)a{sv})a{sv})');
     const [serial, monitors] = state.recursiveUnpack();
     const modes = new Map(monitors.map(([[connector], list]) => [connector, list.find(mode => mode[6]['is-current'])]));
     let x = 0;
     const logical = connectors.map(connector => {
-        const [mode, width] = modes.get(connector);
-        const monitor = [x, 0, 1.0, 0, connector === primary, [[connector, mode, {}]]];
-        x += width;
+        const [mode, width, , , , supported] = modes.get(connector);
+        const wanted = scales[connector] ?? 1;
+        const scale = supported.reduce((best, s) => (Math.abs(s - wanted) < Math.abs(best - wanted) ? s : best), 1);
+        const monitor = [x, 0, scale, 0, connector === primary, [[connector, mode, {}]]];
+        x += Math.round(width / scale);
         return monitor;
     });
     await displayConfig('ApplyMonitorsConfig',
@@ -6437,6 +6441,36 @@ async function testTwoMonitors(ext) {
     await waitFor(() => desktop.grid[0] === grid[0], 3000);
     await Scripting.sleep(400);
     check(cells() === placed, `the bigger one the main one again, where they were on it (${cells()})`);
+}
+
+// A capsule on the main monitor at 125 %, another monitor to the left of
+// it (so not at the stage's origin, as a laptop's external monitor may
+// be): dragged a frame at a time, it follows the pointer as on one.
+async function testCapsuleBesideAnotherMonitor(ext) {
+    const island = ext.stateObj.modules.get('island').island;
+    const primaryScale = () => global.display.get_monitor_scale(Main.layoutManager.primaryIndex);
+    await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0', {'Meta-0': 1.25});
+    if (!check(await waitFor(() => Main.layoutManager.primaryMonitor.x > 0 && primaryScale() > 1.2, 5000),
+        'the main monitor at 125 %, another to its left'))
+        return;
+    await Scripting.sleep(2000);
+    const fake = fakeLevelSliders();
+    try {
+        await clickAt(...centerOf(island));
+        await waitFor(() => hasClass(island.page, 'atelier-cc') && !island.busy, 3000);
+        await Scripting.sleep(800);
+        const capsule = ext.stateObj.modules.get('control-centre').controls.capsule('volume');
+        results.push(`INFO  the main monitor at ${Main.layoutManager.primaryMonitor.x}, ${primaryScale()}×; ` +
+            `the volume's capsule at ${capsule?.get_transformed_position().map(Math.round)}`);
+        await controlCentreCapsuleFrames(ext, fake);
+        await pressKey(Clutter.KEY_Escape);
+        await waitFor(() => !island.page && !island.busy, 3000);
+    } finally {
+        fake.restore();
+        await arrangeMonitors(['Meta-1', 'Meta-0'], 'Meta-0');
+        await waitFor(() => primaryScale() === 1, 5000);
+        await Scripting.sleep(1000);
+    }
 }
 
 /**
@@ -11676,6 +11710,7 @@ export async function run() {
         }
         if (SUITE === 'two-monitors') {
             await testTwoMonitors(ext);
+            await testCapsuleBesideAnotherMonitor(ext);
             await testDockOnTwoMonitors(ext);
             testQuitWithWorkQueued(ext);
             return;
