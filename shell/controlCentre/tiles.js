@@ -2,12 +2,13 @@
 // a tile (its glass – raised when it is an open card – a header, what it
 // shows open, what sits at its foot), a round toggle with the accent's
 // circle growing under its icon, chips with a selection pill sliding
-// between them, a list's rows, a spinner. Sizes are the spec's
+// between them, a list's rows, a spinner, the battery's bar. Sizes are the spec's
 // pixels at Atelier's size (lib/ccLayout.js SIZE), as the stylesheet has
 // them; their motion is lib/ccMotion.js's, run by an Animator
 // (shell/controlCentre/animator.js).
 
 import Atk from 'gi://Atk';
+import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
@@ -15,6 +16,7 @@ import St from 'gi://St';
 
 import {DURATIONS} from '../../lib/ccMotion.js';
 import {SIZE, chipLayout} from '../../lib/ccLayout.js';
+import {reducedMotion} from './animator.js';
 
 /** @returns {number} the stage's scale */
 export const scaleOf = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -487,5 +489,241 @@ class AtelierCcListRow extends St.Button {
             this._animator.ease(this.highlight, {opacity: lit ? 255 : 0},
                 {curve: 'fade', duration: DURATIONS.rowBg, instant: !animate});
         }
+    }
+});
+
+// The battery bar's charging wave: how far its edge sways (of its height)
+// and how long a wave is (of its height); its shimmer, how wide (of its
+// height) and how bright.
+const WAVE_SWAY = 0.035;
+const WAVE_LENGTH = 0.85;
+const SHIMMER_WIDTH = 1.3;
+const SHIMMER_ALPHA = 0.32;
+// Under the pointer: so much bigger, its light so bright.
+const BAR_LIFT = 1.04;
+const BAR_GLOW = 0.16;
+
+/**
+ * The system tile's battery: a tall capsule as brightness's and volume's
+ * are, a faint light track in the glass filled from the left as far as
+ * the level goes – white, orange when low, red when critical, green while
+ * charging, a shimmer passing along it and its edge swaying then. Drawn
+ * with Cairo, as one texture: the level filling it as the panel opens or
+ * as it changes, the shimmer and the light under the pointer are each
+ * that texture drawn again, nothing restyled or laid out anew. The
+ * shimmer runs only while it charges and is on the stage (motion not
+ * reduced). Under the pointer it lifts a little (a transform).
+ */
+export const BatteryBar = GObject.registerClass(
+class AtelierCcBatteryBar extends St.DrawingArea {
+    /** @param {Animator} animator */
+    _init(animator) {
+        super._init({style_class: 'atelier-cc-battery-bar', x_expand: true, y_expand: true, reactive: true,
+            track_hover: true, accessible_role: Atk.Role.LEVEL_BAR});
+        this._animator = animator;
+        // Its level as shown (0 … 1), eased; where it is going.
+        this.level = 0;
+        this._target = 0;
+        // The pointer's light (0 … 1) and where it is (of its width).
+        this.glow = 0;
+        this._pointerX = 0.5;
+        this._tone = '';
+        this._phase = 0;
+        this._wave = null;
+        // (Shown: not resting, see-through, in the island closed.)
+        this._shown = true;
+        /** How many times it was drawn (the tests'). */
+        this.repaints = 0;
+        this.set_pivot_point(0.5, 0.5);
+        this.connect('notify::mapped', () => this._syncWave());
+        this.connect('notify::hover', () => this._hovered());
+        this.connect('motion-event', (actor, event) => {
+            const [x] = event.get_coords();
+            const [ok, local] = this.transform_stage_point(x, 0);
+            if (ok && this.width > 0) {
+                this._pointerX = Math.min(1, Math.max(0, local / this.width));
+                this._redraw();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        St.Settings.get().connectObject('notify::enable-animations', () => this._syncWave(), this);
+        this.connect('destroy', () => {
+            St.Settings.get().disconnectObject(this);
+            this._stopWave();
+            this._animator.stop(this);
+        });
+    }
+
+    /**
+     * @param {number} fraction - its level, 0 … 1
+     * @param {object} [options]
+     * @param {boolean} [options.instant]
+     */
+    setLevel(fraction, {instant = false} = {}) {
+        fraction = Math.min(1, Math.max(0, fraction));
+        const going = this._animator.targetOf(this, 'level');
+        if (fraction === (going ?? this.level) && !instant)
+            return;
+        this._target = fraction;
+        this._animator.ease(this, {level: fraction}, {curve: 'out', duration: DURATIONS.batteryLevel,
+            instant: instant || reducedMotion(), onUpdate: () => this._redraw()});
+    }
+
+    /**
+     * Filled from empty to its level (the panel opening), after a delay;
+     * at once with reduced motion.
+     *
+     * @param {number} delay - ms
+     */
+    grow(delay) {
+        if (reducedMotion()) {
+            this.setLevel(this._target, {instant: true});
+            return;
+        }
+        this._animator.ease(this, {level: this._target}, {curve: 'out', duration: DURATIONS.batteryGrow, delay,
+            from: {level: 0}, onUpdate: () => this._redraw()});
+    }
+
+    /** @param {string} tone - lib/ccLayout.js batteryTone(): 'charging', 'critical', 'low' or '' */
+    setTone(tone) {
+        if (tone === this._tone)
+            return;
+        this._tone = tone;
+        this._syncWave();
+        this._redraw();
+    }
+
+    /**
+     * Shown or not – the panel open, or resting see-through in the island
+     * closed (mapped still): its shimmer only while it is.
+     *
+     * @param {boolean} shown
+     */
+    setShown(shown) {
+        this._shown = shown;
+        this._syncWave();
+    }
+
+    /** @returns {boolean} whether its shimmer runs (while charging, shown) */
+    get waving() {
+        return Boolean(this._wave?.is_playing());
+    }
+
+    _syncWave() {
+        const run = this._tone === 'charging' && this._shown && this.mapped && !reducedMotion();
+        if (run && !this._wave) {
+            this._wave = new Clutter.Timeline({actor: this, duration: DURATIONS.batteryWave, repeat_count: -1});
+            this._wave.connect('new-frame', timeline => {
+                this._phase = timeline.get_progress();
+                this._redraw();
+            });
+            this._wave.start();
+        } else if (!run && this._wave) {
+            this._stopWave();
+            this._phase = 0;
+            this._redraw();
+        }
+    }
+
+    _stopWave() {
+        const wave = this._wave;
+        this._wave = null;
+        wave?.stop();
+    }
+
+    // Drawn again – only on the stage (the shell quitting, a frame of an
+    // ease may come after it is gone).
+    _redraw() {
+        if (this.get_stage())
+            this.queue_repaint();
+    }
+
+    _hovered() {
+        const on = this.hover;
+        this._animator.ease(this, {scale: on ? BAR_LIFT : 1, glow: on ? 1 : 0},
+            {curve: on ? 'out' : 'fade', duration: DURATIONS.batteryHover, onUpdate: () => this._redraw()});
+    }
+
+    vfunc_repaint() {
+        this.repaints++;
+        const cr = this.get_context();
+        const [width, height] = this.get_surface_size();
+        const node = this.get_theme_node();
+        const color = name => {
+            const [, c] = node.lookup_color(name, false);
+            return [c.red / 255, c.green / 255, c.blue / 255, c.alpha / 255];
+        };
+        const radius = Math.min(height / 2, node.get_border_radius(St.Corner.TOPLEFT));
+        const k = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const capsule = () => {
+            cr.newSubPath();
+            cr.arc(width - radius, radius, radius, -Math.PI / 2, 0);
+            cr.arc(width - radius, height - radius, radius, 0, Math.PI / 2);
+            cr.arc(radius, height - radius, radius, Math.PI / 2, Math.PI);
+            cr.arc(radius, radius, radius, Math.PI, 1.5 * Math.PI);
+            cr.closePath();
+        };
+        // The track.
+        capsule();
+        cr.setSourceRGBA(...color('-atelier-track-color'));
+        cr.fillPreserve();
+        cr.clip();
+        // The fill, its edge swaying while it charges.
+        const charging = this._tone === 'charging';
+        const fill = this.level * width;
+        if (fill > 0.5) {
+            const sway = charging && this._wave ? WAVE_SWAY * height : 0;
+            cr.moveTo(0, 0);
+            if (sway > 0) {
+                const length = WAVE_LENGTH * height;
+                for (let y = 0; y <= height; y += Math.max(1, k)) {
+                    const x = fill - sway + sway * Math.sin(2 * Math.PI * (y / length - this._phase));
+                    cr.lineTo(Math.max(0, x), y);
+                }
+            } else {
+                cr.lineTo(fill, 0);
+                cr.lineTo(fill, height);
+            }
+            cr.lineTo(0, height);
+            cr.closePath();
+            const tone = {charging: '-atelier-charging-color', low: '-atelier-low-color',
+                critical: '-atelier-critical-color'}[this._tone] ?? '-atelier-fill-color';
+            cr.setSourceRGBA(...color(tone));
+            if (sway > 0) {
+                cr.fillPreserve();
+                // A shimmer passing along it, left to right.
+                const band = SHIMMER_WIDTH * height;
+                const x = -band + this._phase * (fill + 2 * band);
+                const shimmer = new Cairo.LinearGradient(x - band, 0, x + band, 0);
+                shimmer.addColorStopRGBA(0, 1, 1, 1, 0);
+                shimmer.addColorStopRGBA(0.5, 1, 1, 1, SHIMMER_ALPHA);
+                shimmer.addColorStopRGBA(1, 1, 1, 1, 0);
+                cr.setSource(shimmer);
+                cr.fill();
+            } else {
+                cr.fill();
+            }
+        }
+        // The pointer's light.
+        if (this.glow > 0.01) {
+            const x = this._pointerX * width;
+            const light = new Cairo.RadialGradient(x, height / 2, 0, x, height / 2, height * 1.4);
+            light.addColorStopRGBA(0, 1, 1, 1, BAR_GLOW * this.glow);
+            light.addColorStopRGBA(1, 1, 1, 1, 0);
+            cr.setSource(light);
+            cr.paint();
+        }
+        // Its rim.
+        cr.resetClip();
+        const inset = k / 2;
+        cr.save();
+        cr.translate(inset, inset);
+        cr.scale((width - 2 * inset) / width, (height - 2 * inset) / height);
+        capsule();
+        cr.restore();
+        cr.setLineWidth(k);
+        cr.setSourceRGBA(...color('-atelier-rim-color'));
+        cr.stroke();
+        cr.$dispose();
     }
 });

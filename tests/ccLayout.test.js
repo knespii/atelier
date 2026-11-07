@@ -1,5 +1,5 @@
 import {
-    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, TYPE, chipLayout, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
+    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, TYPE, batteryDetails, batteryTone, chipLayout, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
     tileState, timeLeft, toggleOpen, wiredSubtitle,
 } from '../lib/ccLayout.js';
 import {assert, assertEqual, stylesheetRules} from './util.js';
@@ -114,6 +114,20 @@ export function testTimeLeftAndNames() {
     assertEqual(timeLeft({seconds: 7200, discharging: true}), '≈ 2 h left', 'whole hours');
     assertEqual(timeLeft({seconds: 15000, discharging: false}), '', 'charging or on mains power: none');
     assertEqual(timeLeft({seconds: 0, discharging: true}), '', 'unknown: none');
+    assertEqual(batteryTone({percent: 60, discharging: true}), '', 'discharging: no tone');
+    assertEqual(batteryTone({percent: 20, discharging: true}), 'low', '20 %: low');
+    assertEqual(batteryTone({percent: 10, discharging: true}), 'critical', '10 %: critical');
+    assertEqual(batteryTone({percent: 8, charging: true}), 'charging', 'charging, however low');
+    assertEqual(batteryTone({percent: 15, discharging: false}), '', 'on mains, not charging: no tone');
+    assertEqual(batteryDetails({rate: 11.62, seconds: 15000, discharging: true, health: 92.4})[0],
+        '11.6 W · 4 h 10 min left · Health 92 %', 'the details: power, time to empty, health');
+    assertEqual(batteryDetails({rate: 24, toFull: 4800, charging: true})[0], '24.0 W · 1 h 20 min to full',
+        'charging: the time to full; health unknown, not told');
+    assertEqual(batteryDetails({health: 104})[0], 'Health 100 %', 'health at most 100 %');
+    assertEqual(batteryDetails({}), [], 'nothing known: no details');
+    const variants = batteryDetails({rate: 8, seconds: 3600, discharging: true, health: 90});
+    assert(variants.length > 1 && variants.every((v, i) => i === 0 || v.length < variants[i - 1].length),
+        `the details shorter one after another (${variants.join(' / ')})`);
     assertEqual(shortOutputName({description: 'Speakers – Built-in Audio'}), 'Speakers', 'speakers');
     assertEqual(shortOutputName({description: 'HDMI / DisplayPort 2 – GA102'}), 'HDMI', 'HDMI');
     assertEqual(shortOutputName({description: 'Headset', icon: 'audio-headset-symbolic'}), 'Headset', 'headset');
@@ -164,9 +178,8 @@ const SPEC_SIZES = {
     '.atelier-cc-system': {padding: [30, 28, 28]},
     '.atelier-cc-battery-label': {spacing: [7.5]},
     '.atelier-cc-battery-icon': {'icon-size': [17.5]},
-    '.atelier-cc-battery-time': {'padding-bottom': [12]},
-    '.atelier-cc-battery-bar': {height: [8], 'border-radius': [4]},
-    '.atelier-cc-battery-fill': {'border-radius': [4]},
+    '.atelier-cc-battery-bar': {margin: [22, 0, 24], 'border-radius': [44]},
+    '.atelier-cc-system-gap': {height: [24]},
     '.atelier-cc-system-button': {width: [64], height: [64]},
     '.atelier-cc-system-icon': {'icon-size': [25]},
     // The capsules: the fill inside the 1 px edge, the ring 7.5 out
@@ -196,6 +209,7 @@ const TYPE_OF = {
     '.atelier-cc-mini-subtitle': TYPE.secondary,
     '.atelier-cc-battery-title': TYPE.secondary,
     '.atelier-cc-battery-time': TYPE.secondary,
+    '.atelier-cc-battery-details': TYPE.secondary,
     '.atelier-cc-battery-percent': TYPE.battery,
     '.atelier-cc-tab-label': TYPE.tab,
 };

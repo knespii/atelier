@@ -20,18 +20,19 @@ import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {DURATIONS, OPEN_DELAYS, rowDelays} from '../../lib/ccMotion.js';
-import {CARDS, INNER, OPEN, ORDER, SIZE, TILES, fitScale, linkSpeed, restRects, tileState, timeLeft,
-    toggleOpen, wiredSubtitle} from '../../lib/ccLayout.js';
+import {CARDS, INNER, OPEN, ORDER, SIZE, TILES, batteryDetails, batteryTone, fitScale, linkSpeed, restRects,
+    tileState, timeLeft, toggleOpen, wiredSubtitle} from '../../lib/ccLayout.js';
 import {Animator} from './animator.js';
 import {dropPending, makeAdapters} from './adapters.js';
 import {LevelCapsule} from './capsule.js';
 import {rectIn} from './layout.js';
-import {ChipRow, FnLayout, ListRow, RoundToggle, Tile, iconOf, place, pressable, px, scaleOf,
+import {BatteryBar, ChipRow, FnLayout, ListRow, RoundToggle, Tile, iconOf, place, pressable, px, scaleOf,
     setIcon} from './tiles.js';
 
 // The tiles' shapes.
@@ -238,6 +239,9 @@ class AtelierQuickSettingsHost extends GObject.Object {
             const tile = new Tile('system', {shape: 'tile'});
             const box = new St.BoxLayout({style_class: 'atelier-cc-system', orientation: Clutter.Orientation.VERTICAL,
                 x_expand: true, y_expand: true});
+            // (Without a battery, all of it in the middle of the tile.)
+            tile.above = new St.Widget({y_expand: true, visible: false});
+            box.add_child(tile.above);
             const label = new St.BoxLayout({style_class: 'atelier-cc-battery-label'});
             tile.batteryIcon = iconOf('battery-level-90-symbolic', 'atelier-cc-battery-icon');
             tile.batteryIcon.y_align = Clutter.ActorAlign.CENTER;
@@ -248,17 +252,23 @@ class AtelierQuickSettingsHost extends GObject.Object {
             box.add_child(label);
             tile.percent = new St.Label({style_class: 'atelier-cc-battery-percent', text: ''});
             box.add_child(tile.percent);
-            tile.timeLeft = new St.Label({style_class: 'atelier-cc-battery-time', text: ''});
-            box.add_child(tile.timeLeft);
-            tile.bar = new St.Widget({style_class: 'atelier-cc-battery-bar', x_expand: true,
-                layout_manager: new FnLayout((container, b) => {
-                    const fill = container.get_first_child();
-                    place(fill, 0, 0, b.get_width() * (container._fraction ?? 0), b.get_height());
-                })});
-            tile.bar._fraction = 0;
-            tile.bar.add_child(new St.Widget({style_class: 'atelier-cc-battery-fill'}));
+            // Its status line; in its place, the pointer over the bar, the
+            // battery's details (crossfaded).
+            const status = new St.Widget({style_class: 'atelier-cc-battery-status', x_expand: true,
+                layout_manager: new Clutter.BinLayout()});
+            tile.timeLeft = new St.Label({style_class: 'atelier-cc-battery-time', text: '',
+                x_align: Clutter.ActorAlign.START, x_expand: true});
+            tile.details = new St.Label({style_class: 'atelier-cc-battery-details', text: '', opacity: 0,
+                x_align: Clutter.ActorAlign.START, x_expand: true});
+            tile.details.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+            status.add_child(tile.timeLeft);
+            status.add_child(tile.details);
+            box.add_child(status);
+            tile.bar = new BatteryBar(a);
+            tile.bar.connect('notify::hover', () => this._showBatteryDetails());
             box.add_child(tile.bar);
-            box.add_child(new St.Widget({y_expand: true}));
+            tile.gap = new St.Widget({style_class: 'atelier-cc-system-gap', visible: false});
+            box.add_child(tile.gap);
             const buttons = new St.BoxLayout({style_class: 'atelier-cc-system-buttons', x_expand: true});
             tile.buttons = {};
             const names = [['screenshot', 'screenshooter-symbolic', 'Take Screenshot'],
@@ -279,6 +289,8 @@ class AtelierQuickSettingsHost extends GObject.Object {
                 tile.addFocusables(button);
             });
             box.add_child(buttons);
+            tile.below = new St.Widget({y_expand: true, visible: false});
+            box.add_child(tile.below);
             tile.addPart(box);
             this._add(tile);
         }
@@ -717,9 +729,15 @@ class AtelierQuickSettingsHost extends GObject.Object {
         const left = battery.present ? timeLeft(battery) : '';
         systemTile.timeLeft.text = battery.present ? left || (battery.charged ? 'Fully charged' : 'Charging')
             : 'No battery';
+        // (Without a battery: what it shows in the middle of the tile.)
         systemTile.bar.visible = battery.present;
-        systemTile.bar._fraction = battery.percent / 100;
-        systemTile.bar.queue_relayout();
+        for (const part of [systemTile.above, systemTile.gap, systemTile.below])
+            part.visible = !battery.present;
+        systemTile.bar.setLevel(battery.present ? battery.percent / 100 : 0, {instant});
+        systemTile.bar.setTone(battery.present ? batteryTone(battery) : '');
+        this._details = battery.present ? batteryDetails(battery) : [];
+        if (systemTile.bar.hover)
+            this._showBatteryDetails({instant: true});
         for (const [name, button] of Object.entries(systemTile.buttons)) {
             button.reactive = system.shows(name);
             button.opacity = system.shows(name) ? 255 : 90;
@@ -729,6 +747,27 @@ class AtelierQuickSettingsHost extends GObject.Object {
         if (this._open) {
             const card = this._tiles.get(CARDS[this._open]);
             this._renderList(card, this._open, {instant});
+        }
+    }
+
+    // The pointer over the battery bar: its details in place of its status
+    // line – the longest that fits – or back.
+    _showBatteryDetails({instant = false} = {}) {
+        const tile = this._tiles.get('system');
+        const shown = tile.bar.hover && tile.bar.visible && this._details?.length > 0;
+        if (shown) {
+            const room = tile.details.get_parent().width;
+            const width = text => {
+                tile.details.text = text;
+                return tile.details.get_preferred_width(-1)[1];
+            };
+            const fits = this._details.find(text => width(text) <= room) ?? this._details.at(-1);
+            if (tile.details.text !== fits)
+                tile.details.text = fits;
+        }
+        for (const [label, on] of [[tile.details, shown], [tile.timeLeft, !shown]]) {
+            this.animator.ease(label, {opacity: on ? 255 : 0},
+                {curve: 'fade', duration: DURATIONS.batteryHover, instant});
         }
     }
 
@@ -926,12 +965,22 @@ class AtelierQuickSettingsHost extends GObject.Object {
                 {curve: 'open', duration: DURATIONS.open, delay: OPEN_DELAYS[id],
                     from: {opacity: 0, translation_y: OPEN_DY * k, scale: 0.94}});
         }
+        // The battery filled from empty as its tile comes in.
+        const bar = this._tiles.get('system').bar;
+        bar.setShown(true);
+        bar.grow(OPEN_DELAYS.system);
     }
 
-    /** Back at rest, at once: no card open, nothing moving. */
-    rest() {
+    /**
+     * Back at rest, at once: no card open, nothing moving.
+     *
+     * @param {object} [options]
+     * @param {boolean} [options.resting] - the panel closed, resting see-through in the island
+     */
+    rest({resting = false} = {}) {
         this.setOpen(null, {instant: true});
         this.animator.finish();
+        this._tiles.get('system').bar.setShown(!resting);
     }
 
     /**

@@ -242,7 +242,7 @@ export class ControlCentreModule {
             id: 'controls', label: 'Controls', icon: 'preferences-system-symbolic',
             actor: this._quickSettingsHost.actor,
             onShow: () => this._quickSettingsHost?.rest(),
-            onRest: () => this._quickSettingsHost?.rest(),
+            onRest: () => this._quickSettingsHost?.rest({resting: true}),
             handleKeyPress: event => this._quickSettingsHost?.handleKeyPress(event) ?? false,
             moduleRects: page => this._quickSettingsHost?.moduleRects(page) ?? [],
         }];

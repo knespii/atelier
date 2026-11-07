@@ -1014,21 +1014,36 @@
   color: #ffffff;
 }
 
-.atelier-cc-battery-time {
+.atelier-cc-battery-time,
+.atelier-cc-battery-details {
   font-size: 9.5px;
   color: rgba(255, 255, 255, 0.78);
-  padding-bottom: 6.6px;
 }
 
+/* The battery: a tall capsule in the middle of the tile, as brightness's
+   and volume's are – a faint light track, a rim, filled from the left as
+   far as the level goes (shell/controlCentre/tiles.js BatteryBar draws it
+   with these colours): white; orange when low, red when critical (GNOME's
+   warning and error colours); green while charging. */
 .atelier-cc-battery-bar {
-  height: 4.4px;
-  border-radius: 2.2px;
-  background-color: rgba(255, 255, 255, 0.2);
+  margin: 12.1px 0 13.2px;
+  border-radius: 24.2px;
+  -atelier-track-color: rgba(255, 255, 255, 0.16);
+  -atelier-rim-color: rgba(255, 255, 255, 0.40);
+  -atelier-fill-color: #eeeeec;
+  -atelier-low-color: #ffa348;
+  -atelier-critical-color: #ff7b63;
+  -atelier-charging-color: #8ff0a4;
 }
 
-.atelier-cc-battery-fill {
-  border-radius: 2.2px;
-  background-color: #ffffff;
+/* (Without a battery: between its status line and the buttons.) */
+.atelier-cc-system-gap {
+  height: 13.2px;
+}
+
+/* (On the glass, the capsules' track.) */
+.atelier-island-glass .atelier-cc-battery-bar {
+  -atelier-track-color: rgba(255, 255, 255, 0.23);
 }
 
 .atelier-cc-system-button {
