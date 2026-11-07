@@ -195,7 +195,10 @@ class AtelierQuickSettingsHost extends GObject.Object {
         // Output.
         {
             const tile = new Tile('output', {shape: 'tile', card: true});
-            const header = new St.BoxLayout({style_class: 'atelier-cc-tile-header', x_expand: true});
+            // (Its chevron nearer the output's name than the spec has it:
+            // the name the more room.)
+            const header = new St.BoxLayout({style_class: 'atelier-cc-tile-header atelier-cc-tile-header-chevron',
+                x_expand: true});
             const circle = new St.Bin({style_class: 'atelier-cc-round atelier-cc-round-big atelier-cc-round-static',
                 y_align: Clutter.ActorAlign.CENTER});
             tile.icon = iconOf('audio-headphones-symbolic', 'atelier-cc-round-icon atelier-cc-round-icon-big');

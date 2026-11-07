@@ -769,6 +769,16 @@
   spacing: 9.9px;
 }
 
+/* (Output's chevron 6 of the spec's px after its name, not 18: the name
+   the more room. Its toggle's 18 as a margin.) */
+.atelier-cc-tile-header-chevron {
+  spacing: 3.3px;
+}
+
+.atelier-cc-tile-header-chevron .atelier-cc-round {
+  margin-right: 6.6px;
+}
+
 .atelier-cc-pill-text {
   spacing: 5.5px;
 }

@@ -133,6 +133,8 @@ const SPEC_SIZES = {
     '.atelier-cc-raised': {'border-radius': [40]},
     '.atelier-cc-pill-header': {padding: [0, 22, 0, 24], spacing: [18]},
     '.atelier-cc-tile-header': {padding: [24], spacing: [18]},
+    '.atelier-cc-tile-header-chevron': {spacing: [6]},
+    '.atelier-cc-tile-header-chevron .atelier-cc-round': {'margin-right': [12]},
     '.atelier-cc-pill-text': {spacing: [10]},
     '.atelier-cc-opener-tile': {'border-radius': [40]},
     '.atelier-cc-chevron': {'icon-size': [20]},
