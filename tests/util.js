@@ -36,3 +36,14 @@ export function writeFile(path, contents = '') {
     GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o755);
     GLib.file_set_contents(path, contents);
 }
+
+// stylesheet.css as rules: their selectors and declarations.
+export function stylesheetRules() {
+    const [, bytes] = GLib.file_get_contents('stylesheet.css');
+    const css = new TextDecoder().decode(bytes).replace(/\/\*[\s\S]*?\*\//g, '');
+    return css.split('}').map(block => block.split('{')).filter(parts => parts.length === 2).map(([head, body]) => ({
+        selectors: head.split(',').map(s => s.trim().replace(/\s+/g, ' ')),
+        declarations: Object.fromEntries(body.split(';').map(d => d.split(/:(.*)/s).map(s => s?.trim()))
+            .filter(([name, value]) => name && value)),
+    }));
+}
