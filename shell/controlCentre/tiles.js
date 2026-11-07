@@ -14,7 +14,7 @@ import Gio from 'gi://Gio';
 import St from 'gi://St';
 
 import {DURATIONS} from '../../lib/ccMotion.js';
-import {SIZE} from '../../lib/ccLayout.js';
+import {SIZE, chipLayout} from '../../lib/ccLayout.js';
 
 /** @returns {number} the stage's scale */
 export const scaleOf = () => St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -278,7 +278,11 @@ class AtelierCcChipRow extends St.Widget {
         });
         this._animator = animator;
         this._selected = -1;
+        // (The chip the pill is on, or on its way to.)
+        this._pillIndex = 0;
         this.pill = new St.Widget({style_class: 'atelier-cc-chip-pill', opacity: 0});
+        // (Scaled from its left edge as it slides to a chip of another width.)
+        this.pill.set_pivot_point(0, 0.5);
         this.add_child(this.pill);
         this.chips = [0, 1, 2].map(index => {
             const light = new St.Label({style_class: 'atelier-cc-chip-label', x_align: Clutter.ActorAlign.CENTER,
@@ -309,11 +313,22 @@ class AtelierCcChipRow extends St.Widget {
         });
     }
 
-    _step() {
-        // (As it was laid out: not asked of St off the stage.)
-        const width = this.has_allocation() ? this.get_allocation_box().get_width() : 0;
-        const gap = px(8);
-        return (width - 2 * gap) / 3 + gap;
+    /**
+     * The chips in a row so wide (actor px): thirds while their labels have
+     * room in them, else as each needs (lib/ccLayout.js chipLayout()).
+     *
+     * @param {number} width
+     * @returns {{x: number, width: number}[]}
+     */
+    _layout(width) {
+        const labels = this.chips.map(c => c.visible ? c.get_preferred_width(-1)[1] : 0);
+        return chipLayout(width, labels, {gap: px(8), room: px(16)});
+    }
+
+    // The chips as they were laid out (none yet: off the stage, not asked
+    // of St).
+    _laidOut() {
+        return this._chipRects ?? this.chips.map(() => ({x: 0, width: 0}));
     }
 
     /**
@@ -326,9 +341,19 @@ class AtelierCcChipRow extends St.Widget {
         const instant = !animate;
         const visible = shown && index >= 0;
         if (index >= 0) {
-            const from = this._selected < 0 ? {translation_x: index * this._step()} : null;
-            this._animator.ease(this.pill, {translation_x: index * this._step()},
-                {curve: 'slide', duration: DURATIONS.select, from, instant});
+            // (Slid there, as wide as the chip chosen: its width at once,
+            // scaled from the one left's. Thirds: the same.)
+            const rects = this._laidOut();
+            const [to, was] = [rects[index], rects[this._selected] ?? rects[index]];
+            const fresh = this._selected < 0;
+            this._animator.ease(this.pill, {translation_x: to.x},
+                {curve: 'slide', duration: DURATIONS.select, from: fresh ? {translation_x: to.x} : null, instant});
+            this._pillIndex = index;
+            if (!fresh && to.width > 0 && Math.abs(was.width - to.width) > 0.5) {
+                this.queue_relayout();
+                this._animator.ease(this.pill, {scale_x: 1},
+                    {curve: 'slide', duration: DURATIONS.select, from: {scale_x: was.width / to.width}, instant});
+            }
         }
         this._animator.ease(this.pill, {opacity: visible ? 255 : 0},
             {curve: 'fade', duration: DURATIONS.selectColour, instant});
@@ -348,15 +373,13 @@ class AtelierCcChipRow extends St.Widget {
     }
 
     _allocateChips(box) {
-        const width = box.get_width();
         const height = box.get_height();
-        const gap = px(8);
-        const chip = (width - 2 * gap) / 3;
-        this.chips.forEach((c, i) => place(c, i * (chip + gap), 0, chip, height));
-        place(this.pill, 0, 0, chip, height);
+        const rects = this._chipRects = this._layout(box.get_width());
+        this.chips.forEach((c, i) => place(c, rects[i].x, 0, rects[i].width, height));
+        place(this.pill, 0, 0, rects[this._pillIndex].width, height);
         // (Where it rests, at once, unless on its way.)
         if (this._selected >= 0 && this._animator.targetOf(this.pill, 'translation_x') === undefined)
-            this.pill.translation_x = this._selected * (chip + gap);
+            this.pill.translation_x = rects[this._selected].x;
     }
 });
 

@@ -1310,6 +1310,21 @@ async function controlCentreChecks(ext) {
         const room = [...chipRoom(tile('caffeine').chips), ...chipRoom(tile('output').chips)];
         check(room.every(r => Number(r.split(' ').at(-1)) >= 0),
             `the chips' labels in their chips (room left, px: ${room.join(', ')})`);
+        // Longer names than thirds have room for: each chip as wide as it
+        // needs, the pill too.
+        const outputChips = tile('output').chips;
+        const names = outputChips.chips.map(c => c._light.text);
+        outputChips.setLabels(['Headphones', 'Bluetooth', 'Speakers']);
+        await Scripting.sleep(100);
+        const wide = chipRoom(outputChips);
+        const pillFits = Math.abs(outputChips.pill.width - outputChips.chips[outputChips._selected].width) < 0.5;
+        const last = outputChips.chips.at(-1);
+        const inRow = last.x + last.width <= outputChips.width + 0.5;
+        check(wide.every(r => Number(r.split(' ').at(-1)) >= 0) && cutShort(outputChips).length === 0 && pillFits &&
+            inRow,
+            `longer names: each chip as wide as it needs, the pill as its chip (${wide.join(', ')})`);
+        outputChips.setLabels(names);
+        await Scripting.sleep(100);
         const panel = stageRect(page);
         console.log(`Atelier test: the Controls page ${(panel.width / scale).toFixed(1)} × ` +
             `${(panel.height / scale).toFixed(1)} logical px, its grid ${(origin.width / scale).toFixed(1)} × ` +

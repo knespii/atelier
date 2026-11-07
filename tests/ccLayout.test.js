@@ -1,5 +1,5 @@
 import {
-    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, TYPE, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
+    COLUMNS, GAP, INNER, ORDER, SIZE, TILES, TYPE, chipLayout, fitScale, linkSpeed, panelSize, restRects, setRadio, shortOutputName,
     tileState, timeLeft, toggleOpen, wiredSubtitle,
 } from '../lib/ccLayout.js';
 import {assert, assertEqual, stylesheetRules} from './util.js';
@@ -236,4 +236,24 @@ export function testStylesheetAtSize() {
     assertEqual(valueOf('.atelier-cc-battery-percent', 'letter-spacing'), `${-0.04 * TYPE.battery}px`,
         'the battery\'s figure −0.04 em apart');
     assert(checked > 70, `checked ${checked}`);
+}
+
+export function testChipLayout() {
+    const widths = (...labels) =>
+        chipLayout(138.6, labels, {gap: 4.4, room: 8.8}).map(c => Math.round(c.width * 10) / 10);
+    const thirds = Math.round((138.6 - 8.8) / 3 * 10) / 10;
+    assertEqual(widths(28, 11, 34), [thirds, thirds, thirds], 'labels with room in their thirds: thirds');
+    assertEqual(widths(40, 37, 25), [48.8, 45.8, 35.2], 'one too wide: as wide as it needs, the rest even');
+    const cramped = widths(49, 44, 29);
+    assert(near(cramped.reduce((a, b) => a + b, 0), 129.8, 0.2) && cramped[0] > 49 && cramped[1] > 44,
+        `too little room for all of it: less room round each (${cramped})`);
+    const wide = chipLayout(138.6, [54, 42, 40], {gap: 4.4, room: 8.8});
+    assert(wide.every((c, i) => c.width >= [54, 42, 40][i] - 1e-9) && near(wide[2].x + wide[2].width, 138.6, 1e-6),
+        `wider still: the gaps narrower (${wide.map(c => c.x.toFixed(1))})`);
+    const over = chipLayout(138.6, [67, 54, 49], {gap: 4.4, room: 8.8});
+    assert(near(over[2].x + over[2].width, 138.6, 1e-6) && over[0].width > over[2].width,
+        `too long for the row: in it all the same (${over.map(c => c.width.toFixed(1))})`);
+    const row = chipLayout(138.6, [28, 11, 34], {gap: 4.4, room: 8.8});
+    assert(near(row[1].x, thirds + 4.4, 0.06) && near(row[2].x + row[2].width, 138.6, 1e-6),
+        'a gap between, the row filled');
 }
