@@ -13,6 +13,8 @@ import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {validUser} from '../lib/github.js';
+import {statusOf, validToken} from '../lib/slack.js';
+import {callSlack, keyring, newSession} from '../lib/slackWeb.js';
 import {ProfileStore, keepWidgets} from '../lib/profiles.js';
 import {OptionCards} from './optionCards.js';
 import {PhotoWidgetsGroup, PhotosGroup} from './photos.js';
@@ -26,6 +28,31 @@ const DESKTOP_ICONS = 'ding@rastersoft.com';
 const EXTENSIONS_APP = 'org.gnome.Extensions.desktop';
 // An extension's state, as the shell tells it: running.
 const ACTIVE = 1;
+
+// What the Slack app's user token needs, and nothing more.
+const SLACK_SCOPES = ['im:read', 'im:history', 'mpim:read', 'mpim:history', 'channels:read', 'channels:history',
+    'groups:read', 'groups:history', 'users:read'];
+// How asking Slack went, as the shell says it.
+const SLACK_STATUS = {
+    '': 'In the keyring: Slack is asked while the desktop\'s widgets run',
+    'ok': 'Asked every 3 minutes while the desktop\'s widgets run',
+    'invalid': 'Slack refused the token, so it is no longer asked: paste a new one',
+    'missing-scope': 'The token lacks one of the scopes above: add it, reinstall the app and paste the new token',
+    'offline': 'Slack could not be reached: it is asked again later',
+    'rate-limited': 'Slack asked to wait: it is asked again later',
+    'error': 'Slack\'s answer was not understood: it is asked again later',
+    'no-token': 'The keyring has no Slack token: paste it again',
+};
+
+/**
+ * Where the token is kept and how Slack is asked: the keyring and Slack
+ * itself, but tools/run-prefs.js puts stand-ins here (a keyring in memory,
+ * a Slack that answers without the network).
+ */
+export const slackService = {
+    store: keyring,
+    ask: (token, method) => callSlack(slackService.session ??= newSession(), token, method, {}, null),
+};
 
 const STYLES = [
     ['modern', 'Modern', 'Dark cards in the palette\'s colors'],
@@ -218,6 +245,7 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
                 this._github.text = this._desktop.get_string('github-user');
         }));
         github.add(this._github);
+        this._buildSlack();
 
         const notes = new Adw.PreferencesGroup({
             title: 'Notes',
@@ -282,6 +310,129 @@ class AtelierDesktopPage extends Adw.PreferencesPage {
         };
         syncPhoto();
         this._ids.push(this._desktop.connect('changed::photo', syncPhoto));
+    }
+
+    // Slack: a user token of the user's own Slack app, kept in the GNOME
+    // keyring (the settings only say that there is one), so the widget can
+    // ask Slack's API who wrote.
+    _buildSlack() {
+        const slack = new Adw.PreferencesGroup({
+            title: 'Slack',
+            description: 'The Slack widget shows who wrote from Slack\'s notifications. With a user token of a ' +
+                'Slack app of your own, it also asks Slack every 3 minutes who wrote while the computer was off: ' +
+                'only who, how many and when are kept, in memory, never what a message says.',
+        });
+        this.add(slack);
+        const app = new Adw.ActionRow({
+            title: 'Create a Slack app',
+            subtitle: `User token scopes: ${SLACK_SCOPES.join(', ')}. Install it to your workspace and paste ` +
+                'its User OAuth Token (xoxp-…).',
+            subtitle_lines: 0,
+        });
+        app.add_suffix(new Gtk.LinkButton({label: 'Slack Apps', uri: 'https://api.slack.com/apps', valign: Gtk.Align.CENTER}));
+        slack.add(app);
+        this._slackToken = new Adw.PasswordEntryRow({title: 'Slack token', show_apply_button: true});
+        this._slackToken.connect('apply', () => this.saveSlackToken(this._slackToken.text.trim()));
+        this._slackToken.connect('changed', () => this._slackToken.remove_css_class('error'));
+        slack.add(this._slackToken);
+        this._slackStatus = new Adw.ActionRow({title: 'Slack API', subtitle_lines: 0});
+        this._slackCheck = new Gtk.Button({label: 'Check', valign: Gtk.Align.CENTER});
+        this._slackCheck.connect('clicked', () => this.checkSlack());
+        this._slackStatus.add_suffix(this._slackCheck);
+        this._slackRemove = new Gtk.Button({label: 'Remove', valign: Gtk.Align.CENTER, css_classes: ['destructive-action']});
+        this._slackRemove.connect('clicked', () => this.removeSlackToken());
+        this._slackStatus.add_suffix(this._slackRemove);
+        slack.add(this._slackStatus);
+        this._slackChecked = null;
+        this.syncSlack();
+        this._ids.push(this._desktop.connect('changed::slack-api', () => this.syncSlack()));
+        this._ids.push(this._desktop.connect('changed::slack-status', () => {
+            this._slackChecked = null;
+            this.syncSlack();
+        }));
+    }
+
+    /** Show whether there is a token, and how asking Slack went. */
+    syncSlack() {
+        const set = this._desktop.get_boolean('slack-api');
+        this._slackCheck.visible = set;
+        this._slackRemove.visible = set;
+        const status = this._desktop.get_string('slack-status');
+        if (this._slackChecked)
+            this._slackStatus.subtitle = this._slackChecked;
+        else if (!set)
+            this._slackStatus.subtitle = 'No token: only notifications tell who wrote';
+        else
+            this._slackStatus.subtitle = SLACK_STATUS[status] ?? SLACK_STATUS[''];
+    }
+
+    /**
+     * Keep a token in the keyring (the entry is emptied).
+     *
+     * @param {string} token
+     */
+    async saveSlackToken(token) {
+        if (!validToken(token)) {
+            this._slackToken.add_css_class('error');
+            this._slackChecked = 'That is not a user token: it starts with xoxp-';
+            this.syncSlack();
+            return;
+        }
+        try {
+            await slackService.store.store(token);
+        } catch (e) {
+            this._slackChecked = `The keyring did not keep it: ${e.message}`;
+            this.syncSlack();
+            return;
+        }
+        this._slackToken.text = '';
+        this._slackChecked = null;
+        // (Off and on: the shell looks the token up again, also a new one
+        // for the one there was.)
+        this._desktop.set_boolean('slack-api', false);
+        this._desktop.reset('slack-status');
+        this._desktop.set_boolean('slack-api', true);
+        this.syncSlack();
+        await this.checkSlack();
+    }
+
+    /** Ask Slack whose the token in the keyring is (auth.test). */
+    async checkSlack() {
+        this._slackChecked = 'Checking…';
+        this.syncSlack();
+        let text;
+        try {
+            const token = await slackService.store.lookup();
+            if (!token)
+                throw new Error('The keyring has no Slack token: paste it again');
+            const {status, body} = await slackService.ask(token, 'auth.test');
+            if (body?.ok)
+                text = `Signed in to ${body.team ?? 'Slack'} as ${body.user ?? 'you'}`;
+            else if (status === 429)
+                text = 'Slack asks to wait a while: try again later';
+            else if (body?.error)
+                text = statusOf(body.error) === 'invalid' ? `Slack refused the token (${body.error}): paste a new one`
+                    : `Slack said: ${body.error}`;
+            else
+                text = `Slack did not answer (HTTP ${status})`;
+        } catch (e) {
+            text = e.message.startsWith('The keyring') ? e.message : `Slack could not be reached: ${e.message}`;
+        }
+        this._slackChecked = text;
+        this.syncSlack();
+    }
+
+    /** The token out of the keyring: the widget goes back to notifications only. */
+    async removeSlackToken() {
+        try {
+            await slackService.store.clear();
+        } catch (e) {
+            console.warn(`Atelier: the Slack token could not be removed from the keyring: ${e.message}`);
+        }
+        this._slackChecked = null;
+        this._desktop.set_boolean('slack-api', false);
+        this._desktop.reset('slack-status');
+        this.syncSlack();
     }
 
     // Whether Desktop Icons runs, asked of the shell as the Extensions app

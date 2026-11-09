@@ -18,6 +18,7 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
 import System from 'system';
 import {exportProfile} from '../lib/profileTransfer.js';
+import {slackService} from '../prefs/desktopPage.js';
 
 import * as dockAppearance from './dock-tests/appearance.js';
 import * as dockBadges from './dock-tests/badges.js';
@@ -31,6 +32,28 @@ for (const name of ['org.gnome.Shell.Extensions.src', 'gnome-shell-dbus-interfac
 
 const {ExtensionPrefsDialog} = await import(
     'resource:///org/gnome/Shell/Extensions/js/extensionPrefsDialog.js');
+
+// Never the user's keyring, nor Slack itself: a keyring in memory, and a
+// Slack that knows one token (auth.test only).
+const SLACK_TOKEN = 'xoxp-0000000000-test-token';
+const slackKeyring = {
+    token: null,
+    lookup: async () => slackKeyring.token,
+    store: async token => {
+        slackKeyring.token = token;
+    },
+    clear: async () => {
+        slackKeyring.token = null;
+    },
+};
+slackService.store = slackKeyring;
+slackService.asked = [];
+slackService.ask = async (token, method) => {
+    slackService.asked.push(method);
+    return token === SLACK_TOKEN
+        ? {status: 200, retryAfter: null, body: {ok: true, team: 'Acme', user: 'viktor', user_id: 'U1'}}
+        : {status: 200, retryAfter: null, body: {ok: false, error: 'invalid_auth'}};
+};
 
 const args = System.programArgs;
 const screenshotDir = args.includes('--screenshots') ? args[args.indexOf('--screenshots') + 1] : null;
@@ -535,6 +558,44 @@ async function runSelftest(window) {
     await sleep(50);
     check(desktop._photo.subtitle === '/tmp/pictures' && desktop._clearPhoto.visible, 'the photo shows where it is from');
     ['style', 'github-user', 'photo'].forEach(key => desktopSettings.reset(key));
+    // Slack: a user token, kept in the keyring (here one in memory), never in
+    // the settings; Check asks Slack whose it is.
+    check(desktop._slackToken instanceof Adw.PasswordEntryRow && !desktop._slackCheck.visible &&
+        desktop._slackStatus.subtitle.startsWith('No token'), 'Slack: a token field, and no token at first');
+    desktop._slackToken.text = 'xoxb-1234567890-a-bot-token';
+    await desktop.saveSlackToken(desktop._slackToken.text);
+    check(slackKeyring.token === null && desktop._slackToken.has_css_class('error') &&
+        !desktopSettings.get_boolean('slack-api'), 'a bot token is refused: it has no unread of its own');
+    desktop._slackToken.text = SLACK_TOKEN;
+    desktop._slackToken.emit('apply');
+    await sleep(100);
+    const keys = desktopSettings.settings_schema.list_keys();
+    check(slackKeyring.token === SLACK_TOKEN && desktopSettings.get_boolean('slack-api') &&
+        desktop._slackToken.text === '' && keys.every(key => !JSON.stringify(desktopSettings.get_value(key).recursiveUnpack()).includes('xoxp')),
+    'the token goes into the keyring, not into the settings, and out of the field');
+    check(desktop._slackStatus.subtitle === 'Signed in to Acme as viktor' && desktop._slackCheck.visible &&
+        desktop._slackRemove.visible, `it is checked at once (${desktop._slackStatus.subtitle})`);
+    desktopSettings.set_string('slack-status', 'ok');
+    check(desktop._slackStatus.subtitle.startsWith('Asked every 3 minutes'), 'how asking Slack goes, as the shell says');
+    desktopSettings.set_string('slack-status', 'invalid');
+    check(desktop._slackStatus.subtitle.startsWith('Slack refused the token'), 'a token Slack refused shows');
+    slackKeyring.token = 'xoxp-0000000000-revoked';
+    await desktop.checkSlack();
+    check(desktop._slackStatus.subtitle.includes('invalid_auth'), `Check tells why (${desktop._slackStatus.subtitle})`);
+    if (screenshotDir) {
+        const slackRow = desktop._slackToken.get_parent();
+        const scrolledDesktop = findDescendant(desktop, w => w instanceof Gtk.ScrolledWindow);
+        const [, , y] = slackRow.translate_coordinates(scrolledDesktop.get_child(), 0, 0) ?? [false, 0, 0];
+        scrolledDesktop.vadjustment.value = Math.max(0, y - 200);
+        await sleep(300);
+        await render(window, 'desktop-slack');
+        scrolledDesktop.vadjustment.value = 0;
+    }
+    await desktop.removeSlackToken();
+    check(slackKeyring.token === null && !desktopSettings.get_boolean('slack-api') &&
+        desktopSettings.get_string('slack-status') === '' && !desktop._slackRemove.visible,
+    'Remove takes it out of the keyring');
+    check(slackService.asked.every(method => method === 'auth.test'), 'only auth.test is asked, of a stand-in Slack');
     // The photos: the gallery, and the photo widgets of the profile in use.
     const photos = desktop._photos;
     check(Boolean(findDescendant(photos, w => w instanceof Adw.ButtonRow && w.title === 'Add Photos…')) &&

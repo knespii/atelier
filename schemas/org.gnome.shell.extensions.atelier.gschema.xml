@@ -389,6 +389,16 @@
       <summary>GitHub user of the GitHub widget</summary>
       <description>Its contributions come from GitHub's public page of this user; no account or token is needed.</description>
     </key>
+    <key name="slack-api" type="b">
+      <default>false</default>
+      <summary>Whether a Slack token is in the keyring</summary>
+      <description>Set by the preferences as they keep a Slack user token in the GNOME keyring (the token itself is never here): the Slack widget then asks Slack's Web API who wrote.</description>
+    </key>
+    <key name="slack-status" type="s">
+      <default>''</default>
+      <summary>How asking Slack's Web API went</summary>
+      <description>Written by the shell: “ok”, “invalid” (the token was refused: no longer asked), “missing-scope”, “offline”, “rate-limited” or “error”; empty without a token.</description>
+    </key>
     <key name="photo" type="s">
       <default>''</default>
       <summary>Picture of the photo widgets without photos picked</summary>
