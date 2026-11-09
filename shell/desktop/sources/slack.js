@@ -191,6 +191,13 @@ export class SlackSource extends EventEmitter {
             this._setStatus(this._settings?.get_boolean('slack-api') ? 'no-token' : '');
             return;
         }
+        // Refused before (the preferences clear that with a new token): not
+        // asked again, also after the screen was locked.
+        const status = this._settings.get_string('slack-status');
+        if (status === 'invalid' || status === 'missing-scope') {
+            this._status = status;
+            return;
+        }
         this._soon(SHORTLY);
     }
 
@@ -240,14 +247,20 @@ export class SlackSource extends EventEmitter {
     }
 
     async _call(method, params = {}) {
+        // (A round of a token gone meanwhile: it ends, and what it found goes.)
+        const asked = this._asked;
         let answer;
         try {
             answer = await this._fetch(method, params);
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 throw e;
-            throw new SlackError('offline');
+            answer = null;
         }
+        if (asked !== this._asked || !this._token)
+            throw new SlackError('stale');
+        if (!answer)
+            throw new SlackError('offline');
         if (answer.status === 429)
             throw new SlackError('rate-limited', answer.retryAfter);
         if (answer.status !== 200 || !answer.body)
@@ -348,8 +361,13 @@ export class SlackSource extends EventEmitter {
     /** Ask Slack's API now (if there is a token, and the screen is not locked). */
     async refresh() {
         this._clearTimeout();
-        if (!this.api || this._busy || Main.sessionMode.isLocked)
+        if (!this.api || Main.sessionMode.isLocked)
             return;
+        // (A round still going, of a token gone: this one a moment later.)
+        if (this._busy) {
+            this._schedule(SHORTLY);
+            return;
+        }
         this._busy = true;
         this._last = Date.now();
         let status = 'ok', retryAfter = null;
@@ -374,7 +392,7 @@ export class SlackSource extends EventEmitter {
         } finally {
             this._busy = false;
         }
-        if (this._cancellable.is_cancelled())
+        if (this._cancellable.is_cancelled() || status === 'stale')
             return;
         this._failures = status === 'ok' ? 0 : this._failures + 1;
         // Once per kind of failure, not at every round while it lasts.
