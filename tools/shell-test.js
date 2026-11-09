@@ -5861,6 +5861,7 @@ async function testDesktop(ext) {
     badge(0, false);
     check(await waitFor(() => slack.unread === 0 && slack.senders.length === 0, 2000),
         'read elsewhere (its count gone): nothing new');
+    await testSlackApi(desktop, settings, slackWidget, fromSlack);
     fromSlack.destroy();
     fromCalendar.destroy();
     banners.set_boolean('show-banners', true);
@@ -5973,6 +5974,108 @@ async function testDesktop(ext) {
     check(desktop._layer.get_children().every(child => child !== flowCalendar), 'the calendar is gone');
     settings.reset('widgets');
     await Scripting.sleep(1200);
+}
+
+// Slack's Web API, with a token (here a keyring and a Slack of the test's
+// own: never the network, never the user's keyring): who wrote while the
+// computer was off – their names, how many, when; never what they said.
+async function testSlackApi(desktop, settings, slackWidget, fromSlack) {
+    const slack = desktop.sources.slack;
+    if (slackWidget.entry.size !== 'card')
+        desktop.resizeWidget('slack');
+    // (Without Slack's own count on its icon: the API's.)
+    slack.unread = 0;
+    slack.senders = [];
+    const now = Date.now();
+    const ts = ms => (ms / 1000).toFixed(6);
+    const people = {U2: 'Dana', U3: 'Eve', U4: 'Finn', U5: 'Gus'};
+    const answers = {
+        'auth.test': () => ({ok: true, user_id: 'U1', user: 'viktor', team: 'Acme'}),
+        'conversations.list': () => ({ok: true, channels: [{id: 'D1', is_im: true, user: 'U2', priority: 0.5},
+            {id: 'G1', is_mpim: true}, {id: 'D2', is_im: true, user: 'U5'}], response_metadata: {next_cursor: ''}}),
+        'users.conversations': () => ({ok: true, channels: [{id: 'C1'}, {id: 'C2'}]}),
+        'conversations.info': ({channel}) => ({ok: true, channel: {
+            D1: {id: 'D1', is_im: true, user: 'U2', last_read: ts(now - 3 * 3600e3),
+                latest: {user: 'U2', ts: ts(now - 2 * 3600e3), text: 'secret one'}, unread_count: 2, unread_count_display: 2},
+            D2: {id: 'D2', is_im: true, user: 'U5', last_read: ts(now), latest: {user: 'U5', ts: ts(now - 9e6), text: 'secret old'},
+                unread_count: 0, unread_count_display: 0},
+            G1: {id: 'G1', is_mpim: true, last_read: ts(now - 3 * 3600e3)},
+            C1: {id: 'C1', last_read: ts(now - 3 * 3600e3), latest: {user: 'U4', ts: ts(now - 600e3), text: 'secret three'}},
+            C2: {id: 'C2', last_read: ts(now), latest: {user: 'U5', ts: ts(now - 600e3), text: 'secret read'}},
+        }[channel]}),
+        'conversations.history': ({channel}) => ({ok: true, messages: {
+            G1: [{user: 'U3', ts: ts(now - 3600e3), text: 'secret two'}, {user: 'U1', ts: ts(now - 3500e3), text: 'mine'}],
+            C1: [{user: 'U4', ts: ts(now - 600e3), text: '<@U1> secret three'}, {user: 'U5', ts: ts(now - 700e3), text: 'secret four'}],
+        }[channel] ?? []}),
+        'users.info': ({user}) => ({ok: true, user: {id: user, name: people[user].toLowerCase(), profile: {display_name: people[user]}}}),
+    };
+    const asked = [];
+    let answer = (method, params) => ({status: 200, retryAfter: null, body: answers[method](params)});
+    slack._fetch = async (method, params) => {
+        asked.push(method);
+        return answer(method, params);
+    };
+    const store = slack._store;
+    slack._store = {lookup: async () => 'xoxp-0000000000-not-a-real-token'};
+    settings.set_boolean('slack-api', true);
+    check(await waitFor(() => slack.api, 2000), 'with a token in the keyring, Slack is asked');
+    await slack.refresh();
+    const names = () => slack.senders.map(sender => `${sender.name} ×${sender.count}`).join(', ');
+    check(slack.unread === 4 && names() === 'Finn ×1, Eve ×1, Dana ×2' && settings.get_string('slack-status') === 'ok',
+        `who wrote while the computer was off: direct messages, and mentions in channels (${slack.unread}: ${names()})`);
+    check(slackWidget._count.text === '4' && slackWidget._list.get_n_children() === 3 &&
+        slackWidget._list.get_first_child().get_first_child().text === 'Finn',
+    'the widget shows them, the latest first');
+    const state = JSON.stringify(slack.state);
+    check(!/secret|mine|xoxp/.test(state) && !/secret/.test(JSON.stringify(slack.senders)),
+        `nothing of what they said is kept, nor the token (${state.length} characters known)`);
+    check(!asked.includes('conversations.history') || asked.filter(m => m === 'conversations.history').length === 2,
+        `the history read only where the conversation does not say who (${asked.join(' ')})`);
+    await screenshotArea('42c-desktop-slack-api', ...slackWidget.get_transformed_position().map(v => Math.round(v) - 12),
+        Math.round(slackWidget.width) + 24, Math.round(slackWidget.height) + 24);
+    // A notification since: it counts too, once by any of their names.
+    await notify(fromSlack, 'dana', 'one more');
+    check(await waitFor(() => slack.unread === 5, 2000) && slack.senders[0].name === 'Dana' && slack.senders[0].count === 3,
+        `a notification after it adds to the API's (${slack.unread}: ${names()})`);
+    // Locked, nothing is asked.
+    asked.length = 0;
+    // (As GNOME's session mode says it, without the lock screen itself.)
+    Main.sessionMode.isLocked = true;
+    await slack.refresh();
+    Main.sessionMode.isLocked = false;
+    check(asked.length === 0, 'nothing is asked while the screen is locked');
+    // Read elsewhere: gone at the next round; nothing more is read of what is known.
+    answers['conversations.info'] = ({channel}) => ({ok: true, channel: {id: channel, is_im: channel.startsWith('D'),
+        user: 'U2', last_read: ts(now), latest: {user: 'U2', ts: ts(now - 600e3)}, unread_count_display: 0}});
+    slack._last = 0;
+    await slack.refresh();
+    check(slack.unread === 0 && names() === '' && slackWidget._count.text === '0',
+        `read elsewhere (on the phone, say): gone at the next round (${slack.unread}: ${names()})`);
+    // Slack asks to wait: it waits as long as it says.
+    answer = () => ({status: 429, retryAfter: 300, body: null});
+    await slack.refresh();
+    const waits = Math.round((slack._due - Date.now()) / 1000);
+    check(settings.get_string('slack-status') === 'rate-limited' && waits > 290 && waits <= 300,
+        `rate-limited: asked again after its Retry-After (${waits} s)`);
+    // No network: later, and again later.
+    answer = () => {
+        throw new Error('no network');
+    };
+    await slack.refresh();
+    check(settings.get_string('slack-status') === 'offline', 'offline: asked again later');
+    // The token refused: never asked again, and the preferences say so.
+    answer = () => ({status: 200, retryAfter: null, body: {ok: false, error: 'invalid_auth'}});
+    await slack.refresh();
+    asked.length = 0;
+    await slack.refresh();
+    check(settings.get_string('slack-status') === 'invalid' && !slack.api && !slack._timeout && asked.length === 0,
+        'a refused token: no longer asked, and the status says why');
+    settings.set_boolean('slack-api', false);
+    check(await waitFor(() => settings.get_string('slack-status') === '' && slack.state.api === null, 2000) &&
+        slack.unread === 0, 'the token removed: back to the notifications only');
+    delete slack._fetch;
+    slack._store = store;
+    slack.markSeen();
 }
 
 // A window of an app of its own (a GTK 4 script in gjs), over the desktop;

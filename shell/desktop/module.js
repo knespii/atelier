@@ -160,7 +160,7 @@ export class DesktopModule {
 
     enable() {
         this._desktopSettings = this._settings.get_child('desktop');
-        this.sources = {github: new GithubSource(this._desktopSettings), tasks: new TasksSource(), slack: new SlackSource()};
+        this.sources = {github: new GithubSource(this._desktopSettings), tasks: new TasksSource(), slack: new SlackSource(this._desktopSettings)};
         // The photos' gallery, and whether the desktop can be seen (photo
         // widgets take turns only then).
         this.gallery = new PhotoGallery();

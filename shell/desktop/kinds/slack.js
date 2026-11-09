@@ -1,6 +1,8 @@
 // Slack: how many messages came since it was last looked at, and who wrote
 // them – as a card, the latest three, each with how long ago. Only who (or
-// which channel), never what the message says. A click brings Slack up.
+// which channel), never what the message says: from Slack's notifications,
+// and with a token, from Slack's API (also while the computer was off).
+// A click brings Slack up.
 
 import Clutter from 'gi://Clutter';
 import GnomeDesktop from 'gi://GnomeDesktop';
@@ -80,9 +82,10 @@ class AtelierSlackWidget extends DesktopWidget {
             return;
         this._list.destroy_all_children();
         if (slack.senders.length === 0) {
-            // (Slack's own count, but no notification said who.)
-            const text = slack.unread > 0 ? 'Who wrote shows as their notifications come'
-                : 'Nothing new on Slack since you last looked';
+            // (Slack's own count, but no notification – nor the API, yet – said who.)
+            let text = 'Nothing new on Slack since you last looked';
+            if (slack.unread > 0)
+                text = slack.api ? 'Who wrote shows once Slack is asked' : 'Who wrote shows as their notifications come';
             this._list.add_child(label('atelier-widget-placeholder', text));
             this._list.get_last_child().clutter_text.line_wrap = true;
             return;
