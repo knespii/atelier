@@ -237,7 +237,8 @@ Blur my Shell blurs the bar, turn that off.)
   Accounts), the weather, anyone's GitHub contributions (from GitHub's public
   page, no account needed), Claude Code's block, a photo, and how many Slack
   messages came since you last looked at Slack and who wrote them (counted
-  from its notifications; what they say is never shown or kept) – as
+  from its notifications – and, with a token of your own, asked of Slack, see
+  [Slack's API](#slacks-api); what they say is never shown or kept) – as
   *Modern* cards, on glass, or on *Analogue* paper; the clock's menu
   (right-click it) chooses its face – digital, a watch with a second hand,
   numerals or minimal hands. Right-click the desktop
@@ -306,6 +307,35 @@ Blur my Shell blurs the bar, turn that off.)
     <td align="center"><sub>The dock</sub></td>
   </tr>
 </table>
+
+### Slack's API
+
+A message that came while the computer was off or asleep never makes a
+notification, so the Slack widget can't tell who wrote it – unless Slack is
+asked. For that it needs a user token of a Slack app of your own:
+
+1. At [api.slack.com/apps](https://api.slack.com/apps), *Create New App* →
+   *From scratch*, in your workspace.
+2. *OAuth & Permissions* → *User Token Scopes*: `im:read`, `im:history`,
+   `mpim:read`, `mpim:history`, `channels:read`, `channels:history`,
+   `groups:read`, `groups:history`, `users:read` (nothing more is needed).
+3. *Install to Workspace*, and copy the *User OAuth Token* (`xoxp-…`).
+4. Settings → Desktop → Slack: paste it into *Slack token* and press the
+   tick. *Check* says whose it is; *Remove* takes it away again.
+
+The token is kept in the GNOME keyring (*Passwords and Keys*, "Atelier:
+Slack token"), never in the settings or a log. Slack is asked only while
+you are logged in with the screen unlocked and the desktop's widgets on:
+every three minutes, and soon after an unlock, a resume or Slack's count
+changing; less often when it can't be reached, and as late as Slack says
+when it asks to wait. Each time it asks which direct messages (and group
+messages) are unread – a couple of dozen a round, in turn – and who wrote
+them, and in a few of your channels whose latest message you haven't read,
+whether someone mentioned you (`@you`, not `@here`, nor in threads; of the
+latest 20 messages). Of the answers only who, how many and when are kept,
+in memory: the text of a message is only looked at for a mention. Slack's
+own count, the number on its icon, still wins when it shows one. A token
+Slack refuses (revoked, say) is no longer used, and the settings say so.
 
 ## Palette
 
@@ -455,6 +485,7 @@ gnome-extensions enable atelier@knespii.github.io
 | The depth effect's cutouts of the wallpaper (the latest 16: of a few profiles' wallpapers, on each monitor) | `~/.cache/atelier/depth/` |
 | GTK styles (optional) | `~/.config/gtk-4.0/gtk.css`, `~/.config/gtk-3.0/gtk.css` |
 | Terminal colors (optional) | GNOME Terminal profile "Atelier" |
+| The Slack token (optional) | GNOME keyring, "Atelier: Slack token" |
 
 Wallpapers are copied when a profile keeps them, because the original file may
 be moved or overwritten (the wallpaper portal always writes to
