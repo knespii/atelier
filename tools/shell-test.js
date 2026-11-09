@@ -5845,6 +5845,22 @@ async function testDesktop(ext) {
     await Scripting.sleep(300);
     check(slack.unread === 0, 'and while it has it, nothing counts');
     delete slack.slackFocused;
+    // Slack's own count, as it puts it on its icon: it wins, read elsewhere
+    // or not; and what is known lasts over the widgets starting again (the
+    // screen locked).
+    const badge = (count, visible) => Gio.DBus.session.emit_signal(null, '/com/slack/launcher',
+        'com.canonical.Unity.LauncherEntry', 'Update', new GLib.Variant('(sa{sv})', ['application://slack_slack.desktop',
+            {'count': new GLib.Variant('x', count), 'count-visible': new GLib.Variant('b', visible)}]));
+    await notify(fromSlack, 'Alice Smith', 'are you there');
+    badge(5, true);
+    check(await waitFor(() => slack.unread === 5 && slackWidget._count.text === '5', 2000) &&
+        slack.senders[0]?.name === 'Alice Smith', `Slack's own count (${slack.unread}), who wrote from its notifications`);
+    const restarted = new slack.constructor();
+    check(restarted.unread === 5 && restarted.senders[0]?.name === 'Alice Smith', 'it lasts over the widgets starting again');
+    restarted.destroy();
+    badge(0, false);
+    check(await waitFor(() => slack.unread === 0 && slack.senders.length === 0, 2000),
+        'read elsewhere (its count gone): nothing new');
     fromSlack.destroy();
     fromCalendar.destroy();
     banners.set_boolean('show-banners', true);

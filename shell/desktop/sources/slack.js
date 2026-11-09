@@ -1,9 +1,14 @@
-// Slack's messages that came since Slack was last looked at, counted from
-// its notifications as they reach GNOME (also while Do Not Disturb keeps
-// their banners away): how many, and who wrote, the latest first. A Slack
-// window getting the focus means they were seen. Nothing is asked of Slack
-// itself, and nothing of what the messages say is kept.
+// Slack's messages that came since Slack was last looked at: how many – as
+// Slack itself counts them, the number it puts on its icon in a dock (the
+// Unity launcher API), or else counted from its notifications as they
+// reach GNOME (also while Do Not Disturb keeps their banners away) – and
+// who wrote, the latest first, from those notifications. A Slack window
+// getting the focus means they were seen. What is known lasts over the
+// screen being locked (the desktop's widgets stop then), and what came
+// meanwhile counts too. Nothing is asked of Slack itself, and nothing of
+// what the messages say is kept.
 
+import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
@@ -13,14 +18,20 @@ import {addMessage, isSlack, senderOf} from '../../../lib/slack.js';
 
 // Where Slack may be installed: the snap, the flatpak, the .deb.
 const APP_IDS = ['slack_slack.desktop', 'com.slack.Slack.desktop', 'slack.desktop'];
+const LAUNCHER_ENTRY = 'com.canonical.Unity.LauncherEntry';
+
+// What is known, kept while the extension is on: over the screen locked,
+// as the desktop's widgets stop and start again. (In memory only.)
+const known = {
+    count: 0, // counted from notifications
+    badge: null, // Slack's own count, once it has said one
+    senders: [],
+    handled: 0, // the time of the latest notification counted, ms
+};
 
 export class SlackSource extends EventEmitter {
     constructor() {
         super();
-        /** messages since Slack was last looked at */
-        this.unread = 0;
-        /** who wrote them: [{name, count, time}], the latest first */
-        this.senders = [];
         this._app = null;
         // A notification's headline and text as last counted: one an app
         // updates with a new message counts again. (In memory only.)
@@ -30,6 +41,52 @@ export class SlackSource extends EventEmitter {
         for (const source of Main.messageTray.getSources())
             this._watch(source, true);
         global.display.connectObject('notify::focus-window', () => this._checkFocus(), this);
+        this._badgeId = Gio.DBus.session.signal_subscribe(null, LAUNCHER_ENTRY, 'Update', null, null,
+            Gio.DBusSignalFlags.NONE, (connection, sender, path, iface, signal, params) => this._onBadge(params));
+    }
+
+    /** @returns {number} messages since Slack was last looked at */
+    get unread() {
+        return known.badge ?? known.count;
+    }
+
+    /** @param {number} count - (for showing it off: as if counted) */
+    set unread(count) {
+        known.badge = null;
+        known.count = count;
+    }
+
+    /** @returns {object[]} who wrote them: [{name, count, time}], the latest first */
+    get senders() {
+        return known.senders;
+    }
+
+    set senders(senders) {
+        known.senders = senders;
+    }
+
+    // The number Slack puts on its icon: what it counts as unread, read on
+    // another device or not. Nothing left: all of it seen.
+    _onBadge(params) {
+        let uri, properties;
+        try {
+            [uri, properties] = params.deepUnpack();
+        } catch {
+            return;
+        }
+        if (typeof uri !== 'string' || !isSlack(uri, null))
+            return;
+        const count = properties.count?.unpack?.();
+        const visible = properties['count-visible']?.unpack?.();
+        if (typeof count !== 'number' && typeof visible !== 'boolean')
+            return;
+        const badge = visible === false ? 0 : Math.max(0, count ?? known.badge ?? 0);
+        if (badge === known.badge)
+            return;
+        known.badge = badge;
+        if (badge === 0)
+            known.senders = [];
+        this.emit('changed');
     }
 
     _watch(source, old = false) {
@@ -40,8 +97,10 @@ export class SlackSource extends EventEmitter {
             'notification-added', (_, notification) => this._track(notification),
             'destroy', () => source.disconnectObject(this),
             this);
+        // (Those there already: only what came while nothing counted – the
+        // screen locked – counts now.)
         if (old)
-            source.notifications.forEach(notification => this._track(notification, true));
+            source.notifications.forEach(notification => this._track(notification, !this._newer(notification)));
     }
 
     _track(notification, old = false) {
@@ -61,12 +120,19 @@ export class SlackSource extends EventEmitter {
             this._count(notification);
     }
 
+    _newer(notification) {
+        const time = notification.datetime?.to_unix?.() ?? 0;
+        return time * 1000 > known.handled;
+    }
+
     _count(notification) {
+        const time = (notification.datetime?.to_unix?.() ?? 0) * 1000 || Date.now();
+        known.handled = Math.max(known.handled, time);
         // (Read in Slack as it came.)
         if (this.slackFocused())
             return;
-        this.unread++;
-        this.senders = addMessage(this.senders, senderOf(notification.title, notification.body), Date.now());
+        known.count++;
+        known.senders = addMessage(known.senders, senderOf(notification.title, notification.body), time);
         this.emit('changed');
     }
 
@@ -84,10 +150,14 @@ export class SlackSource extends EventEmitter {
 
     /** Slack was looked at: nothing unread. */
     markSeen() {
-        if (this.unread === 0 && this.senders.length === 0)
+        known.handled = Math.max(known.handled, Date.now());
+        if (this.unread === 0 && known.senders.length === 0 && known.count === 0)
             return;
-        this.unread = 0;
-        this.senders = [];
+        known.count = 0;
+        // (Slack says its own count again as it marks them read.)
+        if (known.badge !== null)
+            known.badge = 0;
+        known.senders = [];
         this.emit('changed');
     }
 
@@ -110,6 +180,7 @@ export class SlackSource extends EventEmitter {
     }
 
     destroy() {
+        Gio.DBus.session.signal_unsubscribe(this._badgeId);
         Main.messageTray.disconnectObject(this);
         for (const source of Main.messageTray.getSources()) {
             source.disconnectObject(this);

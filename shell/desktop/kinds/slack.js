@@ -80,7 +80,10 @@ class AtelierSlackWidget extends DesktopWidget {
             return;
         this._list.destroy_all_children();
         if (slack.senders.length === 0) {
-            this._list.add_child(label('atelier-widget-placeholder', 'Nothing new on Slack since you last looked'));
+            // (Slack's own count, but no notification said who.)
+            const text = slack.unread > 0 ? 'Who wrote shows as their notifications come'
+                : 'Nothing new on Slack since you last looked';
+            this._list.add_child(label('atelier-widget-placeholder', text));
             this._list.get_last_child().clutter_text.line_wrap = true;
             return;
         }
