@@ -1497,7 +1497,6 @@
   border-radius: 14px;
   background-color: rgba(255, 255, 255, 0.08);
   background-size: cover;
-  background-position: center;
 }
 
 .atelier-profile-sheet-titles {
@@ -2622,10 +2621,10 @@
   padding: 0;
 }
 
+/* (Centred as St has it: it takes no keywords for background-position.) */
 .atelier-widget-picture {
   border-radius: 22px;
   background-size: cover;
-  background-position: center;
 }
 
 /* Editing the widgets */
