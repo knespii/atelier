@@ -655,12 +655,25 @@ export const LevelCapsule = GObject.registerClass({
             groups.get(group).add(this);
         }
 
-        // As it is, at once.
-        const target = this._target();
-        for (const [key, value] of [['lift', 1], ['stretch', 1], ['bump', 1], ['dim', 0]])
-            this._motion.set(key, value);
-        this._motion.set('level', target);
-        this._react(target, true);
+        // As it is, at once – once on the stage: made before its slot has
+        // it, it isn't styled yet (St only styles what is on the stage).
+        const settle = () => {
+            const target = this._target();
+            for (const [key, value] of [['lift', 1], ['stretch', 1], ['bump', 1], ['dim', 0]])
+                this._motion.set(key, value);
+            this._motion.set('level', target);
+            this._react(target, true);
+        };
+        if (this.get_stage()) {
+            settle();
+        } else {
+            const id = this.connect('stage-views-changed', () => {
+                if (!this.get_stage())
+                    return;
+                this.disconnect(id);
+                settle();
+            });
+        }
 
         this.connect('notify::mapped', () => {
             if (!this.mapped) {
