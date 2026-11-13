@@ -67,6 +67,35 @@ export function paletteStylesheet(p) {
 // restyled the whole shell twice for nothing.
 let kept = null;
 
+// What Atelier writes into its cache for St: the palette's styles and the
+// type turned for what is behind the glass – one of each loaded at a time.
+const GENERATED = /^(shell|vibrancy)-[0-9a-f]{12}\.css$/;
+
+/**
+ * Remove the stylesheets left in the cache by a shell that ended without
+ * Atelier turned off (they would pile up, session after session). Before
+ * anything of Atelier writes one: none of them is loaded then.
+ */
+export function clearLeftStyles() {
+    const dir = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_cache_dir(), 'atelier']));
+    let children;
+    try {
+        children = dir.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+    } catch {
+        return;
+    }
+    for (let info; (info = children.next_file(null));) {
+        if (!GENERATED.test(info.get_name()))
+            continue;
+        try {
+            dir.get_child(info.get_name()).delete(null);
+        } catch {
+            // (Gone already, or not ours to remove: left.)
+        }
+    }
+    children.close(null);
+}
+
 /** Unload the styles kept over a lock, if any (Atelier turned off). */
 export function releaseKeptStyles() {
     if (!kept)

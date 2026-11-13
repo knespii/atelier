@@ -20,7 +20,7 @@ import {onTime} from './lib/steadyTime.js';
 import {ProfileStore} from './lib/profiles.js';
 import {registerFonts} from './shell/core/fonts.js';
 import {ModuleManager} from './shell/core/moduleManager.js';
-import {releaseKeptStyles} from './shell/core/theme.js';
+import {clearLeftStyles, releaseKeptStyles} from './shell/core/theme.js';
 import {VibrancyModule, releaseKeptVibrancy} from './shell/core/vibrancy.js';
 import {glassLight} from './shell/core/glassLight.js';
 import {releaseClockGeometries} from './shell/lockscreen/clock.js';
@@ -49,6 +49,8 @@ export default class AtelierExtension extends Extension {
     enable() {
         // (The lock screen's fonts, in this process only: once in its life.)
         registerFonts();
+        // (Stylesheets of a shell that ended without Atelier turned off.)
+        clearLeftStyles();
         this._settings = this.getSettings();
         const context = {
             extension: this,
