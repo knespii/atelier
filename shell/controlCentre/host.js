@@ -78,6 +78,9 @@ class AtelierQuickSettingsHost extends GObject.Object {
         // off from it, until the panel opens again.
         this._wired = false;
         this._wiredKept = false;
+        // Wi-Fi asked for from Wired's card (to turn it off, say): in Wired's
+        // place until Wired is asked for back, or the panel closes.
+        this._wifiChosen = false;
         this._connecting = null;
         this._busyDevice = null;
         this._serial = 0;
@@ -658,7 +661,10 @@ class AtelierQuickSettingsHost extends GObject.Object {
         // other, stepping back as a card's neighbours do.
         if (!wired?.available || wired.on)
             this._wiredKept = false;
-        const showWired = Boolean(wired?.available && (wired.on || wired.connecting || this._wiredKept));
+        if (!wired?.available)
+            this._wifiChosen = false;
+        const showWired = Boolean(wired?.available && (wired.on || wired.connecting || this._wiredKept)) &&
+            !this._wifiChosen;
         if (showWired !== this._wired) {
             this._wired = showWired;
             const was = this._open;
@@ -782,7 +788,8 @@ class AtelierQuickSettingsHost extends GObject.Object {
             if (!wifi.on || !wifi.available) {
                 placeholder = wifi.available ? 'Wi-Fi is off. Turn it on to see networks.' : 'No Wi-Fi adapter.';
             } else {
-                rows = wifi.networks.slice(0, MAX_NETWORKS).map(n => {
+                // (One fewer with Wired… under them: room for it.)
+                rows = wifi.networks.slice(0, MAX_NETWORKS - (this._wifiChosen ? 1 : 0)).map(n => {
                     const connecting = this._connecting === n.id;
                     return {id: `net:${n.id}`, kind: 'network', icon: n.icon, title: n.name,
                         note: connecting ? 'Connecting…' : n.connected && this._connecting === null ? 'Connected' : '',
@@ -793,12 +800,23 @@ class AtelierQuickSettingsHost extends GObject.Object {
                 rows.push({id: 'other', kind: 'action', icon: 'list-add-symbolic', title: 'Other network…',
                     activate: () => wifi.openSettings()});
             }
+            // (Wi-Fi shown in Wired's place: back to it.)
+            if (this._wifiChosen)
+                rows.push({id: 'to-wired', kind: 'action', icon: 'network-wired-symbolic', title: 'Wired…',
+                    activate: () => this._choose('wired')});
         } else if (key === 'wired') {
             const wired = this._adapters.wired;
+            const wifi = this._adapters.wifi;
             if (!wired?.available) {
                 placeholder = 'No cable connected.';
             } else {
-                rows = wired.connections.slice(0, MAX_WIRED).map(c => {
+                // (One fewer with Wi-Fi… under them – the one up, or coming
+                // up, first: room for it.)
+                const first = c => (c.active || c.connecting ? 0 : 1);
+                const connections = wifi?.available
+                    ? [...wired.connections].sort((a, b) => first(a) - first(b)).slice(0, MAX_WIRED - 1)
+                    : wired.connections.slice(0, MAX_WIRED);
+                rows = connections.map(c => {
                     const fast = c.active ? linkSpeed(c.speed) : '';
                     return {id: `wire:${c.id}`, kind: 'device', icon: 'network-wired-symbolic', title: c.name,
                         subtitle: c.connecting ? 'Connecting…' : c.active ? ['Connected', fast].filter(Boolean).join(' · ')
@@ -809,6 +827,10 @@ class AtelierQuickSettingsHost extends GObject.Object {
             }
             rows.push({id: 'wired-settings', kind: 'action', icon: 'preferences-system-symbolic', title: 'Wired Settings…',
                 activate: () => wired?.openSettings()});
+            // Wi-Fi, in its place: to see it, turn it off.
+            if (wifi?.available)
+                rows.push({id: 'to-wifi', kind: 'action', icon: 'network-wireless-symbolic', title: 'Wi-Fi…',
+                    note: wifi.on ? 'On' : 'Off', activate: () => this._choose('wifi')});
         } else if (key === 'bt') {
             const bt = this._adapters.bt;
             if (!bt.on || !bt.available) {
@@ -912,6 +934,15 @@ class AtelierQuickSettingsHost extends GObject.Object {
         adapter.setOn(on);
     }
 
+    // Wi-Fi in Wired's place, or Wired back, with its card open.
+    _choose(key) {
+        this._wifiChosen = key === 'wifi';
+        if (key === 'wired')
+            this._wiredKept = true;
+        this._render();
+        this.setOpen(key);
+    }
+
     async _connectNetwork(id) {
         if (this._connecting !== null)
             return;
@@ -952,6 +983,7 @@ class AtelierQuickSettingsHost extends GObject.Object {
      */
     playOpen() {
         this._wiredKept = false;
+        this._wifiChosen = false;
         this._render({instant: true});
         this.setOpen(null, {instant: true});
         const k = px(1);

@@ -1157,8 +1157,8 @@ async function controlCentreWired(host, fakes, at, isAt) {
     const rows = [...wired.rows.values()];
     check(isAt('wired', [0, 0, 460, 376]) && rows.length === 3 && rows[0].title.text === 'Wired connection 1' &&
         rows[0].check.visible && rows[0].subtitle.text === 'Connected · 1 Gb/s' &&
-        rows[1].subtitle.text === 'Ethernet' &&
-        rows[2].title.text === 'Wired Settings…' && wired.foot.mapped && tile('bt').opacity === 0 &&
+        rows[1].title.text === 'Wired Settings…' && rows[2].title.text === 'Wi-Fi…' && wired.foot.mapped &&
+        tile('bt').opacity === 0 &&
         Math.abs(tile('caffeine').opacity - 77) < 2,
     `its card as Wi-Fi's: its connections, Wired Settings…, the mini pills (${at('wired')}; ` +
         `${rows.map(r => r.title.text).join(', ')})`);
@@ -1166,12 +1166,46 @@ async function controlCentreWired(host, fakes, at, isAt) {
     check(cut.length === 0, `no name cut short in it (${cut.join(', ') || 'none'})`);
     await restPointer();
     await screenshotIsland('21-control-centre-wired-card', 460);
-    await clickAt(...centerOf(rows[1]));
+    // Without Wi-Fi, its connections, two of them; another clicked: up.
+    fakes.wifi.available = false;
+    fakes.wifi.changed();
+    await waitFor(() => wired.rows.get('wire:dock')?.mapped && !wired.rows.get('to-wifi')?.visible, 2000);
+    await waitFor(() => !host.animator.busy, 2000);
+    await Scripting.sleep(300);
+    await clickAt(...centerOf(wired.rows.get('wire:dock')));
     await waitFor(() => !host.animator.busy, 2000);
     check(fakes.wired.calls.at(-1) === 'activate dock' && wired.rows.get('wire:dock').check.visible,
         `another connection clicked: up (${fakes.wired.calls.join(', ')})`);
+    fakes.wifi.available = true;
+    fakes.wifi.changed();
+    await waitFor(() => wired.rows.get('to-wifi')?.mapped, 2000);
+    await waitFor(() => !host.animator.busy, 2000);
+    await Scripting.sleep(300);
     await clickAt(...centerOf(wired.rows.get('wired-settings')));
     check(fakes.wired.calls.at(-1) === 'settings', 'Wired Settings… opens GNOME\'s');
+    // Wi-Fi from it (to turn it off, say), in Wired's place; and back.
+    const toWifi = wired.rows.get('to-wifi');
+    const below = actor => actor.get_transformed_position()[1] + actor.get_transformed_size()[1];
+    const footTop = actor => actor.get_transformed_position()[1];
+    check(toWifi.mapped && toWifi.note.text === (fakes.wifi.on ? 'On' : 'Off') &&
+        below(toWifi) <= footTop(wired.foot) + 1,
+    `Wi-Fi… in Wired's card, as it is, clear of the pills under it (${toWifi.note.text}, ${fakes.wifi.on}; ` +
+        `${Math.round(below(toWifi))} ≤ ${Math.round(footTop(wired.foot))})`);
+    await clickAt(...centerOf(toWifi));
+    check(await waitFor(() => host.open === 'wifi' && !host.animator.busy, 3000) && wifi.opacity === 255 &&
+        wired.opacity === 0 && wifi.rows.get('to-wired')?.mapped &&
+        below(wifi.rows.get('to-wired')) <= footTop(wifi.foot) + 1,
+    'clicked: Wi-Fi\'s card in Wired\'s place, its networks, Wired… to go back, clear of the pills');
+    await restPointer();
+    await screenshotIsland('21-control-centre-wired-wifi', 460);
+    await clickAt(...centerOf(wifi.toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    check(!fakes.wifi.on && wifi.opacity === 255 && fakes.wired.on, 'Wi-Fi turned off there, Wired still on, Wi-Fi stays');
+    await clickAt(...centerOf(wifi.toggle));
+    await waitFor(() => !host.animator.busy, 2000);
+    await clickAt(...centerOf(wifi.rows.get('to-wired')));
+    check(await waitFor(() => host.open === 'wired' && !host.animator.busy, 3000) && wired.opacity === 255 &&
+        wifi.opacity === 0, 'Wired… : back to Wired\'s card');
     await pressKey(Clutter.KEY_Escape);
     await waitFor(() => host.open === null && !host.animator.busy, 3000);
 
